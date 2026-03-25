@@ -1,0 +1,167 @@
+[
+  {
+    "id": "5e04179c-3b11-4274-9adc-c64965cc9584",
+    "biernaam": "Berlewalde Blond",
+    "stijl": "Blond",
+    "alcoholpercentage": 6.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700335",
+    "updated_at": "2026-03-22T11:18:43.700335"
+  },
+  {
+    "id": "7949da08-290b-4e70-8704-e6813b1bf662",
+    "biernaam": "Berlewalde Triple",
+    "stijl": "Triple",
+    "alcoholpercentage": 9.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700355",
+    "updated_at": "2026-03-22T11:18:43.700355"
+  },
+  {
+    "id": "297680db-667d-4fda-b8b5-549263dd8c22",
+    "biernaam": "Berlewalde IPA",
+    "stijl": "IPA",
+    "alcoholpercentage": 6.5,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700364",
+    "updated_at": "2026-03-22T11:18:43.700364"
+  },
+  {
+    "id": "61718545-682e-49d4-bd00-b3a312fe205b",
+    "biernaam": "Quadrupel",
+    "stijl": "Quadrupel",
+    "alcoholpercentage": 11.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700370",
+    "updated_at": "2026-03-22T11:18:43.700370"
+  },
+  {
+    "id": "7e2e2b5d-41d2-4fd5-b082-a27d51323e17",
+    "biernaam": "Berlewalde Triple",
+    "stijl": "Triple",
+    "alcoholpercentage": 0.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700376",
+    "updated_at": "2026-03-22T11:18:43.700376"
+  },
+  {
+    "id": "2b43620e-5c29-4d4c-bed3-7c72184b9b94",
+    "biernaam": "Berlewalde Triple",
+    "stijl": "Triple",
+    "alcoholpercentage": 0.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700382",
+    "updated_at": "2026-03-22T11:18:43.700382"
+  },
+  {
+    "id": "443f9f0d-9fae-47a2-90d8-76769f72470e",
+    "biernaam": "Berlewalde Triple",
+    "stijl": "Triple",
+    "alcoholpercentage": 0.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700388",
+    "updated_at": "2026-03-22T11:18:43.700388"
+  },
+  {
+    "id": "91a51a96-b7b3-4a45-8262-b86496c6c943",
+    "biernaam": "Berlewalde Triple",
+    "stijl": "Triple",
+    "alcoholpercentage": 0.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700394",
+    "updated_at": "2026-03-22T11:18:43.700394"
+  },
+  {
+    "id": "a4f49858-ec5b-4b36-809e-b8a67907b700",
+    "biernaam": "Berlewalde Triple",
+    "stijl": "Triple",
+    "alcoholpercentage": 0.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700400",
+    "updated_at": "2026-03-22T11:18:43.700400"
+  },
+  {
+    "id": "d34f31d3-9942-4f6e-8615-736cb61e6f60",
+    "biernaam": "Berlewalde Triple",
+    "stijl": "Triple",
+    "alcoholpercentage": 9.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700406",
+    "updated_at": "2026-03-22T11:18:43.700406"
+  },
+  {
+    "id": "bef2de34-395f-420c-8f5f-de3d2b61e2a1",
+    "biernaam": "Berlewalde triple",
+    "stijl": "triple",
+    "alcoholpercentage": 9.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700412",
+    "updated_at": "2026-03-22T11:18:43.700412"
+  },
+  {
+    "id": "db9ce63f-b142-4b0e-985a-d36148035703",
+    "biernaam": "triple",
+    "stijl": "triple",
+    "alcoholpercentage": 9.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700418",
+    "updated_at": "2026-03-22T11:18:43.700418"
+  },
+  {
+    "id": "c81f107c-8d44-4bd9-a117-b38712b26e88",
+    "biernaam": "Berlewalde triple",
+    "stijl": "triple",
+    "alcoholpercentage": 0.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700424",
+    "updated_at": "2026-03-22T11:18:43.700424"
+  },
+  {
+    "id": "c3d186de-9d63-4aa8-a3ba-b86431b373c7",
+    "biernaam": "Berlewalde Goudkoorts",
+    "stijl": "Blond",
+    "alcoholpercentage": 6.0,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Laag",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-22T11:18:43.700451",
+    "updated_at": "2026-03-22T11:18:43.700453"
+  },
+  {
+    "id": "8208c581-66e6-4176-9ef6-ff97285226c3",
+    "biernaam": "Berlewalde Ipa",
+    "stijl": "IPA",
+    "alcoholpercentage": 6.6,
+    "belastingsoort": "Accijns",
+    "tarief_accijns": "Hoog",
+    "btw_tarief": "21%",
+    "created_at": "2026-03-25T20:35:56.263360",
+    "updated_at": "2026-03-25T20:35:56.263373"
+  }
+]

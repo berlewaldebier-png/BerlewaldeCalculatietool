@@ -1,0 +1,12 @@
+{
+  "2026": {
+    "hoeveelheid_inkoop_l": 40000.0,
+    "hoeveelheid_productie_l": 5000.0,
+    "batchgrootte_eigen_productie_l": 600.0
+  },
+  "2025": {
+    "hoeveelheid_inkoop_l": 30000.0,
+    "hoeveelheid_productie_l": 15000.0,
+    "batchgrootte_eigen_productie_l": 600.0
+  }
+}

@@ -1,0 +1,101 @@
+[
+  {
+    "id": "45da9d37-264b-46a3-a9c2-9ef8e71fc655",
+    "jaar": 2025,
+    "omschrijving": "Fles 33cl",
+    "inhoud_per_eenheid_liter": 0.33,
+    "onderdelen": [
+      {
+        "verpakkingsonderdeel_id": "8778bac7-9de1-4311-aff7-3c00f4ae511e",
+        "verpakkingsonderdeel_key": "8778bac7-9de1-4311-aff7-3c00f4ae511e",
+        "omschrijving": "kroonkurk dop 33cl",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.01,
+        "totale_kosten": 0.01
+      },
+      {
+        "verpakkingsonderdeel_id": "fc368d83-d874-4019-9e5b-c2a852722ce2",
+        "verpakkingsonderdeel_key": "fc368d83-d874-4019-9e5b-c2a852722ce2",
+        "omschrijving": "Fles 33cl",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.14,
+        "totale_kosten": 0.14
+      },
+      {
+        "verpakkingsonderdeel_id": "afc5fe94-b36e-4155-a277-43627eb9e020",
+        "verpakkingsonderdeel_key": "afc5fe94-b36e-4155-a277-43627eb9e020",
+        "omschrijving": "Etiket 33cl",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.145,
+        "totale_kosten": 0.145
+      }
+    ],
+    "totale_verpakkingskosten": 0.29500000000000004
+  },
+  {
+    "id": "f2953c44-7605-4aae-8ac8-f26c32231bc5",
+    "jaar": 2025,
+    "omschrijving": "Fust 20L",
+    "inhoud_per_eenheid_liter": 20.0,
+    "onderdelen": [
+      {
+        "verpakkingsonderdeel_id": "c9e7572a-09e5-42ae-a735-73bbf6367d1b",
+        "verpakkingsonderdeel_key": "c9e7572a-09e5-42ae-a735-73bbf6367d1b",
+        "omschrijving": "Fustcap",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.1,
+        "totale_kosten": 0.1
+      },
+      {
+        "verpakkingsonderdeel_id": "3d3fa2db-2e3c-4d49-a038-ee3a5967a651",
+        "verpakkingsonderdeel_key": "3d3fa2db-2e3c-4d49-a038-ee3a5967a651",
+        "omschrijving": "Fust",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 12.5,
+        "totale_kosten": 12.5
+      },
+      {
+        "verpakkingsonderdeel_id": "f957ec1f-d67a-4920-b84a-cfbfe0193627",
+        "verpakkingsonderdeel_key": "7fc8a430-c2a6-411e-97ee-691f15aff9e3",
+        "omschrijving": "Fustlabel",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.05,
+        "totale_kosten": 0.05
+      }
+    ],
+    "totale_verpakkingskosten": 12.65
+  },
+  {
+    "id": "697c56a0-b28e-43f1-8f08-6d2ee13bd50e",
+    "jaar": 2025,
+    "omschrijving": "Fles 75cl",
+    "inhoud_per_eenheid_liter": 0.75,
+    "onderdelen": [
+      {
+        "verpakkingsonderdeel_id": "920423be-82d6-4958-8869-3b87802423ac",
+        "verpakkingsonderdeel_key": "e2a9787a-c715-439f-b28b-576f40cbdd70",
+        "omschrijving": "Kurk dop 75cl",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.5,
+        "totale_kosten": 0.5
+      },
+      {
+        "verpakkingsonderdeel_id": "34c290c1-182e-42b9-8083-91425b267e66",
+        "verpakkingsonderdeel_key": "fe29db63-739a-47f0-b8d4-66a08f56b506",
+        "omschrijving": "Fles 75cl",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.6,
+        "totale_kosten": 0.6
+      },
+      {
+        "verpakkingsonderdeel_id": "734f91fc-61d8-4a20-acbd-8e63a19da25b",
+        "verpakkingsonderdeel_key": "b11b5671-67a6-4174-b506-8d1d346f6938",
+        "omschrijving": "Etiket 75cl",
+        "hoeveelheid": 1.0,
+        "prijs_per_stuk": 0.18,
+        "totale_kosten": 0.18
+      }
+    ],
+    "totale_verpakkingskosten": 1.28
+  }
+]

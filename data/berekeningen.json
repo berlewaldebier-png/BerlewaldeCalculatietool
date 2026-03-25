@@ -1,0 +1,108 @@
+[
+  {
+    "id": "a1bfaf24-6981-4ae3-bea1-a858bba8b09d",
+    "bier_id": "8208c581-66e6-4176-9ef6-ff97285226c3",
+    "status": "definitief",
+    "basisgegevens": {
+      "jaar": 2025,
+      "biernaam": "Berlewalde Ipa",
+      "stijl": "IPA",
+      "alcoholpercentage": 6.6,
+      "belastingsoort": "Accijns",
+      "tarief_accijns": "Hoog",
+      "btw_tarief": "21%"
+    },
+    "soort_berekening": {
+      "type": "Inkoop"
+    },
+    "invoer": {
+      "ingredienten": {
+        "regels": [],
+        "notities": ""
+      },
+      "inkoop": {
+        "regels": [],
+        "factuurregels": [
+          {
+            "id": "5eef4fef-7913-4cda-98e0-fd8a9eb32d5d",
+            "aantal": 246.0,
+            "eenheid": "78b8f62d-6d87-455a-95a0-c6496a5d29c8",
+            "liters": 1948.32,
+            "subfactuurbedrag": 5787.32
+          }
+        ],
+        "factuurdatum": "02-03-2025",
+        "notities": "",
+        "verzendkosten": 0.0,
+        "overige_kosten": 0.0,
+        "facturen": [
+          {
+            "id": "0c765bbe-3bd9-49bb-babb-b135fb1727ef",
+            "factuurdatum": "02-03-2025",
+            "verzendkosten": 0.0,
+            "overige_kosten": 0.0,
+            "factuurregels": [
+              {
+                "id": "5eef4fef-7913-4cda-98e0-fd8a9eb32d5d",
+                "aantal": 246.0,
+                "eenheid": "78b8f62d-6d87-455a-95a0-c6496a5d29c8",
+                "liters": 1948.32,
+                "subfactuurbedrag": 5787.32
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "bier_snapshot": {
+      "biernaam": "Berlewalde Ipa",
+      "stijl": "IPA",
+      "alcoholpercentage": 6.6,
+      "belastingsoort": "Accijns",
+      "tarief_accijns": "Hoog",
+      "btw_tarief": "21%"
+    },
+    "resultaat_snapshot": {
+      "integrale_kostprijs_per_liter": 3.0037488708220415,
+      "variabele_kosten_per_liter": 2.9704155374887082,
+      "directe_vaste_kosten_per_liter": 0.03333333333333333,
+      "producten": {
+        "basisproducten": [
+          {
+            "biernaam": "Berlewalde Ipa",
+            "soort": "Inkoop",
+            "verpakking": "Fles 33cl",
+            "variabele_kosten": 0.9802371273712738,
+            "verpakkingskosten": 0.0,
+            "vaste_directe_kosten": 0.011000000000000001,
+            "accijns": 0.1768536,
+            "liters_per_product": 0.33
+          }
+        ],
+        "samengestelde_producten": [
+          {
+            "biernaam": "Berlewalde Ipa",
+            "soort": "Inkoop",
+            "verpakking": "Doos 24 flessen 33cl",
+            "variabele_kosten": 23.525691056910567,
+            "verpakkingskosten": 0.0,
+            "vaste_directe_kosten": 0.264,
+            "accijns": 4.2444863999999995,
+            "liters_per_product": 7.92
+          }
+        ]
+      }
+    },
+    "jaarovergang": {
+      "bron_berekening_id": "",
+      "bron_jaar": 0,
+      "doel_jaar": 0,
+      "aangemaakt_via": "",
+      "created_at": ""
+    },
+    "last_completed_step": 4,
+    "created_at": "2026-03-25T20:26:21.263584",
+    "updated_at": "2026-03-25T20:35:56.300253",
+    "finalized_at": "2026-03-25T20:35:56.299383"
+  }
+]

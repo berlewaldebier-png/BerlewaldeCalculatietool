@@ -1,0 +1,88 @@
+[
+  {
+    "id": "42f97ee5-38be-464f-b30b-4e45421347a1",
+    "offertenummer": "202603001",
+    "status": "definitief",
+    "klantnaam": "Berendhaus",
+    "contactpersoon": "Gerben",
+    "referentie": "",
+    "datum_text": "23-03-2026",
+    "opmerking": "",
+    "jaar": 2026,
+    "voorsteltype": "Op basis van liters",
+    "liters_basis": "een_bier",
+    "kanaal": "horeca",
+    "bier_key": "c3d186de-9d63-4aa8-a3ba-b86431b373c7",
+    "staffels": [
+      {
+        "id": "4a5108ee-d22b-41dd-9085-417a631cd665",
+        "product_key": "",
+        "liters": 1000.0,
+        "korting_pct": 18.0
+      }
+    ],
+    "product_rows": [
+      {
+        "id": "29a56fe0-1e11-4fc1-952b-0ef66a473bf9",
+        "product_key": "",
+        "aantal": 0.0,
+        "korting_pct": 0.0
+      }
+    ],
+    "beer_rows": [],
+    "last_step": 5,
+    "created_at": "2026-03-23T15:16:27.673488",
+    "updated_at": "2026-03-23T15:16:50.626624",
+    "finalized_at": "2026-03-23T15:16:50.625766"
+  },
+  {
+    "id": "5275363e-0125-48b4-bb59-09e97a0669db",
+    "offertenummer": "202603002",
+    "status": "concept",
+    "klantnaam": "Berendhaus",
+    "contactpersoon": "Mattijn",
+    "referentie": "Algemeen",
+    "datum_text": "23-03-2026",
+    "opmerking": "",
+    "jaar": 2026,
+    "voorsteltype": "Op basis van producten",
+    "liters_basis": "een_bier",
+    "kanaal": "zakelijk",
+    "bier_key": "c3d186de-9d63-4aa8-a3ba-b86431b373c7",
+    "staffels": [
+      {
+        "id": "7a6f337a-81f7-479a-a450-a81b024cfad4",
+        "product_key": "",
+        "liters": 100.0,
+        "korting_pct": 18.0
+      },
+      {
+        "id": "966aec6c-b002-4b78-ae6d-428c5b3edecc",
+        "product_key": "",
+        "liters": 200.0,
+        "korting_pct": 18.0
+      }
+    ],
+    "product_rows": [
+      {
+        "id": "4072e9c0-9a09-47ef-9208-5000b292c7d2",
+        "product_key": "samengesteld|doos 24 flessen 33cl",
+        "aantal": 100.0,
+        "korting_pct": 0.0
+      }
+    ],
+    "beer_rows": [
+      {
+        "id": "c6e5a2e0-45d0-4f94-9c4c-eb0d0ce00eb3",
+        "bier_key": "",
+        "product_key": "",
+        "liters": 0.0,
+        "korting_pct": 0.0
+      }
+    ],
+    "last_step": 4,
+    "created_at": "2026-03-23T15:19:27.216479",
+    "updated_at": "2026-03-23T23:05:04.923393",
+    "finalized_at": ""
+  }
+]
