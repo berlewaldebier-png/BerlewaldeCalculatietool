@@ -9,6 +9,8 @@ from components.action_buttons import (
     render_edit_button,
     render_save_button,
 )
+from components.breadcrumb import render_breadcrumb
+from components.page_ui import close_main_card, open_main_card
 from components.page_ui import render_page_header
 from components.table_ui import render_read_only_table_cell, render_table_headers
 from pages.nieuwe_berekening.state import build_step_4_product_tables
@@ -25,6 +27,7 @@ from utils.storage import (
     get_verkoopstrategie_verpakking,
     load_samengestelde_producten_for_year,
     load_verkoopstrategie_verpakkingen,
+    ensure_verkoopprijzen_storage,
 )
 
 
@@ -107,12 +110,12 @@ def _available_years() -> list[int]:
             year = 0
         if year > 0:
             years.add(year)
-    return sorted(years, reverse=True)
+    return sorted(years)
 
 
 def _default_year() -> int:
     years = _available_years()
-    return years[0] if years else date.today().year
+    return years[-1] if years else date.today().year
 
 
 def _init_page_state() -> None:
@@ -204,13 +207,13 @@ def _packaging_catalog(year: int) -> list[dict[str, str]]:
         verpakking_key = _packaging_key(verpakking)
         if verpakking_key and verpakking_key not in catalog:
             catalog[verpakking_key] = verpakking
-    for record in _latest_definitive_records_up_to_year(year):
-        for row in _build_samengestelde_product_rows(record):
-            verpakking_key = str(row.get("verpakking_key", "") or "")
-            verpakking = str(row.get("verpakking", "") or "")
-            if verpakking_key and verpakking_key not in catalog:
-                catalog[verpakking_key] = verpakking
     for strategy in load_verkoopstrategie_verpakkingen():
+        try:
+            strategy_year = int(strategy.get("jaar", 0) or 0)
+        except (TypeError, ValueError):
+            strategy_year = 0
+        if strategy_year != int(year):
+            continue
         verpakking_key = _packaging_key(strategy.get("verpakking_key", ""))
         verpakking = str(strategy.get("verpakking", "") or "")
         if verpakking_key and verpakking_key not in catalog:
@@ -641,7 +644,7 @@ def render_verkoopstrategie_content(on_back: Callable[[], None]) -> None:
 
     selected_year = int(st.session_state.get(SELECTED_YEAR_KEY, _default_year()) or _default_year())
     if selected_year not in available_years:
-        selected_year = available_years[0]
+        selected_year = available_years[-1]
         st.session_state[SELECTED_YEAR_KEY] = selected_year
 
     year_col, _ = st.columns([1.2, 4.8])
@@ -666,6 +669,22 @@ def render_verkoopstrategie_content(on_back: Callable[[], None]) -> None:
             on_back()
 
 
-def show_verkoopprijzen_page(on_back: Callable[[], None], on_logout: Callable[[], None]) -> None:
+def show_verkoopstrategie_page(
+    on_back: Callable[[], None],
+    on_logout: Callable[[], None],
+) -> None:
     del on_logout
+    ensure_verkoopprijzen_storage()
+    _init_page_state()
+    open_main_card()
+    render_breadcrumb(current_label="Verkoopstrategie", on_home_click=on_back)
+    _render_feedback()
     render_verkoopstrategie_content(on_back)
+    close_main_card()
+
+
+def show_verkoopprijzen_page(
+    on_back: Callable[[], None],
+    on_logout: Callable[[], None],
+) -> None:
+    show_verkoopstrategie_page(on_back=on_back, on_logout=on_logout)

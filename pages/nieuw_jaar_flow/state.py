@@ -60,7 +60,7 @@ def _empty_productie_record(source_year: int | None = None) -> dict[str, float]:
 
 def _default_state() -> dict[str, Any]:
     years = source_year_options()
-    source_year = years[0] if years else None
+    source_year = years[-1] if years else None
     target_year = (source_year + 1) if source_year else None
     return {
         "source_year": source_year,
@@ -125,7 +125,7 @@ def source_year_options() -> list[int]:
         for year in load_vaste_kosten_data().keys()
         if str(year).isdigit() and int(year) > 0
     )
-    return sorted(years, reverse=True)
+    return sorted(years)
 
 
 def record_group_key(record: dict[str, Any]) -> str:

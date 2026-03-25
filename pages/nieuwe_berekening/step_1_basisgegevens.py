@@ -19,7 +19,7 @@ def render_step_1() -> bool:
     if not available_years:
         available_years = [datetime.now().year]
     if st.session_state.get("nb_basis_jaar") not in available_years:
-        st.session_state["nb_basis_jaar"] = available_years[0]
+        st.session_state["nb_basis_jaar"] = available_years[-1]
 
     st.markdown(
         "<div class='section-title'>Basisgegevens</div>",

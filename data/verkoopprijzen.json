@@ -1,25 +1,25 @@
 [
   {
-    "id": "f4289367-8cc7-4424-a2cc-2ffd09e44dc0",
+    "id": "36fc04ce-ccd8-4b98-befa-20bb33ddca93",
     "record_type": "verkoopstrategie_verpakking",
     "jaar": 2025,
     "bron_jaar": 2025,
     "verpakking_key": "doos 12 flessen 33cl",
     "verpakking": "Doos 12 flessen 33cl",
-    "bron_verkoopstrategie_id": "f4289367-8cc7-4424-a2cc-2ffd09e44dc0",
+    "bron_verkoopstrategie_id": "",
     "strategie_type": "handmatig",
     "kanaalmarges": {
       "particulier": 50.0,
-      "zakelijk": 20.0,
-      "retail": 0.0,
-      "horeca": 0.0,
-      "slijterij": 0.0
+      "zakelijk": 50.0,
+      "retail": 50.0,
+      "horeca": 50.0,
+      "slijterij": 50.0
     },
-    "created_at": "2026-03-25T20:41:41.199267",
-    "updated_at": "2026-03-25T20:45:35.080098"
+    "created_at": "2026-03-25T22:34:11.700148",
+    "updated_at": "2026-03-25T22:34:11.700180"
   },
   {
-    "id": "3725335a-4b3e-46ae-9a2f-7ed7243fdc51",
+    "id": "2e94fc4e-710d-4de4-a29e-aecd2fb376d9",
     "record_type": "verkoopstrategie_verpakking",
     "jaar": 2025,
     "bron_jaar": 2025,
@@ -34,7 +34,45 @@
       "horeca": 50.0,
       "slijterij": 50.0
     },
-    "created_at": "2026-03-25T20:31:21.043448",
-    "updated_at": "2026-03-25T20:31:21.043501"
+    "created_at": "2026-03-25T22:34:21.490349",
+    "updated_at": "2026-03-25T22:34:21.490388"
+  },
+  {
+    "id": "ea7f30f4-0751-4945-8c60-626deb6f04b5",
+    "record_type": "verkoopstrategie_verpakking",
+    "jaar": 2025,
+    "bron_jaar": 2025,
+    "verpakking_key": "doos 6 flessen 75cl",
+    "verpakking": "Doos 6 flessen 75cl",
+    "bron_verkoopstrategie_id": "",
+    "strategie_type": "handmatig",
+    "kanaalmarges": {
+      "particulier": 50.0,
+      "zakelijk": 50.0,
+      "retail": 50.0,
+      "horeca": 50.0,
+      "slijterij": 50.0
+    },
+    "created_at": "2026-03-25T22:34:32.976793",
+    "updated_at": "2026-03-25T22:34:32.976833"
+  },
+  {
+    "id": "eac13095-3815-4398-b872-5effac33ea6d",
+    "record_type": "verkoopstrategie_verpakking",
+    "jaar": 2025,
+    "bron_jaar": 2025,
+    "verpakking_key": "fust 20l",
+    "verpakking": "Fust 20L",
+    "bron_verkoopstrategie_id": "",
+    "strategie_type": "handmatig",
+    "kanaalmarges": {
+      "particulier": 50.0,
+      "zakelijk": 50.0,
+      "retail": 50.0,
+      "horeca": 50.0,
+      "slijterij": 50.0
+    },
+    "created_at": "2026-03-25T22:34:42.714861",
+    "updated_at": "2026-03-25T22:34:42.714900"
   }
 ]

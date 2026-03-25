@@ -561,6 +561,7 @@ def normalize_inkoop_factuur(factuur: dict[str, Any] | None = None) -> dict[str,
 
     return {
         "id": str(source.get("id", "") or uuid4()),
+        "factuurnummer": str(source.get("factuurnummer", "") or ""),
         "factuurdatum": str(source.get("factuurdatum", "") or ""),
         "verzendkosten": float(source.get("verzendkosten", 0.0) or 0.0),
         "overige_kosten": float(source.get("overige_kosten", 0.0) or 0.0),
@@ -591,6 +592,7 @@ def get_record_inkoop_facturen(record: dict[str, Any]) -> list[dict[str, Any]]:
 
     primary_factuur = normalize_inkoop_factuur(
         {
+            "factuurnummer": inkoop.get("factuurnummer", ""),
             "factuurdatum": inkoop.get("factuurdatum", ""),
             "verzendkosten": inkoop.get("verzendkosten", 0.0),
             "overige_kosten": inkoop.get("overige_kosten", 0.0),
@@ -629,6 +631,7 @@ def set_record_inkoop_facturen(
 
     primary_factuur = normalized_facturen[0]
     inkoop["facturen"] = normalized_facturen
+    inkoop["factuurnummer"] = str(primary_factuur.get("factuurnummer", "") or "")
     inkoop["factuurdatum"] = str(primary_factuur.get("factuurdatum", "") or "")
     inkoop["verzendkosten"] = float(primary_factuur.get("verzendkosten", 0.0) or 0.0)
     inkoop["overige_kosten"] = float(primary_factuur.get("overige_kosten", 0.0) or 0.0)

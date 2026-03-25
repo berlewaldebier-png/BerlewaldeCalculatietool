@@ -307,6 +307,7 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
 
     return {
         "id": str(source.get("id", "") or uuid4()),
+        "factuurnummer": str(source.get("factuurnummer", "") or ""),
         "factuurdatum": str(source.get("factuurdatum", "") or ""),
         "verzendkosten": float(source.get("verzendkosten", 0.0) or 0.0),
         "overige_kosten": float(source.get("overige_kosten", 0.0) or 0.0),
@@ -431,6 +432,7 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     legacy_primary_factuur = normalize_inkoop_factuur_record(
         {
             "id": str(inkoop.get("primary_factuur_id", "") or ""),
+            "factuurnummer": str(inkoop.get("factuurnummer", "") or ""),
             "factuurdatum": str(inkoop.get("factuurdatum", "") or ""),
             "verzendkosten": float(inkoop.get("verzendkosten", 0.0) or 0.0),
             "overige_kosten": float(inkoop.get("overige_kosten", 0.0) or 0.0),
@@ -455,6 +457,7 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     inkoop = {
         "regels": inkoop.get("regels", []),
         "factuurregels": primary_factuur.get("factuurregels", []),
+        "factuurnummer": str(primary_factuur.get("factuurnummer", "") or ""),
         "factuurdatum": str(primary_factuur.get("factuurdatum", "") or ""),
         "notities": str(inkoop.get("notities", "") or ""),
         "verzendkosten": float(primary_factuur.get("verzendkosten", 0.0) or 0.0),

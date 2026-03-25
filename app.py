@@ -13,7 +13,7 @@ from pages.producten_verpakking import show_producten_verpakking_page
 from pages.productie import show_productie_page
 from pages.tarieven_heffingen import show_tarieven_heffingen_page
 from pages.vaste_kosten import show_vaste_kosten_page
-from pages.verkoopstrategie_flow import show_verkoopstrategie_page
+from pages.verkoopstrategie import show_verkoopstrategie_page
 from utils.storage import get_concept_berekeningen, get_concept_prijsvoorstellen
 
 

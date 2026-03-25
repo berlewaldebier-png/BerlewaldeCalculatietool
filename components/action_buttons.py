@@ -4,9 +4,27 @@ import streamlit as st
 
 
 ICON_ONLY_LABEL = ""
+ADD_ICON = ":material/add:"
 EDIT_ICON = ":material/edit:"
 SAVE_ICON = ":material/save:"
 DELETE_ICON = ":material/delete:"
+
+
+def render_add_button(
+    key: str,
+    *,
+    use_container_width: bool = False,
+    disabled: bool = False,
+) -> bool:
+    """Toont een compacte toevoegknop met tooltip."""
+    return st.button(
+        ICON_ONLY_LABEL,
+        key=key,
+        help="Toevoegen",
+        icon=ADD_ICON,
+        use_container_width=use_container_width,
+        disabled=disabled,
+    )
 
 
 def render_edit_button(

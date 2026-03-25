@@ -22,6 +22,7 @@ from utils.storage import (
     get_concept_prijsvoorstellen,
     get_definitieve_berekeningen,
     get_definitieve_prijsvoorstellen,
+    get_productie_years,
     get_next_prijsvoorstel_offertenummer,
     get_effective_verkoopstrategie_for_product,
     get_latest_verkoopstrategie_up_to_year,
@@ -118,6 +119,11 @@ def _empty_beer_row() -> dict[str, Any]:
 
 def _default_year() -> int:
     return date.today().year
+
+
+def _year_options() -> list[int]:
+    years = get_productie_years()
+    return years if years else [date.today().year]
 
 
 def _default_form_state() -> dict[str, Any]:
@@ -531,9 +537,24 @@ def _has_strategy_for_year(year: int) -> bool:
 
 def _kanaal_marge(year: int, kanaal: str) -> float | None:
     strategy = _selected_strategy(year)
-    if not strategy:
+    if isinstance(strategy, dict):
+        kanaalmarges = strategy.get("kanaalmarges", {})
+        if isinstance(kanaalmarges, dict):
+            try:
+                return float(kanaalmarges.get(kanaal, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                pass
+
+    verpakkingsstrategien = [
+        record
+        for record in load_verkoopstrategie_verpakkingen()
+        if int(record.get("jaar", 0) or 0) == int(year)
+    ]
+    if not verpakkingsstrategien:
         return None
-    kanaalmarges = strategy.get("kanaalmarges", {})
+
+    verpakkingsstrategien.sort(key=lambda item: str(item.get("verpakking", "") or "").lower())
+    kanaalmarges = verpakkingsstrategien[0].get("kanaalmarges", {})
     if not isinstance(kanaalmarges, dict):
         return None
     try:
@@ -700,7 +721,8 @@ def _build_product_rows_for_bier(year: int, bier_key: str) -> list[dict[str, Any
 
     deduped: dict[str, dict[str, Any]] = {}
     for row in raw_rows:
-        key = str(row.get("product_key", "") or "")
+        verpakking = str(row.get("verpakking", "") or "").strip().lower()
+        key = verpakking or str(row.get("product_key", "") or "")
         if not key:
             continue
         current = deduped.get(key)
@@ -1337,7 +1359,23 @@ def _render_step_2_uitgangspunten() -> None:
     _hydrate_widget("kanaal")
     col_1, col_2 = st.columns(2)
     with col_1:
-        st.number_input("Verkoopjaar", min_value=2020, max_value=2100, step=1, key=_widget_key("jaar"))
+        available_years = _year_options()
+        current_year = int(
+            st.session_state.get(
+                _widget_key("jaar"),
+                _form_value("jaar", available_years[-1]),
+            )
+            or available_years[-1]
+        )
+        if current_year not in available_years:
+            current_year = available_years[-1]
+            st.session_state[_widget_key("jaar")] = current_year
+        st.selectbox(
+            "Verkoopjaar",
+            options=available_years,
+            index=available_years.index(current_year),
+            key=_widget_key("jaar"),
+        )
     with col_2:
         st.selectbox(
             "Voorsteltype",

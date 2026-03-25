@@ -31,14 +31,16 @@
             "subfactuurbedrag": 5787.32
           }
         ],
-        "factuurdatum": "02-03-2025",
+        "factuurnummer": "2025",
+        "factuurdatum": "03-03-2025",
         "notities": "",
         "verzendkosten": 0.0,
         "overige_kosten": 0.0,
         "facturen": [
           {
             "id": "0c765bbe-3bd9-49bb-babb-b135fb1727ef",
-            "factuurdatum": "02-03-2025",
+            "factuurnummer": "2025",
+            "factuurdatum": "03-03-2025",
             "verzendkosten": 0.0,
             "overige_kosten": 0.0,
             "factuurregels": [
@@ -48,6 +50,22 @@
                 "eenheid": "78b8f62d-6d87-455a-95a0-c6496a5d29c8",
                 "liters": 2029.5,
                 "subfactuurbedrag": 5787.32
+              }
+            ]
+          },
+          {
+            "id": "e6faa9a7-bb37-4291-999e-90a6b5a93117",
+            "factuurnummer": "",
+            "factuurdatum": "28-08-2025",
+            "verzendkosten": 300.0,
+            "overige_kosten": 0.0,
+            "factuurregels": [
+              {
+                "id": "26545a0e-edfa-4389-86ea-534fbd00a6b7",
+                "aantal": 100.0,
+                "eenheid": "f60497ad-010d-4c67-a9ee-6cb9238df010",
+                "liters": 2000.0,
+                "subfactuurbedrag": 5764.96
               }
             ]
           }
@@ -102,7 +120,7 @@
     },
     "last_completed_step": 4,
     "created_at": "2026-03-25T20:26:21.263584",
-    "updated_at": "2026-03-25T22:07:23.420301",
-    "finalized_at": "2026-03-25T22:07:23.419928"
+    "updated_at": "2026-03-26T00:02:43.289718",
+    "finalized_at": "2026-03-25T23:10:20.974831"
   }
 ]

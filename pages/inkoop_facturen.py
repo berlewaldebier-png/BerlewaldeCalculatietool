@@ -5,8 +5,9 @@ from uuid import uuid4
 
 import streamlit as st
 
-from components.action_buttons import render_delete_button, render_edit_button
+from components.action_buttons import render_add_button, render_delete_button, render_edit_button
 from components.breadcrumb import render_breadcrumb
+from components.form_ui import ensure_date_widget_value, format_nl_date
 from components.page_ui import render_page_header
 from components.table_ui import render_read_only_table_cell, render_table_headers
 from pages.nieuwe_berekening.state import (
@@ -20,7 +21,7 @@ from pages.nieuwe_berekening.state import (
     normalize_inkoop_row,
     set_record_inkoop_facturen,
 )
-from utils.storage import add_or_update_berekening, load_berekeningen, load_samengestelde_producten
+from utils.storage import add_or_update_berekening, get_definitieve_berekeningen, load_samengestelde_producten
 
 
 MODE_IDLE = "idle"
@@ -31,14 +32,31 @@ MODE_EDIT = "edit"
 def _format_euro(amount: float | int | None) -> str:
     value = float(amount or 0.0)
     formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"EUR {formatted}"
+    return formatted
 
 
 def _inkoop_berekeningen() -> list[dict[str, Any]]:
     return [
         record
-        for record in load_berekeningen()
+        for record in get_definitieve_berekeningen()
         if str(record.get("soort_berekening", {}).get("type", "") or "") == "Inkoop"
+    ]
+
+
+def _available_years() -> list[int]:
+    years = {
+        int(record.get("basisgegevens", {}).get("jaar", 0) or 0)
+        for record in _inkoop_berekeningen()
+        if int(record.get("basisgegevens", {}).get("jaar", 0) or 0) > 0
+    }
+    return sorted(years)
+
+
+def _berekeningen_for_year(year: int) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in _inkoop_berekeningen()
+        if int(record.get("basisgegevens", {}).get("jaar", 0) or 0) == int(year)
     ]
 
 
@@ -80,6 +98,7 @@ def _empty_factuur() -> dict[str, Any]:
     return normalize_inkoop_factuur(
         {
             "id": str(uuid4()),
+            "factuurnummer": "",
             "factuurdatum": "",
             "verzendkosten": 0.0,
             "overige_kosten": 0.0,
@@ -99,12 +118,16 @@ def _render_feedback() -> None:
 
 
 def _init_page_state() -> None:
+    available_years = _available_years()
     defaults = {
+        "inkoop_facturen_selected_year": available_years[-1] if available_years else None,
         "inkoop_facturen_selected_berekening_id": "",
         "inkoop_facturen_loaded_berekening_id": "",
         "inkoop_facturen_mode": MODE_IDLE,
         "inkoop_facturen_selected_factuur_id": "",
         "inkoop_facturen_confirm_delete_factuur_id": "",
+        "inkoop_facturen_pending_add_record_id": "",
+        "inkoop_facturen_pending_edit_record_id": "",
         "inkoop_facturen_feedback": None,
         "inkoop_factuur_form": _empty_factuur(),
         "inkoop_factuur_form_version": 0,
@@ -145,7 +168,8 @@ def _set_form_data(factuur: dict[str, Any]) -> None:
 
 def _ensure_form_widget_state() -> None:
     factuur = st.session_state.get("inkoop_factuur_form", _empty_factuur())
-    st.session_state.setdefault(_widget_key("factuurdatum"), str(factuur.get("factuurdatum", "") or ""))
+    st.session_state.setdefault(_widget_key("factuurnummer"), str(factuur.get("factuurnummer", "") or ""))
+    ensure_date_widget_value(_widget_key("factuurdatum"), str(factuur.get("factuurdatum", "") or ""))
     st.session_state.setdefault(_widget_key("verzendkosten"), float(factuur.get("verzendkosten", 0.0) or 0.0))
     st.session_state.setdefault(_widget_key("overige_kosten"), float(factuur.get("overige_kosten", 0.0) or 0.0))
 
@@ -184,7 +208,8 @@ def _current_form_factuur() -> dict[str, Any]:
     factuur = normalize_inkoop_factuur(
         {
             "id": st.session_state.get("inkoop_facturen_selected_factuur_id", "") or uuid4(),
-            "factuurdatum": st.session_state.get(_widget_key("factuurdatum"), ""),
+            "factuurnummer": st.session_state.get(_widget_key("factuurnummer"), ""),
+            "factuurdatum": format_nl_date(st.session_state.get(_widget_key("factuurdatum"))),
             "verzendkosten": st.session_state.get(_widget_key("verzendkosten"), 0.0),
             "overige_kosten": st.session_state.get(_widget_key("overige_kosten"), 0.0),
             "factuurregels": _get_rows_from_state(),
@@ -200,6 +225,24 @@ def _start_add_factuur() -> None:
     st.session_state["inkoop_facturen_selected_factuur_id"] = ""
     _set_form_data(_empty_factuur())
     _bump_form_version()
+
+
+def _open_record_for_add(record: dict[str, Any]) -> None:
+    record_id = str(record.get("id", "") or "")
+    st.session_state["inkoop_facturen_selected_berekening_id"] = record_id
+    st.session_state["inkoop_facturen_loaded_berekening_id"] = record_id
+    st.session_state["inkoop_facturen_pending_add_record_id"] = ""
+    st.session_state["inkoop_facturen_pending_edit_record_id"] = ""
+    _start_add_factuur()
+
+
+def _open_record_for_edit(record: dict[str, Any], factuur: dict[str, Any]) -> None:
+    record_id = str(record.get("id", "") or "")
+    st.session_state["inkoop_facturen_selected_berekening_id"] = record_id
+    st.session_state["inkoop_facturen_loaded_berekening_id"] = record_id
+    st.session_state["inkoop_facturen_pending_add_record_id"] = ""
+    st.session_state["inkoop_facturen_pending_edit_record_id"] = ""
+    _start_edit_factuur(factuur)
 
 
 def _start_edit_factuur(factuur: dict[str, Any]) -> None:
@@ -235,10 +278,17 @@ def _factuur_totals(factuur: dict[str, Any]) -> dict[str, float]:
     }
 
 
-def _validate_factuur(factuur: dict[str, Any]) -> tuple[list[str], dict[str, Any] | None]:
+def _validate_factuur(factuur: dict[str, Any], expected_year: int) -> tuple[list[str], dict[str, Any] | None]:
     errors: list[str] = []
     normalized = normalize_inkoop_factuur(factuur)
     valid_rows: list[dict[str, Any]] = []
+    factuurdatum = str(normalized.get("factuurdatum", "") or "").strip()
+    if factuurdatum:
+        parsed = st.session_state.get(_widget_key("factuurdatum"))
+        if parsed is None:
+            errors.append("Kies een geldige factuurdatum.")
+        elif int(parsed.year) != int(expected_year):
+            errors.append(f"De factuurdatum moet binnen het geselecteerde jaar {expected_year} vallen.")
 
     for index, row in enumerate(normalized.get("factuurregels", []), start=1):
         eenheid = str(row.get("eenheid", "") or "")
@@ -269,7 +319,11 @@ def _validate_factuur(factuur: dict[str, Any]) -> tuple[list[str], dict[str, Any
 
 
 def _save_factuur(record: dict[str, Any]) -> bool:
-    errors, valid_factuur = _validate_factuur(_current_form_factuur())
+    basisgegevens = record.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    expected_year = int(basisgegevens.get("jaar", 0) or 0)
+    errors, valid_factuur = _validate_factuur(_current_form_factuur(), expected_year)
     if errors:
         for error in errors:
             st.error(error)
@@ -346,6 +400,105 @@ def _render_record_summary(record: dict[str, Any]) -> None:
         st.caption(f"Gemiddelde kostprijs per liter ({format_number(totaal_liters)} L)")
 
 
+def _factuur_keuze_label(factuur: dict[str, Any]) -> str:
+    totals = _factuur_totals(factuur)
+    total_cost = totals["totaal_subfactuurbedrag"] + totals["totale_extra_kosten"]
+    factuurnummer = str(factuur.get("factuurnummer", "") or "-")
+    factuurdatum = str(factuur.get("factuurdatum", "") or "-")
+    regels = len(factuur.get("factuurregels", []))
+    return f"{factuurnummer} | {factuurdatum} | {regels} regels | {_format_euro(total_cost)}"
+
+
+def _render_bier_selectie(record: dict[str, Any]) -> None:
+    basisgegevens = record.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    biernaam = str(basisgegevens.get("biernaam", "Onbekend") or "Onbekend")
+    jaar = int(basisgegevens.get("jaar", 0) or 0)
+    facturen = get_record_inkoop_facturen(record)
+    row_cols = st.columns([2.2, 0.8, 0.42, 0.42])
+    with row_cols[0]:
+        render_read_only_table_cell(biernaam)
+    with row_cols[1]:
+        render_read_only_table_cell(str(jaar))
+    with row_cols[2]:
+        if render_add_button(
+            key=f"inkoop_facturen_add_for_{record.get('id', '')}",
+            use_container_width=True,
+        ):
+            st.session_state["inkoop_facturen_pending_add_record_id"] = str(record.get("id", "") or "")
+            st.session_state["inkoop_facturen_pending_edit_record_id"] = ""
+            st.rerun()
+    with row_cols[3]:
+        if render_edit_button(
+            key=f"inkoop_facturen_pick_edit_{record.get('id', '')}",
+            disabled=not bool(facturen),
+            use_container_width=True,
+        ):
+            st.session_state["inkoop_facturen_pending_edit_record_id"] = str(record.get("id", "") or "")
+            st.session_state["inkoop_facturen_pending_add_record_id"] = ""
+            st.rerun()
+
+    record_id = str(record.get("id", "") or "")
+    if st.session_state.get("inkoop_facturen_pending_add_record_id", "") == record_id:
+        st.warning(f"Weet je zeker dat je voor {biernaam} een factuur wilt toevoegen?")
+        confirm_col, cancel_col, _ = st.columns([1, 1, 4])
+        with confirm_col:
+            if st.button("Ja, toevoegen", key=f"inkoop_facturen_confirm_add_{record_id}"):
+                _open_record_for_add(record)
+                st.rerun()
+        with cancel_col:
+            if st.button("Annuleren", key=f"inkoop_facturen_cancel_add_{record_id}"):
+                st.session_state["inkoop_facturen_pending_add_record_id"] = ""
+                st.rerun()
+
+    if st.session_state.get("inkoop_facturen_pending_edit_record_id", "") == record_id:
+        st.info(f"Kies welke factuur van {biernaam} je wilt aanpassen.")
+        options = [str(factuur.get("id", "") or "") for factuur in facturen]
+        labels = {
+            str(factuur.get("id", "") or ""): _factuur_keuze_label(factuur)
+            for factuur in facturen
+        }
+        if options:
+            selected_factuur_id = st.selectbox(
+                "Factuur",
+                options=options,
+                format_func=lambda factuur_id: labels.get(factuur_id, factuur_id),
+                key=f"inkoop_facturen_edit_factuur_select_{record_id}",
+            )
+            action_col, cancel_col, _ = st.columns([1, 1, 4])
+            with action_col:
+                if st.button("Factuur openen", key=f"inkoop_facturen_open_edit_{record_id}"):
+                    factuur = next(
+                        (
+                            item
+                            for item in facturen
+                            if str(item.get("id", "") or "") == str(selected_factuur_id or "")
+                        ),
+                        None,
+                    )
+                    if factuur:
+                        _open_record_for_edit(record, factuur)
+                        st.rerun()
+            with cancel_col:
+                if st.button("Annuleren", key=f"inkoop_facturen_cancel_edit_{record_id}"):
+                    st.session_state["inkoop_facturen_pending_edit_record_id"] = ""
+                    st.rerun()
+
+
+def _render_bier_overview(year: int) -> None:
+    st.markdown("<div class='section-title'>Definitieve bieren</div>", unsafe_allow_html=True)
+    records = _berekeningen_for_year(year)
+    if not records:
+        st.info("Er zijn voor dit jaar nog geen definitieve inkoopberekeningen beschikbaar.")
+        return
+    headers = ["Bier", "Jaar", "", ""]
+    row_widths = [2.2, 0.8, 0.42, 0.42]
+    render_table_headers(headers, row_widths)
+    for record in records:
+        _render_bier_selectie(record)
+
+
 def _render_facturen_overview(record: dict[str, Any]) -> None:
     st.markdown("<div class='section-title'>Facturen</div>", unsafe_allow_html=True)
     facturen = get_record_inkoop_facturen(record)
@@ -353,8 +506,8 @@ def _render_facturen_overview(record: dict[str, Any]) -> None:
         st.info("Nog geen facturen toegevoegd.")
         return
 
-    headers = ["Factuurdatum", "Regels", "Liters", "Totale kosten", "", ""]
-    row_widths = [1.2, 0.8, 0.9, 1.0, 0.42, 0.42]
+    headers = ["Factuurnr.", "Factuurdatum", "Regels", "Liters", "Totale kosten", "", ""]
+    row_widths = [1.1, 1.2, 0.8, 0.9, 1.0, 0.42, 0.42]
     render_table_headers(headers, row_widths)
 
     confirm_delete_id = st.session_state.get("inkoop_facturen_confirm_delete_factuur_id", "")
@@ -364,18 +517,20 @@ def _render_facturen_overview(record: dict[str, Any]) -> None:
         total_cost = totals["totaal_subfactuurbedrag"] + totals["totale_extra_kosten"]
         row_cols = st.columns(row_widths)
         with row_cols[0]:
-            render_read_only_table_cell(str(factuur.get("factuurdatum", "") or "-"))
+            render_read_only_table_cell(str(factuur.get("factuurnummer", "") or "-"))
         with row_cols[1]:
-            render_read_only_table_cell(str(len(factuur.get("factuurregels", []))))
+            render_read_only_table_cell(str(factuur.get("factuurdatum", "") or "-"))
         with row_cols[2]:
-            render_read_only_table_cell(f"{format_number(totals['totaal_liters'])} L")
+            render_read_only_table_cell(str(len(factuur.get("factuurregels", []))))
         with row_cols[3]:
-            render_read_only_table_cell(_format_euro(total_cost))
+            render_read_only_table_cell(f"{format_number(totals['totaal_liters'])} L")
         with row_cols[4]:
+            render_read_only_table_cell(_format_euro(total_cost))
+        with row_cols[5]:
             if render_edit_button(key=f"inkoop_factuur_edit_{factuur_id}"):
                 _start_edit_factuur(factuur)
                 st.rerun()
-        with row_cols[5]:
+        with row_cols[6]:
             if render_delete_button(key=f"inkoop_factuur_delete_{factuur_id}"):
                 st.session_state["inkoop_facturen_confirm_delete_factuur_id"] = factuur_id
                 st.rerun()
@@ -403,7 +558,14 @@ def _render_factuur_form(record: dict[str, Any]) -> None:
     title = "Nieuwe factuur toevoegen" if mode == MODE_ADD else "Factuur bewerken"
     st.markdown(f"<div class='section-title'>{title}</div>", unsafe_allow_html=True)
 
-    st.text_input("Factuurdatum", key=_widget_key("factuurdatum"), placeholder="DD-MM-YYYY")
+    basisgegevens = record.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    factuur_col_1, factuur_col_2 = st.columns(2)
+    with factuur_col_1:
+        st.text_input("Factuurnummer", key=_widget_key("factuurnummer"))
+    with factuur_col_2:
+        st.date_input("Factuurdatum", key=_widget_key("factuurdatum"), format="DD-MM-YYYY")
     cost_col_1, cost_col_2 = st.columns(2)
     with cost_col_1:
         st.number_input(
@@ -434,17 +596,19 @@ def _render_factuur_form(record: dict[str, Any]) -> None:
         "Inkoopeenheid",
         "Aantal",
         "Liters",
-        "Subfactuurbedrag",
-        "Toegerekende extra kosten",
-        "Prijs per eenheid",
+        "Subbedrag",
+        "Extra kosten",
+        "p.p. eenheid",
         "Prijs per liter",
         "",
+        "",
     ]
-    row_widths = [1.1, 0.9, 0.9, 1.1, 1.05, 1.0, 1.0, 0.42]
+    row_widths = [1.1, 0.9, 0.9, 1.1, 1.05, 1.0, 1.0, 0.42, 0.42]
     render_table_headers(headers, row_widths)
 
     confirm_row_id = st.session_state.get("inkoop_factuur_delete_confirm_row_id", "")
-    for row in rows:
+    total_rows = len(rows)
+    for row_index, row in enumerate(rows):
         row_id = str(row.get("id", "") or "")
         row_cols = st.columns(row_widths)
         row_options = list(product_options)
@@ -489,6 +653,21 @@ def _render_factuur_form(record: dict[str, Any]) -> None:
         with row_cols[6]:
             render_read_only_table_cell(_format_euro(prijs_per_liter))
         with row_cols[7]:
+            if row_index == total_rows - 1:
+                if render_add_button(key="inkoop_factuur_add_row", use_container_width=True):
+                    current_rows = _get_rows_from_state()
+                    current_rows.append(_empty_factuur_row())
+                    _set_form_data(
+                        {
+                            **_current_form_factuur(),
+                            "factuurregels": current_rows,
+                        }
+                    )
+                    _bump_form_version()
+                    st.rerun()
+            else:
+                st.write("")
+        with row_cols[8]:
             if render_delete_button(key=f"inkoop_factuur_remove_row_{row_id}"):
                 st.session_state["inkoop_factuur_delete_confirm_row_id"] = row_id
                 st.rerun()
@@ -522,22 +701,6 @@ def _render_factuur_form(record: dict[str, Any]) -> None:
                 if st.button("Annuleren", key=f"inkoop_factuur_cancel_remove_row_{row_id}"):
                     st.session_state["inkoop_factuur_delete_confirm_row_id"] = ""
                     st.rerun()
-
-    add_col, spacer_col = st.columns([1.2, 4.8])
-    with add_col:
-        if st.button("Toevoegen", key="inkoop_factuur_add_row", use_container_width=True):
-            rows = _get_rows_from_state()
-            rows.append(_empty_factuur_row())
-            _set_form_data(
-                {
-                    **_current_form_factuur(),
-                    "factuurregels": rows,
-                }
-            )
-            _bump_form_version()
-            st.rerun()
-    with spacer_col:
-        st.write("")
 
     totals = _factuur_totals(_current_form_factuur())
     summary_col_1, summary_col_2, summary_col_3, summary_col_4 = st.columns(4)
@@ -580,7 +743,7 @@ def show_inkoop_facturen_page(
     del on_logout
     _init_page_state()
 
-    berekeningen = _inkoop_berekeningen()
+    available_years = _available_years()
     st.markdown("<div class='main-card'>", unsafe_allow_html=True)
     render_breadcrumb(current_label="Inkoopfacturen", on_home_click=on_back)
     render_page_header(
@@ -589,7 +752,7 @@ def show_inkoop_facturen_page(
     )
     _render_feedback()
 
-    if not berekeningen:
+    if not available_years:
         st.info("Er zijn nog geen berekeningen met soort 'Inkoop' beschikbaar.")
         col_back, _ = st.columns([1, 4])
         with col_back:
@@ -598,42 +761,31 @@ def show_inkoop_facturen_page(
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    option_ids = [str(record.get("id", "") or "") for record in berekeningen]
-    current_selection = st.session_state.get("inkoop_facturen_selected_berekening_id", "")
-    if current_selection not in option_ids:
-        current_selection = option_ids[0]
-        st.session_state["inkoop_facturen_selected_berekening_id"] = current_selection
+    selected_year = st.session_state.get("inkoop_facturen_selected_year")
+    if selected_year not in available_years:
+        selected_year = available_years[-1]
+        st.session_state["inkoop_facturen_selected_year"] = selected_year
 
-    selected_id = st.selectbox(
-        "Inkoopberekening",
-        options=option_ids,
-        format_func=lambda record_id: _berekening_label(_get_record_by_id(record_id) or {}),
-        key="inkoop_facturen_selected_berekening_id",
-    )
-    record = _get_record_by_id(selected_id)
-    if not record:
-        st.warning("De geselecteerde inkoopberekening is niet gevonden.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
+    year_col, _ = st.columns([1.2, 4.8])
+    with year_col:
+        selected_year = st.selectbox(
+            "Jaar",
+            options=available_years,
+            index=available_years.index(selected_year),
+            key="inkoop_facturen_selected_year",
+        )
 
-    if st.session_state.get("inkoop_facturen_loaded_berekening_id", "") != selected_id:
-        st.session_state["inkoop_facturen_loaded_berekening_id"] = selected_id
-        _cancel_factuur_form()
+    _render_bier_overview(int(selected_year))
 
-    _render_record_summary(record)
-    st.write("")
-
-    action_col_add, action_col_spacer = st.columns([1.4, 4.6])
-    with action_col_add:
-        if st.button("Nieuwe factuur toevoegen", key="inkoop_facturen_add", use_container_width=True):
-            _start_add_factuur()
-            st.rerun()
-    with action_col_spacer:
+    active_record_id = str(st.session_state.get("inkoop_facturen_loaded_berekening_id", "") or "")
+    record = _get_record_by_id(active_record_id) if active_record_id else None
+    if record and st.session_state.get("inkoop_facturen_mode") in {MODE_ADD, MODE_EDIT}:
         st.write("")
-
-    _render_factuur_form(record)
-    st.write("")
-    _render_facturen_overview(record)
+        _render_record_summary(record)
+        st.write("")
+        _render_factuur_form(record)
+        st.write("")
+        _render_facturen_overview(record)
 
     col_back, _ = st.columns([1, 4])
     with col_back:
