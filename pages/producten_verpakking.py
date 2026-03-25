@@ -1322,17 +1322,18 @@ def _render_samengesteld_product_form(
     if mode not in {MODE_ADD, MODE_EDIT}:
         return False
 
-    if not basisproducten:
+    selecteerbare_bouwblokken = _get_samengesteld_keuzes(
+        basisproducten,
+        verpakkingsonderdelen,
+    )
+    if not selecteerbare_bouwblokken:
         st.warning(
-            "Voeg eerst minimaal één basisproduct toe voordat je een samengesteld product kunt maken."
+            "Voeg eerst minimaal één basisproduct of één verpakkingsonderdeel met 'In samengesteld' toe."
         )
         return False
 
     _ensure_samengesteld_product_form_widget_state()
-    lookup = {
-        choice["id"]: {"omschrijving": choice["label"]}
-        for choice in _get_samengesteld_keuzes(basisproducten, verpakkingsonderdelen)
-    }
+    lookup = {choice["id"]: {"omschrijving": choice["label"]} for choice in selecteerbare_bouwblokken}
 
     title = (
         "Nieuw samengesteld product toevoegen"
@@ -1615,7 +1616,7 @@ def _render_samengestelde_producten_tab(
     selected_year: int | None,
 ) -> None:
     st.markdown(
-        "<div class='section-text'>Beheer hier samengestelde producten zoals een doos met 24 flessen, opgebouwd uit basisproducten.</div>",
+        "<div class='section-text'>Beheer hier samengestelde producten zoals een doos met 24 flessen, opgebouwd uit basisproducten en optioneel losse onderdelen met 'In samengesteld'.</div>",
         unsafe_allow_html=True,
     )
     _render_feedback("samengestelde_producten_feedback")

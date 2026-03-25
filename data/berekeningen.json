@@ -27,7 +27,7 @@
             "id": "5eef4fef-7913-4cda-98e0-fd8a9eb32d5d",
             "aantal": 246.0,
             "eenheid": "78b8f62d-6d87-455a-95a0-c6496a5d29c8",
-            "liters": 1948.32,
+            "liters": 2029.5,
             "subfactuurbedrag": 5787.32
           }
         ],
@@ -46,7 +46,7 @@
                 "id": "5eef4fef-7913-4cda-98e0-fd8a9eb32d5d",
                 "aantal": 246.0,
                 "eenheid": "78b8f62d-6d87-455a-95a0-c6496a5d29c8",
-                "liters": 1948.32,
+                "liters": 2029.5,
                 "subfactuurbedrag": 5787.32
               }
             ]
@@ -63,8 +63,8 @@
       "btw_tarief": "21%"
     },
     "resultaat_snapshot": {
-      "integrale_kostprijs_per_liter": 3.0037488708220415,
-      "variabele_kosten_per_liter": 2.9704155374887082,
+      "integrale_kostprijs_per_liter": 2.884932249322493,
+      "variabele_kosten_per_liter": 2.8515989159891597,
       "directe_vaste_kosten_per_liter": 0.03333333333333333,
       "producten": {
         "basisproducten": [
@@ -72,7 +72,7 @@
             "biernaam": "Berlewalde Ipa",
             "soort": "Inkoop",
             "verpakking": "Fles 33cl",
-            "variabele_kosten": 0.9802371273712738,
+            "variabele_kosten": 0.9410276422764227,
             "verpakkingskosten": 0.0,
             "vaste_directe_kosten": 0.011000000000000001,
             "accijns": 0.1768536,
@@ -86,9 +86,9 @@
             "verpakking": "Doos 24 flessen 33cl",
             "variabele_kosten": 23.525691056910567,
             "verpakkingskosten": 0.0,
-            "vaste_directe_kosten": 0.264,
-            "accijns": 4.2444863999999995,
-            "liters_per_product": 7.92
+            "vaste_directe_kosten": 0.275,
+            "accijns": 4.42134,
+            "liters_per_product": 8.25
           }
         ]
       }
@@ -102,7 +102,7 @@
     },
     "last_completed_step": 4,
     "created_at": "2026-03-25T20:26:21.263584",
-    "updated_at": "2026-03-25T20:35:56.300253",
-    "finalized_at": "2026-03-25T20:35:56.299383"
+    "updated_at": "2026-03-25T22:07:23.420301",
+    "finalized_at": "2026-03-25T22:07:23.419928"
   }
 ]

@@ -12,10 +12,19 @@
         "totale_inhoud_liter": 8.25,
         "verpakkingskosten_per_eenheid": 0.29500000000000004,
         "totale_verpakkingskosten": 7.375000000000001
+      },
+      {
+        "basisproduct_id": "verpakkingsonderdeel:f6173525-f32b-4910-84ba-ba1ec63da7f7",
+        "omschrijving": "Doos voor 24 flessen 33cl",
+        "aantal": 1.0,
+        "inhoud_per_eenheid_liter": 0.0,
+        "totale_inhoud_liter": 0.0,
+        "verpakkingskosten_per_eenheid": 0.14,
+        "totale_verpakkingskosten": 0.14
       }
     ],
     "totale_inhoud_liter": 8.25,
-    "totale_verpakkingskosten": 7.375000000000001
+    "totale_verpakkingskosten": 7.515000000000001
   },
   {
     "id": "f60497ad-010d-4c67-a9ee-6cb9238df010",
