@@ -19,3 +19,4 @@ def render_step_4(plan: dict) -> None:
         f"<div class='section-text'><strong>Nieuwe conceptberekeningen voor {plan['target_year']}:</strong> {plan['ready_record_count'] if st.session_state.get('nieuw_jaar_state', {}).get('copy_berekeningen', True) else 0}</div>",
         unsafe_allow_html=True,
     )
+

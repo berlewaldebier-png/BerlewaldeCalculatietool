@@ -25,3 +25,4 @@ def show_nieuw_jaar_voorbereiden_page(
     render_feedback()
     render_wizard(on_back)
     close_main_card()
+

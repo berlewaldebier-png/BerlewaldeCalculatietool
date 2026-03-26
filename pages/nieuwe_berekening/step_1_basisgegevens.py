@@ -70,3 +70,4 @@ def render_step_1() -> bool:
         )
 
     return True
+

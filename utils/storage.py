@@ -315,8 +315,30 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
     }
 
 
+def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, Any]:
+    """Normaliseert een ingrediëntregel voor opslag in berekeningen."""
+    source = row if isinstance(row, dict) else {}
+
+    def _float_value(key: str) -> float:
+        try:
+            return float(source.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    return {
+        "id": str(source.get("id", "") or uuid4()),
+        "ingrediënt": str(source.get("ingrediënt", "") or source.get("ingredient", "") or ""),
+        "omschrijving": str(source.get("omschrijving", "") or ""),
+        "leverancier": str(source.get("leverancier", "") or ""),
+        "hoeveelheid": _float_value("hoeveelheid"),
+        "eenheid": str(source.get("eenheid", "") or ""),
+        "prijs": _float_value("prijs"),
+        "benodigd_in_recept": _float_value("benodigd_in_recept"),
+    }
+
+
 def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Normaliseert een berekeningrecord voor Nieuwe berekening."""
+    """Normaliseert een berekeningrecord voor Nieuwe kostprijsberekening."""
     status = str(record.get("status", "concept") or "concept").strip().lower()
     if status not in {"concept", "definitief"}:
         status = "concept"
@@ -401,6 +423,17 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
             )
             or DEFAULT_BTW_TARIEF
         ),
+    }
+
+    hercalculatie_basis = record.get("hercalculatie_basis", {})
+    if not isinstance(hercalculatie_basis, dict):
+        hercalculatie_basis = {}
+    hercalculatie_basis = {
+        "ingredienten_regels": [
+            _normalize_ingredient_row_record(row)
+            for row in hercalculatie_basis.get("ingredienten_regels", [])
+            if isinstance(row, dict)
+        ],
     }
 
     invoer = record.get("invoer", {})
@@ -503,6 +536,13 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(record.get("id", "") or uuid4()),
         "bier_id": str(record.get("bier_id", "") or ""),
+        "record_type": str(record.get("record_type", "kostprijsberekening") or "kostprijsberekening"),
+        "calculation_variant": str(record.get("calculation_variant", "origineel") or "origineel"),
+        "bron_berekening_id": str(record.get("bron_berekening_id", "") or ""),
+        "hercalculatie_reden": str(record.get("hercalculatie_reden", "") or ""),
+        "hercalculatie_notitie": str(record.get("hercalculatie_notitie", "") or ""),
+        "hercalculatie_timestamp": str(record.get("hercalculatie_timestamp", "") or ""),
+        "hercalculatie_basis": hercalculatie_basis,
         "status": status,
         "basisgegevens": basisgegevens,
         "soort_berekening": soort_berekening,
@@ -2004,6 +2044,211 @@ def save_bieren(data: list[dict[str, Any]]) -> bool:
     return _save_json_value(BIEREN_FILE, data, "[]")
 
 
+def _collect_referenced_bier_ids() -> set[str]:
+    """Verzamelt alle bier-id's die nog ergens functioneel worden gebruikt."""
+    referenced_ids: set[str] = set()
+
+    for record in load_berekeningen():
+        bier_id = str(record.get("bier_id", "") or "").strip()
+        if bier_id:
+            referenced_ids.add(bier_id)
+
+    for voorstel in load_prijsvoorstellen():
+        bier_key = str(voorstel.get("bier_key", "") or "").strip()
+        if bier_key:
+            referenced_ids.add(bier_key)
+
+        beer_rows = voorstel.get("beer_rows", [])
+        if isinstance(beer_rows, list):
+            for row in beer_rows:
+                if not isinstance(row, dict):
+                    continue
+                bier_row_key = str(row.get("bier_key", "") or "").strip()
+                if bier_row_key:
+                    referenced_ids.add(bier_row_key)
+
+    for record in load_verkoopprijzen():
+        bier_key = str(record.get("bier_key", "") or "").strip()
+        if bier_key:
+            referenced_ids.add(bier_key)
+
+    for record in _load_verkoopprijs_records():
+        if not isinstance(record, dict):
+            continue
+        bier_key = str(record.get("bier_key", "") or "").strip()
+        if bier_key:
+            referenced_ids.add(bier_key)
+
+    variabele_kosten_data = load_variabele_kosten_data()
+    for year_records in variabele_kosten_data.values():
+        if not isinstance(year_records, dict):
+            continue
+        for bier_id in year_records.keys():
+            bier_id_value = str(bier_id or "").strip()
+            if bier_id_value:
+                referenced_ids.add(bier_id_value)
+
+    return referenced_ids
+
+
+def cleanup_unused_bieren() -> bool:
+    """Verwijdert bierrecords die nergens meer door de app worden gebruikt."""
+    bieren = load_bieren()
+    referenced_ids = _collect_referenced_bier_ids()
+    filtered = [
+        bier
+        for bier in bieren
+        if str(bier.get("id", "") or "").strip() in referenced_ids
+    ]
+    if len(filtered) == len(bieren):
+        return True
+    return save_bieren(filtered)
+
+
+def get_bier_usage_locations(
+    bier_id: str,
+    *,
+    exclude_berekening_id: str = "",
+) -> list[str]:
+    """Geeft een compacte lijst terug van plekken waar een bier-id nog wordt gebruikt."""
+    bier_key = str(bier_id or "").strip()
+    if not bier_key:
+        return []
+
+    locations: list[str] = []
+
+    overige_berekeningen = [
+        record
+        for record in load_berekeningen()
+        if str(record.get("bier_id", "") or "").strip() == bier_key
+        and str(record.get("id", "") or "").strip() != str(exclude_berekening_id or "").strip()
+    ]
+    if overige_berekeningen:
+        label = "berekening" if len(overige_berekeningen) == 1 else "berekeningen"
+        locations.append(f"{len(overige_berekeningen)} {label}")
+
+    prijsvoorstellen = [
+        record
+        for record in load_prijsvoorstellen()
+        if (
+            str(record.get("bier_key", "") or "").strip() == bier_key
+            or any(
+                isinstance(row, dict)
+                and str(row.get("bier_key", "") or "").strip() == bier_key
+                for row in (record.get("beer_rows", []) if isinstance(record.get("beer_rows", []), list) else [])
+            )
+        )
+    ]
+    if prijsvoorstellen:
+        label = "prijsvoorstel" if len(prijsvoorstellen) == 1 else "prijsvoorstellen"
+        locations.append(f"{len(prijsvoorstellen)} {label}")
+
+    verkoopprijzen = [
+        record
+        for record in load_verkoopprijzen()
+        if str(record.get("bier_key", "") or "").strip() == bier_key
+    ]
+    if verkoopprijzen:
+        label = "verkoopprijs" if len(verkoopprijzen) == 1 else "verkoopprijzen"
+        locations.append(f"{len(verkoopprijzen)} {label}")
+
+    productstrategieën = [
+        record
+        for record in _load_verkoopprijs_records()
+        if isinstance(record, dict)
+        and str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_PRODUCT
+        and str(record.get("bier_key", "") or "").strip() == bier_key
+    ]
+    if productstrategieën:
+        label = "productstrategie" if len(productstrategieën) == 1 else "productstrategieën"
+        locations.append(f"{len(productstrategieën)} {label}")
+
+    variabele_kosten_jaren = [
+        year_key
+        for year_key, year_records in load_variabele_kosten_data().items()
+        if isinstance(year_records, dict) and bier_key in year_records
+    ]
+    if variabele_kosten_jaren:
+        label = "jaar variabele kosten" if len(variabele_kosten_jaren) == 1 else "jaren variabele kosten"
+        locations.append(f"{len(variabele_kosten_jaren)} {label}")
+
+    return locations
+
+
+def delete_bier_usage_everywhere(
+    bier_id: str,
+    *,
+    exclude_berekening_id: str = "",
+) -> bool:
+    """Verwijdert alle afgeleide records die nog naar een bier-id verwijzen."""
+    bier_key = str(bier_id or "").strip()
+    if not bier_key:
+        return cleanup_unused_bieren()
+
+    berekeningen = [
+        record
+        for record in load_berekeningen()
+        if not (
+            str(record.get("bier_id", "") or "").strip() == bier_key
+            and str(record.get("id", "") or "").strip() != str(exclude_berekening_id or "").strip()
+        )
+    ]
+    if not save_berekeningen(berekeningen):
+        return False
+
+    prijsvoorstellen = [
+        record
+        for record in load_prijsvoorstellen()
+        if not (
+            str(record.get("bier_key", "") or "").strip() == bier_key
+            or any(
+                isinstance(row, dict)
+                and str(row.get("bier_key", "") or "").strip() == bier_key
+                for row in (record.get("beer_rows", []) if isinstance(record.get("beer_rows", []), list) else [])
+            )
+        )
+    ]
+    if not save_prijsvoorstellen(prijsvoorstellen):
+        return False
+
+    verkoopprijzen = [
+        record
+        for record in load_verkoopprijzen()
+        if str(record.get("bier_key", "") or "").strip() != bier_key
+    ]
+    if not save_verkoopprijzen(verkoopprijzen):
+        return False
+
+    verkoop_records = [
+        record
+        for record in _load_verkoopprijs_records()
+        if not (
+            isinstance(record, dict)
+            and str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_PRODUCT
+            and str(record.get("bier_key", "") or "").strip() == bier_key
+        )
+    ]
+    if not _save_verkoop_records(verkoop_records):
+        return False
+
+    variabele_kosten = load_variabele_kosten_data()
+    updated_variabele_kosten: dict[str, Any] = {}
+    for year_key, year_records in variabele_kosten.items():
+        if not isinstance(year_records, dict):
+            continue
+        filtered_year_records = {
+            key: value
+            for key, value in year_records.items()
+            if str(key or "").strip() != bier_key
+        }
+        if filtered_year_records:
+            updated_variabele_kosten[year_key] = filtered_year_records
+    if not save_variabele_kosten_data(updated_variabele_kosten):
+        return False
+
+    return cleanup_unused_bieren()
+
+
 def add_bier(
     biernaam: str,
     stijl: str,
@@ -2080,7 +2325,7 @@ def update_bier(
 
 
 def load_berekeningen() -> list[dict[str, Any]]:
-    """Laadt alle berekeningen voor Nieuwe berekening."""
+    """Laadt alle berekeningen voor Nieuwe kostprijsberekening."""
     data = _load_json_value(BEREKENINGEN_FILE, [])
     if not isinstance(data, list):
         return []
@@ -2902,7 +3147,10 @@ def delete_verkoopstrategie_product(verkoopstrategie_id: str) -> bool:
     ]
     if len(filtered) == len(records):
         return False
-    return _save_verkoop_records(filtered)
+    if not _save_verkoop_records(filtered):
+        return False
+    cleanup_unused_bieren()
+    return True
 
 
 def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -2944,6 +3192,7 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         product_rows.append(
             {
                 "id": str(row.get("id", "") or uuid4()),
+                "bier_key": str(row.get("bier_key", "") or ""),
                 "product_key": str(row.get("product_key", "") or ""),
                 "aantal": _float_value(row.get("aantal")),
                 "korting_pct": _float_value(row.get("korting_pct")),
@@ -2967,6 +3216,32 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    product_bier_keys_source = record.get("product_bier_keys", [])
+    if not isinstance(product_bier_keys_source, list):
+        product_bier_keys_source = []
+    product_bier_keys = [
+        str(value or "")
+        for value in product_bier_keys_source
+        if str(value or "").strip()
+    ]
+
+    deleted_product_pairs_source = record.get("deleted_product_pairs", [])
+    if not isinstance(deleted_product_pairs_source, list):
+        deleted_product_pairs_source = []
+    deleted_product_pairs: list[dict[str, Any]] = []
+    for item in deleted_product_pairs_source:
+        if not isinstance(item, dict):
+            continue
+        bier_key = str(item.get("bier_key", "") or "")
+        product_key = str(item.get("product_key", "") or "")
+        if bier_key and product_key:
+            deleted_product_pairs.append(
+                {
+                    "bier_key": bier_key,
+                    "product_key": product_key,
+                }
+            )
+
     created_at = str(record.get("created_at", "") or "") or _now_iso()
     updated_at = str(record.get("updated_at", "") or "") or created_at
     finalized_at = str(record.get("finalized_at", "") or "")
@@ -2987,6 +3262,8 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         "liters_basis": str(record.get("liters_basis", "een_bier") or "een_bier"),
         "kanaal": str(record.get("kanaal", "") or ""),
         "bier_key": str(record.get("bier_key", "") or ""),
+        "product_bier_keys": product_bier_keys,
+        "deleted_product_pairs": deleted_product_pairs,
         "staffels": staffels,
         "product_rows": product_rows,
         "beer_rows": beer_rows,
@@ -3180,7 +3457,10 @@ def delete_prijsvoorstel(prijsvoorstel_id: str) -> bool:
     ]
     if len(filtered) == len(records):
         return False
-    return save_prijsvoorstellen(filtered)
+    if not save_prijsvoorstellen(filtered):
+        return False
+    cleanup_unused_bieren()
+    return True
 
 
 def get_concept_prijsvoorstellen() -> list[dict[str, Any]]:
@@ -3288,7 +3568,10 @@ def delete_verkoopprijs(verkoopprijs_id: str) -> bool:
     ]
     if len(filtered) == len(records):
         return False
-    return save_verkoopprijzen(filtered)
+    if not save_verkoopprijzen(filtered):
+        return False
+    cleanup_unused_bieren()
+    return True
 
 
 def get_verkoopprijzen_for_year(year: int | str) -> list[dict[str, Any]]:
@@ -3321,6 +3604,15 @@ def create_empty_berekening() -> dict[str, Any]:
         {
             "id": str(uuid4()),
             "bier_id": "",
+            "record_type": "kostprijsberekening",
+            "calculation_variant": "origineel",
+            "bron_berekening_id": "",
+            "hercalculatie_reden": "",
+            "hercalculatie_notitie": "",
+            "hercalculatie_timestamp": "",
+            "hercalculatie_basis": {
+                "ingredienten_regels": [],
+            },
             "status": "concept",
             "basisgegevens": {
                 "jaar": 0,
@@ -3372,6 +3664,34 @@ def create_empty_berekening() -> dict[str, Any]:
             "finalized_at": "",
         }
     )
+
+
+def create_recalculatie_from_berekening(
+    source_record: dict[str, Any],
+    *,
+    reason: str = "Hercalculatie",
+) -> dict[str, Any]:
+    """Maakt een nieuwe concept-hercalculatie op basis van een bestaande berekening."""
+    cloned = deepcopy(source_record if isinstance(source_record, dict) else {})
+    cloned["id"] = str(uuid4())
+    cloned["status"] = "concept"
+    cloned["record_type"] = "kostprijsberekening"
+    cloned["calculation_variant"] = "hercalculatie"
+    cloned["bron_berekening_id"] = str(source_record.get("id", "") or "")
+    cloned["hercalculatie_reden"] = str(reason or "Hercalculatie")
+    cloned["hercalculatie_notitie"] = ""
+    cloned["hercalculatie_timestamp"] = _now_iso()
+    cloned["hercalculatie_basis"] = {
+        "ingredienten_regels": deepcopy(
+            source_record.get("invoer", {}).get("ingredienten", {}).get("regels", []),
+        ),
+    }
+    cloned["resultaat_snapshot"] = {}
+    cloned["finalized_at"] = ""
+    cloned["last_completed_step"] = 1
+    cloned["created_at"] = _now_iso()
+    cloned["updated_at"] = _now_iso()
+    return normalize_berekening_record(cloned)
 
 
 def get_berekening_by_id(berekening_id: str) -> dict[str, Any] | None:
@@ -3445,12 +3765,39 @@ def finalize_berekening(record: dict[str, Any]) -> dict[str, Any] | None:
 def delete_berekening(berekening_id: str) -> bool:
     """Verwijdert een berekening op basis van id."""
     records = load_berekeningen()
+    target_record = next(
+        (
+            record
+            for record in records
+            if str(record.get("id", "")) == str(berekening_id or "")
+        ),
+        None,
+    )
+    if not isinstance(target_record, dict):
+        return False
+
+    bier_id = str(target_record.get("bier_id", "") or "").strip()
+    bereken_jaar = int(
+        target_record.get("basisgegevens", {}).get("jaar", 0) or 0
+    )
     filtered = [
         record for record in records if str(record.get("id", "")) != berekening_id
     ]
-    if len(filtered) == len(records):
+    if not save_berekeningen(filtered):
         return False
-    return save_berekeningen(filtered)
+
+    if bier_id and bereken_jaar > 0:
+        has_remaining_year_record = any(
+            str(record.get("bier_id", "") or "").strip() == bier_id
+            and int(record.get("basisgegevens", {}).get("jaar", 0) or 0) == bereken_jaar
+            for record in filtered
+            if isinstance(record, dict)
+        )
+        if not has_remaining_year_record:
+            delete_variabele_kosten_record(bereken_jaar, bier_id)
+
+    cleanup_unused_bieren()
+    return True
 
 
 def get_concept_berekeningen() -> list[dict[str, Any]]:

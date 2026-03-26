@@ -526,10 +526,17 @@ def show_vaste_kosten_page(
             st.rerun()
 
     _render_summary(selected_year)
-
     col_back, col_spacer = st.columns([1, 4])
     with col_back:
         if st.button("Terug naar welkom", key="vaste_kosten_back"):
             on_back()
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+
+
+
+
+
+

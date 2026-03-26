@@ -2,6 +2,15 @@
   {
     "id": "a1bfaf24-6981-4ae3-bea1-a858bba8b09d",
     "bier_id": "8208c581-66e6-4176-9ef6-ff97285226c3",
+    "record_type": "kostprijsberekening",
+    "calculation_variant": "origineel",
+    "bron_berekening_id": "",
+    "hercalculatie_reden": "",
+    "hercalculatie_notitie": "",
+    "hercalculatie_timestamp": "",
+    "hercalculatie_basis": {
+      "ingredienten_regels": []
+    },
     "status": "definitief",
     "basisgegevens": {
       "jaar": 2025,
@@ -81,8 +90,8 @@
       "btw_tarief": "21%"
     },
     "resultaat_snapshot": {
-      "integrale_kostprijs_per_liter": 2.884932249322493,
-      "variabele_kosten_per_liter": 2.8515989159891597,
+      "integrale_kostprijs_per_liter": 2.9747106754353307,
+      "variabele_kosten_per_liter": 2.9413773421019975,
       "directe_vaste_kosten_per_liter": 0.03333333333333333,
       "producten": {
         "basisproducten": [
@@ -95,6 +104,16 @@
             "vaste_directe_kosten": 0.011000000000000001,
             "accijns": 0.1768536,
             "liters_per_product": 0.33
+          },
+          {
+            "biernaam": "Berlewalde Ipa",
+            "soort": "Inkoop",
+            "verpakking": "Fust 20L",
+            "variabele_kosten": 60.6496,
+            "verpakkingskosten": 0.0,
+            "vaste_directe_kosten": 0.6666666666666666,
+            "accijns": 10.718399999999999,
+            "liters_per_product": 20.0
           }
         ],
         "samengestelde_producten": [
@@ -107,6 +126,178 @@
             "vaste_directe_kosten": 0.275,
             "accijns": 4.42134,
             "liters_per_product": 8.25
+          },
+          {
+            "biernaam": "Berlewalde Ipa",
+            "soort": "Inkoop",
+            "verpakking": "Fust 20L",
+            "variabele_kosten": 60.6496,
+            "verpakkingskosten": 0.0,
+            "vaste_directe_kosten": 0.6666666666666666,
+            "accijns": 10.718399999999999,
+            "liters_per_product": 20.0
+          }
+        ]
+      }
+    },
+    "jaarovergang": {
+      "bron_berekening_id": "",
+      "bron_jaar": 0,
+      "doel_jaar": 0,
+      "aangemaakt_via": "",
+      "created_at": ""
+    },
+    "last_completed_step": 5,
+    "created_at": "2026-03-25T20:26:21.263584",
+    "updated_at": "2026-03-26T22:22:42.412429",
+    "finalized_at": "2026-03-26T22:22:42.411997"
+  },
+  {
+    "id": "34f42f20-e376-4261-b5b1-3605347158fc",
+    "bier_id": "7b4a4ba1-c04a-4d92-8e9b-9bc2c1355d2e",
+    "record_type": "kostprijsberekening",
+    "calculation_variant": "origineel",
+    "bron_berekening_id": "",
+    "hercalculatie_reden": "",
+    "hercalculatie_notitie": "",
+    "hercalculatie_timestamp": "",
+    "hercalculatie_basis": {
+      "ingredienten_regels": []
+    },
+    "status": "definitief",
+    "basisgegevens": {
+      "jaar": 2025,
+      "biernaam": "Berlewalde Goudkoorts",
+      "stijl": "Blond",
+      "alcoholpercentage": 6.0,
+      "belastingsoort": "Accijns",
+      "tarief_accijns": "Laag",
+      "btw_tarief": "21%"
+    },
+    "soort_berekening": {
+      "type": "Eigen productie"
+    },
+    "invoer": {
+      "ingredienten": {
+        "regels": [
+          {
+            "id": "8c68f29b-c714-46f7-8ef8-d4f452a89e5c",
+            "ingrediënt": "Overig",
+            "omschrijving": "Honing",
+            "leverancier": "",
+            "hoeveelheid": 1.0,
+            "eenheid": "L",
+            "prijs": 3.0,
+            "benodigd_in_recept": 20.0
+          }
+        ],
+        "notities": ""
+      },
+      "inkoop": {
+        "regels": [],
+        "factuurregels": [],
+        "factuurnummer": "",
+        "factuurdatum": "",
+        "notities": "",
+        "verzendkosten": 0.0,
+        "overige_kosten": 0.0,
+        "facturen": [
+          {
+            "id": "f015bba1-f9b8-49ff-9370-58593c84783d",
+            "factuurnummer": "",
+            "factuurdatum": "",
+            "verzendkosten": 0.0,
+            "overige_kosten": 0.0,
+            "factuurregels": []
+          }
+        ]
+      }
+    },
+    "bier_snapshot": {
+      "biernaam": "Berlewalde Goudkoorts",
+      "stijl": "Blond",
+      "alcoholpercentage": 6.0,
+      "belastingsoort": "Accijns",
+      "tarief_accijns": "Laag",
+      "btw_tarief": "21%"
+    },
+    "resultaat_snapshot": {
+      "integrale_kostprijs_per_liter": 0.1,
+      "variabele_kosten_per_liter": 0.1,
+      "directe_vaste_kosten_per_liter": 0.0,
+      "producten": {
+        "basisproducten": [
+          {
+            "biernaam": "Berlewalde Goudkoorts",
+            "soort": "Eigen productie",
+            "verpakking": "Fles 33cl",
+            "variabele_kosten": 0.033,
+            "verpakkingskosten": 0.29500000000000004,
+            "vaste_directe_kosten": 0.0,
+            "accijns": 0.148698,
+            "liters_per_product": 0.33
+          },
+          {
+            "biernaam": "Berlewalde Goudkoorts",
+            "soort": "Eigen productie",
+            "verpakking": "Fust 20L",
+            "variabele_kosten": 2.0,
+            "verpakkingskosten": 12.65,
+            "vaste_directe_kosten": 0.0,
+            "accijns": 9.012,
+            "liters_per_product": 20.0
+          },
+          {
+            "biernaam": "Berlewalde Goudkoorts",
+            "soort": "Eigen productie",
+            "verpakking": "Fles 75cl",
+            "variabele_kosten": 0.07500000000000001,
+            "verpakkingskosten": 1.28,
+            "vaste_directe_kosten": 0.0,
+            "accijns": 0.33795,
+            "liters_per_product": 0.75
+          }
+        ],
+        "samengestelde_producten": [
+          {
+            "biernaam": "Berlewalde Goudkoorts",
+            "soort": "Eigen productie",
+            "verpakking": "Doos 24 flessen 33cl",
+            "variabele_kosten": 0.8250000000000001,
+            "verpakkingskosten": 7.515000000000001,
+            "vaste_directe_kosten": 0.0,
+            "accijns": 3.71745,
+            "liters_per_product": 8.25
+          },
+          {
+            "biernaam": "Berlewalde Goudkoorts",
+            "soort": "Eigen productie",
+            "verpakking": "Fust 20L",
+            "variabele_kosten": 2.0,
+            "verpakkingskosten": 12.65,
+            "vaste_directe_kosten": 0.0,
+            "accijns": 9.012,
+            "liters_per_product": 20.0
+          },
+          {
+            "biernaam": "Berlewalde Goudkoorts",
+            "soort": "Eigen productie",
+            "verpakking": "Doos 12 flessen 33cl",
+            "variabele_kosten": 0.396,
+            "verpakkingskosten": 3.5400000000000005,
+            "vaste_directe_kosten": 0.0,
+            "accijns": 1.784376,
+            "liters_per_product": 3.96
+          },
+          {
+            "biernaam": "Berlewalde Goudkoorts",
+            "soort": "Eigen productie",
+            "verpakking": "Doos 6 flessen 75cl",
+            "variabele_kosten": 0.45,
+            "verpakkingskosten": 7.68,
+            "vaste_directe_kosten": 0.0,
+            "accijns": 2.0277,
+            "liters_per_product": 4.5
           }
         ]
       }
@@ -119,8 +310,8 @@
       "created_at": ""
     },
     "last_completed_step": 4,
-    "created_at": "2026-03-25T20:26:21.263584",
-    "updated_at": "2026-03-26T00:02:43.289718",
-    "finalized_at": "2026-03-25T23:10:20.974831"
+    "created_at": "2026-03-26T13:18:34.578769",
+    "updated_at": "2026-03-26T13:24:11.255951",
+    "finalized_at": "2026-03-26T13:24:11.248612"
   }
 ]

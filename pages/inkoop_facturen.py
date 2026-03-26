@@ -9,7 +9,12 @@ from components.action_buttons import render_add_button, render_delete_button, r
 from components.breadcrumb import render_breadcrumb
 from components.form_ui import ensure_date_widget_value, format_nl_date
 from components.page_ui import render_page_header
-from components.table_ui import render_read_only_table_cell, render_table_headers
+from components.table_ui import (
+    format_currency_cell_value,
+    render_currency_table_cell,
+    render_read_only_table_cell,
+    render_table_headers,
+)
 from pages.nieuwe_berekening.state import (
     calculate_inkoop_prijs_per_eenheid,
     calculate_inkoop_prijs_per_liter,
@@ -30,17 +35,19 @@ MODE_EDIT = "edit"
 
 
 def _format_euro(amount: float | int | None) -> str:
-    value = float(amount or 0.0)
-    formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return formatted
+    return format_currency_cell_value(amount)
 
 
 def _inkoop_berekeningen() -> list[dict[str, Any]]:
-    return [
-        record
-        for record in get_definitieve_berekeningen()
-        if str(record.get("soort_berekening", {}).get("type", "") or "") == "Inkoop"
-    ]
+    records: list[dict[str, Any]] = []
+    for record in get_definitieve_berekeningen():
+        soort_berekening = record.get("soort_berekening", {})
+        if not isinstance(soort_berekening, dict):
+            continue
+        if str(soort_berekening.get("type", "") or "").strip().lower() != "inkoop":
+            continue
+        records.append(record)
+    return records
 
 
 def _available_years() -> list[int]:
@@ -525,7 +532,7 @@ def _render_facturen_overview(record: dict[str, Any]) -> None:
         with row_cols[3]:
             render_read_only_table_cell(f"{format_number(totals['totaal_liters'])} L")
         with row_cols[4]:
-            render_read_only_table_cell(_format_euro(total_cost))
+            render_currency_table_cell(total_cost)
         with row_cols[5]:
             if render_edit_button(key=f"inkoop_factuur_edit_{factuur_id}"):
                 _start_edit_factuur(factuur)
@@ -647,11 +654,11 @@ def _render_factuur_form(record: dict[str, Any]) -> None:
                 label_visibility="collapsed",
             )
         with row_cols[4]:
-            render_read_only_table_cell(_format_euro(toegerekende_extra_kosten))
+            render_currency_table_cell(toegerekende_extra_kosten)
         with row_cols[5]:
-            render_read_only_table_cell(_format_euro(prijs_per_eenheid))
+            render_currency_table_cell(prijs_per_eenheid)
         with row_cols[6]:
-            render_read_only_table_cell(_format_euro(prijs_per_liter))
+            render_currency_table_cell(prijs_per_liter)
         with row_cols[7]:
             if row_index == total_rows - 1:
                 if render_add_button(key="inkoop_factuur_add_row", use_container_width=True):
@@ -708,10 +715,10 @@ def _render_factuur_form(record: dict[str, Any]) -> None:
         render_read_only_table_cell(f"{format_number(totals['totaal_liters'])} L")
         st.caption("Totaal liters")
     with summary_col_2:
-        render_read_only_table_cell(_format_euro(totals["totaal_subfactuurbedrag"]))
+        render_currency_table_cell(totals["totaal_subfactuurbedrag"])
         st.caption("Totaal subfactuurbedrag")
     with summary_col_3:
-        render_read_only_table_cell(_format_euro(totals["totale_extra_kosten"]))
+        render_currency_table_cell(totals["totale_extra_kosten"])
         st.caption("Totale extra kosten")
     with summary_col_4:
         gemiddelde = (
@@ -786,10 +793,17 @@ def show_inkoop_facturen_page(
         _render_factuur_form(record)
         st.write("")
         _render_facturen_overview(record)
-
     col_back, _ = st.columns([1, 4])
     with col_back:
         if st.button("Terug naar welkom", key="inkoop_facturen_back"):
             on_back()
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+
+
+
+
+
+

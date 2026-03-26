@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from components.table_ui import render_read_only_table_cell, render_table_headers
-
-from .state import format_euro
-
+from components.table_ui import (
+    render_currency_table_cell,
+    render_read_only_table_cell,
+    render_table_headers,
+)
 
 def render_step_3(state: dict, plan: dict) -> None:
     st.markdown(
@@ -35,10 +36,12 @@ def render_step_3(state: dict, plan: dict) -> None:
         with cols[2]:
             render_read_only_table_cell(row["soort"])
         with cols[3]:
-            render_read_only_table_cell(format_euro(row["bron_kostprijs"]))
+            render_currency_table_cell(row["bron_kostprijs"])
         with cols[4]:
-            render_read_only_table_cell(
-                format_euro(row["nieuwe_kostprijs"]) if row["nieuwe_kostprijs"] is not None else "-"
-            )
+            if row["nieuwe_kostprijs"] is not None:
+                render_currency_table_cell(row["nieuwe_kostprijs"])
+            else:
+                render_read_only_table_cell("-")
         with cols[5]:
             render_read_only_table_cell("Bestaat al" if row["exists_in_target"] else "Nieuw concept")
+

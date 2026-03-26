@@ -4,7 +4,12 @@ from typing import Any
 
 import streamlit as st
 
-from components.table_ui import render_read_only_table_cell, render_table_headers
+from components.table_ui import (
+    format_currency_cell_value,
+    render_currency_table_cell,
+    render_read_only_table_cell,
+    render_table_headers,
+)
 from .state import (
     build_step_4_product_tables,
     format_number,
@@ -12,14 +17,18 @@ from .state import (
 )
 
 
-def _format_euro(amount: float | int | None) -> str:
-    """Formatteert een bedrag in euro-notatie."""
+def _calculate_kostprijs(row: dict[str, Any]) -> float:
+    """Telt de zichtbare kostencomponenten op tot één kostprijs."""
     try:
-        value = float(amount or 0.0)
+        return (
+            float(row.get("variabele_kosten", 0.0) or 0.0)
+            + float(row.get("verpakkingskosten", 0.0) or 0.0)
+            + float(row.get("vaste_directe_kosten", 0.0) or 0.0)
+            + float(row.get("accijns", 0.0) or 0.0)
+        )
     except (TypeError, ValueError):
-        value = 0.0
-    formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"EUR {formatted}"
+        return 0.0
+
 
 def _render_products_table(
     title: str,
@@ -37,7 +46,7 @@ def _render_products_table(
         st.info(f"Nog geen {title.lower()} beschikbaar.")
         return
 
-    kosten_label = "Inkoop in €" if calculation_type == "Inkoop" else "Ingrediënten in €"
+    kosten_label = "Inkoop" if calculation_type == "Inkoop" else "Ingrediënten"
     vaste_kosten_label = (
         "Indirecte kosten"
         if calculation_type == "Inkoop"
@@ -48,11 +57,12 @@ def _render_products_table(
         "Soort",
         "Verpakkingseenheid",
         kosten_label,
-        "Verpakking in €",
+        "Verpakking",
         vaste_kosten_label,
         "Accijns",
+        "Kostprijs",
     ]
-    row_widths = [1.6, 1.4, 1.9, 1.1, 1.1, 1.2, 1.0]
+    row_widths = [1.6, 1.4, 1.9, 1.1, 1.1, 1.2, 1.0, 1.1]
     render_table_headers(headers, row_widths)
 
     for row in rows:
@@ -64,13 +74,15 @@ def _render_products_table(
         with row_cols[2]:
             render_read_only_table_cell(str(row.get("verpakking", "-") or "-"))
         with row_cols[3]:
-            render_read_only_table_cell(_format_euro(row.get("variabele_kosten")))
+            render_currency_table_cell(row.get("variabele_kosten"))
         with row_cols[4]:
-            render_read_only_table_cell(_format_euro(row.get("verpakkingskosten")))
+            render_currency_table_cell(row.get("verpakkingskosten"))
         with row_cols[5]:
-            render_read_only_table_cell(_format_euro(row.get("vaste_directe_kosten")))
+            render_currency_table_cell(row.get("vaste_directe_kosten"))
         with row_cols[6]:
-            render_read_only_table_cell(_format_euro(row.get("accijns")))
+            render_currency_table_cell(row.get("accijns"))
+        with row_cols[7]:
+            render_currency_table_cell(_calculate_kostprijs(row))
 
 
 def render_step_4() -> None:
@@ -100,21 +112,25 @@ def render_step_4() -> None:
     context_col_1, context_col_2, context_col_3 = st.columns(3)
     soort = str(soort_berekening.get("type", "Eigen productie") or "Eigen productie")
     kosten_per_liter_label = (
-        "Inkoopkosten per liter"
+        "Gemiddelde inkoop per liter"
         if soort == "Inkoop"
-        else "Variabele kosten per liter"
+        else "Gemiddelde variabele kosten per liter"
     )
     vaste_kosten_per_liter_label = (
-        "Indirecte vaste kosten per liter"
+        "Gemiddelde indirecte kosten per liter"
         if soort == "Inkoop"
-        else "Directe vaste kosten per liter"
+        else "Gemiddelde directe kosten per liter"
+    )
+    integrale_kostprijs_per_liter = (
+        float(tables.get("variabele_kosten_per_liter", 0.0) or 0.0)
+        + float(tables.get("directe_vaste_kosten_per_liter", 0.0) or 0.0)
     )
     with context_col_1:
         st.markdown(
             f"""
             <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
                 <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">{kosten_per_liter_label}</div>
-                <div style="font-size:1.05rem;font-weight:700;color:#24332b;">{_format_euro(tables.get("variabele_kosten_per_liter"))}</div>
+                <div style="font-size:1.05rem;font-weight:700;color:#24332b;">{format_currency_cell_value(tables.get("variabele_kosten_per_liter"))}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -124,23 +140,17 @@ def render_step_4() -> None:
             f"""
             <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
                 <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">{vaste_kosten_per_liter_label}</div>
-                <div style="font-size:1.05rem;font-weight:700;color:#24332b;">{_format_euro(tables.get("directe_vaste_kosten_per_liter"))}</div>
+                <div style="font-size:1.05rem;font-weight:700;color:#24332b;">{format_currency_cell_value(tables.get("directe_vaste_kosten_per_liter"))}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
     with context_col_3:
-        batchgrootte = tables.get("batchgrootte_l")
-        batchgrootte_label = (
-            f"{format_number(batchgrootte)} L"
-            if batchgrootte is not None
-            else "Niet beschikbaar"
-        )
         st.markdown(
             f"""
             <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
-                <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">Batchgrootte</div>
-                <div style="font-size:1.05rem;font-weight:700;color:#24332b;">{batchgrootte_label}</div>
+                <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">Gemiddelde integrale kostprijs per liter</div>
+                <div style="font-size:1.05rem;font-weight:700;color:#24332b;">{format_currency_cell_value(integrale_kostprijs_per_liter)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -163,7 +173,7 @@ def render_step_4() -> None:
             )
 
     if not tarieven_record:
-        st.info("Er zijn nog geen tarieven en heffingen beschikbaar voor dit jaar. Accijns wordt daarom nu als EUR 0,00 getoond.")
+        st.info("Er zijn nog geen tarieven en heffingen beschikbaar voor dit jaar. Accijns wordt daarom nu als 0,00 getoond.")
 
     st.write("")
     _render_products_table(
@@ -177,3 +187,4 @@ def render_step_4() -> None:
         tables.get("samengestelde_producten", []),
         calculation_type=soort,
     )
+

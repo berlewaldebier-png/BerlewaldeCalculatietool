@@ -4,7 +4,12 @@ from typing import Any
 
 import streamlit as st
 
-from components.table_ui import render_read_only_table_cell, render_table_headers
+from components.table_ui import (
+    format_currency_cell_value,
+    render_currency_table_cell,
+    render_read_only_table_cell,
+    render_table_headers,
+)
 from utils.storage import get_batchgrootte_eigen_productie_l, load_samengestelde_producten
 
 from .state import (
@@ -158,14 +163,14 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
         with row_cols[4]:
             _render_read_only_cell("Eenheid", row["eenheid"] or "-", f"nb_ingredient_eenheid_{row_id}")
         with row_cols[5]:
-            _render_read_only_cell("Prijs", format_number(row["prijs"]), f"nb_ingredient_prijs_{row_id}")
+            _render_read_only_cell("Prijs", format_currency_cell_value(row["prijs"]), f"nb_ingredient_prijs_{row_id}")
         with row_cols[6]:
             _render_read_only_cell("Benodigd in recept", format_number(row["benodigd_in_recept"]), f"nb_ingredient_benodigd_{row_id}")
 
     with row_cols[7]:
-        render_read_only_table_cell(format_number(prijs_per_eenheid))
+        render_currency_table_cell(prijs_per_eenheid)
     with row_cols[8]:
-        render_read_only_table_cell(format_number(kosten_recept))
+        render_currency_table_cell(kosten_recept)
     with row_cols[9]:
         _, action_col, _ = st.columns([1, 1.4, 1])
         with action_col:
@@ -261,7 +266,7 @@ def _render_inkoop_row(
             render_read_only_table_cell(format_number(live_row["liters"]))
         with row_cols[3]:
             st.number_input(
-                "Subfactuurbedrag",
+                "Subbedragen",
                 min_value=0.0,
                 step=0.01,
                 format="%.2f",
@@ -284,14 +289,14 @@ def _render_inkoop_row(
         with row_cols[2]:
             _render_read_only_cell("Liters", format_number(row["liters"]), f"nb_inkoop_liters_{row_id}")
         with row_cols[3]:
-            _render_read_only_cell("Subfactuurbedrag", format_number(row["subfactuurbedrag"]), f"nb_inkoop_subfactuurbedrag_{row_id}")
+            _render_read_only_cell("Subbedragen", format_currency_cell_value(row["subfactuurbedrag"]), f"nb_inkoop_subfactuurbedrag_{row_id}")
 
     with row_cols[4]:
-        render_read_only_table_cell(format_number(toegerekende_extra_kosten))
+        render_currency_table_cell(toegerekende_extra_kosten)
     with row_cols[5]:
-        render_read_only_table_cell(format_number(prijs_per_eenheid))
+        render_currency_table_cell(prijs_per_eenheid)
     with row_cols[6]:
-        render_read_only_table_cell(format_number(prijs_per_liter))
+        render_currency_table_cell(prijs_per_liter)
     with row_cols[7]:
         _, action_col, _ = st.columns([1, 1.4, 1])
         with action_col:
@@ -348,7 +353,7 @@ def _render_step_3_summary(rows: list[dict[str, Any]], year: int | None) -> None
             f"""
             <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
                 <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">Totale kosten recept</div>
-                <div style="font-size:1.1rem;font-weight:700;color:#24332b;">EUR {format_number(totale_kosten_recept)}</div>
+                <div style="font-size:1.1rem;font-weight:700;color:#24332b;">{format_currency_cell_value(totale_kosten_recept)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -360,7 +365,7 @@ def _render_step_3_summary(rows: list[dict[str, Any]], year: int | None) -> None
                 f"""
                 <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
                     <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">Prijs per liter</div>
-                    <div style="font-size:1.1rem;font-weight:700;color:#24332b;">EUR {format_number(prijs_per_liter)} per L</div>
+                    <div style="font-size:1.1rem;font-weight:700;color:#24332b;">{format_currency_cell_value(prijs_per_liter)} per L</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -416,7 +421,7 @@ def _render_step_3_inkoop_summary(
             f"""
             <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
                 <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">Totaal subfactuurbedrag</div>
-                <div style="font-size:1.1rem;font-weight:700;color:#24332b;">EUR {format_number(totaal_subfactuurbedrag)}</div>
+                <div style="font-size:1.1rem;font-weight:700;color:#24332b;">{format_currency_cell_value(totaal_subfactuurbedrag)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -426,7 +431,7 @@ def _render_step_3_inkoop_summary(
             f"""
             <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
                 <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">Totale extra kosten</div>
-                <div style="font-size:1.1rem;font-weight:700;color:#24332b;">EUR {format_number(totale_extra_kosten)}</div>
+                <div style="font-size:1.1rem;font-weight:700;color:#24332b;">{format_currency_cell_value(totale_extra_kosten)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -437,7 +442,7 @@ def _render_step_3_inkoop_summary(
                 f"""
                 <div style="border:1px solid #d9ddcf;border-radius:14px;padding:0.9rem 1rem;background:#f8f8f4;">
                     <div style="font-size:0.82rem;color:#6b766b;font-weight:700;">Gemiddelde kostprijs per liter</div>
-                    <div style="font-size:1.1rem;font-weight:700;color:#24332b;">EUR {format_number(gemiddelde_kostprijs_per_liter)} per L</div>
+                    <div style="font-size:1.1rem;font-weight:700;color:#24332b;">{format_currency_cell_value(gemiddelde_kostprijs_per_liter)} per L</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -455,7 +460,11 @@ def _render_step_3_inkoop(record: dict[str, Any]) -> None:
         start_edit_inkoop_row(record, pending_edit_row_id)
         record = get_active_berekening()
 
-    st.markdown("<div class='section-title'>Inkoop</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Initiële kostprijs</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-text'>Hier leg je de initiële kostprijs vast op basis van de gekoppelde inkoopeenheden en factuurgegevens.</div>",
+        unsafe_allow_html=True,
+    )
 
     st.text_input(
         "Factuurdatum",
@@ -493,8 +502,8 @@ def _render_step_3_inkoop(record: dict[str, Any]) -> None:
         "Inkoopeenheid",
         "Aantal",
         "Liters",
-        "Subfactuurbedrag",
-        "Toegerekende extra kosten",
+        "Subbedragen",
+        "Extra kosten",
         "Prijs per eenheid",
         "Prijs per liter",
         "",
@@ -548,6 +557,8 @@ def render_step_3() -> None:
         _render_step_3_inkoop(record)
         return
 
+    st.info("Placeholder: deze stap wordt later uitgebreid voor hercalculaties bij eigen productie. De huidige invoer blijft hieronder beschikbaar.")
+
     st.markdown("<div class='section-title'>Ingrediënten</div>", unsafe_allow_html=True)
 
     rows = get_step_3_rows_for_view(record)
@@ -594,3 +605,301 @@ def render_step_3() -> None:
         get_step_3_rows_for_view(get_active_berekening()),
         int(basisgegevens.get("jaar", 0) or 0) or None,
     )
+
+
+def _render_step_3_hercalculatie_basis(record: dict[str, Any]) -> None:
+    """Toont de initiële berekening read-only als basis voor hercalculatie."""
+    from .state import get_hercalculatie_basis_rows
+
+    st.markdown("<div class='section-title'>Initiële berekening</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-text'>Hier zie je de vastgelegde basis van de oorspronkelijke berekening. In de volgende stap werk je de herberekening uit.</div>",
+        unsafe_allow_html=True,
+    )
+
+    rows = get_hercalculatie_basis_rows(record)
+    headers = [
+        "Ingrediënt",
+        "Omschrijving",
+        "Leverancier",
+        "Hoeveelheid",
+        "Eenheid",
+        "Prijs",
+        "Benodigd in recept",
+        "Prijs per eenheid",
+        "Kosten recept",
+    ]
+    render_table_headers(
+        headers,
+        [1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05],
+    )
+
+    if not rows:
+        st.info("Nog geen initiële ingrediënten beschikbaar.")
+    else:
+        for row in rows:
+            row_cols = st.columns([1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05])
+            with row_cols[0]:
+                render_read_only_table_cell(row["ingrediënt"] or "-")
+            with row_cols[1]:
+                render_read_only_table_cell(row["omschrijving"] or "-")
+            with row_cols[2]:
+                render_read_only_table_cell(row["leverancier"] or "-")
+            with row_cols[3]:
+                render_read_only_table_cell(format_number(row["hoeveelheid"]))
+            with row_cols[4]:
+                render_read_only_table_cell(row["eenheid"] or "-")
+            with row_cols[5]:
+                render_read_only_table_cell(format_currency_cell_value(row["prijs"]))
+            with row_cols[6]:
+                render_read_only_table_cell(format_number(row["benodigd_in_recept"]))
+            with row_cols[7]:
+                render_currency_table_cell(calculate_prijs_per_eenheid(row))
+            with row_cols[8]:
+                render_currency_table_cell(calculate_kosten_recept(row))
+
+    st.write("")
+    basisgegevens = record.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    _render_step_3_summary(
+        rows,
+        int(basisgegevens.get("jaar", 0) or 0) or None,
+    )
+
+
+def render_step_3() -> None:
+    """Toont stap 3 voor productie, inkoop of initiële hercalculatiebasis."""
+    from .state import is_recalculatie_record
+
+    record = get_active_berekening()
+    if is_recalculatie_record(record):
+        _render_step_3_hercalculatie_basis(record)
+        return
+
+    calculation_type = str(
+        st.session_state.get("nb_soort_type", "Eigen productie") or "Eigen productie"
+    )
+    pending_edit_row_id = str(
+        st.session_state.pop("nb_ingredient_edit_row_id_pending", "") or ""
+    )
+    if pending_edit_row_id:
+        start_edit_ingredient_row(record, pending_edit_row_id)
+        record = get_active_berekening()
+
+    if calculation_type != "Eigen productie":
+        _render_step_3_inkoop(record)
+        return
+
+    st.markdown("<div class='section-title'>Berekening</div>", unsafe_allow_html=True)
+    st.info("Placeholder: deze stap wordt later uitgebreid voor hercalculaties bij eigen productie. De huidige invoer blijft hieronder beschikbaar.")
+
+    rows = get_step_3_rows_for_view(record)
+    headers = [
+        "Ingrediënt",
+        "Omschrijving",
+        "Leverancier",
+        "Hoeveelheid",
+        "Eenheid",
+        "Prijs",
+        "Benodigd in recept",
+        "Prijs per eenheid",
+        "Kosten recept",
+        "",
+        "",
+        "",
+    ]
+    render_table_headers(
+        headers,
+        [1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05, 0.48, 0.48, 0.48],
+    )
+
+    if not rows:
+        st.info("Nog geen ingrediënten toegevoegd.")
+    else:
+        editing_row_id = str(st.session_state.get("nb_ingredient_edit_row_id", "") or "")
+        for row in rows:
+            _render_ingredient_row(row, is_editing=row["id"] == editing_row_id)
+
+    add_col, spacer_col = st.columns([1.2, 4.8])
+    with add_col:
+        if st.button("Toevoegen", key="nb_ingredient_add"):
+            sync_active_berekening_from_widgets()
+            add_new_ingredient_row(get_active_berekening())
+            st.rerun()
+    with spacer_col:
+        st.write("")
+
+    st.write("")
+    basisgegevens = record.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    _render_step_3_summary(
+        get_step_3_rows_for_view(get_active_berekening()),
+        int(basisgegevens.get("jaar", 0) or 0) or None,
+    )
+
+
+def _render_step_3_inkoop(record: dict[str, Any]) -> None:
+    """Toont stap 3 voor inkoop."""
+    from .state import has_linked_facturen
+
+    pending_edit_row_id = str(
+        st.session_state.pop("nb_inkoop_edit_row_id_pending", "") or ""
+    )
+    if pending_edit_row_id:
+        start_edit_inkoop_row(record, pending_edit_row_id)
+        record = get_active_berekening()
+
+    if has_linked_facturen(record):
+        st.markdown("<div class='section-title'>Initiële kostprijs</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='section-text'>Hier leg je de initiële kostprijs vast op basis van de gekoppelde inkoopeenheden en factuurgegevens.</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown("<div class='section-title'>Berekening</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='section-text'>Hier leg je de inkoopbasis vast voor deze berekening.</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.text_input(
+        "Factuurdatum",
+        key="nb_inkoop_factuurdatum",
+        placeholder="DD-MM-YYYY",
+    )
+
+    cost_col_1, cost_col_2 = st.columns(2)
+    with cost_col_1:
+        st.number_input(
+            "Verzendkosten",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key="nb_inkoop_verzendkosten",
+        )
+    with cost_col_2:
+        st.number_input(
+            "Overige kosten",
+            min_value=0.0,
+            step=0.01,
+            format="%.2f",
+            key="nb_inkoop_overige_kosten",
+        )
+
+    rows = get_step_3_inkoop_rows_for_view(record)
+    aantal_regels = len(rows)
+    toegerekende_extra_kosten = calculate_toegerekende_extra_kosten_per_row(
+        st.session_state.get("nb_inkoop_verzendkosten", 0.0),
+        st.session_state.get("nb_inkoop_overige_kosten", 0.0),
+        aantal_regels,
+    )
+
+    headers = [
+        "Inkoopeenheid",
+        "Aantal",
+        "Liters",
+        "Subbedragen",
+        "Extra kosten",
+        "Prijs per eenheid",
+        "Prijs per liter",
+        "",
+        "",
+        "",
+    ]
+    render_table_headers(headers, [1.1, 0.9, 0.9, 1.1, 1.05, 1.0, 1.0, 0.48, 0.48, 0.48])
+
+    if not rows:
+        st.info("Nog geen factuurregels toegevoegd.")
+    else:
+        editing_row_id = str(st.session_state.get("nb_inkoop_edit_row_id", "") or "")
+        for row in rows:
+            _render_inkoop_row(
+                row,
+                is_editing=row["id"] == editing_row_id,
+                toegerekende_extra_kosten=toegerekende_extra_kosten,
+            )
+
+    add_col, spacer_col = st.columns([1.2, 4.8])
+    with add_col:
+        if st.button("Toevoegen", key="nb_inkoop_add"):
+            sync_active_berekening_from_widgets()
+            add_new_inkoop_row(get_active_berekening())
+            st.rerun()
+    with spacer_col:
+        st.write("")
+
+    st.write("")
+    _render_step_3_inkoop_summary(
+        get_step_3_inkoop_rows_for_view(get_active_berekening()),
+        verzendkosten=float(st.session_state.get("nb_inkoop_verzendkosten", 0.0) or 0.0),
+        overige_kosten=float(st.session_state.get("nb_inkoop_overige_kosten", 0.0) or 0.0),
+    )
+
+
+def render_step_3() -> None:
+    """Toont stap 3 voor productie of inkoop."""
+    record = get_active_berekening()
+    calculation_type = str(
+        st.session_state.get("nb_soort_type", "Eigen productie") or "Eigen productie"
+    )
+    pending_edit_row_id = str(
+        st.session_state.pop("nb_ingredient_edit_row_id_pending", "") or ""
+    )
+    if pending_edit_row_id:
+        start_edit_ingredient_row(record, pending_edit_row_id)
+        record = get_active_berekening()
+
+    if calculation_type != "Eigen productie":
+        _render_step_3_inkoop(record)
+        return
+
+    st.markdown("<div class='section-title'>Berekening</div>", unsafe_allow_html=True)
+    st.info("Placeholder: deze stap wordt later uitgebreid voor hercalculaties bij eigen productie. De huidige invoer blijft hieronder beschikbaar.")
+
+    rows = get_step_3_rows_for_view(record)
+    headers = [
+        "Ingrediënt",
+        "Omschrijving",
+        "Leverancier",
+        "Hoeveelheid",
+        "Eenheid",
+        "Prijs",
+        "Benodigd in recept",
+        "Prijs per eenheid",
+        "Kosten recept",
+        "",
+        "",
+        "",
+    ]
+    render_table_headers(
+        headers,
+        [1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05, 0.48, 0.48, 0.48],
+    )
+
+    if not rows:
+        st.info("Nog geen ingrediënten toegevoegd.")
+    else:
+        editing_row_id = str(st.session_state.get("nb_ingredient_edit_row_id", "") or "")
+        for row in rows:
+            _render_ingredient_row(row, is_editing=row["id"] == editing_row_id)
+
+    add_col, spacer_col = st.columns([1.2, 4.8])
+    with add_col:
+        if st.button("Toevoegen", key="nb_ingredient_add"):
+            sync_active_berekening_from_widgets()
+            add_new_ingredient_row(get_active_berekening())
+            st.rerun()
+    with spacer_col:
+        st.write("")
+
+    st.write("")
+    basisgegevens = record.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    _render_step_3_summary(
+        get_step_3_rows_for_view(get_active_berekening()),
+        int(basisgegevens.get("jaar", 0) or 0) or None,
+    )
+

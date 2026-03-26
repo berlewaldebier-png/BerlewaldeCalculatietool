@@ -8,7 +8,11 @@ import streamlit as st
 
 from components.action_buttons import render_delete_button, render_edit_button
 from components.page_ui import render_page_header
-from components.table_ui import render_read_only_table_cell, render_table_headers
+from components.table_ui import (
+    format_currency_cell_value,
+    render_read_only_table_cell,
+    render_table_headers,
+)
 from components.wizard_ui import (
     apply_wizard_navigation_styles,
     render_step_sidebar,
@@ -56,12 +60,7 @@ LITERS_BASIS_LABELS = {
 
 
 def _format_euro(value: float | int | None) -> str:
-    try:
-        amount = float(value or 0.0)
-    except (TypeError, ValueError):
-        amount = 0.0
-    formatted = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return formatted
+    return format_currency_cell_value(value)
 
 
 def _format_percentage(value: float | int | None) -> str:
@@ -105,12 +104,18 @@ def _step_titles() -> dict[int, str]:
     }
 
 
+def _render_step_heading(title: str, subtitle: str = "") -> None:
+    st.markdown(f"<div class='section-title'>{title}</div>", unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f"<div class='section-text'>{subtitle}</div>", unsafe_allow_html=True)
+
+
 def _empty_staffel_row() -> dict[str, Any]:
     return {"id": str(uuid4()), "product_key": "", "liters": 0.0, "korting_pct": 0.0}
 
 
 def _empty_product_row() -> dict[str, Any]:
-    return {"id": str(uuid4()), "product_key": "", "aantal": 0.0, "korting_pct": 0.0}
+    return {"id": str(uuid4()), "bier_key": "", "product_key": "", "aantal": 0.0, "korting_pct": 0.0}
 
 
 def _empty_beer_row() -> dict[str, Any]:
@@ -141,6 +146,8 @@ def _default_form_state() -> dict[str, Any]:
         "liters_basis": LITERS_BASIS_EEN_BIER,
         "kanaal": "horeca",
         "bier_key": "",
+        "product_bier_keys": [],
+        "deleted_product_pairs": [],
         "staffels": [_empty_staffel_row()],
         "product_rows": [_empty_product_row()],
         "beer_rows": [_empty_beer_row()],
@@ -257,8 +264,19 @@ def _start_edit_prijsvoorstel(prijsvoorstel_id: str) -> None:
         "liters_basis": str(record.get("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER),
         "kanaal": str(record.get("kanaal", "horeca") or "horeca"),
         "bier_key": str(record.get("bier_key", "") or ""),
+        "product_bier_keys": list(record.get("product_bier_keys", []) or []),
+        "deleted_product_pairs": list(record.get("deleted_product_pairs", []) or []),
         "staffels": list(record.get("staffels", []) or [_empty_staffel_row()]),
-        "product_rows": list(record.get("product_rows", []) or [_empty_product_row()]),
+        "product_rows": [
+            {
+                **_empty_product_row(),
+                **row,
+                "bier_key": str(row.get("bier_key", "") or record.get("bier_key", "") or ""),
+            }
+            for row in list(record.get("product_rows", []) or [_empty_product_row()])
+            if isinstance(row, dict)
+        ]
+        or [_empty_product_row()],
         "beer_rows": list(record.get("beer_rows", []) or [_empty_beer_row()]),
     }
     st.session_state["prijsvoorstel_step"] = int(record.get("last_step", 1) or 1)
@@ -291,6 +309,8 @@ def _serialize_current_form(*, status: str) -> dict[str, Any]:
         "liters_basis": str(form_state.get("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER),
         "kanaal": str(form_state.get("kanaal", "horeca") or "horeca"),
         "bier_key": str(form_state.get("bier_key", "") or ""),
+        "product_bier_keys": list(form_state.get("product_bier_keys", [])),
+        "deleted_product_pairs": list(form_state.get("deleted_product_pairs", [])),
         "staffels": list(form_state.get("staffels", [])),
         "product_rows": list(form_state.get("product_rows", [])),
         "beer_rows": list(form_state.get("beer_rows", [])),
@@ -391,7 +411,6 @@ def _render_overview(on_back: Callable[[], None]) -> None:
         get_definitieve_prijsvoorstellen(),
         key_prefix="pp_definitief",
     )
-
     back_col, _ = st.columns([1.2, 4.8])
     with back_col:
         if st.button("Terug naar welkom", key="prijsvoorstel_overview_back"):
@@ -448,6 +467,20 @@ def _records_for_bier_up_to_year(year: int, bier_key: str) -> list[dict[str, Any
             basisgegevens = {}
         record_year = int(basisgegevens.get("jaar", 0) or 0)
         if record_year <= 0 or record_year > year:
+            continue
+        if _bier_group_key(record) == bier_key:
+            matches.append(record)
+    return sorted(matches, key=_record_sort_key, reverse=True)
+
+
+def _records_for_bier_in_year(year: int, bier_key: str) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    for record in get_definitieve_berekeningen():
+        basisgegevens = record.get("basisgegevens", {})
+        if not isinstance(basisgegevens, dict):
+            basisgegevens = {}
+        record_year = int(basisgegevens.get("jaar", 0) or 0)
+        if record_year != year:
             continue
         if _bier_group_key(record) == bier_key:
             matches.append(record)
@@ -665,11 +698,7 @@ def _effective_strategy_source_label(
     return str(strategy_year or "-")
 
 
-def _build_product_rows_for_bier(year: int, bier_key: str) -> list[dict[str, Any]]:
-    record = _latest_record_for_bier(year, bier_key)
-    if not record:
-        return []
-
+def _product_rows_from_record(record: dict[str, Any], year: int) -> list[dict[str, Any]]:
     basisgegevens = record.get("basisgegevens", {})
     if not isinstance(basisgegevens, dict):
         basisgegevens = {}
@@ -707,6 +736,9 @@ def _build_product_rows_for_bier(year: int, bier_key: str) -> list[dict[str, Any
                     "biernaam": str(basisgegevens.get("biernaam", "") or "-"),
                     "stijl": str(basisgegevens.get("stijl", "") or "-"),
                     "verpakking": verpakking,
+                    "soort_berekening": str(record.get("soort_berekening", {}).get("type", "") or ""),
+                    "source_record_id": str(record.get("id", "") or ""),
+                    "source_sort_key": _record_sort_key(record),
                     "liters_per_product": float(product.get("liters_per_product", 0.0) or 0.0),
                     "kostprijs": kostprijs,
                     **{
@@ -718,6 +750,44 @@ def _build_product_rows_for_bier(year: int, bier_key: str) -> list[dict[str, Any
                     },
                 }
             )
+    return raw_rows
+
+
+def _prefer_product_row(candidate: dict[str, Any], current: dict[str, Any] | None) -> bool:
+    if current is None:
+        return True
+
+    current_type = str(current.get("product_type", "") or "")
+    candidate_type = str(candidate.get("product_type", "") or "")
+    if current_type != "samengesteld" and candidate_type == "samengesteld":
+        return True
+    if current_type == "samengesteld" and candidate_type != "samengesteld":
+        return False
+
+    candidate_calc_type = str(candidate.get("soort_berekening", "") or "")
+    current_calc_type = str(current.get("soort_berekening", "") or "")
+    if candidate_calc_type == "Inkoop":
+        try:
+            return float(candidate.get("kostprijs", 0.0) or 0.0) > float(current.get("kostprijs", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return False
+
+    if candidate_calc_type == "Eigen productie":
+        return str(candidate.get("source_sort_key", "") or "") > str(current.get("source_sort_key", "") or "")
+
+    if current_calc_type != "samengesteld" and candidate_type == "samengesteld":
+        return True
+    return False
+
+
+def _build_product_rows_for_bier(year: int, bier_key: str) -> list[dict[str, Any]]:
+    records = _records_for_bier_in_year(year, bier_key)
+    if not records:
+        return []
+
+    raw_rows: list[dict[str, Any]] = []
+    for record in records:
+        raw_rows.extend(_product_rows_from_record(record, year))
 
     deduped: dict[str, dict[str, Any]] = {}
     for row in raw_rows:
@@ -726,16 +796,10 @@ def _build_product_rows_for_bier(year: int, bier_key: str) -> list[dict[str, Any
         if not key:
             continue
         current = deduped.get(key)
-        if current is None or (
-            current.get("product_type") != "samengesteld"
-            and row.get("product_type") == "samengesteld"
-        ):
+        if _prefer_product_row(row, current):
             deduped[key] = row
 
-    return sorted(
-        deduped.values(),
-        key=lambda item: str(item.get("verpakking", "") or "").lower(),
-    )
+    return sorted(deduped.values(), key=lambda item: str(item.get("verpakking", "") or "").lower())
 
 
 def _fust_cost_insights(year: int, bier_key: str) -> list[dict[str, Any]]:
@@ -887,6 +951,7 @@ def _hydrate_product_widgets() -> None:
         row_id = str(row.get("id", "") or "")
         if not row_id:
             continue
+        st.session_state.setdefault(_product_widget_key(row_id, "bier"), str(row.get("bier_key", "") or ""))
         st.session_state.setdefault(_product_widget_key(row_id, "product"), str(row.get("product_key", "") or ""))
         st.session_state.setdefault(_product_widget_key(row_id, "aantal"), float(row.get("aantal", 0.0) or 0.0))
         st.session_state.setdefault(_product_widget_key(row_id, "korting"), float(row.get("korting_pct", 0.0) or 0.0))
@@ -947,6 +1012,13 @@ def _current_product_rows() -> list[dict[str, Any]]:
         rows.append(
             {
                 "id": row_id,
+                "bier_key": str(
+                    st.session_state.get(
+                        _product_widget_key(row_id, "bier"),
+                        row.get("bier_key", ""),
+                    )
+                    or ""
+                ),
                 "product_key": str(
                     st.session_state.get(
                         _product_widget_key(row_id, "product"),
@@ -1005,6 +1077,14 @@ def _sync_state_from_widgets() -> None:
         "liters_basis": str(st.session_state.get(_widget_key("liters_basis"), form_state.get("liters_basis", LITERS_BASIS_EEN_BIER)) or LITERS_BASIS_EEN_BIER),
         "kanaal": str(st.session_state.get(_widget_key("kanaal"), form_state.get("kanaal", "horeca")) or "horeca"),
         "bier_key": str(st.session_state.get(_widget_key("bier_key"), form_state.get("bier_key", "")) or ""),
+        "product_bier_keys": list(
+            st.session_state.get(
+                _widget_key("product_bier_keys"),
+                form_state.get("product_bier_keys", []),
+            )
+            or []
+        ),
+        "deleted_product_pairs": list(form_state.get("deleted_product_pairs", [])),
         "staffels": _current_staffels(),
         "product_rows": _current_product_rows(),
         "beer_rows": _current_beer_rows(),
@@ -1035,7 +1115,18 @@ def _add_product_row() -> None:
 
 
 def _remove_product_row(row_id: str) -> None:
-    rows = [row for row in _current_product_rows() if str(row.get("id", "") or "") != row_id]
+    current_rows = _current_product_rows()
+    removed = next((row for row in current_rows if str(row.get("id", "") or "") == row_id), None)
+    if isinstance(removed, dict):
+        bier_key = str(removed.get("bier_key", "") or "")
+        product_key = str(removed.get("product_key", "") or "")
+        if bier_key and product_key:
+            deleted_pairs = list(_get_form_state().get("deleted_product_pairs", []) or [])
+            pair = {"bier_key": bier_key, "product_key": product_key}
+            if pair not in deleted_pairs:
+                deleted_pairs.append(pair)
+                _get_form_state()["deleted_product_pairs"] = deleted_pairs
+    rows = [row for row in current_rows if str(row.get("id", "") or "") != row_id]
     _get_form_state()["product_rows"] = rows or [_empty_product_row()]
 
 
@@ -1174,12 +1265,12 @@ def _liters_results() -> list[dict[str, Any]]:
 
 def _product_results() -> list[dict[str, Any]]:
     jaar = int(_form_value("jaar", _default_year()) or _default_year())
-    bier_key = str(_form_value("bier_key", "") or "")
     kanaal = str(_form_value("kanaal", "horeca") or "horeca")
-    products = {row["product_key"]: row for row in _build_product_rows_for_bier(jaar, bier_key)}
     results: list[dict[str, Any]] = []
     for row in _current_product_rows():
-        product = products.get(str(row.get("product_key", "") or ""))
+        bier_key = str(row.get("bier_key", "") or "")
+        product_key = str(row.get("product_key", "") or "")
+        product = _product_map_for_bier(jaar, bier_key).get(product_key) if bier_key and product_key else None
         if not product:
             continue
         aantal = float(row.get("aantal", 0.0) or 0.0)
@@ -1194,6 +1285,8 @@ def _product_results() -> list[dict[str, Any]]:
         results.append(
             {
                 "id": row["id"],
+                "bier_key": bier_key,
+                "biernaam": str(product.get("biernaam", "-") or "-"),
                 "verpakking": str(product.get("verpakking", "-") or "-"),
                 "aantal": aantal,
                 "korting_pct": korting_pct,
@@ -1209,80 +1302,6 @@ def _product_results() -> list[dict[str, Any]]:
     return results
 
 
-def _validate_step(step: int) -> bool:
-    if step == 1:
-        klantnaam = str(_form_value("klantnaam", "") or "").strip()
-        if not klantnaam:
-            st.error("Vul minimaal een klantnaam in.")
-            return False
-    if step == 2:
-        jaar = int(_form_value("jaar", 0) or 0)
-        if jaar <= 0:
-            st.error("Kies een geldig verkoopjaar.")
-            return False
-        if not _has_strategy_for_year(jaar):
-            st.error("Er is nog geen verkoopstrategie beschikbaar voor dit jaar of een eerder bronjaar.")
-            return False
-    if step == 3:
-        bier_key = str(_form_value("bier_key", "") or "")
-        if not bier_key:
-            st.error("Selecteer eerst een bier.")
-            return False
-        voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-        if voorstel_type == VOORSTELTYPE_LITERS:
-            if not any(float(row.get("liters", 0.0) or 0.0) > 0 for row in _current_staffels()):
-                st.error("Vul minimaal één staffel met liters in.")
-                return False
-        else:
-            if not any(float(row.get("aantal", 0.0) or 0.0) > 0 for row in _current_product_rows()):
-                st.error("Vul minimaal één productregel met aantal in.")
-                return False
-    return True
-
-
-def _validate_step_v2(step: int) -> bool:
-    if step == 1:
-        klantnaam = str(_form_value("klantnaam", "") or "").strip()
-        if not klantnaam:
-            st.error("Vul minimaal een klantnaam in.")
-            return False
-    if step == 2:
-        jaar = int(_form_value("jaar", 0) or 0)
-        if jaar <= 0:
-            st.error("Kies een geldig verkoopjaar.")
-            return False
-        if not _has_strategy_for_year(jaar):
-            st.error("Er is nog geen verkoopstrategie beschikbaar voor dit jaar of een eerder bronjaar.")
-            return False
-    if step == 3:
-        voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-        if voorstel_type == VOORSTELTYPE_LITERS:
-            liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
-            if liters_basis == LITERS_BASIS_EEN_BIER:
-                bier_key = str(_form_value("bier_key", "") or "")
-                if not bier_key:
-                    st.error("Selecteer eerst een bier.")
-                    return False
-                if not any(float(row.get("liters", 0.0) or 0.0) > 0 for row in _current_staffels()):
-                    st.error("Vul minimaal één staffel met liters in.")
-                    return False
-            elif liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-                if not any(
-                    str(row.get("bier_key", "") or "").strip()
-                    and float(row.get("liters", 0.0) or 0.0) > 0
-                    for row in _current_beer_rows()
-                ):
-                    st.error("Vul minimaal één bierregel met liters in.")
-                    return False
-            else:
-                if not any(float(row.get("liters", 0.0) or 0.0) > 0 for row in _current_staffels()):
-                    st.error("Vul minimaal één staffel met liters in.")
-                    return False
-        else:
-            if not any(float(row.get("aantal", 0.0) or 0.0) > 0 for row in _current_product_rows()):
-                st.error("Vul minimaal één productregel met aantal in.")
-                return False
-    return True
 
 
 def _render_step_indicator() -> None:
@@ -1317,731 +1336,22 @@ def _render_step_indicator() -> None:
         key_prefix="pp_step",
         css_prefix="pp",
         on_step_click=_handle_step_click,
-        accent_color="#2fae66",
         compact=True,
     )
 
 
 def _render_step_1() -> None:
-    render_page_header("Basisgegevens", "Leg hier de basis van het prijsvoorstel vast.")
-    if not str(_form_value("offertenummer", "") or "").strip():
-        _get_form_state()["offertenummer"] = get_next_prijsvoorstel_offertenummer()
-    _hydrate_widget("klantnaam")
-    _hydrate_widget("contactpersoon")
-    _hydrate_widget("referentie")
-    _hydrate_widget("datum_text")
-    render_read_only_table_cell(str(_form_value("offertenummer", "") or "-"))
-    st.caption("Offertenummer")
-    col_1, col_2 = st.columns(2)
-    with col_1:
-        st.text_input("Klantnaam", key=_widget_key("klantnaam"))
-    with col_2:
-        st.text_input("Contactpersoon", key=_widget_key("contactpersoon"))
-    col_3, col_4 = st.columns(2)
-    with col_3:
-        st.text_input("Referentie / voorstelnaam", key=_widget_key("referentie"))
-    with col_4:
-        st.text_input(
-            "Datum",
-            key=_widget_key("datum_text"),
-            placeholder="DD-MM-YYYY",
-        )
+    from .step_1_basisgegevens import render_step_1
+
+    render_step_1()
 
 
 def _render_step_2_uitgangspunten() -> None:
-    render_page_header(
-        "Uitgangspunten",
-        "Kies hier het verkoopjaar, het voorsteltype en het referentiekanaal.",
-    )
-    _hydrate_widget("jaar")
-    _hydrate_widget("type")
-    _hydrate_widget("liters_basis")
-    _hydrate_widget("kanaal")
-    col_1, col_2 = st.columns(2)
-    with col_1:
-        available_years = _year_options()
-        current_year = int(
-            st.session_state.get(
-                _widget_key("jaar"),
-                _form_value("jaar", available_years[-1]),
-            )
-            or available_years[-1]
-        )
-        if current_year not in available_years:
-            current_year = available_years[-1]
-            st.session_state[_widget_key("jaar")] = current_year
-        st.selectbox(
-            "Verkoopjaar",
-            options=available_years,
-            index=available_years.index(current_year),
-            key=_widget_key("jaar"),
-        )
-    with col_2:
-        st.selectbox(
-            "Voorsteltype",
-            options=[VOORSTELTYPE_LITERS, VOORSTELTYPE_PRODUCTEN],
-            key=_widget_key("type"),
-        )
-    voorstel_type = str(st.session_state.get(_widget_key("type"), _form_value("type", VOORSTELTYPE_LITERS)) or VOORSTELTYPE_LITERS)
-    if voorstel_type == VOORSTELTYPE_LITERS:
-        st.selectbox(
-            "Bereken liters op basis van",
-            options=list(LITERS_BASIS_LABELS.keys()),
-            format_func=lambda key: LITERS_BASIS_LABELS.get(key, key),
-            key=_widget_key("liters_basis"),
-        )
-    st.selectbox(
-        "Referentiekanaal",
-        options=list(KANAAL_LABELS.keys()),
-        format_func=lambda key: KANAAL_LABELS.get(key, key),
-        key=_widget_key("kanaal"),
-    )
-    jaar = int(st.session_state.get(_widget_key("jaar"), _form_value("jaar", _default_year())) or _default_year())
-    if _has_strategy_for_year(jaar):
-        kanaal = str(st.session_state.get(_widget_key("kanaal"), _form_value("kanaal", "horeca")) or "horeca")
-        default_margin = _kanaal_marge(jaar, kanaal)
-        st.info(
-            f"Voor verkoopjaar {jaar} zijn standaardmarges beschikbaar. Zodra je in stap 3 een bier en verpakking kiest, kijkt de app eerst naar 'Overzicht bieren' en anders naar 'Marges per jaar'. Huidige default voor {KANAAL_LABELS.get(kanaal, kanaal)}: {_format_percentage(default_margin)}."
-        )
-    else:
-        st.warning("Voor dit verkoopjaar is nog geen verkoopstrategie beschikbaar.")
+    from .step_2_uitgangspunten import render_step_2
+
+    render_step_2()
 
 
-def _render_liters_table() -> None:
-    _ensure_staffels()
-    _hydrate_staffel_widgets()
-    headers = ["Liters", "Korting %", "Prijs € / L", "Omzet €", "Kosten €", "Marge €", "Marge %", ""]
-    row_widths = [0.9, 1.2, 1.0, 1.0, 1.0, 1.0, 0.9, 0.42]
-    render_table_headers(headers, row_widths)
-    results_by_id = {row["id"]: row for row in _liters_results()}
-    for row in _current_staffels():
-        row_id = row["id"]
-        result = results_by_id.get(row_id, {})
-        row_cols = st.columns(row_widths)
-        with row_cols[0]:
-            st.number_input("Liters", min_value=0.0, step=1000.0, format="%.2f", key=_staffel_widget_key(row_id, "liters"), label_visibility="collapsed")
-        with row_cols[1]:
-            st.number_input("Korting", min_value=0.0, max_value=99.99, step=0.1, format="%.2f", key=_staffel_widget_key(row_id, "korting"), label_visibility="collapsed")
-        with row_cols[2]:
-            render_read_only_table_cell(_format_euro(result.get("prijs_per_liter")))
-        with row_cols[3]:
-            render_read_only_table_cell(_format_euro(result.get("omzet")))
-        with row_cols[4]:
-            render_read_only_table_cell(_format_euro(result.get("kosten")))
-        with row_cols[5]:
-            render_read_only_table_cell(_format_euro(result.get("marge_eur")))
-        with row_cols[6]:
-            render_read_only_table_cell(_format_percentage(result.get("marge_pct")))
-        with row_cols[7]:
-            if render_delete_button(key=f"pp_staffel_delete_{row_id}"):
-                _remove_staffel_row(row_id)
-                st.rerun()
-    add_col, _ = st.columns([1.2, 4.8])
-    with add_col:
-        if st.button("Staffel toevoegen", key="pp_add_staffel"):
-            _add_staffel_row()
-            st.rerun()
-
-
-def _render_multi_beer_table(year: int) -> None:
-    _ensure_beer_rows()
-    _hydrate_beer_widgets()
-    options, labels = _bier_options(year)
-    results_by_id = {row["id"]: row for row in _liters_results()}
-    headers = ["Bier", "Liters", "Korting %", "Prijs € / L", "Omzet €", "Kosten €", "Marge €", "Marge %", ""]
-    row_widths = [1.7, 0.9, 0.8, 1.0, 1.0, 1.0, 1.0, 0.8, 0.42]
-    render_table_headers(headers, row_widths)
-    for row in _current_beer_rows():
-        row_id = row["id"]
-        result = results_by_id.get(row_id, {})
-        row_cols = st.columns(row_widths)
-        with row_cols[0]:
-            st.selectbox(
-                "Bier",
-                options=options,
-                format_func=lambda key: labels.get(key, key),
-                key=_beer_widget_key(row_id, "bier"),
-                label_visibility="collapsed",
-            )
-        with row_cols[1]:
-            st.number_input("Liters", min_value=0.0, step=1000.0, format="%.2f", key=_beer_widget_key(row_id, "liters"), label_visibility="collapsed")
-        with row_cols[2]:
-            st.number_input("Korting", min_value=0.0, max_value=99.99, step=0.1, format="%.2f", key=_beer_widget_key(row_id, "korting"), label_visibility="collapsed")
-        with row_cols[3]:
-            render_read_only_table_cell(_format_euro(result.get("prijs_per_liter")))
-        with row_cols[4]:
-            render_read_only_table_cell(_format_euro(result.get("omzet")))
-        with row_cols[5]:
-            render_read_only_table_cell(_format_euro(result.get("kosten")))
-        with row_cols[6]:
-            render_read_only_table_cell(_format_euro(result.get("marge_eur")))
-        with row_cols[7]:
-            render_read_only_table_cell(_format_percentage(result.get("marge_pct")))
-        with row_cols[8]:
-            if render_delete_button(key=f"pp_beer_delete_{row_id}"):
-                _remove_beer_row(row_id)
-                st.rerun()
-    add_col, _ = st.columns([1.3, 4.7])
-    with add_col:
-        if st.button("Biersoort toevoegen", key="pp_add_beer"):
-            _add_beer_row()
-            st.rerun()
-
-
-def _render_products_table(product_rows: list[dict[str, Any]]) -> None:
-    _ensure_product_rows()
-    _hydrate_product_widgets()
-    results_by_id = {row["id"]: row for row in _product_results()}
-    options = [""]
-    options.extend(row["product_key"] for row in product_rows)
-    labels = {"": "Selecteer product"}
-    labels.update({row["product_key"]: row["verpakking"] for row in product_rows})
-    headers = ["Product", "Aantal", "Korting", "Kanaalprijs € / stuk", "Omzet €", "Kosten €", "Marge €", "Marge %", ""]
-    row_widths = [1.8, 0.8, 0.8, 1.0, 1.0, 1.0, 1.0, 0.9, 0.42]
-    render_table_headers(headers, row_widths)
-    for row in _current_product_rows():
-        row_id = row["id"]
-        result = results_by_id.get(row_id, {})
-        row_cols = st.columns(row_widths)
-        with row_cols[0]:
-            st.selectbox("Product", options=options, format_func=lambda key: labels.get(key, key), key=_product_widget_key(row_id, "product"), label_visibility="collapsed")
-        with row_cols[1]:
-            st.number_input("Aantal", min_value=0.0, step=1.0, format="%.2f", key=_product_widget_key(row_id, "aantal"), label_visibility="collapsed")
-        with row_cols[2]:
-            st.number_input("Korting", min_value=0.0, max_value=99.99, step=0.1, format="%.2f", key=_product_widget_key(row_id, "korting"), label_visibility="collapsed")
-        with row_cols[3]:
-            render_read_only_table_cell(_format_euro(result.get("verkoopprijs")))
-        with row_cols[4]:
-            render_read_only_table_cell(_format_euro(result.get("omzet")))
-        with row_cols[5]:
-            render_read_only_table_cell(_format_euro(result.get("kosten")))
-        with row_cols[6]:
-            render_read_only_table_cell(_format_euro(result.get("marge_eur")))
-        with row_cols[7]:
-            render_read_only_table_cell(_format_percentage(result.get("marge_pct")))
-        with row_cols[8]:
-            if render_delete_button(key=f"pp_product_delete_{row_id}"):
-                _remove_product_row(row_id)
-                st.rerun()
-    add_col, _ = st.columns([1.2, 4.8])
-    with add_col:
-        if st.button("Productregel toevoegen", key="pp_add_product"):
-            _add_product_row()
-            st.rerun()
-
-
-def _render_summary_sidebar() -> None:
-    jaar = int(_form_value("jaar", _default_year()) or _default_year())
-    bier_key = str(_form_value("bier_key", "") or "")
-    liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
-    bier_record = _latest_record_for_bier(jaar, bier_key) if bier_key else None
-    basisgegevens = bier_record.get("basisgegevens", {}) if isinstance(bier_record, dict) else {}
-    if not isinstance(basisgegevens, dict):
-        basisgegevens = {}
-    voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-    kanaal = str(_form_value("kanaal", "horeca") or "horeca")
-    bier_label = str(basisgegevens.get("biernaam", "") or "-")
-    bron_strategy_label = "-"
-    if voorstel_type == VOORSTELTYPE_LITERS and liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-        bier_label = "Meerdere bieren"
-        first_row = next(
-            (
-                row
-                for row in _current_beer_rows()
-                if str(row.get("bier_key", "") or "") and str(row.get("product_key", "") or "")
-            ),
-            None,
-        )
-        if isinstance(first_row, dict):
-            bron_strategy_label = _effective_strategy_source_label(
-                jaar,
-                bier_key=str(first_row.get("bier_key", "") or ""),
-                product_key=str(first_row.get("product_key", "") or ""),
-            )
-    if voorstel_type == VOORSTELTYPE_LITERS and liters_basis == LITERS_BASIS_ALGEMEEN:
-        bier_label = "Algemene hoogste kostprijs"
-        bron_strategy_label = _effective_strategy_source_label(jaar)
-    elif voorstel_type == VOORSTELTYPE_LITERS and liters_basis == LITERS_BASIS_EEN_BIER:
-        first_row = next(
-            (
-                row
-                for row in _current_staffels()
-                if str(row.get("product_key", "") or "")
-            ),
-            None,
-        )
-        if isinstance(first_row, dict):
-            product_key = str(first_row.get("product_key", "") or "")
-            product = _product_map_for_bier(jaar, bier_key).get(product_key)
-            bron_strategy_label = _effective_strategy_source_label(
-                jaar,
-                bier_key=bier_key,
-                product_key=product_key,
-                verpakking=str((product or {}).get("verpakking", "") or ""),
-            )
-        else:
-            bron_strategy_label = _effective_strategy_source_label(jaar)
-    elif voorstel_type == VOORSTELTYPE_PRODUCTEN:
-        first_row = next(
-            (
-                row
-                for row in _current_product_rows()
-                if str(row.get("product_key", "") or "")
-            ),
-            None,
-        )
-        if isinstance(first_row, dict):
-            product_key = str(first_row.get("product_key", "") or "")
-            product = _product_map_for_bier(jaar, bier_key).get(product_key)
-            bron_strategy_label = _effective_strategy_source_label(
-                jaar,
-                bier_key=bier_key,
-                product_key=product_key,
-                verpakking=str((product or {}).get("verpakking", "") or ""),
-            )
-        else:
-            bron_strategy_label = _effective_strategy_source_label(jaar)
-
-    st.markdown("<div class='pp-summary-sidebar'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title' style='font-size:1.2rem;'>Samenvatting</div>", unsafe_allow_html=True)
-    for label, value in [
-        ("Klant", str(_form_value("klantnaam", "") or "-")),
-        ("Type", voorstel_type),
-        ("Verkoopjaar", str(jaar)),
-        ("Kanaal", KANAAL_LABELS.get(kanaal, kanaal)),
-        ("Bier", bier_label),
-        ("Bron strategie", bron_strategy_label),
-    ]:
-        st.markdown(
-            f"<div class='section-text' style='margin-bottom:0.45rem;'><strong>{label}:</strong> {value}</div>",
-            unsafe_allow_html=True,
-        )
-
-    results = _liters_results() if voorstel_type == VOORSTELTYPE_LITERS else _product_results()
-    totale_omzet = sum(float(row.get("omzet", 0.0) or 0.0) for row in results)
-    totale_kosten = sum(float(row.get("kosten", 0.0) or 0.0) for row in results)
-    totale_marge = totale_omzet - totale_kosten
-    marge_pct = (totale_marge / totale_omzet * 100.0) if totale_omzet > 0 else 0.0
-
-    st.write("")
-    summary_cols = st.columns(2)
-    with summary_cols[0]:
-        render_read_only_table_cell(_format_euro(totale_omzet))
-        st.caption("Totale omzet €")
-    with summary_cols[1]:
-        render_read_only_table_cell(_format_euro(totale_kosten))
-        st.caption("Totale kosten €")
-    render_read_only_table_cell(_format_euro(totale_marge))
-    st.caption("Totale winstmarge €")
-    render_read_only_table_cell(_format_percentage(marge_pct))
-    st.caption("Gemiddelde winstmarge")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def _render_step_3() -> None:
-    render_page_header(
-        "Berekening",
-        "Werk hier het voorstel uit. Links vul je staffels of producten in, rechts zie je direct de samenvatting.",
-    )
-    _hydrate_widget("bier_key")
-    jaar = int(_form_value("jaar", _default_year()) or _default_year())
-    voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-    kanaal = str(_form_value("kanaal", "horeca") or "horeca")
-    liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
-    options, labels = _bier_options(jaar)
-    bier_widget_key = _widget_key("bier_key")
-    if str(st.session_state.get(bier_widget_key, _form_value("bier_key", "")) or "") not in options:
-        st.session_state[bier_widget_key] = ""
-        _get_form_state()["bier_key"] = ""
-
-    left_col, right_col = st.columns([2.35, 0.75], gap="large")
-    with left_col:
-        if voorstel_type == VOORSTELTYPE_LITERS:
-            if liters_basis == LITERS_BASIS_EEN_BIER:
-                st.selectbox("Bier", options=options, format_func=lambda key: labels.get(key, key), key=bier_widget_key)
-                bier_key = str(st.session_state.get(bier_widget_key, "") or "")
-                if not bier_key:
-                    st.info("Selecteer eerst een bier om de berekening op te bouwen.")
-                else:
-                    hoogste_kostprijs, bronjaar = _highest_cost_for_bier(jaar, bier_key)
-                    referentieprijs = _calculate_price_from_margin(hoogste_kostprijs, _kanaal_marge(jaar, kanaal))
-                    info_cols = st.columns(3)
-                    with info_cols[0]:
-                        render_read_only_table_cell(_format_euro(hoogste_kostprijs))
-                        st.caption(f"Hoogste kostprijs per liter ({bronjaar or '-'})")
-                    with info_cols[1]:
-                        render_read_only_table_cell(_format_euro(referentieprijs))
-                        st.caption(f"Referentieprijs {KANAAL_LABELS.get(kanaal, kanaal)} per liter")
-                    with info_cols[2]:
-                        render_read_only_table_cell(_format_percentage(_kanaal_marge(jaar, kanaal)))
-                        st.caption("Kanaalwinstmarge verkoopstrategie")
-                    fust_rows = _fust_cost_insights(jaar, bier_key)
-                    if fust_rows:
-                        fust_labels = ", ".join(
-                            f"{str(row.get('verpakking', '-') or '-')}: € { _format_euro(row.get('kostprijs')) }"
-                            for row in fust_rows[:3]
-                        )
-                        st.info(f"Fustinzicht: {fust_labels}")
-                    st.write("")
-                    _render_liters_table()
-            elif liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-                st.info("Voeg hieronder één of meer bieren toe. Per bier reken ik met de hoogste bekende kostprijs en dezelfde referentiestrategie.")
-                _render_multi_beer_table(jaar)
-            else:
-                hoogste_kostprijs, bronjaar, bronbier = _highest_cost_overall(jaar)
-                referentieprijs = _calculate_price_from_margin(hoogste_kostprijs, _kanaal_marge(jaar, kanaal))
-                info_cols = st.columns(3)
-                with info_cols[0]:
-                    render_read_only_table_cell(_format_euro(hoogste_kostprijs))
-                    st.caption(f"Algemene hoogste kostprijs per liter ({bronjaar or '-'})")
-                with info_cols[1]:
-                    render_read_only_table_cell(str(bronbier or "-"))
-                    st.caption("Bronbier hoogste kostprijs")
-                with info_cols[2]:
-                    render_read_only_table_cell(_format_euro(referentieprijs))
-                    st.caption(f"Referentieprijs {KANAAL_LABELS.get(kanaal, kanaal)} per liter")
-                st.write("")
-                _render_liters_table()
-        else:
-            st.selectbox("Bier", options=options, format_func=lambda key: labels.get(key, key), key=bier_widget_key)
-            bier_key = str(st.session_state.get(bier_widget_key, "") or "")
-            if not bier_key:
-                st.info("Selecteer eerst een bier om de berekening op te bouwen.")
-            else:
-                hoogste_kostprijs, bronjaar = _highest_cost_for_bier(jaar, bier_key)
-                product_rows = _build_product_rows_for_bier(jaar, bier_key)
-                if not product_rows:
-                    st.warning("Voor dit bier zijn nog geen producten beschikbaar vanuit stap 4 van 'Nieuwe berekening'.")
-                else:
-                    st.info(
-                        f"De basisprijzen volgen eerst 'Overzicht bieren' en anders de default uit 'Marges per jaar' voor kanaal {KANAAL_LABELS.get(kanaal, kanaal)}."
-                    )
-                    _render_products_table(product_rows)
-    with right_col:
-        _render_summary_sidebar()
-
-
-def _render_step_4() -> None:
-    render_page_header(
-        "Samenvatting",
-        "Controleer hieronder de commerciële samenvatting voor de groothandel en vergelijk die met jullie adviesprijzen per kanaal.",
-    )
-    voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-    jaar = int(_form_value("jaar", _default_year()) or _default_year())
-    kanaal = str(_form_value("kanaal", "horeca") or "horeca")
-    bier_key = str(_form_value("bier_key", "") or "")
-    bier_record = _latest_record_for_bier(jaar, bier_key) if bier_key else None
-    basisgegevens = bier_record.get("basisgegevens", {}) if isinstance(bier_record, dict) else {}
-    if not isinstance(basisgegevens, dict):
-        basisgegevens = {}
-    st.markdown(
-        f"<div class='section-text'><strong>Klant:</strong> {str(_form_value('klantnaam', '') or '-')} | <strong>Voorsteltype:</strong> {voorstel_type} | <strong>Verkoopjaar:</strong> {jaar} | <strong>Kanaal:</strong> {KANAAL_LABELS.get(kanaal, kanaal)}</div>",
-        unsafe_allow_html=True,
-    )
-
-    if voorstel_type == VOORSTELTYPE_LITERS:
-        rows = _liters_results()
-        hoogste_kostprijs, bronjaar = _highest_cost_for_bier(jaar, bier_key)
-        strategy = _selected_strategy(jaar)
-        kanaalmarges = strategy.get("kanaalmarges", {}) if isinstance(strategy, dict) else {}
-        if not isinstance(kanaalmarges, dict):
-            kanaalmarges = {}
-        st.markdown("<div class='section-title' style='font-size:1.2rem;'>Groothandelsoverzicht</div>", unsafe_allow_html=True)
-        headers = [
-            "Liters",
-            "Inkoopprijs € / L",
-            "Adviesprijs zakelijk € / L",
-            "Adviesprijs retail € / L",
-            "Adviesprijs horeca € / L",
-            "Adviesprijs slijterij € / L",
-            "Onze winstmarge",
-        ]
-        row_widths = [0.8, 1.15, 1.15, 1.15, 1.15, 1.15, 1.0]
-        render_table_headers(headers, row_widths)
-        for row in rows:
-            advies_zakelijk = _calculate_price_from_margin(hoogste_kostprijs, kanaalmarges.get("zakelijk"))
-            advies_retail = _calculate_price_from_margin(hoogste_kostprijs, kanaalmarges.get("retail"))
-            advies_horeca = _calculate_price_from_margin(hoogste_kostprijs, kanaalmarges.get("horeca"))
-            advies_slijterij = _calculate_price_from_margin(hoogste_kostprijs, kanaalmarges.get("slijterij"))
-            row_cols = st.columns(row_widths)
-            with row_cols[0]:
-                render_read_only_table_cell(f"{float(row.get('liters', 0.0) or 0.0):.2f}")
-            with row_cols[1]:
-                render_read_only_table_cell(_format_euro(row.get("prijs_per_liter")))
-            with row_cols[2]:
-                render_read_only_table_cell(_format_euro(advies_zakelijk))
-            with row_cols[3]:
-                render_read_only_table_cell(_format_euro(advies_retail))
-            with row_cols[4]:
-                render_read_only_table_cell(_format_euro(advies_horeca))
-            with row_cols[5]:
-                render_read_only_table_cell(_format_euro(advies_slijterij))
-            with row_cols[6]:
-                render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
-        st.write("")
-        info_cols = st.columns(3)
-        with info_cols[0]:
-            render_read_only_table_cell(_format_euro(hoogste_kostprijs))
-            st.caption(f"Hoogste bekende kostprijs per liter ({bronjaar or '-'})")
-        with info_cols[1]:
-            render_read_only_table_cell(str(basisgegevens.get("biernaam", "") or "-"))
-            st.caption("Bier")
-        with info_cols[2]:
-            render_read_only_table_cell(str(int(strategy.get("jaar", 0) or 0) or "-") if strategy else "-")
-            st.caption("Bronjaar verkoopstrategie")
-    else:
-        rows = _product_results()
-        products = {row["product_key"]: row for row in _build_product_rows_for_bier(jaar, bier_key)}
-        st.markdown("<div class='section-title' style='font-size:1.2rem;'>Groothandelsoverzicht</div>", unsafe_allow_html=True)
-        headers = [
-            "Product",
-            "Aantal",
-            "Inkoopprijs € / stuk",
-            "Adviesprijs zakelijk €",
-            "Adviesprijs retail €",
-            "Adviesprijs horeca €",
-            "Adviesprijs slijterij €",
-            "Onze winstmarge",
-        ]
-        row_widths = [1.6, 0.7, 1.05, 1.0, 1.0, 1.0, 1.0, 0.9]
-        render_table_headers(headers, row_widths)
-        for row in rows:
-            product = next(
-                (
-                    product_row
-                    for product_row in _current_product_rows()
-                    if str(product_row.get("id", "") or "") == str(row.get("id", "") or "")
-                ),
-                {},
-            )
-            product_pricing = products.get(str(product.get("product_key", "") or ""), {})
-            row_cols = st.columns(row_widths)
-            with row_cols[0]:
-                render_read_only_table_cell(str(row.get("verpakking", "-") or "-"))
-            with row_cols[1]:
-                render_read_only_table_cell(f"{float(row.get('aantal', 0.0) or 0.0):.2f}")
-            with row_cols[2]:
-                render_read_only_table_cell(_format_euro(row.get("verkoopprijs")))
-            with row_cols[3]:
-                render_read_only_table_cell(_format_euro(product_pricing.get("zakelijk")))
-            with row_cols[4]:
-                render_read_only_table_cell(_format_euro(product_pricing.get("retail")))
-            with row_cols[5]:
-                render_read_only_table_cell(_format_euro(product_pricing.get("horeca")))
-            with row_cols[6]:
-                render_read_only_table_cell(_format_euro(product_pricing.get("slijterij")))
-            with row_cols[7]:
-                render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
-
-
-def _render_step_5() -> None:
-    render_page_header(
-        "Afronden",
-        "Voeg hier nog een interne notitie toe. PDF-export en verdere afronding kunnen we hierna verder inkleden.",
-    )
-    _hydrate_widget("opmerking")
-    st.write("")
-    st.text_area(
-        "Interne notitie",
-        key=_widget_key("opmerking"),
-        placeholder="Bijvoorbeeld: voorstel voor eerste groothandelsgesprek, prijzen nog intern afstemmen.",
-        height=120,
-    )
-    st.info("PDF-export en verdere afronding kunnen we hierna als vervolgstap toevoegen.")
-
-
-def _render_step_4_v2() -> None:
-    render_page_header(
-        "Samenvatting",
-        "Controleer hieronder de commerciële samenvatting voor de groothandel en vergelijk die met jullie adviesprijzen per kanaal.",
-    )
-    voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-    jaar = int(_form_value("jaar", _default_year()) or _default_year())
-    kanaal = str(_form_value("kanaal", "horeca") or "horeca")
-    bier_key = str(_form_value("bier_key", "") or "")
-    liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
-    bier_record = _latest_record_for_bier(jaar, bier_key) if bier_key else None
-    basisgegevens = bier_record.get("basisgegevens", {}) if isinstance(bier_record, dict) else {}
-    if not isinstance(basisgegevens, dict):
-        basisgegevens = {}
-    st.markdown(
-        f"<div class='section-text'><strong>Klant:</strong> {str(_form_value('klantnaam', '') or '-')} | <strong>Voorsteltype:</strong> {voorstel_type} | <strong>Verkoopjaar:</strong> {jaar} | <strong>Kanaal:</strong> {KANAAL_LABELS.get(kanaal, kanaal)}</div>",
-        unsafe_allow_html=True,
-    )
-
-    if voorstel_type == VOORSTELTYPE_LITERS:
-        rows = _liters_results()
-        st.markdown("<div class='section-title' style='font-size:1.2rem;'>Groothandelsoverzicht</div>", unsafe_allow_html=True)
-        if liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-            headers = ["Bier", "Liters", "Inkoopprijs € / L", "Adviesprijs horeca € / L", "Onze winstmarge"]
-            row_widths = [1.5, 0.8, 1.1, 1.2, 1.0]
-        else:
-            headers = [
-                "Liters",
-                "Inkoopprijs € / L",
-                "Adviesprijs zakelijk € / L",
-                "Adviesprijs retail € / L",
-                "Adviesprijs horeca € / L",
-                "Adviesprijs slijterij € / L",
-                "Onze winstmarge",
-            ]
-            row_widths = [0.8, 1.15, 1.15, 1.15, 1.15, 1.15, 1.0]
-        render_table_headers(headers, row_widths)
-        for row in rows:
-            liters = float(row.get("liters", 0.0) or 0.0)
-            kostprijs_per_liter = (float(row.get("kosten", 0.0) or 0.0) / liters) if liters > 0 else 0.0
-            row_bier_key = str(row.get("bier_key", "") or bier_key or "")
-            row_product_map = _product_map_for_bier(jaar, row_bier_key) if row_bier_key else {}
-            product = row_product_map.get(str(row.get("product_key", "") or ""))
-            advies_zakelijk = _product_channel_price_per_liter(product, "zakelijk")
-            advies_retail = _product_channel_price_per_liter(product, "retail")
-            advies_horeca = _product_channel_price_per_liter(product, "horeca")
-            advies_slijterij = _product_channel_price_per_liter(product, "slijterij")
-            if advies_zakelijk is None:
-                advies_zakelijk = _calculate_price_from_margin(kostprijs_per_liter, kanaalmarges.get("zakelijk"))
-            if advies_retail is None:
-                advies_retail = _calculate_price_from_margin(kostprijs_per_liter, kanaalmarges.get("retail"))
-            if advies_horeca is None:
-                advies_horeca = _calculate_price_from_margin(kostprijs_per_liter, kanaalmarges.get("horeca"))
-            if advies_slijterij is None:
-                advies_slijterij = _calculate_price_from_margin(kostprijs_per_liter, kanaalmarges.get("slijterij"))
-            row_cols = st.columns(row_widths)
-            if liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-                with row_cols[0]:
-                    render_read_only_table_cell(str(row.get("biernaam", "-") or "-"))
-                with row_cols[1]:
-                    render_read_only_table_cell(f"{liters:.2f}")
-                with row_cols[2]:
-                    render_read_only_table_cell(_format_euro(row.get("prijs_per_liter")))
-                with row_cols[3]:
-                    render_read_only_table_cell(_format_euro(advies_horeca))
-                with row_cols[4]:
-                    render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
-            else:
-                with row_cols[0]:
-                    render_read_only_table_cell(f"{liters:.2f}")
-                with row_cols[1]:
-                    render_read_only_table_cell(_format_euro(row.get("prijs_per_liter")))
-                with row_cols[2]:
-                    render_read_only_table_cell(_format_euro(advies_zakelijk))
-                with row_cols[3]:
-                    render_read_only_table_cell(_format_euro(advies_retail))
-                with row_cols[4]:
-                    render_read_only_table_cell(_format_euro(advies_horeca))
-                with row_cols[5]:
-                    render_read_only_table_cell(_format_euro(advies_slijterij))
-                with row_cols[6]:
-                    render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
-        st.write("")
-        if liters_basis == LITERS_BASIS_ALGEMEEN:
-            hoogste_kostprijs, bronjaar, bronbier = _highest_cost_overall(jaar)
-        else:
-            hoogste_kostprijs, bronjaar = _highest_cost_for_bier(jaar, bier_key)
-            bronbier = str(basisgegevens.get("biernaam", "") or "-")
-        info_cols = st.columns(3)
-        with info_cols[0]:
-            render_read_only_table_cell(_format_euro(hoogste_kostprijs))
-            st.caption(f"Hoogste bekende kostprijs per liter ({bronjaar or '-'})")
-        with info_cols[1]:
-            render_read_only_table_cell(str(bronbier or "-"))
-            st.caption("Bronbier")
-        with info_cols[2]:
-            render_read_only_table_cell(str(int(strategy.get("jaar", 0) or 0) or "-") if strategy else "-")
-            st.caption("Bronjaar verkoopstrategie")
-        return
-
-    rows = _product_results()
-    products = {row["product_key"]: row for row in _build_product_rows_for_bier(jaar, bier_key)}
-    st.markdown("<div class='section-title' style='font-size:1.2rem;'>Groothandelsoverzicht</div>", unsafe_allow_html=True)
-    headers = [
-        "Product",
-        "Aantal",
-        "Inkoopprijs groothandel € / stuk",
-        "Adviesprijs zakelijk €",
-        "Adviesprijs retail €",
-        "Adviesprijs horeca €",
-        "Adviesprijs slijterij €",
-        "Onze winstmarge",
-    ]
-    row_widths = [1.6, 0.7, 1.05, 1.0, 1.0, 1.0, 1.0, 0.9]
-    render_table_headers(headers, row_widths)
-    for row in rows:
-        product = next(
-            (
-                product_row
-                for product_row in _current_product_rows()
-                if str(product_row.get("id", "") or "") == str(row.get("id", "") or "")
-            ),
-            {},
-        )
-        product_pricing = products.get(str(product.get("product_key", "") or ""), {})
-        row_cols = st.columns(row_widths)
-        with row_cols[0]:
-            render_read_only_table_cell(str(row.get("verpakking", "-") or "-"))
-        with row_cols[1]:
-            render_read_only_table_cell(f"{float(row.get('aantal', 0.0) or 0.0):.2f}")
-        with row_cols[2]:
-            render_read_only_table_cell(_format_euro(row.get("kostprijs")))
-        with row_cols[3]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("zakelijk")))
-        with row_cols[4]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("retail")))
-        with row_cols[5]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("horeca")))
-        with row_cols[6]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("slijterij")))
-        with row_cols[7]:
-            render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
-
-
-def _validate_step_v2(step: int) -> bool:
-    if step == 1:
-        klantnaam = str(_form_value("klantnaam", "") or "").strip()
-        if not klantnaam:
-            st.error("Vul minimaal een klantnaam in.")
-            return False
-    if step == 2:
-        jaar = int(_form_value("jaar", 0) or 0)
-        if jaar <= 0:
-            st.error("Kies een geldig verkoopjaar.")
-            return False
-        if not _has_strategy_for_year(jaar):
-            st.error("Er is nog geen verkoopstrategie beschikbaar voor dit jaar of een eerder bronjaar.")
-            return False
-    if step == 3:
-        voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-        if voorstel_type == VOORSTELTYPE_LITERS:
-            liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
-            if liters_basis == LITERS_BASIS_EEN_BIER:
-                bier_key = str(_form_value("bier_key", "") or "")
-                if not bier_key:
-                    st.error("Selecteer eerst een bier.")
-                    return False
-                if not any(
-                    str(row.get("product_key", "") or "").strip()
-                    and float(row.get("liters", 0.0) or 0.0) > 0
-                    for row in _current_staffels()
-                ):
-                    st.error("Kies minimaal één verpakking en vul liters in.")
-                    return False
-            elif liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-                if not any(
-                    str(row.get("bier_key", "") or "").strip()
-                    and str(row.get("product_key", "") or "").strip()
-                    and float(row.get("liters", 0.0) or 0.0) > 0
-                    for row in _current_beer_rows()
-                ):
-                    st.error("Vul minimaal één bierregel met verpakking en liters in.")
-                    return False
-            else:
-                if not any(float(row.get("liters", 0.0) or 0.0) > 0 for row in _current_staffels()):
-                    st.error("Vul minimaal één staffel met liters in.")
-                    return False
-        else:
-            if not any(float(row.get("aantal", 0.0) or 0.0) > 0 for row in _current_product_rows()):
-                st.error("Vul minimaal één productregel met aantal in.")
-                return False
-    return True
 
 
 def _render_liters_table(year: int, bier_key: str) -> None:
@@ -2178,298 +1488,146 @@ def _render_multi_beer_table(year: int) -> None:
             st.rerun()
 
 
-def _render_step_3() -> None:
-    render_page_header(
-        "Berekening",
-        "Werk hier het voorstel uit. Links vul je staffels of producten in, rechts zie je direct de samenvatting.",
-    )
-    _hydrate_widget("bier_key")
-    jaar = int(_form_value("jaar", _default_year()) or _default_year())
-    voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-    kanaal = str(_form_value("kanaal", "horeca") or "horeca")
-    liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
-    options, labels = _bier_options(jaar)
-    bier_widget_key = _widget_key("bier_key")
-    if str(st.session_state.get(bier_widget_key, _form_value("bier_key", "")) or "") not in options:
-        st.session_state[bier_widget_key] = ""
-        _get_form_state()["bier_key"] = ""
+def _selected_product_bier_keys() -> list[str]:
+    keys = _form_value("product_bier_keys", [])
+    if not isinstance(keys, list):
+        keys = []
+    normalized = [str(key or "") for key in keys if str(key or "")]
+    if normalized:
+        return list(dict.fromkeys(normalized))
+    fallback = str(_form_value("bier_key", "") or "")
+    return [fallback] if fallback else []
 
-    left_col, right_col = st.columns([3.15, 0.55], gap="large")
-    with left_col:
-        if voorstel_type == VOORSTELTYPE_LITERS:
-            if liters_basis == LITERS_BASIS_EEN_BIER:
-                st.selectbox("Bier", options=options, format_func=lambda key: labels.get(key, key), key=bier_widget_key)
-                bier_key = str(st.session_state.get(bier_widget_key, "") or "")
-                if not bier_key:
-                    st.info("Selecteer eerst een bier om de berekening op te bouwen.")
-                else:
-                    hoogste_product_kostprijs, duurste_verpakking = _highest_product_cost_for_bier(jaar, bier_key)
-                    product_map = _product_map_for_bier(jaar, bier_key)
-                    selected_product = next(
-                        (
-                            product_map.get(str(row.get("product_key", "") or ""))
-                            for row in _current_staffels()
-                            if str(row.get("product_key", "") or "")
-                        ),
-                        None,
-                    )
-                    selected_reference_price = _product_channel_price_per_liter(selected_product, kanaal)
-                    selected_margin_pct = _product_channel_margin_pct(selected_product, kanaal)
-                    info_cols = st.columns([1.2, 1.4, 1.0])
-                    with info_cols[0]:
-                        render_read_only_table_cell(_format_euro(hoogste_product_kostprijs))
-                        st.caption("Hoogste productkostprijs € / L")
-                    with info_cols[1]:
-                        render_read_only_table_cell(
-                            _format_euro(selected_reference_price)
-                            if selected_reference_price is not None
-                            else str(duurste_verpakking or "-")
-                        )
-                        st.caption(
-                            f"Referentieprijs {KANAAL_LABELS.get(kanaal, kanaal)} € / L"
-                            if selected_reference_price is not None
-                            else "Duurste verpakking als referentie"
-                        )
-                    with info_cols[2]:
-                        render_read_only_table_cell(_format_percentage(selected_margin_pct))
-                        st.caption(
-                            "Kanaalwinstmarge gekozen verpakking"
-                            if selected_margin_pct is not None
-                            else "Kanaalwinstmarge"
-                        )
-                    st.info("Kies hieronder per regel de verpakking. De prijs per liter, kostprijs en marge volgen dan die gekozen verpakking.")
-                    st.write("")
-                    _render_liters_table(jaar, bier_key)
-            elif liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-                st.info("Voeg hieronder één of meer bierregels toe. Per regel kies je eerst het bier en daarna de verpakking.")
-                _render_multi_beer_table(jaar)
-            else:
-                hoogste_kostprijs, bronjaar, bronbier = _highest_cost_overall(jaar)
-                referentieprijs = _calculate_price_from_margin(hoogste_kostprijs, _kanaal_marge(jaar, kanaal))
-                info_cols = st.columns(3)
-                with info_cols[0]:
-                    render_read_only_table_cell(_format_euro(hoogste_kostprijs))
-                    st.caption(f"Algemene hoogste kostprijs per liter ({bronjaar or '-'})")
-                with info_cols[1]:
-                    render_read_only_table_cell(str(bronbier or "-"))
-                    st.caption("Bronbier hoogste kostprijs")
-                with info_cols[2]:
-                    render_read_only_table_cell(_format_euro(referentieprijs))
-                    st.caption(f"Referentieprijs {KANAAL_LABELS.get(kanaal, kanaal)} per liter")
-                st.write("")
-                _render_liters_table_legacy()
+
+def _combined_product_rows_for_bieren(year: int, bier_keys: list[str]) -> list[dict[str, Any]]:
+    combined: list[dict[str, Any]] = []
+    for bier_key in bier_keys:
+        for row in _build_product_rows_for_bier(year, bier_key):
+            combined.append({**row, "bier_key": bier_key})
+    return combined
+
+
+def _sync_seeded_product_rows(product_rows: list[dict[str, Any]]) -> None:
+    current_rows = _current_product_rows()
+    deleted_pairs_raw = _get_form_state().get("deleted_product_pairs", [])
+    deleted_pairs = {
+        (str(item.get("bier_key", "") or ""), str(item.get("product_key", "") or ""))
+        for item in deleted_pairs_raw
+        if isinstance(item, dict)
+    }
+    current_by_pair = {
+        (str(row.get("bier_key", "") or ""), str(row.get("product_key", "") or "")): row
+        for row in current_rows
+        if str(row.get("bier_key", "") or "") and str(row.get("product_key", "") or "")
+    }
+    seeded_rows: list[dict[str, Any]] = []
+    for product in product_rows:
+        bier_key = str(product.get("bier_key", "") or "")
+        product_key = str(product.get("product_key", "") or "")
+        if (bier_key, product_key) in deleted_pairs:
+            continue
+        existing = current_by_pair.get((bier_key, product_key))
+        if existing:
+            seeded_rows.append(existing)
         else:
-            st.selectbox("Bier", options=options, format_func=lambda key: labels.get(key, key), key=bier_widget_key)
-            bier_key = str(st.session_state.get(bier_widget_key, "") or "")
-            if not bier_key:
-                st.info("Selecteer eerst een bier om de berekening op te bouwen.")
-            else:
-                product_rows = _build_product_rows_for_bier(jaar, bier_key)
-                if not product_rows:
-                    st.warning("Voor dit bier zijn nog geen producten beschikbaar vanuit stap 4 van 'Nieuwe berekening'.")
-                else:
-                    st.info(f"De basisprijzen komen uit de verkoopstrategie van {jaar} voor kanaal {KANAAL_LABELS.get(kanaal, kanaal)}.")
-                    _render_products_table(product_rows)
-    with right_col:
-        _render_summary_sidebar()
+            seeded_rows.append(
+                {
+                    "id": str(uuid4()),
+                    "bier_key": bier_key,
+                    "product_key": product_key,
+                    "aantal": 0.0,
+                    "korting_pct": 0.0,
+                }
+            )
+    _get_form_state()["product_rows"] = seeded_rows if seeded_rows else [_empty_product_row()]
 
 
-def _render_liters_table_legacy() -> None:
-    _ensure_staffels()
-    _hydrate_staffel_widgets()
-    headers = ["Liters", "Korting %", "Prijs € / L", "Omzet €", "Kosten €", "Marge €", "Marge %", ""]
-    row_widths = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9, 0.42]
+def _render_products_table(product_rows: list[dict[str, Any]]) -> None:
+    _sync_seeded_product_rows(product_rows)
+    _ensure_product_rows()
+    _hydrate_product_widgets()
+    results_by_id = {row["id"]: row for row in _product_results()}
+    pricing_by_pair = {
+        (str(row.get("bier_key", "") or ""), str(row.get("product_key", "") or "")): row
+        for row in product_rows
+    }
+    bier_labels = _bier_options(int(_form_value("jaar", _default_year()) or _default_year()))[1]
+    headers = ["Bier", "Product", "Aantal", "Korting", "Kanaalprijs / stuk", "Omzet", "Kosten", "Marge", "Marge %", ""]
+    row_widths = [1.35, 1.55, 0.8, 0.8, 1.0, 1.0, 1.0, 1.0, 0.9, 0.42]
     render_table_headers(headers, row_widths)
-    results_by_id = {row["id"]: row for row in _liters_results()}
-    for row in _current_staffels():
-        row_id = row["id"]
+    for row in _current_product_rows():
+        row_id = str(row.get("id", "") or "")
+        bier_key = str(row.get("bier_key", "") or "")
+        product_key = str(row.get("product_key", "") or "")
+        product = pricing_by_pair.get((bier_key, product_key), {})
         result = results_by_id.get(row_id, {})
         row_cols = st.columns(row_widths)
         with row_cols[0]:
-            st.number_input("Liters", min_value=0.0, step=1000.0, format="%.2f", key=_staffel_widget_key(row_id, "liters"), label_visibility="collapsed")
+            render_read_only_table_cell(str(bier_labels.get(bier_key, product.get("biernaam", "-")) or "-"))
         with row_cols[1]:
-            st.number_input("Korting", min_value=0.0, max_value=99.99, step=0.1, format="%.2f", key=_staffel_widget_key(row_id, "korting"), label_visibility="collapsed")
+            render_read_only_table_cell(str(product.get("verpakking", "-") or "-"))
         with row_cols[2]:
-            render_read_only_table_cell(_format_euro(result.get("prijs_per_liter")))
+            st.number_input("Aantal", min_value=0.0, step=1.0, format="%.2f", key=_product_widget_key(row_id, "aantal"), label_visibility="collapsed")
         with row_cols[3]:
+            st.number_input("Korting", min_value=0.0, max_value=99.99, step=0.1, format="%.2f", key=_product_widget_key(row_id, "korting"), label_visibility="collapsed")
+        with row_cols[4]:
+            render_read_only_table_cell(_format_euro(result.get("verkoopprijs")))
+        with row_cols[5]:
             render_read_only_table_cell(_format_euro(result.get("omzet")))
-        with row_cols[4]:
+        with row_cols[6]:
             render_read_only_table_cell(_format_euro(result.get("kosten")))
-        with row_cols[5]:
+        with row_cols[7]:
             render_read_only_table_cell(_format_euro(result.get("marge_eur")))
-        with row_cols[6]:
+        with row_cols[8]:
             render_read_only_table_cell(_format_percentage(result.get("marge_pct")))
-        with row_cols[7]:
-            if render_delete_button(key=f"pp_staffel_delete_{row_id}"):
-                _remove_staffel_row(row_id)
+        with row_cols[9]:
+            if render_delete_button(key=f"pp_product_delete_{row_id}"):
+                _remove_product_row(row_id)
                 st.rerun()
-    add_col, _ = st.columns([1.4, 4.6])
-    with add_col:
-        if st.button("Staffel toevoegen", key="pp_add_staffel_legacy"):
-            _add_staffel_row()
-            st.rerun()
 
 
-def _render_step_4_v2() -> None:
-    render_page_header(
-        "Samenvatting",
-        "Controleer hieronder de commerciële samenvatting voor de groothandel en vergelijk die met jullie adviesprijzen per kanaal.",
-    )
-    voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
-    jaar = int(_form_value("jaar", _default_year()) or _default_year())
-    kanaal = str(_form_value("kanaal", "horeca") or "horeca")
-    bier_key = str(_form_value("bier_key", "") or "")
-    liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
-    bier_record = _latest_record_for_bier(jaar, bier_key) if bier_key else None
-    basisgegevens = bier_record.get("basisgegevens", {}) if isinstance(bier_record, dict) else {}
-    if not isinstance(basisgegevens, dict):
-        basisgegevens = {}
-    st.markdown(
-        f"<div class='section-text'><strong>Klant:</strong> {str(_form_value('klantnaam', '') or '-')} | <strong>Voorsteltype:</strong> {voorstel_type} | <strong>Verkoopjaar:</strong> {jaar} | <strong>Kanaal:</strong> {KANAAL_LABELS.get(kanaal, kanaal)}</div>",
-        unsafe_allow_html=True,
-    )
-
-    if voorstel_type == VOORSTELTYPE_LITERS:
-        rows = _liters_results()
-        strategy = _selected_strategy(jaar)
-        kanaalmarges = strategy.get("kanaalmarges", {}) if isinstance(strategy, dict) else {}
-        if not isinstance(kanaalmarges, dict):
-            kanaalmarges = {}
-        st.markdown("<div class='section-title' style='font-size:1.2rem;'>Groothandelsoverzicht</div>", unsafe_allow_html=True)
-        if liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-            headers = ["Bier", "Verpakking", "Liters", "Inkoopprijs € / L", "Adviesprijs horeca € / L", "Onze winstmarge"]
-            row_widths = [1.35, 1.6, 0.8, 1.1, 1.2, 1.0]
-        elif liters_basis == LITERS_BASIS_EEN_BIER:
-            headers = ["Verpakking", "Liters", "Inkoopprijs € / L", "Adviesprijs zakelijk € / L", "Adviesprijs retail € / L", "Adviesprijs horeca € / L", "Adviesprijs slijterij € / L", "Onze winstmarge"]
-            row_widths = [1.6, 0.8, 1.1, 1.15, 1.15, 1.15, 1.15, 1.0]
-        else:
-            headers = ["Liters", "Inkoopprijs € / L", "Adviesprijs zakelijk € / L", "Adviesprijs retail € / L", "Adviesprijs horeca € / L", "Adviesprijs slijterij € / L", "Onze winstmarge"]
-            row_widths = [0.8, 1.15, 1.15, 1.15, 1.15, 1.15, 1.0]
-        render_table_headers(headers, row_widths)
-        for row in rows:
-            liters = float(row.get("liters", 0.0) or 0.0)
-            kostprijs_per_liter = (float(row.get("kosten", 0.0) or 0.0) / liters) if liters > 0 else 0.0
-            adviesprijzen = _effective_channel_prices_for_cost(
-                jaar,
-                kostprijs_per_liter,
-                bier_key=str(row.get("bier_key", "") or bier_key),
-                product_key=str(row.get("product_key", "") or ""),
-                verpakking=str(row.get("verpakking", "") or ""),
-            )
-            row_cols = st.columns(row_widths)
-            if liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
-                with row_cols[0]:
-                    render_read_only_table_cell(str(row.get("biernaam", "-") or "-"))
-                with row_cols[1]:
-                    render_read_only_table_cell(str(row.get("verpakking", "-") or "-"))
-                with row_cols[2]:
-                    render_read_only_table_cell(f"{liters:.2f}")
-                with row_cols[3]:
-                    render_read_only_table_cell(_format_euro(row.get("prijs_per_liter")))
-                with row_cols[4]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("horeca")))
-                with row_cols[5]:
-                    render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
-            elif liters_basis == LITERS_BASIS_EEN_BIER:
-                with row_cols[0]:
-                    render_read_only_table_cell(str(row.get("verpakking", "-") or "-"))
-                with row_cols[1]:
-                    render_read_only_table_cell(f"{liters:.2f}")
-                with row_cols[2]:
-                    render_read_only_table_cell(_format_euro(row.get("prijs_per_liter")))
-                with row_cols[3]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("zakelijk")))
-                with row_cols[4]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("retail")))
-                with row_cols[5]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("horeca")))
-                with row_cols[6]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("slijterij")))
-                with row_cols[7]:
-                    render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
+def _validate_step_v2(step: int) -> bool:
+    if step == 1:
+        klantnaam = str(_form_value("klantnaam", "") or "").strip()
+        if not klantnaam:
+            st.error("Vul minimaal een klantnaam in.")
+            return False
+    if step == 2:
+        jaar = int(_form_value("jaar", 0) or 0)
+        if jaar <= 0:
+            st.error("Kies een geldig verkoopjaar.")
+            return False
+        if not _has_strategy_for_year(jaar):
+            st.error("Er is nog geen verkoopstrategie beschikbaar voor dit jaar of een eerder bronjaar.")
+            return False
+    if step == 3:
+        voorstel_type = str(_form_value("type", VOORSTELTYPE_LITERS))
+        if voorstel_type == VOORSTELTYPE_LITERS:
+            liters_basis = str(_form_value("liters_basis", LITERS_BASIS_EEN_BIER) or LITERS_BASIS_EEN_BIER)
+            if liters_basis == LITERS_BASIS_EEN_BIER:
+                bier_key = str(_form_value("bier_key", "") or "")
+                if not bier_key:
+                    st.error("Selecteer eerst een bier.")
+                    return False
+                if not any(str(row.get("product_key", "") or "").strip() and float(row.get("liters", 0.0) or 0.0) > 0 for row in _current_staffels()):
+                    st.error("Kies minimaal één verpakking en vul liters in.")
+                    return False
+            elif liters_basis == LITERS_BASIS_MEERDERE_BIEREN:
+                if not any(str(row.get("bier_key", "") or "").strip() and str(row.get("product_key", "") or "").strip() and float(row.get("liters", 0.0) or 0.0) > 0 for row in _current_beer_rows()):
+                    st.error("Voeg minimaal één bierregel met verpakking en liters toe.")
+                    return False
             else:
-                with row_cols[0]:
-                    render_read_only_table_cell(f"{liters:.2f}")
-                with row_cols[1]:
-                    render_read_only_table_cell(_format_euro(row.get("prijs_per_liter")))
-                with row_cols[2]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("zakelijk")))
-                with row_cols[3]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("retail")))
-                with row_cols[4]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("horeca")))
-                with row_cols[5]:
-                    render_read_only_table_cell(_format_euro(adviesprijzen.get("slijterij")))
-                with row_cols[6]:
-                    render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
-        st.write("")
-        if liters_basis == LITERS_BASIS_ALGEMEEN:
-            hoogste_kostprijs, bronjaar, bronbier = _highest_cost_overall(jaar)
-            bron_strategy_label = _effective_strategy_source_label(jaar)
+                if not any(float(row.get("liters", 0.0) or 0.0) > 0 for row in _current_staffels()):
+                    st.error("Vul minimaal één staffel met liters in.")
+                    return False
         else:
-            hoogste_kostprijs, bronjaar = _highest_cost_for_bier(jaar, bier_key)
-            bronbier = str(basisgegevens.get("biernaam", "") or "-")
-            first_row = rows[0] if rows else {}
-            bron_strategy_label = _effective_strategy_source_label(
-                jaar,
-                bier_key=str(first_row.get("bier_key", "") or bier_key),
-                product_key=str(first_row.get("product_key", "") or ""),
-                verpakking=str(first_row.get("verpakking", "") or ""),
-            )
-        info_cols = st.columns(3)
-        with info_cols[0]:
-            render_read_only_table_cell(_format_euro(hoogste_kostprijs))
-            st.caption(f"Hoogste bekende kostprijs per liter ({bronjaar or '-'})")
-        with info_cols[1]:
-            render_read_only_table_cell(str(bronbier or "-"))
-            st.caption("Bronbier")
-        with info_cols[2]:
-            render_read_only_table_cell(bron_strategy_label)
-            st.caption("Bron strategie")
-        return
-
-    rows = _product_results()
-    products = {row["product_key"]: row for row in _build_product_rows_for_bier(jaar, bier_key)}
-    st.markdown("<div class='section-title' style='font-size:1.2rem;'>Groothandelsoverzicht</div>", unsafe_allow_html=True)
-    headers = [
-        "Product",
-        "Aantal",
-        "Kostprijs € / stuk",
-        "Adviesprijs zakelijk €",
-        "Adviesprijs retail €",
-        "Adviesprijs horeca €",
-        "Adviesprijs slijterij €",
-        "Onze winstmarge",
-    ]
-    row_widths = [1.6, 0.7, 1.05, 1.0, 1.0, 1.0, 1.0, 0.9]
-    render_table_headers(headers, row_widths)
-    for row in rows:
-        product = next(
-            (
-                product_row
-                for product_row in _current_product_rows()
-                if str(product_row.get("id", "") or "") == str(row.get("id", "") or "")
-            ),
-            {},
-        )
-        product_pricing = products.get(str(product.get("product_key", "") or ""), {})
-        row_cols = st.columns(row_widths)
-        with row_cols[0]:
-            render_read_only_table_cell(str(row.get("verpakking", "-") or "-"))
-        with row_cols[1]:
-            render_read_only_table_cell(f"{float(row.get('aantal', 0.0) or 0.0):.2f}")
-        with row_cols[2]:
-            render_read_only_table_cell(_format_euro(row.get("kostprijs")))
-        with row_cols[3]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("zakelijk")))
-        with row_cols[4]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("retail")))
-        with row_cols[5]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("horeca")))
-        with row_cols[6]:
-            render_read_only_table_cell(_format_euro(product_pricing.get("slijterij")))
-        with row_cols[7]:
-            render_read_only_table_cell(_format_percentage(row.get("marge_pct")))
+            if not _selected_product_bier_keys():
+                st.error("Selecteer minimaal één bier.")
+                return False
+            if not any(str(row.get("bier_key", "") or "").strip() and str(row.get("product_key", "") or "").strip() and float(row.get("aantal", 0.0) or 0.0) > 0 for row in _current_product_rows()):
+                st.error("Vul minimaal één productregel met bier, product en aantal in.")
+                return False
+    return True
 
 
 def _render_navigation(on_back: Callable[[], None]) -> None:
@@ -2563,3 +1721,29 @@ def show_prijsvoorstel_page(
             st.write("")
             _render_navigation(on_back)
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_step_3() -> None:
+    from .step_3_berekening import render_step_3
+
+    render_step_3()
+
+
+def _render_step_4_v2() -> None:
+    from .step_4_adviesprijzen import render_step_4
+
+    render_step_4()
+
+
+def _render_step_5() -> None:
+    from .step_5_afronden import render_step_5
+
+    render_step_5()
+
+
+
+
+
+
+
+

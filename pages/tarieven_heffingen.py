@@ -365,7 +365,7 @@ def show_tarieven_heffingen_page(
     _render_feedback()
 
     st.markdown(
-        "<div class='section-text'>Deze waarden kunnen later gebruikt worden in Nieuwe berekening om accijnzen per liter op basis van jaar te bepalen.</div>",
+        "<div class='section-text'>Deze waarden kunnen later gebruikt worden in Nieuwe kostprijsberekening om accijnzen per liter op basis van jaar te bepalen.</div>",
         unsafe_allow_html=True,
     )
 
@@ -376,7 +376,6 @@ def show_tarieven_heffingen_page(
         if st.button("Regel toevoegen", key="th_add_row"):
             _add_empty_row()
             st.rerun()
-
     st.write("")
     back_col, save_close_col, _ = st.columns([1, 1.2, 2.8])
     with back_col:
@@ -390,3 +389,10 @@ def show_tarieven_heffingen_page(
                 on_back()
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+
+
+
+
+

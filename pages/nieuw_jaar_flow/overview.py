@@ -18,3 +18,4 @@ def render_component_overview(plan: dict) -> None:
             render_read_only_table_cell("Bekend" if item["target_exists"] else "Ontbreekt")
         with cols[3]:
             render_read_only_table_cell("Dupliceren" if item["copy"] else "Later handmatig")
+

@@ -78,3 +78,11 @@ def render_wizard(on_back) -> None:
             render_step_5(state, plan)
 
     _render_navigation(on_back)
+
+
+
+
+
+
+
+

@@ -24,6 +24,7 @@ def show_prijsvoorstel_page(
     if str(st.session_state.get(VIEW_MODE_KEY, "overview") or "overview") == "overview":
         render_prijsvoorstel_overview(on_back)
     else:
-        render_prijsvoorstel_wizard(on_back)
+        render_prijsvoorstel_wizard(on_back, "Prijsvoorstel maken", "")
 
     close_main_card()
+

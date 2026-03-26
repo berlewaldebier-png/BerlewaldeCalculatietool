@@ -52,3 +52,18 @@ def render_read_only_table_cell(value: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def format_currency_cell_value(value: float | int | None) -> str:
+    """Formatteert een bedrag voor gebruik in standaard tabelcellen."""
+    try:
+        amount = float(value or 0.0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    formatted = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return "\u20ac " + formatted
+
+
+def render_currency_table_cell(value: float | int | None) -> None:
+    """Render een consistente tabelcel voor bedragen."""
+    render_read_only_table_cell(format_currency_cell_value(value))

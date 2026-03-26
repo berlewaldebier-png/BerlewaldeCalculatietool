@@ -9,15 +9,15 @@ from components.page_ui import close_main_card, open_main_card, render_page_head
 from utils.storage import ensure_berekeningen_storage, ensure_bieren_storage
 
 from .overview import render_overview
-from .state import init_page_state, render_feedback
+from .state import get_active_berekening, init_page_state, render_feedback
 from .wizard import render_wizard
 
 
-def show_nieuwe_berekening_page(
+def show_nieuwe_kostprijsberekening_page(
     on_back: Callable[[], None],
     on_logout: Callable[[], None],
 ) -> None:
-    """Toont de pagina Nieuwe berekening via de opgesplitste module-architectuur."""
+    """Toont de pagina Nieuwe kostprijsberekening via de opgesplitste module-architectuur."""
     del on_logout
 
     ensure_bieren_storage()
@@ -25,11 +25,11 @@ def show_nieuwe_berekening_page(
     init_page_state()
 
     open_main_card()
-    render_breadcrumb(current_label="Nieuwe berekening", on_home_click=on_back)
+    render_breadcrumb(current_label="Nieuwe kostprijsberekening", on_home_click=on_back)
 
     if st.session_state.get("nieuwe_berekening_view_mode") != "wizard":
         render_page_header(
-            "Nieuwe berekening",
+            "Nieuwe kostprijsberekening",
             "Maak en beheer hier kostprijsberekeningen op basis van de integrale kostprijsmethodiek.",
         )
         render_feedback()
@@ -37,7 +37,19 @@ def show_nieuwe_berekening_page(
         close_main_card()
         return
 
-    render_page_header("Nieuwe berekening", "Wizard voor kostprijsberekeningen")
+    active_record = get_active_berekening()
+    basisgegevens = active_record.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
+    bronjaar = int(basisgegevens.get("jaar", 0) or 0)
+    is_existing = bool(str(active_record.get("id", "") or "").strip()) and bool(biernaam)
+    title = (
+        f"Aanpassen kostprijs {biernaam} {bronjaar}"
+        if is_existing
+        else "Nieuwe kostprijsberekening"
+    )
     render_feedback()
-    render_wizard()
+    render_wizard(title, "")
     close_main_card()
+

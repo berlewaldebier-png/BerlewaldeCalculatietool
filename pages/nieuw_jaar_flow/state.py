@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+
+from components.table_ui import format_currency_cell_value
 from uuid import uuid4
 
 import streamlit as st
@@ -43,9 +45,7 @@ FEEDBACK_KEY = "nieuw_jaar_feedback"
 
 
 def format_euro(amount: float | int | None) -> str:
-    value = float(amount or 0.0)
-    formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"EUR {formatted}"
+    return format_currency_cell_value(amount)
 
 
 def _empty_productie_record(source_year: int | None = None) -> dict[str, float]:
@@ -357,3 +357,4 @@ def run_generation(state: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any
             result["open_actions"].append(f"Controleer conceptberekeningen voor {target_year}.")
 
     return result
+

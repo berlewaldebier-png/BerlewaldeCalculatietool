@@ -7,7 +7,8 @@ from components.page_ui import close_main_card, open_main_card, render_page_head
 from components.theme import apply_app_theme
 from pages.inkoop_facturen import show_inkoop_facturen_page
 from pages.nieuw_jaar_flow import show_nieuw_jaar_voorbereiden_page
-from pages.nieuwe_berekening import show_nieuwe_berekening_page
+from pages.nieuwe_berekening import show_nieuwe_kostprijsberekening_page
+from pages.recept_hercalculatie import show_recept_hercalculatie_page
 from pages.prijsvoorstel_flow import show_prijsvoorstel_page
 from pages.producten_verpakking import show_producten_verpakking_page
 from pages.productie import show_productie_page
@@ -20,7 +21,8 @@ from utils.storage import get_concept_berekeningen, get_concept_prijsvoorstellen
 PAGE_HOME = "home"
 PAGE_PRODUCTIE = "productie"
 PAGE_VASTE_KOSTEN = "vaste_kosten"
-PAGE_NIEUWE_BEREKENING = "nieuwe_berekening"
+PAGE_NIEUWE_KOSTPRIJSBEREKENING = "nieuwe_kostprijsberekening"
+PAGE_RECEPT_HERCALCULATIE = "recept_hercalculatie"
 PAGE_INKOOP_FACTUREN = "inkoop_facturen"
 PAGE_VERKOOPSTRATEGIE = "verkoopstrategie"
 PAGE_NIEUW_JAAR_VOORBEREIDEN = "nieuw_jaar_voorbereiden"
@@ -256,7 +258,7 @@ def show_home() -> None:
     calc_cols = st.columns(3, gap="large")
     with calc_cols[0]:
         if render_home_card(
-            "🧮 Nieuwe berekening",
+            "🧮 Nieuwe kostprijsberekening",
             "Bereken kostprijzen voor eigen productie of inkoop en werk concepten verder uit.",
             "home_nieuwe_berekening",
         ):
@@ -264,9 +266,8 @@ def show_home() -> None:
             st.session_state.pop("nieuwe_berekening_selected_bier_id", None)
             st.session_state.pop("nieuwe_berekening_loaded_key", None)
             st.session_state["nieuwe_berekening_view_mode"] = "overview"
-            st.session_state["nieuwe_berekening_mode"] = "new"
             st.session_state["nieuwe_berekening_step"] = 1
-            set_page(PAGE_NIEUWE_BEREKENING)
+            set_page(PAGE_NIEUWE_KOSTPRIJSBEREKENING)
     with calc_cols[1]:
         if render_home_card(
             "🧾 Inkoopfacturen",
@@ -281,6 +282,18 @@ def show_home() -> None:
             "home_nieuw_jaar_voorbereiden",
         ):
             set_page(PAGE_NIEUW_JAAR_VOORBEREIDEN)
+    calc_cols_2 = st.columns(3, gap="large")
+    with calc_cols_2[0]:
+        if render_home_card(
+            "Recept hercalculeren",
+            "Open de berekenflow om een bestaand recept of bier opnieuw door te rekenen.",
+            "home_recept_hercalculeren",
+        ):
+            set_page(PAGE_RECEPT_HERCALCULATIE)
+    with calc_cols_2[1]:
+        st.write("")
+    with calc_cols_2[2]:
+        st.write("")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='home-section-divider'></div>", unsafe_allow_html=True)
@@ -322,9 +335,18 @@ def show_vaste_kosten() -> None:
     show_vaste_kosten_page(on_back=lambda: set_page(PAGE_HOME), on_logout=logout)
 
 
-def show_nieuwe_berekening() -> None:
-    """Toont de pagina voor Nieuwe berekening."""
-    show_nieuwe_berekening_page(on_back=lambda: set_page(PAGE_HOME), on_logout=logout)
+def show_nieuwe_kostprijsberekening() -> None:
+    """Toont de pagina voor Nieuwe kostprijsberekening."""
+    show_nieuwe_kostprijsberekening_page(on_back=lambda: set_page(PAGE_HOME), on_logout=logout)
+
+
+def show_recept_hercalculatie() -> None:
+    """Toont de pagina voor Recept hercalculeren."""
+    show_recept_hercalculatie_page(
+        on_back=lambda: set_page(PAGE_HOME),
+        on_open_kostprijsberekening=lambda: set_page(PAGE_NIEUWE_KOSTPRIJSBEREKENING),
+        on_logout=logout,
+    )
 
 
 def show_producten_verpakking() -> None:
@@ -365,7 +387,8 @@ def route_page() -> None:
         PAGE_HOME: show_home,
         PAGE_PRODUCTIE: show_productie,
         PAGE_VASTE_KOSTEN: show_vaste_kosten,
-        PAGE_NIEUWE_BEREKENING: show_nieuwe_berekening,
+        PAGE_NIEUWE_KOSTPRIJSBEREKENING: show_nieuwe_kostprijsberekening,
+        PAGE_RECEPT_HERCALCULATIE: show_recept_hercalculatie,
         PAGE_INKOOP_FACTUREN: show_inkoop_facturen,
         PAGE_TARIEVEN_HEFFINGEN: show_tarieven_heffingen,
         PAGE_PRODUCTEN_VERPAKKING: show_producten_verpakking,

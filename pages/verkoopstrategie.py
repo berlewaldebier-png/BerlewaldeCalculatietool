@@ -12,7 +12,12 @@ from components.action_buttons import (
 from components.breadcrumb import render_breadcrumb
 from components.page_ui import close_main_card, open_main_card
 from components.page_ui import render_page_header
-from components.table_ui import render_read_only_table_cell, render_table_headers
+from components.table_ui import (
+    format_currency_cell_value,
+    render_currency_table_cell,
+    render_read_only_table_cell,
+    render_table_headers,
+)
 from pages.nieuwe_berekening.state import build_step_4_product_tables
 from utils.storage import (
     VERKOOPSTRATEGIE_CATEGORIEN,
@@ -47,12 +52,7 @@ def _format_percentage(value: float | int | None) -> str:
 
 
 def _format_euro(value: float | int | None) -> str:
-    try:
-        amount = float(value or 0.0)
-    except (TypeError, ValueError):
-        amount = 0.0
-    formatted = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return formatted
+    return format_currency_cell_value(value)
 
 
 def _calculate_price_from_margin(
@@ -593,9 +593,9 @@ def _render_bieren_tab(year: int) -> None:
         with row_cols[3]:
             render_read_only_table_cell(str(int(row.get("bron_jaar", 0) or 0) or "-"))
         with row_cols[4]:
-            render_read_only_table_cell(_format_euro(row.get("kostprijs")))
+            render_currency_table_cell(row.get("kostprijs"))
         with row_cols[5]:
-            render_read_only_table_cell(_format_euro(row.get("kostprijs_per_liter")))
+            render_currency_table_cell(row.get("kostprijs_per_liter"))
         if edit_override_key == current_edit_key:
             for index, categorie in enumerate(["zakelijk", "retail", "horeca", "slijterij"], start=6):
                 with row_cols[index]:
@@ -662,7 +662,6 @@ def render_verkoopstrategie_content(on_back: Callable[[], None]) -> None:
         _render_marges_tab(selected_year)
     with overzicht_tab:
         _render_bieren_tab(selected_year)
-
     back_col, _ = st.columns([1.2, 4.8])
     with back_col:
         if st.button("Terug naar welkom", key="verkoopstrategie_back"):
@@ -688,3 +687,10 @@ def show_verkoopprijzen_page(
     on_logout: Callable[[], None],
 ) -> None:
     show_verkoopstrategie_page(on_back=on_back, on_logout=on_logout)
+
+
+
+
+
+
+

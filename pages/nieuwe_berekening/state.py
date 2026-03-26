@@ -6,8 +6,10 @@ from uuid import uuid4
 
 import streamlit as st
 
+from components.table_ui import format_currency_cell_value
 from utils.storage import (
     add_bier,
+    create_recalculatie_from_berekening,
     bereken_basisproduct_kostprijs,
     bereken_directe_vaste_kosten_per_liter,
     bereken_samengesteld_product_kostprijs,
@@ -34,6 +36,11 @@ TARIEF_ACCIJNS_OPTIONS = ["Hoog", "Laag"]
 BTW_TARIEF_OPTIONS = ["9%", "21%"]
 INGREDIENT_OPTIONS = ["Mout", "Gist", "Hop", "Kruiden", "Overig"]
 EENHEID_OPTIONS = ["KG", "L", "CL", "MM", "GR", "ST"]
+HERCALCULATIE_REDENEN = [
+    "Prijswijziging",
+    "Receptafwijking",
+    "Prijs en receptafwijking",
+]
 
 
 def format_euro_per_liter(value: float | int | None) -> str:
@@ -44,8 +51,7 @@ def format_euro_per_liter(value: float | int | None) -> str:
         amount = float(value)
     except (TypeError, ValueError):
         return "Nog niet berekend"
-    formatted = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"EUR {formatted} per L"
+    return f"{format_currency_cell_value(amount)} per L"
 
 
 def format_number(value: float | int | None, decimals: int = 2) -> str:
@@ -461,7 +467,7 @@ def build_step_4_product_tables(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def init_page_state() -> None:
-    """Initialiseert de basis-state voor Nieuwe berekening."""
+    """Initialiseert de basis-state voor Nieuwe kostprijsberekening."""
     defaults = {
         "nieuwe_berekening_view_mode": "overview",
         "nieuwe_berekening_step": 1,
@@ -490,6 +496,40 @@ def get_active_berekening() -> dict[str, Any]:
         record = create_empty_berekening()
         st.session_state["active_berekening"] = record
     return deepcopy(record)
+
+
+def is_recalculatie_record(record: dict[str, Any] | None = None) -> bool:
+    """Geeft terug of de actieve berekening een hercalculatie is."""
+    source_record = record if isinstance(record, dict) else get_active_berekening()
+    return str(source_record.get("calculation_variant", "origineel") or "origineel") == "hercalculatie"
+
+
+def get_hercalculatie_basis_rows(record: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Geeft de vastgelegde initiële ingredientregels van een hercalculatie terug."""
+    source_record = record if isinstance(record, dict) else get_active_berekening()
+    hercalculatie_basis = source_record.get("hercalculatie_basis", {})
+    if not isinstance(hercalculatie_basis, dict):
+        return []
+    rows = hercalculatie_basis.get("ingredienten_regels", [])
+    if not isinstance(rows, list):
+        return []
+    return [normalize_ingredient_row(row) for row in rows if isinstance(row, dict)]
+
+
+def has_linked_facturen(record: dict[str, Any] | None = None) -> bool:
+    """Geeft terug of een inkoopberekening gekoppelde facturen heeft."""
+    source_record = record if isinstance(record, dict) else get_active_berekening()
+    calculation_type = str(
+        source_record.get("soort_berekening", {}).get("type", "Eigen productie")
+        or "Eigen productie"
+    )
+    return calculation_type == "Inkoop" and len(get_record_inkoop_facturen(source_record)) > 0
+
+
+def get_total_steps_for_record(record: dict[str, Any] | None = None) -> int:
+    """Geeft het actuele aantal wizardstappen terug voor een berekening."""
+    source_record = record if isinstance(record, dict) else get_active_berekening()
+    return 5 if has_linked_facturen(source_record) or is_recalculatie_record(source_record) else TOTAL_STEPS
 
 
 def set_active_berekening(record: dict[str, Any]) -> None:
@@ -1320,8 +1360,10 @@ def load_record_into_editor(record: dict[str, Any], *, step: int | None = None) 
     """Opent een berekening in de wizard."""
     set_active_berekening(record)
     st.session_state["nieuwe_berekening_view_mode"] = "wizard"
-    st.session_state["nieuwe_berekening_step"] = step or int(
-        record.get("last_completed_step", 1) or 1
+    requested_step = step or int(record.get("last_completed_step", 1) or 1)
+    st.session_state["nieuwe_berekening_step"] = min(
+        requested_step,
+        get_total_steps_for_record(record),
     )
     load_record_into_widget_state(record)
 
@@ -1437,6 +1479,10 @@ def sync_active_berekening_from_widgets() -> dict[str, Any]:
         ingredienten["notities"] = str(
             st.session_state.get("nb_input_ingredienten_notities", "") or ""
         )
+    if "nb_hercalculatie_reden" in st.session_state:
+        record["hercalculatie_reden"] = str(
+            st.session_state.get("nb_hercalculatie_reden", "") or ""
+        )
     if "nb_input_inkoop_notities" in st.session_state:
         inkoop["notities"] = str(st.session_state.get("nb_input_inkoop_notities", "") or "")
 
@@ -1550,7 +1596,7 @@ def finalize_active_berekening() -> bool:
         "btw_tarief": str(basisgegevens.get("btw_tarief", "21%") or "21%"),
     }
     record["resultaat_snapshot"] = build_resultaat_snapshot(record)
-    record["last_completed_step"] = TOTAL_STEPS
+    record["last_completed_step"] = get_total_steps_for_record(record)
 
     finalized = finalize_berekening(record)
     if not finalized:
@@ -1567,6 +1613,19 @@ def finalize_active_berekening() -> bool:
 def start_new_berekening() -> None:
     """Start een nieuwe berekening."""
     load_record_into_editor(create_empty_berekening(), step=1)
+
+
+def start_recalculatie_berekening(berekening_id: str) -> None:
+    """Start een hercalculatie op basis van een bestaande definitieve berekening."""
+    record = get_berekening_by_id(berekening_id)
+    if not record:
+        st.warning("De geselecteerde berekening is niet gevonden.")
+        return
+    recalculatie = create_recalculatie_from_berekening(
+        record,
+        reason="Hercalculatie",
+    )
+    load_record_into_editor(recalculatie, step=1)
 
 
 def start_edit_berekening(berekening_id: str) -> None:
@@ -1695,3 +1754,4 @@ def delete_inkoop_row(record: dict[str, Any], row_id: str) -> None:
     if st.session_state.get("nb_inkoop_edit_row_id") == row_id:
         st.session_state["nb_inkoop_edit_row_id"] = None
     st.session_state["nb_inkoop_delete_confirm_row_id"] = None
+
