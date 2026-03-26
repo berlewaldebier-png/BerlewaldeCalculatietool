@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
@@ -101,7 +101,7 @@ def calculate_accijns_for_product(
     alcoholpercentage: float | int | None,
     belastingsoort: str,
 ) -> float:
-    """Berekent accijns voor één product via de vereenvoudigde formule."""
+    """Berekent accijns voor Ã©Ã©n product via de vereenvoudigde formule."""
     if str(belastingsoort or "").strip().lower() != "accijns":
         return 0.0
 
@@ -187,7 +187,7 @@ def _build_product_cost_row(
     directe_vaste_kosten_per_liter: float | None,
     accijns: float,
 ) -> dict[str, Any]:
-    """Bouwt één read-only productregel voor stap 4."""
+    """Bouwt Ã©Ã©n read-only productregel voor stap 4."""
     variabele_kosten = max(float(variabele_kosten_per_liter or 0.0), 0.0) * max(
         float(liters_per_product or 0.0),
         0.0,
@@ -470,6 +470,7 @@ def init_page_state() -> None:
     """Initialiseert de basis-state voor Nieuwe kostprijsberekening."""
     defaults = {
         "nieuwe_berekening_view_mode": "overview",
+        "nieuwe_berekening_allow_empty_wizard": False,
         "nieuwe_berekening_step": 1,
         "nieuwe_berekening_overview_year": "Alles",
         "nieuwe_berekening_feedback": None,
@@ -505,7 +506,7 @@ def is_recalculatie_record(record: dict[str, Any] | None = None) -> bool:
 
 
 def get_hercalculatie_basis_rows(record: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Geeft de vastgelegde initiële ingredientregels van een hercalculatie terug."""
+    """Geeft de vastgelegde initiÃ«le ingredientregels van een hercalculatie terug."""
     source_record = record if isinstance(record, dict) else get_active_berekening()
     hercalculatie_basis = source_record.get("hercalculatie_basis", {})
     if not isinstance(hercalculatie_basis, dict):
@@ -523,7 +524,24 @@ def has_linked_facturen(record: dict[str, Any] | None = None) -> bool:
         source_record.get("soort_berekening", {}).get("type", "Eigen productie")
         or "Eigen productie"
     )
-    return calculation_type == "Inkoop" and len(get_record_inkoop_facturen(source_record)) > 0
+    if calculation_type != "Inkoop":
+        return False
+
+    for factuur in get_record_inkoop_facturen(source_record):
+        if not isinstance(factuur, dict):
+            continue
+        factuurregels = factuur.get("factuurregels", [])
+        if not isinstance(factuurregels, list):
+            factuurregels = []
+        if (
+            str(factuur.get("factuurnummer", "") or "").strip()
+            or str(factuur.get("factuurdatum", "") or "").strip()
+            or float(factuur.get("verzendkosten", 0.0) or 0.0) != 0.0
+            or float(factuur.get("overige_kosten", 0.0) or 0.0) != 0.0
+            or len(factuurregels) > 0
+        ):
+            return True
+    return False
 
 
 def get_total_steps_for_record(record: dict[str, Any] | None = None) -> int:
@@ -550,7 +568,7 @@ def render_feedback() -> None:
 
 
 def normalize_ingredient_row(row: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Normaliseert één ingrediëntregel voor opslag en rendering."""
+    """Normaliseert Ã©Ã©n ingrediÃ«ntregel voor opslag en rendering."""
     source = row if isinstance(row, dict) else {}
 
     def _float_value(key: str) -> float:
@@ -561,9 +579,21 @@ def normalize_ingredient_row(row: dict[str, Any] | None = None) -> dict[str, Any
 
     return {
         "id": str(source.get("id", "") or uuid4()),
-        "ingrediënt": str(source.get("ingrediënt", "") or ""),
+        "ingrediÃ«nt": str(
+            source.get("ingrediÃ«nt", "")
+            or source.get("ingrediënt", "")
+            or source.get("ingrediÃƒÂ«nt", "")
+            or source.get("ingredient", "")
+            or ""
+        ),
+        "ingrediënt": str(
+            source.get("ingrediënt", "")
+            or source.get("ingrediÃ«nt", "")
+            or source.get("ingrediÃƒÂ«nt", "")
+            or source.get("ingredient", "")
+            or ""
+        ),
         "omschrijving": str(source.get("omschrijving", "") or ""),
-        "leverancier": str(source.get("leverancier", "") or ""),
         "hoeveelheid": _float_value("hoeveelheid"),
         "eenheid": str(source.get("eenheid", "") or ""),
         "prijs": _float_value("prijs"),
@@ -572,7 +602,7 @@ def normalize_ingredient_row(row: dict[str, Any] | None = None) -> dict[str, Any
 
 
 def normalize_inkoop_row(row: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Normaliseert één inkoopregel voor opslag en rendering."""
+    """Normaliseert Ã©Ã©n inkoopregel voor opslag en rendering."""
     source = row if isinstance(row, dict) else {}
 
     def _float_value(key: str) -> float:
@@ -593,7 +623,7 @@ def normalize_inkoop_row(row: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def normalize_inkoop_factuur(factuur: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Normaliseert één inkoopfactuur voor opslag en berekening."""
+    """Normaliseert Ã©Ã©n inkoopfactuur voor opslag en berekening."""
     source = factuur if isinstance(factuur, dict) else {}
     raw_rows = source.get("factuurregels", [])
     if not isinstance(raw_rows, list):
@@ -736,7 +766,7 @@ def calculate_inkoop_row_liters(row: dict[str, Any]) -> float:
 
 
 def calculate_prijs_per_eenheid(row: dict[str, Any]) -> float:
-    """Berekent de prijs per eenheid voor een ingrediëntregel."""
+    """Berekent de prijs per eenheid voor een ingrediÃ«ntregel."""
     hoeveelheid = float(row.get("hoeveelheid", 0.0) or 0.0)
     prijs = float(row.get("prijs", 0.0) or 0.0)
     if hoeveelheid <= 0:
@@ -745,7 +775,7 @@ def calculate_prijs_per_eenheid(row: dict[str, Any]) -> float:
 
 
 def calculate_kosten_recept(row: dict[str, Any]) -> float:
-    """Berekent de receptkosten voor een ingrediëntregel."""
+    """Berekent de receptkosten voor een ingrediÃ«ntregel."""
     benodigd = float(row.get("benodigd_in_recept", 0.0) or 0.0)
     if benodigd <= 0:
         return 0.0
@@ -796,16 +826,15 @@ def calculate_inkoop_prijs_per_liter(
 
 
 def get_ingredient_key(row_id: str, field: str) -> str:
-    """Bouwt een stabiele widgetkey voor een ingrediëntveld."""
+    """Bouwt een stabiele widgetkey voor een ingrediÃ«ntveld."""
     return f"nb_ingredient_{field}_{row_id}"
 
 
 def ingredient_widget_keys(row_id: str) -> list[str]:
-    """Geeft alle widgetkeys terug voor één ingrediëntregel."""
+    """Geeft alle widgetkeys terug voor Ã©Ã©n ingrediÃ«ntregel."""
     return [
         get_ingredient_key(row_id, "ingredient"),
         get_ingredient_key(row_id, "omschrijving"),
-        get_ingredient_key(row_id, "leverancier"),
         get_ingredient_key(row_id, "hoeveelheid"),
         get_ingredient_key(row_id, "eenheid"),
         get_ingredient_key(row_id, "prijs"),
@@ -819,7 +848,7 @@ def get_inkoop_key(row_id: str, field: str) -> str:
 
 
 def inkoop_widget_keys(row_id: str) -> list[str]:
-    """Geeft alle widgetkeys terug voor één inkoopregel."""
+    """Geeft alle widgetkeys terug voor Ã©Ã©n inkoopregel."""
     return [
         get_inkoop_key(row_id, "aantal"),
         get_inkoop_key(row_id, "eenheid"),
@@ -832,13 +861,12 @@ def hydrate_ingredient_row_widgets(
     *,
     overwrite: bool = False,
 ) -> None:
-    """Vult widgetstate voor een ingrediëntregel vanuit de actieve berekening."""
+    """Vult widgetstate voor een ingrediÃ«ntregel vanuit de actieve berekening."""
     normalized = normalize_ingredient_row(row)
     row_id = normalized["id"]
     widget_values = {
-        get_ingredient_key(row_id, "ingredient"): normalized["ingrediënt"],
+        get_ingredient_key(row_id, "ingredient"): normalized["ingrediÃ«nt"],
         get_ingredient_key(row_id, "omschrijving"): normalized["omschrijving"],
-        get_ingredient_key(row_id, "leverancier"): normalized["leverancier"],
         get_ingredient_key(row_id, "hoeveelheid"): float(normalized["hoeveelheid"]),
         get_ingredient_key(row_id, "eenheid"): normalized["eenheid"],
         get_ingredient_key(row_id, "prijs"): float(normalized["prijs"]),
@@ -870,13 +898,12 @@ def hydrate_inkoop_row_widgets(
 
 
 def collect_ingredient_row_from_widgets(row_id: str) -> dict[str, Any]:
-    """Leest een ingrediëntregel terug uit de widgetstate."""
+    """Leest een ingrediÃ«ntregel terug uit de widgetstate."""
     return normalize_ingredient_row(
         {
             "id": row_id,
-            "ingrediënt": st.session_state.get(get_ingredient_key(row_id, "ingredient"), ""),
+            "ingrediÃ«nt": st.session_state.get(get_ingredient_key(row_id, "ingredient"), ""),
             "omschrijving": st.session_state.get(get_ingredient_key(row_id, "omschrijving"), ""),
-            "leverancier": st.session_state.get(get_ingredient_key(row_id, "leverancier"), ""),
             "hoeveelheid": st.session_state.get(get_ingredient_key(row_id, "hoeveelheid"), 0.0),
             "eenheid": st.session_state.get(get_ingredient_key(row_id, "eenheid"), ""),
             "prijs": st.session_state.get(get_ingredient_key(row_id, "prijs"), 0.0),
@@ -907,7 +934,7 @@ def merge_ingredient_row_into_record_rows(
     record_rows: list[dict[str, Any]],
     row: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Voegt een ingrediëntregel toe aan de recordlijst of werkt hem bij."""
+    """Voegt een ingrediÃ«ntregel toe aan de recordlijst of werkt hem bij."""
     normalized_row = normalize_ingredient_row(row)
     row_id = normalized_row["id"]
     updated_rows: list[dict[str, Any]] = []
@@ -952,7 +979,7 @@ def merge_inkoop_row_into_record_rows(
 
 
 def get_record_ingredient_rows(record: dict[str, Any]) -> list[dict[str, Any]]:
-    """Haalt ingrediëntregels veilig uit een berekening."""
+    """Haalt ingrediÃ«ntregels veilig uit een berekening."""
     invoer = record.get("invoer", {})
     if not isinstance(invoer, dict):
         return []
@@ -977,7 +1004,7 @@ def get_record_inkoop_rows(record: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def set_record_ingredient_rows(record: dict[str, Any], rows: list[dict[str, Any]]) -> None:
-    """Schrijft ingrediëntregels terug naar de berekening."""
+    """Schrijft ingrediÃ«ntregels terug naar de berekening."""
     invoer = record.get("invoer", {})
     if not isinstance(invoer, dict):
         invoer = {}
@@ -1048,7 +1075,7 @@ def sync_active_inkoop_state_from_widgets() -> dict[str, Any]:
 
 
 def get_step_3_rows_for_view(record: dict[str, Any]) -> list[dict[str, Any]]:
-    """Geeft de actuele ingrediëntregels terug inclusief een bewerkte rij."""
+    """Geeft de actuele ingrediÃ«ntregels terug inclusief een bewerkte rij."""
     record_rows = get_record_ingredient_rows(record)
     editing_row_id = str(st.session_state.get("nb_ingredient_edit_row_id", "") or "")
     if not editing_row_id:
@@ -1612,6 +1639,7 @@ def finalize_active_berekening() -> bool:
 
 def start_new_berekening() -> None:
     """Start een nieuwe berekening."""
+    st.session_state["nieuwe_berekening_allow_empty_wizard"] = True
     load_record_into_editor(create_empty_berekening(), step=1)
 
 
@@ -1625,6 +1653,7 @@ def start_recalculatie_berekening(berekening_id: str) -> None:
         record,
         reason="Hercalculatie",
     )
+    st.session_state["nieuwe_berekening_allow_empty_wizard"] = True
     load_record_into_editor(recalculatie, step=1)
 
 
@@ -1634,6 +1663,7 @@ def start_edit_berekening(berekening_id: str) -> None:
     if not record:
         st.warning("De geselecteerde berekening is niet gevonden.")
         return
+    st.session_state["nieuwe_berekening_allow_empty_wizard"] = True
     load_record_into_editor(record, step=int(record.get("last_completed_step", 1) or 1))
 
 
@@ -1641,12 +1671,13 @@ def return_to_overview(*, skip_sync: bool = False) -> None:
     """Gaat terug naar het overzicht."""
     if not skip_sync:
         sync_active_berekening_from_widgets()
+    st.session_state["nieuwe_berekening_allow_empty_wizard"] = False
     st.session_state["nieuwe_berekening_view_mode"] = "overview"
     st.session_state["nieuwe_berekening_step"] = 1
 
 
 def save_current_ingredient_row() -> None:
-    """Slaat de huidige bewerkte ingrediëntregel op in de actieve berekening."""
+    """Slaat de huidige bewerkte ingrediÃ«ntregel op in de actieve berekening."""
     record = get_active_berekening()
     row_id = str(st.session_state.get("nb_ingredient_edit_row_id", "") or "")
     if not row_id:
@@ -1683,7 +1714,7 @@ def save_current_inkoop_row() -> None:
 
 
 def start_edit_ingredient_row(record: dict[str, Any], row_id: str) -> None:
-    """Zet één ingrediëntregel in bewerkmodus."""
+    """Zet Ã©Ã©n ingrediÃ«ntregel in bewerkmodus."""
     for row in get_record_ingredient_rows(record):
         if row["id"] != row_id:
             continue
@@ -1694,7 +1725,7 @@ def start_edit_ingredient_row(record: dict[str, Any], row_id: str) -> None:
 
 
 def start_edit_inkoop_row(record: dict[str, Any], row_id: str) -> None:
-    """Zet één inkoopregel in bewerkmodus."""
+    """Zet Ã©Ã©n inkoopregel in bewerkmodus."""
     for row in get_record_inkoop_rows(record):
         if row["id"] != row_id:
             continue
@@ -1705,7 +1736,7 @@ def start_edit_inkoop_row(record: dict[str, Any], row_id: str) -> None:
 
 
 def add_new_ingredient_row(record: dict[str, Any]) -> None:
-    """Voegt een lege ingrediëntregel toe en opent die direct in bewerkmodus."""
+    """Voegt een lege ingrediÃ«ntregel toe en opent die direct in bewerkmodus."""
     new_row = normalize_ingredient_row()
     rows = get_record_ingredient_rows(record)
     rows.append(new_row)
@@ -1733,7 +1764,7 @@ def add_new_inkoop_row(record: dict[str, Any]) -> None:
 
 
 def delete_ingredient_row(record: dict[str, Any], row_id: str) -> None:
-    """Verwijdert één ingrediëntregel uit de actieve berekening."""
+    """Verwijdert Ã©Ã©n ingrediÃ«ntregel uit de actieve berekening."""
     rows = [row for row in get_record_ingredient_rows(record) if row["id"] != row_id]
     set_record_ingredient_rows(record, rows)
     set_active_berekening(record)
@@ -1744,7 +1775,7 @@ def delete_ingredient_row(record: dict[str, Any], row_id: str) -> None:
 
 
 def delete_inkoop_row(record: dict[str, Any], row_id: str) -> None:
-    """Verwijdert één inkoopregel uit de actieve berekening."""
+    """Verwijdert Ã©Ã©n inkoopregel uit de actieve berekening."""
     del record
     record = sync_active_inkoop_state_from_widgets()
     rows = [row for row in get_record_inkoop_rows(record) if row["id"] != row_id]
@@ -1754,4 +1785,5 @@ def delete_inkoop_row(record: dict[str, Any], row_id: str) -> None:
     if st.session_state.get("nb_inkoop_edit_row_id") == row_id:
         st.session_state["nb_inkoop_edit_row_id"] = None
     st.session_state["nb_inkoop_delete_confirm_row_id"] = None
+
 

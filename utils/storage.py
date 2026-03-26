@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from copy import deepcopy
@@ -43,7 +43,8 @@ def _load_json_value(file_path: Path, default_value: Any) -> Any:
     file_path = _ensure_json_file(file_path, default_content)
 
     try:
-        raw_content = file_path.read_text(encoding="utf-8").strip()
+        # Accept both regular UTF-8 and UTF-8 with BOM to prevent silent empty-state fallbacks.
+        raw_content = file_path.read_text(encoding="utf-8-sig").strip()
         if not raw_content:
             return default_value
 
@@ -178,7 +179,7 @@ def upsert_tarieven_heffingen_row(record: dict[str, Any]) -> bool:
 
 
 def delete_tarieven_heffingen_row(row_id: str) -> bool:
-    """Verwijdert één tarievenregel op basis van id."""
+    """Verwijdert Ã©Ã©n tarievenregel op basis van id."""
     records = load_tarieven_heffingen()
     filtered = [record for record in records if str(record.get("id", "")) != row_id]
 
@@ -316,7 +317,7 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
 
 
 def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, Any]:
-    """Normaliseert een ingrediëntregel voor opslag in berekeningen."""
+    """Normaliseert een ingrediÃ«ntregel voor opslag in berekeningen."""
     source = row if isinstance(row, dict) else {}
 
     def _float_value(key: str) -> float:
@@ -327,9 +328,21 @@ def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, An
 
     return {
         "id": str(source.get("id", "") or uuid4()),
-        "ingrediënt": str(source.get("ingrediënt", "") or source.get("ingredient", "") or ""),
+        "ingrediÃ«nt": str(
+            source.get("ingrediÃ«nt", "")
+            or source.get("ingrediënt", "")
+            or source.get("ingrediÃƒÂ«nt", "")
+            or source.get("ingredient", "")
+            or ""
+        ),
+        "ingrediënt": str(
+            source.get("ingrediënt", "")
+            or source.get("ingrediÃ«nt", "")
+            or source.get("ingrediÃƒÂ«nt", "")
+            or source.get("ingredient", "")
+            or ""
+        ),
         "omschrijving": str(source.get("omschrijving", "") or ""),
-        "leverancier": str(source.get("leverancier", "") or ""),
         "hoeveelheid": _float_value("hoeveelheid"),
         "eenheid": str(source.get("eenheid", "") or ""),
         "prijs": _float_value("prijs"),
@@ -746,7 +759,7 @@ def save_verpakkingsonderdelen(data: list[dict[str, Any]]) -> bool:
 
 
 def get_verpakkingsonderdelen_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft verpakkingsonderdelen terug voor één geselecteerd jaar."""
+    """Geeft verpakkingsonderdelen terug voor Ã©Ã©n geselecteerd jaar."""
     return load_verpakkingsonderdelen(year)
 
 
@@ -897,7 +910,7 @@ def delete_verpakkingsonderdeel(
     *,
     year: int | str | None = None,
 ) -> bool:
-    """Verwijdert een verpakkingsonderdeel op basis van id, optioneel binnen één jaar."""
+    """Verwijdert een verpakkingsonderdeel op basis van id, optioneel binnen Ã©Ã©n jaar."""
     onderdelen = load_verpakkingsonderdelen()
 
     if year is None:
@@ -2152,16 +2165,16 @@ def get_bier_usage_locations(
         label = "verkoopprijs" if len(verkoopprijzen) == 1 else "verkoopprijzen"
         locations.append(f"{len(verkoopprijzen)} {label}")
 
-    productstrategieën = [
+    productstrategieen = [
         record
         for record in _load_verkoopprijs_records()
         if isinstance(record, dict)
         and str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_PRODUCT
         and str(record.get("bier_key", "") or "").strip() == bier_key
     ]
-    if productstrategieën:
-        label = "productstrategie" if len(productstrategieën) == 1 else "productstrategieën"
-        locations.append(f"{len(productstrategieën)} {label}")
+    if productstrategieen:
+        label = "productstrategie" if len(productstrategieen) == 1 else "productstrategieën"
+        locations.append(f"{len(productstrategieen)} {label}")
 
     variabele_kosten_jaren = [
         year_key
@@ -2653,7 +2666,7 @@ def save_verkoopprijzen(data: list[dict[str, Any]]) -> bool:
 
 
 def load_verkoopstrategien() -> list[dict[str, Any]]:
-    """Laadt alle jaargebonden verkoopstrategieën veilig in."""
+    """Laadt alle jaargebonden verkoopstrategieÃ«n veilig in."""
     return [
         normalize_verkoopstrategie_record(record)
         for record in _load_verkoopprijs_records()
@@ -2663,7 +2676,7 @@ def load_verkoopstrategien() -> list[dict[str, Any]]:
 
 
 def get_verkoopstrategie_for_year(year: int | str) -> dict[str, Any] | None:
-    """Geeft de verkoopstrategie terug voor één jaar."""
+    """Geeft de verkoopstrategie terug voor Ã©Ã©n jaar."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2676,7 +2689,7 @@ def get_verkoopstrategie_for_year(year: int | str) -> dict[str, Any] | None:
 
 
 def load_verkoopstrategie_producten() -> list[dict[str, Any]]:
-    """Laadt alle verkoopstrategieën op productniveau veilig in."""
+    """Laadt alle verkoopstrategieÃ«n op productniveau veilig in."""
     return [
         normalize_verkoopstrategie_product_record(record)
         for record in _load_verkoopprijs_records()
@@ -2686,7 +2699,7 @@ def load_verkoopstrategie_producten() -> list[dict[str, Any]]:
 
 
 def load_verkoopstrategie_verpakkingen() -> list[dict[str, Any]]:
-    """Laadt alle verkoopstrategieën op verpakkingstype veilig in."""
+    """Laadt alle verkoopstrategieÃ«n op verpakkingstype veilig in."""
     return [
         normalize_verkoopstrategie_verpakking_record(record)
         for record in _load_verkoopprijs_records()
@@ -2696,7 +2709,7 @@ def load_verkoopstrategie_verpakkingen() -> list[dict[str, Any]]:
 
 
 def get_verkoopstrategie_verpakkingen_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft alle verpakkingsstrategieën voor één jaar terug."""
+    """Geeft alle verpakkingsstrategieÃ«n voor Ã©Ã©n jaar terug."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2715,7 +2728,7 @@ def duplicate_verkoopstrategie_verpakkingen_to_year(
     *,
     overwrite: bool = False,
 ) -> int:
-    """Dupliceert verpakkingsstrategieën van bronjaar naar doeljaar."""
+    """Dupliceert verpakkingsstrategieÃ«n van bronjaar naar doeljaar."""
     try:
         source_year_value = int(source_year)
         target_year_value = int(target_year)
@@ -2755,7 +2768,7 @@ def get_verkoopstrategie_verpakking(
     year: int | str,
     verpakking_key: str,
 ) -> dict[str, Any] | None:
-    """Geeft één verpakkingsstrategie terug voor een jaar en verpakkingstype."""
+    """Geeft Ã©Ã©n verpakkingsstrategie terug voor een jaar en verpakkingstype."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2794,7 +2807,7 @@ def get_latest_verkoopstrategie_verpakking_up_to_year(
 
 
 def get_verkoopstrategie_producten_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft alle productstrategieën voor één jaar terug."""
+    """Geeft alle productstrategieÃ«n voor Ã©Ã©n jaar terug."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2814,7 +2827,7 @@ def get_verkoopstrategie_product(
     *,
     only_override: bool = False,
 ) -> dict[str, Any] | None:
-    """Geeft één productstrategie terug voor jaar, bier en samengesteld product."""
+    """Geeft Ã©Ã©n productstrategie terug voor jaar, bier en samengesteld product."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2991,7 +3004,7 @@ def add_or_update_verkoopstrategie(record: dict[str, Any]) -> dict[str, Any] | N
 
 
 def delete_verkoopstrategie(verkoopstrategie_id: str) -> bool:
-    """Verwijdert één verkoopstrategie-record op basis van id."""
+    """Verwijdert Ã©Ã©n verkoopstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -3060,7 +3073,7 @@ def add_or_update_verkoopstrategie_verpakking(record: dict[str, Any]) -> dict[st
 
 
 def delete_verkoopstrategie_verpakking(verkoopstrategie_id: str) -> bool:
-    """Verwijdert één verpakkingsstrategie-record op basis van id."""
+    """Verwijdert Ã©Ã©n verpakkingsstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -3134,7 +3147,7 @@ def add_or_update_verkoopstrategie_product(record: dict[str, Any]) -> dict[str, 
 
 
 def delete_verkoopstrategie_product(verkoopstrategie_id: str) -> bool:
-    """Verwijdert één productstrategie-record op basis van id."""
+    """Verwijdert Ã©Ã©n productstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -3372,7 +3385,7 @@ def save_prijsvoorstellen(data: list[dict[str, Any]]) -> bool:
 
 
 def get_prijsvoorstel_by_id(prijsvoorstel_id: str) -> dict[str, Any] | None:
-    """Geeft één prijsvoorstel terug op basis van id."""
+    """Geeft Ã©Ã©n prijsvoorstel terug op basis van id."""
     target_id = str(prijsvoorstel_id or "")
     for record in load_prijsvoorstellen():
         if str(record.get("id", "") or "") == target_id:
@@ -3448,7 +3461,7 @@ def finalize_prijsvoorstel(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def delete_prijsvoorstel(prijsvoorstel_id: str) -> bool:
-    """Verwijdert één prijsvoorstelrecord op basis van id."""
+    """Verwijdert Ã©Ã©n prijsvoorstelrecord op basis van id."""
     records = load_prijsvoorstellen()
     filtered = [
         record
@@ -3486,7 +3499,7 @@ def get_verkoopprijs_by_bierjaar(
     year: int | str,
     product_key: str = "",
 ) -> dict[str, Any] | None:
-    """Geeft een verkoopprijsrecord terug voor één bier, jaar en optioneel verkoopartikel."""
+    """Geeft een verkoopprijsrecord terug voor Ã©Ã©n bier, jaar en optioneel verkoopartikel."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -3559,7 +3572,7 @@ def add_or_update_verkoopprijs(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def delete_verkoopprijs(verkoopprijs_id: str) -> bool:
-    """Verwijdert één verkoopprijsrecord op basis van id."""
+    """Verwijdert Ã©Ã©n verkoopprijsrecord op basis van id."""
     records = load_verkoopprijzen()
     filtered = [
         record
@@ -4008,3 +4021,4 @@ def calculate_variabele_kosten_per_liter(
         return None
 
     return float(totale_batchkosten) / float(batchgrootte_l)
+

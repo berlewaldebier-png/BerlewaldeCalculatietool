@@ -43,6 +43,17 @@ def show_nieuwe_kostprijsberekening_page(
         basisgegevens = {}
     biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
     bronjaar = int(basisgegevens.get("jaar", 0) or 0)
+    allow_empty_wizard = bool(st.session_state.get("nieuwe_berekening_allow_empty_wizard", False))
+    if not allow_empty_wizard and not biernaam and bronjaar <= 0:
+        st.session_state["nieuwe_berekening_view_mode"] = "overview"
+        render_page_header(
+            "Nieuwe kostprijsberekening",
+            "Maak en beheer hier kostprijsberekeningen op basis van de integrale kostprijsmethodiek.",
+        )
+        render_feedback()
+        render_overview(on_back)
+        close_main_card()
+        return
     is_existing = bool(str(active_record.get("id", "") or "").strip()) and bool(biernaam)
     title = (
         f"Aanpassen kostprijs {biernaam} {bronjaar}"

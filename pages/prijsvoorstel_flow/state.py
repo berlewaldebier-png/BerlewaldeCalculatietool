@@ -496,10 +496,8 @@ def _bier_options(year: int) -> tuple[list[str], dict[str, str]]:
             basisgegevens = {}
         bier_key = _bier_group_key(record)
         biernaam = str(basisgegevens.get("biernaam", "") or "Onbekend")
-        stijl = str(basisgegevens.get("stijl", "") or "-")
-        bronjaar = int(basisgegevens.get("jaar", 0) or 0)
         options.append(bier_key)
-        labels[bier_key] = f"{biernaam} ({stijl}) - bronjaar {bronjaar}"
+        labels[bier_key] = biernaam
     return options, labels
 
 

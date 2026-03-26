@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import streamlit as st
 
@@ -201,7 +201,7 @@ def render_wizard(page_title: str = "", page_subtitle: str = "") -> None:
     )
     st.session_state["nieuwe_berekening_step"] = current_step
 
-    sidebar_col, content_col = st.columns([1.15, 3.85], gap="large")
+    sidebar_col, content_col = st.columns([1.0, 4.2], gap="large")
 
     with sidebar_col:
         _render_step_indicator()
@@ -234,6 +234,7 @@ def render_wizard(page_title: str = "", page_subtitle: str = "") -> None:
 
         st.write("")
         _render_navigation()
+
 
 
 

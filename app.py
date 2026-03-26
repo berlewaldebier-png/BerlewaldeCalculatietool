@@ -1,8 +1,13 @@
 import base64
+import subprocess
 from pathlib import Path
 
 import streamlit as st
 
+from pages.beheer import show_beheer_page
+from pages.beheer.deployment import show_deployment_instructie_page
+from pages.beheer.handleiding import show_handleiding_page
+from pages.beheer.users import show_users_page
 from components.page_ui import close_main_card, open_main_card, render_page_header
 from components.theme import apply_app_theme
 from pages.inkoop_facturen import show_inkoop_facturen_page
@@ -29,6 +34,10 @@ PAGE_NIEUW_JAAR_VOORBEREIDEN = "nieuw_jaar_voorbereiden"
 PAGE_TARIEVEN_HEFFINGEN = "tarieven_heffingen"
 PAGE_PRODUCTEN_VERPAKKING = "producten_verpakking"
 PAGE_PRIJSVOORSTEL = "prijsvoorstel"
+PAGE_BEHEER = "beheer"
+PAGE_USERS = "users"
+PAGE_HANDLEIDING = "handleiding"
+PAGE_DEPLOYMENT_INSTRUCTIE = "deployment_instructie"
 
 LOGOUT_ICON = "\u21AA"
 HEADER_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "berlewalde-met-slogan.svg"
@@ -58,6 +67,23 @@ def set_page(page_name: str) -> None:
     """Wijzigt de actieve pagina en herlaadt de interface."""
     st.session_state["page"] = page_name
     st.rerun()
+
+
+@st.cache_data(show_spinner=False)
+def is_test_environment() -> bool:
+    """Bepaalt of de app op een codex-testbranch draait."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        branch = str(result.stdout or "").strip().lower()
+        return branch.startswith("codex/")
+    except Exception:
+        return False
 
 
 def logout() -> None:
@@ -115,7 +141,7 @@ def render_home_footer() -> None:
         """
         <div class='home-footer'>
             <div class='home-footer-title'>Berlewalde calculatie tool</div>
-            <div class='home-footer-text'>Kostprijzen, verkoopstrategie en prijsvoorstellen op één centrale plek.</div>
+            <div class='home-footer-text'>Test-omgeving: kostprijzen, verkoopstrategie en prijsvoorstellen op één centrale plek.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -243,9 +269,19 @@ def show_home() -> None:
         ):
             set_page(PAGE_PRODUCTEN_VERPAKKING)
     with beheer_cols_2[1]:
-        st.write("")
+        if render_home_card(
+            "🎇 Nieuw jaar voorbereiden",
+            "Maak concepten voor een nieuw jaar aan op basis van een bestaand bronjaar.",
+            "home_nieuw_jaar_voorbereiden",
+        ):
+            set_page(PAGE_NIEUW_JAAR_VOORBEREIDEN)
     with beheer_cols_2[2]:
-        st.write("")
+        if render_home_card(
+            "⚙️ Beheer",
+            "Open users, handleiding en deployment instructie vanuit één centrale plek.",
+            "home_beheer",
+        ):
+            set_page(PAGE_BEHEER)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='home-section-divider'></div>", unsafe_allow_html=True)
@@ -264,6 +300,7 @@ def show_home() -> None:
             st.session_state.pop("nieuwe_berekening_selected_bier_id", None)
             st.session_state.pop("nieuwe_berekening_loaded_key", None)
             st.session_state["nieuwe_berekening_view_mode"] = "overview"
+            st.session_state["nieuwe_berekening_allow_empty_wizard"] = False
             st.session_state["nieuwe_berekening_step"] = 1
             set_page(PAGE_NIEUWE_KOSTPRIJSBEREKENING)
     with calc_cols[1]:
@@ -274,12 +311,7 @@ def show_home() -> None:
         ):
             set_page(PAGE_INKOOP_FACTUREN)
     with calc_cols[2]:
-        if render_home_card(
-            "🎇 Nieuw jaar voorbereiden",
-            "Maak concepten voor een nieuw jaar aan op basis van een bestaand bronjaar.",
-            "home_nieuw_jaar_voorbereiden",
-        ):
-            set_page(PAGE_NIEUW_JAAR_VOORBEREIDEN)
+        st.write("")
     calc_cols_2 = st.columns(3, gap="large")
     with calc_cols_2[0]:
         if render_home_card(
@@ -377,6 +409,35 @@ def show_nieuw_jaar_voorbereiden() -> None:
     show_nieuw_jaar_voorbereiden_page(on_back=lambda: set_page(PAGE_HOME), on_logout=logout)
 
 
+def show_users() -> None:
+    """Toont de placeholderpagina voor gebruikersbeheer."""
+    show_users_page(on_back=lambda: set_page(PAGE_BEHEER))
+
+
+def show_handleiding() -> None:
+    """Toont de handleiding."""
+    show_handleiding_page(on_back=lambda: set_page(PAGE_BEHEER))
+
+
+def show_deployment_instructie() -> None:
+    """Toont deployment instructies in de testomgeving."""
+    if not is_test_environment():
+        set_page(PAGE_BEHEER)
+        return
+    show_deployment_instructie_page(on_back=lambda: set_page(PAGE_BEHEER))
+
+
+def show_beheer() -> None:
+    """Toont de centrale beheerpagina."""
+    show_beheer_page(
+        on_back=lambda: set_page(PAGE_HOME),
+        on_open_users=lambda: set_page(PAGE_USERS),
+        on_open_handleiding=lambda: set_page(PAGE_HANDLEIDING),
+        on_open_deployment=lambda: set_page(PAGE_DEPLOYMENT_INSTRUCTIE),
+        is_test_environment=is_test_environment(),
+    )
+
+
 def route_page() -> None:
     """Centrale router op basis van de actieve pagina in session_state."""
     page = st.session_state.get("page", PAGE_HOME)
@@ -393,6 +454,10 @@ def route_page() -> None:
         PAGE_PRIJSVOORSTEL: show_prijsvoorstel,
         PAGE_VERKOOPSTRATEGIE: show_verkoopstrategie,
         PAGE_NIEUW_JAAR_VOORBEREIDEN: show_nieuw_jaar_voorbereiden,
+        PAGE_BEHEER: show_beheer,
+        PAGE_USERS: show_users,
+        PAGE_HANDLEIDING: show_handleiding,
+        PAGE_DEPLOYMENT_INSTRUCTIE: show_deployment_instructie,
     }
     routes.get(page, show_home)()
 

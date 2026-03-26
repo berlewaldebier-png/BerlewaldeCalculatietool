@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
@@ -46,6 +46,15 @@ from components.action_buttons import (
 )
 
 
+def _ingredient_value(row: dict[str, Any]) -> str:
+    return str(
+        row.get("ingrediënt", "")
+        or row.get("ingrediÃ«nt", "")
+        or row.get("ingrediÃƒÂ«nt", "")
+        or ""
+    )
+
+
 def _render_read_only_cell(label: str, value: str, key: str) -> None:
     """Toont een compact read-only veld in tabelstijl."""
     st.text_input(
@@ -74,18 +83,19 @@ def _get_inkoop_product_options() -> tuple[list[str], dict[str, str]]:
 
 
 def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
-    """Render één ingrediëntregel."""
+    """Render ÃƒÂ©ÃƒÂ©n ingrediëntregel."""
     row_id = row["id"]
+    ingredient_value = _ingredient_value(row)
     prijs_per_eenheid = calculate_prijs_per_eenheid(row)
     kosten_recept = calculate_kosten_recept(row)
     confirm_delete_row_id = str(
         st.session_state.get("nb_ingredient_delete_confirm_row_id", "") or ""
     )
 
-    row_cols = st.columns([1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05, 0.48, 0.48, 0.48])
+    row_cols = st.columns([1.7, 2.3, 1.05, 1.0, 1.15, 1.2, 1.15, 0.48, 0.48, 0.48, 0.48])
 
     if is_editing:
-        default_ingredient = row["ingrediënt"] if row["ingrediënt"] in INGREDIENT_OPTIONS else INGREDIENT_OPTIONS[-1]
+        default_ingredient = ingredient_value if ingredient_value in INGREDIENT_OPTIONS else INGREDIENT_OPTIONS[-1]
         default_eenheid = row["eenheid"] if row["eenheid"] in EENHEID_OPTIONS else EENHEID_OPTIONS[0]
         ingredient_key = get_ingredient_key(row_id, "ingredient")
         eenheid_key = get_ingredient_key(row_id, "eenheid")
@@ -94,7 +104,6 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
         if st.session_state.get(eenheid_key) not in EENHEID_OPTIONS:
             st.session_state[eenheid_key] = default_eenheid
         st.session_state.setdefault(get_ingredient_key(row_id, "omschrijving"), row["omschrijving"])
-        st.session_state.setdefault(get_ingredient_key(row_id, "leverancier"), row["leverancier"])
         st.session_state.setdefault(get_ingredient_key(row_id, "hoeveelheid"), float(row["hoeveelheid"]))
         st.session_state.setdefault(get_ingredient_key(row_id, "prijs"), float(row["prijs"]))
         st.session_state.setdefault(
@@ -112,8 +121,6 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
         with row_cols[1]:
             st.text_input("Omschrijving", key=get_ingredient_key(row_id, "omschrijving"), label_visibility="collapsed")
         with row_cols[2]:
-            st.text_input("Leverancier", key=get_ingredient_key(row_id, "leverancier"), label_visibility="collapsed")
-        with row_cols[3]:
             st.number_input(
                 "Hoeveelheid",
                 min_value=0.0,
@@ -122,14 +129,14 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
                 key=get_ingredient_key(row_id, "hoeveelheid"),
                 label_visibility="collapsed",
             )
-        with row_cols[4]:
+        with row_cols[3]:
             st.selectbox(
                 "Eenheid",
                 options=EENHEID_OPTIONS,
                 key=eenheid_key,
                 label_visibility="collapsed",
             )
-        with row_cols[5]:
+        with row_cols[4]:
             st.number_input(
                 "Prijs",
                 min_value=0.0,
@@ -138,7 +145,7 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
                 key=get_ingredient_key(row_id, "prijs"),
                 label_visibility="collapsed",
             )
-        with row_cols[6]:
+        with row_cols[5]:
             st.number_input(
                 "Benodigd in recept",
                 min_value=0.0,
@@ -153,25 +160,23 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
         kosten_recept = calculate_kosten_recept(live_row)
     else:
         with row_cols[0]:
-            _render_read_only_cell("Ingrediënt", row["ingrediënt"] or "-", f"nb_ingredient_name_{row_id}")
+            _render_read_only_cell("Ingrediënt", ingredient_value or "-", f"nb_ingredient_name_{row_id}")
         with row_cols[1]:
             _render_read_only_cell("Omschrijving", row["omschrijving"] or "-", f"nb_ingredient_omschrijving_{row_id}")
         with row_cols[2]:
-            _render_read_only_cell("Leverancier", row["leverancier"] or "-", f"nb_ingredient_leverancier_{row_id}")
-        with row_cols[3]:
             _render_read_only_cell("Hoeveelheid", format_number(row["hoeveelheid"]), f"nb_ingredient_hoeveelheid_{row_id}")
-        with row_cols[4]:
+        with row_cols[3]:
             _render_read_only_cell("Eenheid", row["eenheid"] or "-", f"nb_ingredient_eenheid_{row_id}")
-        with row_cols[5]:
+        with row_cols[4]:
             _render_read_only_cell("Prijs", format_currency_cell_value(row["prijs"]), f"nb_ingredient_prijs_{row_id}")
-        with row_cols[6]:
+        with row_cols[5]:
             _render_read_only_cell("Benodigd in recept", format_number(row["benodigd_in_recept"]), f"nb_ingredient_benodigd_{row_id}")
 
-    with row_cols[7]:
+    with row_cols[6]:
         render_currency_table_cell(prijs_per_eenheid)
-    with row_cols[8]:
+    with row_cols[7]:
         render_currency_table_cell(kosten_recept)
-    with row_cols[9]:
+    with row_cols[8]:
         _, action_col, _ = st.columns([1, 1.4, 1])
         with action_col:
             if render_edit_button(
@@ -181,7 +186,7 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
             ):
                 st.session_state["nb_ingredient_edit_row_id_pending"] = row_id
                 st.rerun()
-    with row_cols[10]:
+    with row_cols[9]:
         _, action_col, _ = st.columns([1, 1.4, 1])
         with action_col:
             if render_save_button(
@@ -191,7 +196,7 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
             ):
                 save_current_ingredient_row()
                 st.rerun()
-    with row_cols[11]:
+    with row_cols[10]:
         _, action_col, _ = st.columns([1, 1.4, 1])
         with action_col:
             if render_delete_button(
@@ -203,7 +208,7 @@ def _render_ingredient_row(row: dict[str, Any], is_editing: bool) -> None:
 
     if confirm_delete_row_id == row_id:
         st.warning(
-            f"Weet je zeker dat je de ingrediëntregel '{row['ingrediënt'] or 'nieuwe regel'}' wilt verwijderen?"
+            f"Weet je zeker dat je de ingrediëntregel '{ingredient_value or 'nieuwe regel'}' wilt verwijderen?"
         )
         confirm_col, cancel_col, _ = st.columns([1, 1, 4])
         with confirm_col:
@@ -565,7 +570,6 @@ def render_step_3() -> None:
     headers = [
         "Ingrediënt",
         "Omschrijving",
-        "Leverancier",
         "Hoeveelheid",
         "Eenheid",
         "Prijs",
@@ -578,7 +582,7 @@ def render_step_3() -> None:
     ]
     render_table_headers(
         headers,
-        [1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05, 0.48, 0.48, 0.48],
+        [1.7, 2.3, 1.05, 1.0, 1.15, 1.2, 1.15, 0.48, 0.48, 0.48],
     )
 
     if not rows:
@@ -621,7 +625,6 @@ def _render_step_3_hercalculatie_basis(record: dict[str, Any]) -> None:
     headers = [
         "Ingrediënt",
         "Omschrijving",
-        "Leverancier",
         "Hoeveelheid",
         "Eenheid",
         "Prijs",
@@ -638,13 +641,12 @@ def _render_step_3_hercalculatie_basis(record: dict[str, Any]) -> None:
         st.info("Nog geen initiële ingrediënten beschikbaar.")
     else:
         for row in rows:
+            ingredient_value = _ingredient_value(row)
             row_cols = st.columns([1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05])
             with row_cols[0]:
-                render_read_only_table_cell(row["ingrediënt"] or "-")
+                render_read_only_table_cell(ingredient_value or "-")
             with row_cols[1]:
                 render_read_only_table_cell(row["omschrijving"] or "-")
-            with row_cols[2]:
-                render_read_only_table_cell(row["leverancier"] or "-")
             with row_cols[3]:
                 render_read_only_table_cell(format_number(row["hoeveelheid"]))
             with row_cols[4]:
@@ -698,7 +700,6 @@ def render_step_3() -> None:
     headers = [
         "Ingrediënt",
         "Omschrijving",
-        "Leverancier",
         "Hoeveelheid",
         "Eenheid",
         "Prijs",
@@ -711,7 +712,7 @@ def render_step_3() -> None:
     ]
     render_table_headers(
         headers,
-        [1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05, 0.48, 0.48, 0.48],
+        [1.7, 2.3, 1.05, 1.0, 1.15, 1.2, 1.15, 0.48, 0.48, 0.48],
     )
 
     if not rows:
@@ -862,7 +863,6 @@ def render_step_3() -> None:
     headers = [
         "Ingrediënt",
         "Omschrijving",
-        "Leverancier",
         "Hoeveelheid",
         "Eenheid",
         "Prijs",
@@ -875,7 +875,7 @@ def render_step_3() -> None:
     ]
     render_table_headers(
         headers,
-        [1.7, 1.9, 1.6, 1.0, 0.95, 0.95, 1.1, 1.05, 1.05, 0.48, 0.48, 0.48],
+        [1.7, 2.3, 1.05, 1.0, 1.15, 1.2, 1.15, 0.48, 0.48, 0.48],
     )
 
     if not rows:
@@ -902,4 +902,6 @@ def render_step_3() -> None:
         get_step_3_rows_for_view(get_active_berekening()),
         int(basisgegevens.get("jaar", 0) or 0) or None,
     )
+
+
 

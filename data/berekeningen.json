@@ -182,13 +182,13 @@
         "regels": [
           {
             "id": "8c68f29b-c714-46f7-8ef8-d4f452a89e5c",
-            "ingrediënt": "Overig",
+            "ingrediÃ«nt": "Overig",
             "omschrijving": "Honing",
-            "leverancier": "",
             "hoeveelheid": 1.0,
             "eenheid": "L",
             "prijs": 3.0,
-            "benodigd_in_recept": 20.0
+            "benodigd_in_recept": 20.0,
+            "ingrediënt": "Overig"
           }
         ],
         "notities": ""
@@ -313,5 +313,87 @@
     "created_at": "2026-03-26T13:18:34.578769",
     "updated_at": "2026-03-26T13:24:11.255951",
     "finalized_at": "2026-03-26T13:24:11.248612"
+  },
+  {
+    "id": "23f51133-b31c-4536-a4ca-84ae54e9ce13",
+    "bier_id": "",
+    "record_type": "kostprijsberekening",
+    "calculation_variant": "origineel",
+    "bron_berekening_id": "",
+    "hercalculatie_reden": "",
+    "hercalculatie_notitie": "",
+    "hercalculatie_timestamp": "",
+    "hercalculatie_basis": {
+      "ingredienten_regels": []
+    },
+    "status": "concept",
+    "basisgegevens": {
+      "jaar": 2025,
+      "biernaam": "Berlewalde triple",
+      "stijl": "Triple",
+      "alcoholpercentage": 9.0,
+      "belastingsoort": "Accijns",
+      "tarief_accijns": "Hoog",
+      "btw_tarief": "21%"
+    },
+    "soort_berekening": {
+      "type": "Eigen productie"
+    },
+    "invoer": {
+      "ingredienten": {
+        "regels": [
+          {
+            "id": "c7a9746e-c998-4dd1-9792-72d78e0881e7",
+            "ingrediÃ«nt": "Overig",
+            "ingrediënt": "Overig",
+            "omschrijving": "Mout",
+            "hoeveelheid": 50.0,
+            "eenheid": "KG",
+            "prijs": 50.0,
+            "benodigd_in_recept": 50.0
+          }
+        ],
+        "notities": ""
+      },
+      "inkoop": {
+        "regels": [],
+        "factuurregels": [],
+        "factuurnummer": "",
+        "factuurdatum": "",
+        "notities": "",
+        "verzendkosten": 0.0,
+        "overige_kosten": 0.0,
+        "facturen": [
+          {
+            "id": "626f2fc7-3a51-4c0d-8201-caa1a5792627",
+            "factuurnummer": "",
+            "factuurdatum": "",
+            "verzendkosten": 0.0,
+            "overige_kosten": 0.0,
+            "factuurregels": []
+          }
+        ]
+      }
+    },
+    "bier_snapshot": {
+      "biernaam": "Berlewalde triple",
+      "stijl": "Triple",
+      "alcoholpercentage": 9.0,
+      "belastingsoort": "Accijns",
+      "tarief_accijns": "Hoog",
+      "btw_tarief": "21%"
+    },
+    "resultaat_snapshot": {},
+    "jaarovergang": {
+      "bron_berekening_id": "",
+      "bron_jaar": 0,
+      "doel_jaar": 0,
+      "aangemaakt_via": "",
+      "created_at": ""
+    },
+    "last_completed_step": 4,
+    "created_at": "2026-03-27T00:32:30.352987",
+    "updated_at": "2026-03-27T00:44:59.403470",
+    "finalized_at": ""
   }
 ]
