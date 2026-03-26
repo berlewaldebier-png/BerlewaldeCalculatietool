@@ -31,9 +31,7 @@ PAGE_PRODUCTEN_VERPAKKING = "producten_verpakking"
 PAGE_PRIJSVOORSTEL = "prijsvoorstel"
 
 LOGOUT_ICON = "\u21AA"
-HEADER_LOGO_PATH = Path(
-    r"C:\Users\hansh\OneDrive - Brouwerij Berlewalde\Gedeelde documenten - Berlewalde\Brouwerij Berlewalde\04 - Verkoop & Marketing\02 - Marketing en promo\01 - Interne promotiemateriaal\1. Logo\berlewalde-met-slogan.svg"
-)
+HEADER_LOGO_PATH = Path(__file__).resolve().parent / "assets" / "berlewalde-met-slogan.svg"
 
 
 def init_session_state() -> None:
