@@ -1,10 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib import error, parse, request
 from uuid import uuid4
 
 
@@ -27,6 +29,148 @@ DEFAULT_TARIEF_ACCIJNS = "Hoog"
 DEFAULT_BTW_TARIEF = "21%"
 
 
+def _get_config_value(name: str, default: str = "") -> str:
+    """Leest configuratie uit env vars of Streamlit secrets indien beschikbaar."""
+    env_value = os.getenv(name)
+    if env_value:
+        return env_value
+
+    try:
+        import streamlit as st
+
+        secret_value = st.secrets.get(name)
+        if secret_value is not None:
+            return str(secret_value)
+    except Exception:
+        pass
+
+    return default
+
+
+def _storage_provider() -> str:
+    return _get_config_value("CALCULATIETOOL_STORAGE_PROVIDER", "local").strip().lower()
+
+
+def _onedrive_tenant_id() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_TENANT_ID", "").strip()
+
+
+def _onedrive_client_id() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_CLIENT_ID", "").strip()
+
+
+def _onedrive_client_secret() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_CLIENT_SECRET", "").strip()
+
+
+def _onedrive_drive_id() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_DRIVE_ID", "").strip()
+
+
+def _onedrive_base_path() -> str:
+    base_path = _get_config_value("CALCULATIETOOL_ONEDRIVE_BASE_PATH", "").strip()
+    if not base_path:
+        return ""
+    return "/" + base_path.strip("/")
+
+
+def _uses_onedrive_storage(file_path: Path) -> bool:
+    return (
+        _storage_provider() == "onedrive"
+        and file_path.parent == DATA_DIR
+        and bool(_onedrive_tenant_id())
+        and bool(_onedrive_client_id())
+        and bool(_onedrive_client_secret())
+        and bool(_onedrive_drive_id())
+        and bool(_onedrive_base_path())
+    )
+
+
+def _read_local_json_text(file_path: Path, default_content: str) -> str:
+    file_path = _ensure_json_file(file_path, default_content)
+    return file_path.read_text(encoding="utf-8-sig")
+
+
+def _write_local_json_text(file_path: Path, raw_content: str, default_content: str) -> None:
+    file_path = _ensure_json_file(file_path, default_content)
+    file_path.write_text(raw_content, encoding="utf-8")
+
+
+def _parse_json_content(raw_content: str, default_value: Any) -> Any:
+    raw_content = (raw_content or "").strip()
+    if not raw_content:
+        return default_value
+
+    try:
+        data = json.loads(raw_content)
+        if isinstance(data, type(default_value)):
+            return data
+    except json.JSONDecodeError:
+        return default_value
+
+    return default_value
+
+
+def _onedrive_access_token() -> str:
+    payload = parse.urlencode(
+        {
+            "client_id": _onedrive_client_id(),
+            "client_secret": _onedrive_client_secret(),
+            "scope": "https://graph.microsoft.com/.default",
+            "grant_type": "client_credentials",
+        }
+    ).encode("utf-8")
+    token_url = (
+        f"https://login.microsoftonline.com/{_onedrive_tenant_id()}/oauth2/v2.0/token"
+    )
+    req = request.Request(
+        token_url,
+        data=payload,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with request.urlopen(req) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return str(data.get("access_token", "") or "")
+
+
+def _onedrive_file_path(file_path: Path) -> str:
+    return f"{_onedrive_base_path()}/{file_path.name}"
+
+
+def _onedrive_download_text(file_path: Path) -> str | None:
+    remote_path = _onedrive_file_path(file_path)
+    encoded_path = parse.quote(remote_path)
+    req = request.Request(
+        f"https://graph.microsoft.com/v1.0/drives/{_onedrive_drive_id()}/root:{encoded_path}:/content",
+        method="GET",
+        headers={"Authorization": f"Bearer {_onedrive_access_token()}"},
+    )
+    try:
+        with request.urlopen(req) as response:
+            return response.read().decode("utf-8-sig")
+    except error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def _onedrive_upload_text(file_path: Path, raw_content: str) -> None:
+    remote_path = _onedrive_file_path(file_path)
+    encoded_path = parse.quote(remote_path)
+    req = request.Request(
+        f"https://graph.microsoft.com/v1.0/drives/{_onedrive_drive_id()}/root:{encoded_path}:/content",
+        data=raw_content.encode("utf-8"),
+        method="PUT",
+        headers={
+            "Authorization": f"Bearer {_onedrive_access_token()}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+    )
+    with request.urlopen(req):
+        return
+
+
 def _ensure_json_file(file_path: Path, default_content: str) -> Path:
     """Maakt een JSON-bestand aan met een standaardinhoud indien nodig."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,33 +184,29 @@ def _ensure_json_file(file_path: Path, default_content: str) -> Path:
 def _load_json_value(file_path: Path, default_value: Any) -> Any:
     """Laadt JSON veilig in en valt terug op een standaardstructuur."""
     default_content = "{}" if isinstance(default_value, dict) else "[]"
-    file_path = _ensure_json_file(file_path, default_content)
-
     try:
-        raw_content = file_path.read_text(encoding="utf-8").strip()
-        if not raw_content:
-            return default_value
+        if _uses_onedrive_storage(file_path):
+            raw_content = _onedrive_download_text(file_path)
+            if raw_content is not None:
+                _write_local_json_text(file_path, raw_content, default_content)
+                return _parse_json_content(raw_content, default_value)
 
-        data = json.loads(raw_content)
-        if isinstance(data, type(default_value)):
-            return data
-    except (json.JSONDecodeError, OSError):
+        raw_content = _read_local_json_text(file_path, default_content)
+        return _parse_json_content(raw_content, default_value)
+    except (OSError, error.URLError):
         return default_value
-
-    return default_value
 
 
 def _save_json_value(file_path: Path, data: Any, default_content: str) -> bool:
     """Slaat JSON veilig op naar schijf."""
-    file_path = _ensure_json_file(file_path, default_content)
-
     try:
-        file_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        raw_content = json.dumps(data, indent=2, ensure_ascii=False)
+        if _uses_onedrive_storage(file_path):
+            _onedrive_upload_text(file_path, raw_content)
+
+        _write_local_json_text(file_path, raw_content, default_content)
         return True
-    except OSError:
+    except (OSError, error.URLError):
         return False
 
 
@@ -178,7 +318,7 @@ def upsert_tarieven_heffingen_row(record: dict[str, Any]) -> bool:
 
 
 def delete_tarieven_heffingen_row(row_id: str) -> bool:
-    """Verwijdert één tarievenregel op basis van id."""
+    """Verwijdert Ã©Ã©n tarievenregel op basis van id."""
     records = load_tarieven_heffingen()
     filtered = [record for record in records if str(record.get("id", "")) != row_id]
 
@@ -316,7 +456,7 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
 
 
 def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, Any]:
-    """Normaliseert een ingrediëntregel voor opslag in berekeningen."""
+    """Normaliseert een ingrediÃ«ntregel voor opslag in berekeningen."""
     source = row if isinstance(row, dict) else {}
 
     def _float_value(key: str) -> float:
@@ -327,9 +467,21 @@ def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, An
 
     return {
         "id": str(source.get("id", "") or uuid4()),
-        "ingrediënt": str(source.get("ingrediënt", "") or source.get("ingredient", "") or ""),
+        "ingrediÃ«nt": str(
+            source.get("ingrediÃ«nt", "")
+            or source.get("ingrediënt", "")
+            or source.get("ingrediÃƒÂ«nt", "")
+            or source.get("ingredient", "")
+            or ""
+        ),
+        "ingrediënt": str(
+            source.get("ingrediënt", "")
+            or source.get("ingrediÃ«nt", "")
+            or source.get("ingrediÃƒÂ«nt", "")
+            or source.get("ingredient", "")
+            or ""
+        ),
         "omschrijving": str(source.get("omschrijving", "") or ""),
-        "leverancier": str(source.get("leverancier", "") or ""),
         "hoeveelheid": _float_value("hoeveelheid"),
         "eenheid": str(source.get("eenheid", "") or ""),
         "prijs": _float_value("prijs"),
@@ -746,7 +898,7 @@ def save_verpakkingsonderdelen(data: list[dict[str, Any]]) -> bool:
 
 
 def get_verpakkingsonderdelen_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft verpakkingsonderdelen terug voor één geselecteerd jaar."""
+    """Geeft verpakkingsonderdelen terug voor Ã©Ã©n geselecteerd jaar."""
     return load_verpakkingsonderdelen(year)
 
 
@@ -897,7 +1049,7 @@ def delete_verpakkingsonderdeel(
     *,
     year: int | str | None = None,
 ) -> bool:
-    """Verwijdert een verpakkingsonderdeel op basis van id, optioneel binnen één jaar."""
+    """Verwijdert een verpakkingsonderdeel op basis van id, optioneel binnen Ã©Ã©n jaar."""
     onderdelen = load_verpakkingsonderdelen()
 
     if year is None:
@@ -2152,16 +2304,16 @@ def get_bier_usage_locations(
         label = "verkoopprijs" if len(verkoopprijzen) == 1 else "verkoopprijzen"
         locations.append(f"{len(verkoopprijzen)} {label}")
 
-    productstrategieën = [
+    productstrategieen = [
         record
         for record in _load_verkoopprijs_records()
         if isinstance(record, dict)
         and str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_PRODUCT
         and str(record.get("bier_key", "") or "").strip() == bier_key
     ]
-    if productstrategieën:
-        label = "productstrategie" if len(productstrategieën) == 1 else "productstrategieën"
-        locations.append(f"{len(productstrategieën)} {label}")
+    if productstrategieen:
+        label = "productstrategie" if len(productstrategieen) == 1 else "productstrategieën"
+        locations.append(f"{len(productstrategieen)} {label}")
 
     variabele_kosten_jaren = [
         year_key
@@ -2653,7 +2805,7 @@ def save_verkoopprijzen(data: list[dict[str, Any]]) -> bool:
 
 
 def load_verkoopstrategien() -> list[dict[str, Any]]:
-    """Laadt alle jaargebonden verkoopstrategieën veilig in."""
+    """Laadt alle jaargebonden verkoopstrategieÃ«n veilig in."""
     return [
         normalize_verkoopstrategie_record(record)
         for record in _load_verkoopprijs_records()
@@ -2663,7 +2815,7 @@ def load_verkoopstrategien() -> list[dict[str, Any]]:
 
 
 def get_verkoopstrategie_for_year(year: int | str) -> dict[str, Any] | None:
-    """Geeft de verkoopstrategie terug voor één jaar."""
+    """Geeft de verkoopstrategie terug voor Ã©Ã©n jaar."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2676,7 +2828,7 @@ def get_verkoopstrategie_for_year(year: int | str) -> dict[str, Any] | None:
 
 
 def load_verkoopstrategie_producten() -> list[dict[str, Any]]:
-    """Laadt alle verkoopstrategieën op productniveau veilig in."""
+    """Laadt alle verkoopstrategieÃ«n op productniveau veilig in."""
     return [
         normalize_verkoopstrategie_product_record(record)
         for record in _load_verkoopprijs_records()
@@ -2686,7 +2838,7 @@ def load_verkoopstrategie_producten() -> list[dict[str, Any]]:
 
 
 def load_verkoopstrategie_verpakkingen() -> list[dict[str, Any]]:
-    """Laadt alle verkoopstrategieën op verpakkingstype veilig in."""
+    """Laadt alle verkoopstrategieÃ«n op verpakkingstype veilig in."""
     return [
         normalize_verkoopstrategie_verpakking_record(record)
         for record in _load_verkoopprijs_records()
@@ -2696,7 +2848,7 @@ def load_verkoopstrategie_verpakkingen() -> list[dict[str, Any]]:
 
 
 def get_verkoopstrategie_verpakkingen_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft alle verpakkingsstrategieën voor één jaar terug."""
+    """Geeft alle verpakkingsstrategieÃ«n voor Ã©Ã©n jaar terug."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2715,7 +2867,7 @@ def duplicate_verkoopstrategie_verpakkingen_to_year(
     *,
     overwrite: bool = False,
 ) -> int:
-    """Dupliceert verpakkingsstrategieën van bronjaar naar doeljaar."""
+    """Dupliceert verpakkingsstrategieÃ«n van bronjaar naar doeljaar."""
     try:
         source_year_value = int(source_year)
         target_year_value = int(target_year)
@@ -2755,7 +2907,7 @@ def get_verkoopstrategie_verpakking(
     year: int | str,
     verpakking_key: str,
 ) -> dict[str, Any] | None:
-    """Geeft één verpakkingsstrategie terug voor een jaar en verpakkingstype."""
+    """Geeft Ã©Ã©n verpakkingsstrategie terug voor een jaar en verpakkingstype."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2794,7 +2946,7 @@ def get_latest_verkoopstrategie_verpakking_up_to_year(
 
 
 def get_verkoopstrategie_producten_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft alle productstrategieën voor één jaar terug."""
+    """Geeft alle productstrategieÃ«n voor Ã©Ã©n jaar terug."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2814,7 +2966,7 @@ def get_verkoopstrategie_product(
     *,
     only_override: bool = False,
 ) -> dict[str, Any] | None:
-    """Geeft één productstrategie terug voor jaar, bier en samengesteld product."""
+    """Geeft Ã©Ã©n productstrategie terug voor jaar, bier en samengesteld product."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -2991,7 +3143,7 @@ def add_or_update_verkoopstrategie(record: dict[str, Any]) -> dict[str, Any] | N
 
 
 def delete_verkoopstrategie(verkoopstrategie_id: str) -> bool:
-    """Verwijdert één verkoopstrategie-record op basis van id."""
+    """Verwijdert Ã©Ã©n verkoopstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -3060,7 +3212,7 @@ def add_or_update_verkoopstrategie_verpakking(record: dict[str, Any]) -> dict[st
 
 
 def delete_verkoopstrategie_verpakking(verkoopstrategie_id: str) -> bool:
-    """Verwijdert één verpakkingsstrategie-record op basis van id."""
+    """Verwijdert Ã©Ã©n verpakkingsstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -3134,7 +3286,7 @@ def add_or_update_verkoopstrategie_product(record: dict[str, Any]) -> dict[str, 
 
 
 def delete_verkoopstrategie_product(verkoopstrategie_id: str) -> bool:
-    """Verwijdert één productstrategie-record op basis van id."""
+    """Verwijdert Ã©Ã©n productstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -3372,7 +3524,7 @@ def save_prijsvoorstellen(data: list[dict[str, Any]]) -> bool:
 
 
 def get_prijsvoorstel_by_id(prijsvoorstel_id: str) -> dict[str, Any] | None:
-    """Geeft één prijsvoorstel terug op basis van id."""
+    """Geeft Ã©Ã©n prijsvoorstel terug op basis van id."""
     target_id = str(prijsvoorstel_id or "")
     for record in load_prijsvoorstellen():
         if str(record.get("id", "") or "") == target_id:
@@ -3448,7 +3600,7 @@ def finalize_prijsvoorstel(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def delete_prijsvoorstel(prijsvoorstel_id: str) -> bool:
-    """Verwijdert één prijsvoorstelrecord op basis van id."""
+    """Verwijdert Ã©Ã©n prijsvoorstelrecord op basis van id."""
     records = load_prijsvoorstellen()
     filtered = [
         record
@@ -3486,7 +3638,7 @@ def get_verkoopprijs_by_bierjaar(
     year: int | str,
     product_key: str = "",
 ) -> dict[str, Any] | None:
-    """Geeft een verkoopprijsrecord terug voor één bier, jaar en optioneel verkoopartikel."""
+    """Geeft een verkoopprijsrecord terug voor Ã©Ã©n bier, jaar en optioneel verkoopartikel."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -3559,7 +3711,7 @@ def add_or_update_verkoopprijs(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def delete_verkoopprijs(verkoopprijs_id: str) -> bool:
-    """Verwijdert één verkoopprijsrecord op basis van id."""
+    """Verwijdert Ã©Ã©n verkoopprijsrecord op basis van id."""
     records = load_verkoopprijzen()
     filtered = [
         record
@@ -4008,3 +4160,4 @@ def calculate_variabele_kosten_per_liter(
         return None
 
     return float(totale_batchkosten) / float(batchgrootte_l)
+
