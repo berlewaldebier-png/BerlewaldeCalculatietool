@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib import error, parse, request
 from uuid import uuid4
 
 
@@ -27,6 +29,148 @@ DEFAULT_TARIEF_ACCIJNS = "Hoog"
 DEFAULT_BTW_TARIEF = "21%"
 
 
+def _get_config_value(name: str, default: str = "") -> str:
+    """Leest configuratie uit env vars of Streamlit secrets indien beschikbaar."""
+    env_value = os.getenv(name)
+    if env_value:
+        return env_value
+
+    try:
+        import streamlit as st
+
+        secret_value = st.secrets.get(name)
+        if secret_value is not None:
+            return str(secret_value)
+    except Exception:
+        pass
+
+    return default
+
+
+def _storage_provider() -> str:
+    return _get_config_value("CALCULATIETOOL_STORAGE_PROVIDER", "local").strip().lower()
+
+
+def _onedrive_tenant_id() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_TENANT_ID", "").strip()
+
+
+def _onedrive_client_id() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_CLIENT_ID", "").strip()
+
+
+def _onedrive_client_secret() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_CLIENT_SECRET", "").strip()
+
+
+def _onedrive_drive_id() -> str:
+    return _get_config_value("CALCULATIETOOL_ONEDRIVE_DRIVE_ID", "").strip()
+
+
+def _onedrive_base_path() -> str:
+    base_path = _get_config_value("CALCULATIETOOL_ONEDRIVE_BASE_PATH", "").strip()
+    if not base_path:
+        return ""
+    return "/" + base_path.strip("/")
+
+
+def _uses_onedrive_storage(file_path: Path) -> bool:
+    return (
+        _storage_provider() == "onedrive"
+        and file_path.parent == DATA_DIR
+        and bool(_onedrive_tenant_id())
+        and bool(_onedrive_client_id())
+        and bool(_onedrive_client_secret())
+        and bool(_onedrive_drive_id())
+        and bool(_onedrive_base_path())
+    )
+
+
+def _read_local_json_text(file_path: Path, default_content: str) -> str:
+    file_path = _ensure_json_file(file_path, default_content)
+    return file_path.read_text(encoding="utf-8-sig")
+
+
+def _write_local_json_text(file_path: Path, raw_content: str, default_content: str) -> None:
+    file_path = _ensure_json_file(file_path, default_content)
+    file_path.write_text(raw_content, encoding="utf-8")
+
+
+def _parse_json_content(raw_content: str, default_value: Any) -> Any:
+    raw_content = (raw_content or "").strip()
+    if not raw_content:
+        return default_value
+
+    try:
+        data = json.loads(raw_content)
+        if isinstance(data, type(default_value)):
+            return data
+    except json.JSONDecodeError:
+        return default_value
+
+    return default_value
+
+
+def _onedrive_access_token() -> str:
+    payload = parse.urlencode(
+        {
+            "client_id": _onedrive_client_id(),
+            "client_secret": _onedrive_client_secret(),
+            "scope": "https://graph.microsoft.com/.default",
+            "grant_type": "client_credentials",
+        }
+    ).encode("utf-8")
+    token_url = (
+        f"https://login.microsoftonline.com/{_onedrive_tenant_id()}/oauth2/v2.0/token"
+    )
+    req = request.Request(
+        token_url,
+        data=payload,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with request.urlopen(req) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return str(data.get("access_token", "") or "")
+
+
+def _onedrive_file_path(file_path: Path) -> str:
+    return f"{_onedrive_base_path()}/{file_path.name}"
+
+
+def _onedrive_download_text(file_path: Path) -> str | None:
+    remote_path = _onedrive_file_path(file_path)
+    encoded_path = parse.quote(remote_path)
+    req = request.Request(
+        f"https://graph.microsoft.com/v1.0/drives/{_onedrive_drive_id()}/root:{encoded_path}:/content",
+        method="GET",
+        headers={"Authorization": f"Bearer {_onedrive_access_token()}"},
+    )
+    try:
+        with request.urlopen(req) as response:
+            return response.read().decode("utf-8-sig")
+    except error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+
+
+def _onedrive_upload_text(file_path: Path, raw_content: str) -> None:
+    remote_path = _onedrive_file_path(file_path)
+    encoded_path = parse.quote(remote_path)
+    req = request.Request(
+        f"https://graph.microsoft.com/v1.0/drives/{_onedrive_drive_id()}/root:{encoded_path}:/content",
+        data=raw_content.encode("utf-8"),
+        method="PUT",
+        headers={
+            "Authorization": f"Bearer {_onedrive_access_token()}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+    )
+    with request.urlopen(req):
+        return
+
+
 def _ensure_json_file(file_path: Path, default_content: str) -> Path:
     """Maakt een JSON-bestand aan met een standaardinhoud indien nodig."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -40,34 +184,29 @@ def _ensure_json_file(file_path: Path, default_content: str) -> Path:
 def _load_json_value(file_path: Path, default_value: Any) -> Any:
     """Laadt JSON veilig in en valt terug op een standaardstructuur."""
     default_content = "{}" if isinstance(default_value, dict) else "[]"
-    file_path = _ensure_json_file(file_path, default_content)
-
     try:
-        # Accept both regular UTF-8 and UTF-8 with BOM to prevent silent empty-state fallbacks.
-        raw_content = file_path.read_text(encoding="utf-8-sig").strip()
-        if not raw_content:
-            return default_value
+        if _uses_onedrive_storage(file_path):
+            raw_content = _onedrive_download_text(file_path)
+            if raw_content is not None:
+                _write_local_json_text(file_path, raw_content, default_content)
+                return _parse_json_content(raw_content, default_value)
 
-        data = json.loads(raw_content)
-        if isinstance(data, type(default_value)):
-            return data
-    except (json.JSONDecodeError, OSError):
+        raw_content = _read_local_json_text(file_path, default_content)
+        return _parse_json_content(raw_content, default_value)
+    except (OSError, error.URLError):
         return default_value
-
-    return default_value
 
 
 def _save_json_value(file_path: Path, data: Any, default_content: str) -> bool:
     """Slaat JSON veilig op naar schijf."""
-    file_path = _ensure_json_file(file_path, default_content)
-
     try:
-        file_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        raw_content = json.dumps(data, indent=2, ensure_ascii=False)
+        if _uses_onedrive_storage(file_path):
+            _onedrive_upload_text(file_path, raw_content)
+
+        _write_local_json_text(file_path, raw_content, default_content)
         return True
-    except OSError:
+    except (OSError, error.URLError):
         return False
 
 

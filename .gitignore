@@ -1,0 +1,14 @@
+.next/
+node_modules/
+frontend.log
+frontend.err.log
+backend.log
+backend.err.log
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+backend/.env.local.ps1
