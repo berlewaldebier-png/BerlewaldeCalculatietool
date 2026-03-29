@@ -22,13 +22,11 @@ uvicorn app.main:app --reload
 - metadata routes voor navigatie en dashboard
 - data read/write endpoints bovenop een providerlaag
 - bestaande businesslogica blijft in Python
+- actieve opslag draait PostgreSQL-first
 
 ## Storage providers
 
-De backend ondersteunt nu:
-
-- `json` als standaard/fallback
-- `postgres` als nieuwe opslagprovider
+De backend ondersteunt legacy JSON-bootstrap en een actieve `postgres` provider. In de huidige setup leest en schrijft de backend primair via PostgreSQL. JSON is alleen nog bedoeld voor bootstrap, export of noodgevallen tijdens migratie.
 
 Zet hiervoor environment variables, bijvoorbeeld:
 
@@ -70,7 +68,8 @@ Voor de voorbereide auth-laag:
 
 Deze laag staat klaar, maar wordt nog niet afgedwongen zolang auth uit staat.
 
-Volgende stap:
+Huidige praktische richting:
 
-- de nieuwe UI gecontroleerd laten draaien op PostgreSQL
+- web-UI draait tegen PostgreSQL
+- regressiechecks lopen via de actieve API/provider
 - auth, users en rollen verder afmaken

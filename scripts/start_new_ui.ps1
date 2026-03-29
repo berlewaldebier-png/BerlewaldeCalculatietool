@@ -31,11 +31,23 @@ Write-Host "Oude processen op poort 3000 en 8000 opruimen..."
 Stop-PortProcess -Port 3000
 Stop-PortProcess -Port 8000
 
+$frontendStartScript = "cd '$frontendDir'; `$env:PATH='C:\Program Files\nodejs;' + `$env:PATH; & '$npmCmd' run start"
+$frontendModeLabel = "production"
+
 Write-Host "Frontend production build maken..."
 Push-Location $frontendDir
 try {
     $env:PATH = "C:\Program Files\nodejs;$env:PATH"
     & $npmCmd run build
+    if ($LASTEXITCODE -ne 0) {
+        throw "Frontend build mislukte met exitcode $LASTEXITCODE."
+    }
+}
+catch {
+    Write-Warning "Frontend build mislukte. Er wordt automatisch teruggevallen op dev-modus."
+    Write-Warning $_
+    $frontendStartScript = "cd '$frontendDir'; `$env:PATH='C:\Program Files\nodejs;' + `$env:PATH; & '$npmCmd' run dev"
+    $frontendModeLabel = "development"
 }
 finally {
     Pop-Location
@@ -51,9 +63,9 @@ Start-Process powershell `
 
 Start-Sleep -Seconds 2
 
-Write-Host "Frontend starten op http://localhost:3000 ..."
+Write-Host "Frontend starten op http://localhost:3000 ($frontendModeLabel) ..."
 Start-Process powershell `
-    -ArgumentList "-NoExit", "-Command", "cd '$frontendDir'; `$env:PATH='C:\Program Files\nodejs;' + `$env:PATH; & '$npmCmd' run start"
+    -ArgumentList "-NoExit", "-Command", $frontendStartScript
 
 Write-Host ""
 Write-Host "Nieuwe UI gestart."

@@ -4,9 +4,9 @@ De primaire applicatie draait nu als webstack:
 
 - frontend: `Next.js + TypeScript`
 - backend: `FastAPI`
-- opslag: tijdelijk JSON
+- opslag: `PostgreSQL` als primaire opslag
 
-De oude Streamlit-app is uitgefaseerd als hoofdroute en bestaat alleen nog als legacy ingang met verwijzing.
+De oude Streamlit-app is volledig uitgefaseerd. De primaire route is nu de Next.js/FastAPI-webstack.
 
 ## Starten
 
@@ -45,15 +45,17 @@ Afgeronde migratiefasen:
 - Fase 4: nieuwe kostprijsberekening
 - Fase 5: inkoopfacturen, recept hercalculatie, nieuw jaar voorbereiden
 - Fase 6: regressiechecks en golden scenarios
+- Fase 7: Streamlit uitfaseren
+- Fase 8: PostgreSQL als primaire opslag activeren
 
 Volgende grote stappen:
 
-- Fase 8: PostgreSQL verder afronden en regressiechecks daarop uitbreiden
 - Fase 9: auth-basis klaarzetten, later login/rollen afdwingen en eventueel 2FA
+- UI/UX-logica verder verfijnen en businesslogica blijven toetsen
 
 ## Legacy
 
-De oude Streamlit-route bestaat nog alleen als verwijspagina in [app.py](C:\Users\hansh\.codex\CalculatieTool\app.py). De oude Streamlit UI-bestanden onder `pages/` en `components/` zijn verwijderd. Nieuwe functionele wijzigingen horen in de webstack thuis:
+De oude Streamlit UI-bestanden onder `pages/` en `components/` zijn verwijderd. JSON-bestanden bestaan nog alleen voor legacy/bootstrap-doeleinden en zijn niet meer de actieve primaire opslag. Nieuwe functionele wijzigingen horen in de webstack thuis:
 
 - frontend: [frontend](C:\Users\hansh\.codex\CalculatieTool\frontend)
 - backend: [backend](C:\Users\hansh\.codex\CalculatieTool\backend)

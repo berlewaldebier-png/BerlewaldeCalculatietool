@@ -11,4 +11,5 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
+*.tsbuildinfo
 backend/.env.local.ps1
