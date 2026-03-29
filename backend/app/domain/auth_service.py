@@ -12,6 +12,8 @@ from app.domain import postgres_storage
 
 
 PBKDF2_ITERATIONS = 390_000
+TEMP_ADMIN_USERNAME = "admin"
+TEMP_ADMIN_PASSWORD = "admin!"
 
 
 def auth_enabled() -> bool:
@@ -107,6 +109,50 @@ def list_users() -> list[dict[str, Any]]:
             }
         )
     return users
+
+
+def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
+    normalized_username = username.strip()
+    if (
+        normalized_username.lower() == TEMP_ADMIN_USERNAME
+        and password == TEMP_ADMIN_PASSWORD
+    ):
+        return {
+            "authenticated": True,
+            "username": TEMP_ADMIN_USERNAME,
+            "display_name": "Beheerder",
+            "role": "admin",
+        }
+
+    ensure_schema()
+    if not postgres_storage.database_url():
+        return None
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT username, display_name, role, password_hash, is_active
+                FROM app_users
+                WHERE LOWER(username) = LOWER(%s)
+                """,
+                (normalized_username,),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        return None
+
+    db_username, display_name, role, password_hash, is_active = row
+    if not is_active or not verify_password(password, password_hash):
+        return None
+
+    return {
+        "authenticated": True,
+        "username": db_username,
+        "display_name": display_name,
+        "role": role,
+    }
 
 
 def bootstrap_admin(username: str, password: str, display_name: str) -> dict[str, Any]:

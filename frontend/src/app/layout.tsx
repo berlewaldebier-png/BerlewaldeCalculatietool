@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AppHeader } from "@/components/AppHeader";
+import { AuthGate } from "@/components/AuthGate";
 
 
 export const metadata: Metadata = {
-  title: "CalculatieTool",
-  description: "Nieuwe webinterface voor kostprijzen, verkoopstrategie en prijsvoorstellen."
+  title: "Brouwerij Calculatie",
+  description: "Interne calculatie- en offerteomgeving"
 };
 
 
@@ -17,15 +19,10 @@ export default function RootLayout({
     <html lang="nl">
       <body>
         <div className="app-shell">
-          <header className="app-header">
-            <div>
-              <div className="app-brand">Berlewalde CalculatieTool</div>
-              <div className="app-tagline">
-                Nieuwe webinterface met behoud van bestaande Python-berekeningen
-              </div>
-            </div>
-          </header>
-          <main className="app-main">{children}</main>
+          <AppHeader />
+          <AuthGate>
+            <main className="app-main">{children}</main>
+          </AuthGate>
         </div>
       </body>
     </html>

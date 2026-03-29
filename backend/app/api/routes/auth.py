@@ -8,6 +8,8 @@ from app.schemas.auth import (
     AuthUser,
     BootstrapAdminRequest,
     BootstrapAdminResponse,
+    LoginRequest,
+    LoginResponse,
 )
 
 
@@ -35,3 +37,14 @@ def post_bootstrap_admin(payload: BootstrapAdminRequest) -> BootstrapAdminRespon
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return BootstrapAdminResponse(**result)
+
+
+@router.post("/login", response_model=LoginResponse)
+def post_login(payload: LoginRequest) -> LoginResponse:
+    authenticated = auth_service.authenticate_user(
+        username=payload.username,
+        password=payload.password,
+    )
+    if not authenticated:
+        raise HTTPException(status_code=401, detail="Ongeldige gebruikersnaam of wachtwoord.")
+    return LoginResponse(**authenticated)

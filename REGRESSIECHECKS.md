@@ -12,7 +12,6 @@ powershell -ExecutionPolicy Bypass -File C:\Users\hansh\.codex\CalculatieTool\sc
 
 Het script controleert nu:
 
-- aanwezigheid van alle kern-JSON-bestanden
 - actieve backend-provider = `postgres`
 - `Berlewalde Ipa` 2025 `Inkoop` definitief
   - 2 facturen
@@ -31,9 +30,11 @@ Het script controleert nu:
   - 6 productregels
   - 1 staffel
 - jaarbasis aanwezig in:
-  - `productie.json`
-  - `vaste_kosten.json`
-  - `tarieven_heffingen.json`
+  - dataset `productie`
+  - dataset `vaste_kosten`
+  - dataset `tarieven_heffingen`
+
+De checks lopen dus via de draaiende FastAPI-backend en de actieve PostgreSQL-provider, niet meer via lokale JSON-bestanden.
 
 ## Handmatige checklist
 

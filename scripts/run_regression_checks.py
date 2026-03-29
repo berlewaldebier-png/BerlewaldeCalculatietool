@@ -5,12 +5,9 @@ import math
 import os
 from urllib import error, request
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data"
 API_BASE_URL = os.getenv("CALCULATIETOOL_API_BASE_URL", "http://127.0.0.1:8000/api").rstrip("/")
 
 
@@ -19,11 +16,6 @@ class CheckResult:
     name: str
     ok: bool
     detail: str
-
-
-def load_json(name: str) -> Any:
-    path = DATA_DIR / name
-    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def api_get(path: str) -> Any:
@@ -51,25 +43,6 @@ def find_berekening(
         ):
             return row
     raise AssertionError(f"Berekening niet gevonden: {biernaam} {jaar} {soort} {status}")
-
-
-def check_datasets_present() -> CheckResult:
-    required = [
-        "berekeningen.json",
-        "bieren.json",
-        "prijsvoorstellen.json",
-        "productie.json",
-        "vaste_kosten.json",
-        "tarieven_heffingen.json",
-        "verkoopprijzen.json",
-        "verpakkingsonderdelen.json",
-        "basisproducten.json",
-        "samengestelde_producten.json",
-    ]
-    missing = [name for name in required if not (DATA_DIR / name).exists()]
-    if missing:
-        return CheckResult("datasets_present", False, f"Ontbrekend: {', '.join(missing)}")
-    return CheckResult("datasets_present", True, "Alle kernbestanden aanwezig")
 
 
 def check_storage_provider() -> CheckResult:
@@ -228,7 +201,6 @@ def check_jaarbasis() -> CheckResult:
 
 def main() -> int:
     results = [
-        check_datasets_present(),
         check_storage_provider(),
         check_ipa_inkoop(),
         check_goudkoorts_eigen_productie(),

@@ -1355,6 +1355,8 @@ export function BerekeningenWizard({
   function renderFacturenStep() {
     const inkoop = ((current.invoer as GenericRecord).inkoop as GenericRecord) ?? {};
     const facturen = Array.isArray(inkoop.facturen) ? (inkoop.facturen as GenericRecord[]) : [];
+    const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));
+    const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten);
     return (
       <div className="nested-editor-list">
         {facturen.map((factuur, index) => (
@@ -1383,31 +1385,215 @@ export function BerekeningenWizard({
                 Verwijderen
               </button>
             </div>
-            <label className="nested-field">
-              <span>Factuurregels</span>
-              <textarea
-                className="json-editor nested-json-editor"
-                value={JSON.stringify(
-                  Array.isArray(factuur.factuurregels) ? factuur.factuurregels : [],
-                  null,
-                  2
-                )}
-                onChange={(event) => {
-                  try {
-                    const parsed = JSON.parse(event.target.value);
-                    updateCurrent((draft) => {
-                      const allFacturen =
-                        ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                          .facturen as GenericRecord[]) ?? []);
-                      allFacturen[index].factuurregels = parsed;
+            <div className="wizard-form-grid">
+              {[
+                ["Factuurnummer", "factuurnummer"],
+                ["Factuurdatum", "factuurdatum"],
+                ["Verzendkosten", "verzendkosten"],
+                ["Overige kosten", "overige_kosten"]
+              ].map(([label, key]) => (
+                <label key={key} className="nested-field">
+                  <span>{label}</span>
+                  <input
+                    className="dataset-input"
+                    type={key === "verzendkosten" || key === "overige_kosten" ? "number" : "text"}
+                    step={key === "verzendkosten" || key === "overige_kosten" ? "any" : undefined}
+                    value={String(factuur[key] ?? "")}
+                    onChange={(event) =>
+                      updateCurrent((draft) => {
+                        const allFacturen =
+                          ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                            .facturen as GenericRecord[]) ?? []);
+                        allFacturen[index][key] =
+                          key === "verzendkosten" || key === "overige_kosten"
+                            ? event.target.value === ""
+                              ? null
+                              : Number(event.target.value)
+                            : event.target.value;
+                      })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="dataset-editor-scroll">
+              <table className="dataset-editor-table">
+                <thead>
+                  <tr>
+                    <th>Aantal</th>
+                    <th>Extra kosten</th>
+                    <th>Prijs per eenheid</th>
+                    <th>Prijs per liter</th>
+                    <th>Liters</th>
+                    <th>Subfactuurbedrag</th>
+                    <th>Eenheid</th>
+                    <th>Actie</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : []).map(
+                    (regel, regelIndex, regels) => {
+                      const extraKostenPerRegel =
+                        regels.length > 0
+                          ? (Number(factuur.verzendkosten ?? 0) + Number(factuur.overige_kosten ?? 0)) /
+                            regels.length
+                          : 0;
+
+                      return (
+                        <tr key={String(regel.id ?? regelIndex)}>
+                          {[
+                            ["aantal", String(regel.aantal ?? "")],
+                            ["extra_kosten", String(roundValue(extraKostenPerRegel))],
+                            [
+                              "prijs_per_eenheid",
+                              String(roundValue(calculateInkoopPrijsPerEenheid(regel, extraKostenPerRegel)))
+                            ],
+                            [
+                              "prijs_per_liter",
+                              String(
+                                roundValue(
+                                  calculateInkoopPrijsPerLiter(
+                                    regel,
+                                    extraKostenPerRegel,
+                                    jaar,
+                                    basisproducten,
+                                    samengesteldeProducten
+                                  )
+                                )
+                              )
+                            ],
+                            [
+                              "liters",
+                              String(getFactuurRegelLiters(regel, jaar, basisproducten, samengesteldeProducten) ?? "")
+                            ],
+                            ["subfactuurbedrag", String(regel.subfactuurbedrag ?? "")]
+                          ].map(([key, value]) => (
+                            <td key={key}>
+                              <input
+                                className="dataset-input"
+                                type="number"
+                                step="any"
+                                value={value}
+                                readOnly={
+                                  key === "liters" ||
+                                  key === "extra_kosten" ||
+                                  key === "prijs_per_eenheid" ||
+                                  key === "prijs_per_liter"
+                                }
+                                onChange={(event) =>
+                                  updateCurrent((draft) => {
+                                    const allFacturen =
+                                      ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                                        .facturen as GenericRecord[]) ?? []);
+                                    const factuurRegels = Array.isArray(allFacturen[index].factuurregels)
+                                      ? (allFacturen[index].factuurregels as GenericRecord[])
+                                      : [];
+                                    if (key === "aantal" || key === "subfactuurbedrag") {
+                                      factuurRegels[regelIndex][key] =
+                                        event.target.value === "" ? null : Number(event.target.value);
+                                      factuurRegels[regelIndex].liters = getFactuurRegelLiters(
+                                        factuurRegels[regelIndex],
+                                        jaar,
+                                        basisproducten,
+                                        samengesteldeProducten
+                                      );
+                                    }
+                                  })
+                                }
+                              />
+                            </td>
+                          ))}
+                          <td>
+                            <select
+                              className="dataset-input"
+                              value={String(regel.eenheid ?? "")}
+                              onChange={(event) =>
+                                updateCurrent((draft) => {
+                                  const allFacturen =
+                                    ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                                      .facturen as GenericRecord[]) ?? []);
+                                  const factuurRegels = Array.isArray(allFacturen[index].factuurregels)
+                                    ? (allFacturen[index].factuurregels as GenericRecord[])
+                                    : [];
+                                  factuurRegels[regelIndex].eenheid = event.target.value;
+                                  factuurRegels[regelIndex].liters = getFactuurRegelLiters(
+                                    factuurRegels[regelIndex],
+                                    jaar,
+                                    basisproducten,
+                                    samengesteldeProducten
+                                  );
+                                })
+                              }
+                            >
+                              <option value="">Selecteer verpakking</option>
+                              {unitOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="editor-button editor-button-secondary"
+                              onClick={() =>
+                                updateCurrent((draft) => {
+                                  const allFacturen =
+                                    ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                                      .facturen as GenericRecord[]) ?? []);
+                                  const factuurRegels = Array.isArray(allFacturen[index].factuurregels)
+                                    ? (allFacturen[index].factuurregels as GenericRecord[])
+                                    : [];
+                                  factuurRegels.splice(regelIndex, 1);
+                                })
+                              }
+                            >
+                              Verwijderen
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+                  )}
+                  {(Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [])
+                    .length === 0 ? (
+                    <tr>
+                      <td className="dataset-empty" colSpan={8}>
+                        Nog geen factuurregels voor deze factuur.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="editor-actions">
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() =>
+                  updateCurrent((draft) => {
+                    const allFacturen =
+                      ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                        .facturen as GenericRecord[]) ?? []);
+                    if (!Array.isArray(allFacturen[index].factuurregels)) {
+                      allFacturen[index].factuurregels = [];
+                    }
+                    (allFacturen[index].factuurregels as GenericRecord[]).push({
+                      id: createId(),
+                      aantal: 0,
+                      eenheid: "",
+                      liters: 0,
+                      subfactuurbedrag: 0
                     });
-                    setStatus("");
-                  } catch {
-                    setStatus("JSON ongeldig in factuurregels.");
-                  }
-                }}
-              />
-            </label>
+                  })
+                }
+              >
+                Factuurregel toevoegen
+              </button>
+            </div>
           </article>
         ))}
         <div className="editor-actions">
