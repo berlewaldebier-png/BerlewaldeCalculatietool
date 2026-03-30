@@ -3,6 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.domain import legacy_storage, postgres_storage
+from utils.storage import (
+    ensure_complete_verkoop_records,
+    load_all_verkoop_records,
+    normalize_any_verkoop_record,
+    normalize_berekening_record,
+)
 
 
 DATASET_DEFAULTS: dict[str, Any] = {
@@ -39,11 +45,43 @@ def require_postgres() -> None:
 def load_dataset(name: str) -> Any:
     require_postgres()
     default_value = DATASET_DEFAULTS[name]
-    return postgres_storage.load_dataset(name, default_value)
+    payload = postgres_storage.load_dataset(name, default_value)
+    if name == "berekeningen" and isinstance(payload, list):
+        return [
+            normalize_berekening_record(record)
+            for record in payload
+            if isinstance(record, dict)
+        ]
+    if name == "verkoopprijzen" and isinstance(payload, list):
+        source_records = load_all_verkoop_records() if payload == [] else payload
+        return ensure_complete_verkoop_records(
+            [
+                normalize_any_verkoop_record(record)
+                for record in source_records
+                if isinstance(record, dict)
+            ]
+        )
+    return payload
 
 
 def save_dataset(name: str, data: Any) -> bool:
     require_postgres()
+    if name == "berekeningen" and isinstance(data, list):
+        payload = [
+            normalize_berekening_record(record)
+            for record in data
+            if isinstance(record, dict)
+        ]
+        return postgres_storage.save_dataset(name, payload)
+    if name == "verkoopprijzen" and isinstance(data, list):
+        payload = ensure_complete_verkoop_records(
+            [
+                normalize_any_verkoop_record(record)
+                for record in data
+                if isinstance(record, dict)
+            ]
+        )
+        return postgres_storage.save_dataset(name, payload)
     return postgres_storage.save_dataset(name, data)
 
 

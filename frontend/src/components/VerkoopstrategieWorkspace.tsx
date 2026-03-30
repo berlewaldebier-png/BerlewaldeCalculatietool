@@ -11,6 +11,8 @@ type PackagingRow = {
   record_type: string;
   jaar: number;
   bron_jaar: number;
+  product_id: string;
+  product_type: "basis" | "samengesteld" | "";
   verpakking_key: string;
   verpakking: string;
   bron_verkoopstrategie_id: string;
@@ -28,6 +30,7 @@ type BeerOverviewRow = {
 };
 
 type PackagingSource = {
+  id: string;
   key: string;
   label: string;
   jaar: number;
@@ -71,6 +74,11 @@ function normalizeVerkoopstrategieRow(row: GenericRecord): PackagingRow {
     record_type: String(row.record_type ?? "verkoopstrategie_verpakking"),
     jaar: Number(row.jaar ?? new Date().getFullYear()),
     bron_jaar: Number(row.bron_jaar ?? new Date().getFullYear()),
+    product_id: String(row.product_id ?? ""),
+    product_type:
+      String(row.product_type ?? "") === "basis" || String(row.product_type ?? "") === "samengesteld"
+        ? (String(row.product_type ?? "") as "basis" | "samengesteld")
+        : "",
     verpakking_key: String(row.verpakking_key ?? ""),
     verpakking: String(row.verpakking ?? ""),
     bron_verkoopstrategie_id: String(row.bron_verkoopstrategie_id ?? ""),
@@ -90,6 +98,7 @@ function buildPackagingSources(
   samengesteldeProducten: GenericRecord[]
 ): PackagingSource[] {
   const basis = basisproducten.map((row) => ({
+    id: String(row.id ?? ""),
     key: toPackagingKey("basis", String(row.omschrijving ?? "")),
     label: String(row.omschrijving ?? ""),
     jaar: Number(row.jaar ?? 0),
@@ -97,6 +106,7 @@ function buildPackagingSources(
   }));
 
   const samengesteld = samengesteldeProducten.map((row) => ({
+    id: String(row.id ?? ""),
     key: toPackagingKey("samengesteld", String(row.omschrijving ?? "")),
     label: String(row.omschrijving ?? ""),
     jaar: Number(row.jaar ?? 0),
@@ -194,7 +204,11 @@ export function VerkoopstrategieWorkspace({
     const existingForYear = rows.filter((row) => row.jaar === selectedYear);
 
     const merged = sourcesForYear.map((source) => {
-      const existing = existingForYear.find((row) => row.verpakking_key === source.key);
+      const existing = existingForYear.find(
+        (row) =>
+          (source.id && row.product_id === source.id) ||
+          (!source.id && row.verpakking_key === source.key)
+      );
       if (existing) {
         return existing;
       }
@@ -204,6 +218,8 @@ export function VerkoopstrategieWorkspace({
         record_type: "verkoopstrategie_verpakking",
         jaar: selectedYear,
         bron_jaar: selectedYear,
+        product_id: source.id,
+        product_type: source.type,
         verpakking_key: source.key,
         verpakking: source.label,
         bron_verkoopstrategie_id: "",
@@ -214,7 +230,12 @@ export function VerkoopstrategieWorkspace({
     });
 
     const additional = existingForYear.filter(
-      (row) => !sourcesForYear.some((source) => source.key === row.verpakking_key)
+      (row) =>
+        !sourcesForYear.some(
+          (source) =>
+            (source.id && row.product_id === source.id) ||
+            (!source.id && source.key === row.verpakking_key)
+        )
     );
 
     return [...merged, ...additional];
@@ -262,6 +283,8 @@ export function VerkoopstrategieWorkspace({
         record_type: "verkoopstrategie_verpakking",
         jaar: selectedYear,
         bron_jaar: selectedYear,
+        product_id: "",
+        product_type: "",
         verpakking_key: "",
         verpakking: "",
         bron_verkoopstrategie_id: "",
@@ -281,7 +304,11 @@ export function VerkoopstrategieWorkspace({
     setIsSaving(true);
 
     try {
-      const payload = rows.map(stripInternal);
+      const effectiveRows = [
+        ...rows.filter((row) => row.jaar !== selectedYear),
+        ...visiblePackagingRows
+      ];
+      const payload = effectiveRows.map(stripInternal);
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "PUT",
         headers: {
@@ -294,6 +321,7 @@ export function VerkoopstrategieWorkspace({
         throw new Error("Opslaan mislukt");
       }
 
+      setRows(effectiveRows);
       setStatus("Opgeslagen.");
     } catch {
       setStatus("Opslaan mislukt.");
@@ -364,7 +392,9 @@ export function VerkoopstrategieWorkspace({
                   <div className="nested-editor-card-title">
                     {row.verpakking || "Nieuwe verpakking"}
                   </div>
-                  <div className="nested-editor-card-meta">Key: {row.verpakking_key || "(nog leeg)"}</div>
+                  <div className="nested-editor-card-meta">
+                    ID: {row.product_id || "(nog leeg)"} | Key: {row.verpakking_key || "(nog leeg)"}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -377,12 +407,30 @@ export function VerkoopstrategieWorkspace({
 
               <div className="nested-editor-grid">
                 <label className="nested-field">
+                  <span>Product ID</span>
+                  <input
+                    className="dataset-input"
+                    type="text"
+                    value={row.product_id}
+                    onChange={(event) => updatePackagingRow(row._uiId, "product_id", event.target.value)}
+                  />
+                </label>
+                <label className="nested-field">
                   <span>Verpakking</span>
                   <input
                     className="dataset-input"
                     type="text"
                     value={row.verpakking}
                     onChange={(event) => updatePackagingRow(row._uiId, "verpakking", event.target.value)}
+                  />
+                </label>
+                <label className="nested-field">
+                  <span>Producttype</span>
+                  <input
+                    className="dataset-input"
+                    type="text"
+                    value={row.product_type}
+                    onChange={(event) => updatePackagingRow(row._uiId, "product_type", event.target.value)}
                   />
                 </label>
                 <label className="nested-field">

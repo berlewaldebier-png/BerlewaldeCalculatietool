@@ -361,6 +361,79 @@ def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, An
     }
 
 
+def _snapshot_float(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_resultaat_snapshot_product_row(row: dict[str, Any] | None) -> dict[str, Any]:
+    source = row if isinstance(row, dict) else {}
+    verpakking = str(
+        source.get("verpakking", "")
+        or source.get("verpakkingseenheid", "")
+        or source.get("omschrijving", "")
+        or ""
+    )
+    primaire_kosten = _snapshot_float(
+        source.get("primaire_kosten", source.get("variabele_kosten", 0.0))
+    )
+    verpakkingskosten = _snapshot_float(source.get("verpakkingskosten", 0.0))
+    vaste_kosten = _snapshot_float(
+        source.get("vaste_kosten", source.get("vaste_directe_kosten", 0.0))
+    )
+    accijns = _snapshot_float(source.get("accijns", 0.0))
+    kostprijs = _snapshot_float(
+        source.get("kostprijs", primaire_kosten + verpakkingskosten + vaste_kosten + accijns)
+    )
+    liters_per_product = source.get(
+        "liters_per_product",
+        source.get("totale_inhoud_liter", source.get("inhoud_per_eenheid_liter")),
+    )
+
+    return {
+        "biernaam": str(source.get("biernaam", "") or ""),
+        "soort": str(source.get("soort", "") or ""),
+        "verpakking": verpakking,
+        "verpakkingseenheid": verpakking,
+        "primaire_kosten": primaire_kosten,
+        "variabele_kosten": primaire_kosten,
+        "verpakkingskosten": verpakkingskosten,
+        "vaste_kosten": vaste_kosten,
+        "vaste_directe_kosten": vaste_kosten,
+        "accijns": accijns,
+        "kostprijs": kostprijs,
+        "liters_per_product": _snapshot_float(liters_per_product),
+    }
+
+
+def _normalize_resultaat_snapshot_producten(
+    producten: dict[str, Any] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    source = producten if isinstance(producten, dict) else {}
+    basisproducten = source.get("basisproducten", [])
+    samengestelde_producten = source.get("samengestelde_producten", [])
+
+    if not isinstance(basisproducten, list):
+        basisproducten = []
+    if not isinstance(samengestelde_producten, list):
+        samengestelde_producten = []
+
+    return {
+        "basisproducten": [
+            _normalize_resultaat_snapshot_product_row(row)
+            for row in basisproducten
+            if isinstance(row, dict)
+        ],
+        "samengestelde_producten": [
+            _normalize_resultaat_snapshot_product_row(row)
+            for row in samengestelde_producten
+            if isinstance(row, dict)
+        ],
+    }
+
+
 def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     """Normaliseert een berekeningrecord voor Nieuwe kostprijsberekening."""
     status = str(record.get("status", "concept") or "concept").strip().lower()
@@ -539,7 +612,9 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         "directe_vaste_kosten_per_liter": resultaat_snapshot.get(
             "directe_vaste_kosten_per_liter"
         ),
-        "producten": resultaat_snapshot.get("producten", []),
+        "producten": _normalize_resultaat_snapshot_producten(
+            resultaat_snapshot.get("producten")
+        ),
     }
 
     jaarovergang = record.get("jaarovergang", {})
@@ -2544,6 +2619,7 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
         "bier_key": str(record.get("bier_key", "") or ""),
         "biernaam": str(record.get("biernaam", "") or ""),
         "stijl": str(record.get("stijl", "") or ""),
+        "product_id": str(record.get("product_id", "") or ""),
         "product_key": str(record.get("product_key", "") or ""),
         "product_type": str(record.get("product_type", "samengesteld") or "samengesteld"),
         "verpakking": str(record.get("verpakking", "") or ""),
@@ -2601,6 +2677,8 @@ def normalize_verkoopstrategie_verpakking_record(record: dict[str, Any]) -> dict
         "record_type": VERKOOPSTRATEGIE_RECORD_TYPE_VERPAKKING,
         "jaar": jaar,
         "bron_jaar": bron_jaar,
+        "product_id": str(record.get("product_id", "") or ""),
+        "product_type": str(record.get("product_type", "") or ""),
         "verpakking_key": verpakking_key,
         "verpakking": verpakking,
         "bron_verkoopstrategie_id": str(record.get("bron_verkoopstrategie_id", "") or ""),
@@ -2629,15 +2707,149 @@ def _normalize_any_verkoop_record(record: dict[str, Any]) -> dict[str, Any]:
     return normalize_verkoopprijs_record(record)
 
 
-def _save_verkoop_records(records: list[dict[str, Any]]) -> bool:
-    """Slaat gemengde verkooprecords veilig op."""
+def _default_verkoop_kanaalmarges() -> dict[str, float]:
+    return {
+        categorie: 50.0 for categorie in VERKOOPSTRATEGIE_CATEGORIEN
+    }
+
+
+def _build_verkoopstrategie_packaging_sources() -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+
+    for product in load_basisproducten():
+        verpakking = str(product.get("omschrijving", "") or "")
+        if not verpakking:
+            continue
+        sources.append(
+            {
+                "jaar": int(product.get("jaar", 0) or 0),
+                "product_id": str(product.get("id", "") or ""),
+                "product_type": "basis",
+                "verpakking": verpakking,
+                "verpakking_key": _normalize_verpakking_key(verpakking),
+            }
+        )
+
+    for product in load_samengestelde_producten():
+        verpakking = str(product.get("omschrijving", "") or "")
+        if not verpakking:
+            continue
+        sources.append(
+            {
+                "jaar": int(product.get("jaar", 0) or 0),
+                "product_id": str(product.get("id", "") or ""),
+                "product_type": "samengesteld",
+                "verpakking": verpakking,
+                "verpakking_key": _normalize_verpakking_key(verpakking),
+            }
+        )
+
+    return sources
+
+
+def _pick_verkoopstrategie_seed(
+    year: int,
+    product_id: str,
+    verpakking_key: str,
+    records: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    verpakking_candidates = [
+        record
+        for record in records
+        if str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_VERPAKKING
+        and int(record.get("jaar", 0) or 0) <= year
+        and product_id
+        and str(record.get("product_id", "") or "") == product_id
+    ]
+    if verpakking_candidates:
+        return max(verpakking_candidates, key=lambda item: int(item.get("jaar", 0) or 0))
+
+    jaarstrategie_candidates = [
+        record
+        for record in records
+        if str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_JAAR
+        and int(record.get("jaar", 0) or 0) <= year
+    ]
+    if jaarstrategie_candidates:
+        return max(jaarstrategie_candidates, key=lambda item: int(item.get("jaar", 0) or 0))
+
+    return None
+
+
+def _ensure_complete_verkoop_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized = [
         _normalize_any_verkoop_record(record)
         for record in records
         if isinstance(record, dict)
     ]
-    normalized = sorted(
-        normalized,
+
+    existing_packaging_keys: set[tuple[int, str, str]] = set()
+    for record in normalized:
+        if str(record.get("record_type", "") or "") != VERKOOPSTRATEGIE_RECORD_TYPE_VERPAKKING:
+            continue
+        existing_packaging_keys.add(
+            (
+                int(record.get("jaar", 0) or 0),
+                str(record.get("product_id", "") or ""),
+                _normalize_verpakking_key(record.get("verpakking_key", record.get("verpakking", ""))),
+            )
+        )
+
+    appended: list[dict[str, Any]] = []
+    for source in _build_verkoopstrategie_packaging_sources():
+        year = int(source.get("jaar", 0) or 0)
+        product_id = str(source.get("product_id", "") or "")
+        verpakking = str(source.get("verpakking", "") or "")
+        verpakking_key = _normalize_verpakking_key(source.get("verpakking_key", verpakking))
+        identity = (year, product_id, verpakking_key)
+        if identity in existing_packaging_keys:
+            continue
+
+        seed = _pick_verkoopstrategie_seed(year, product_id, verpakking_key, normalized)
+        appended.append(
+            normalize_verkoopstrategie_verpakking_record(
+                {
+                    "jaar": year,
+                    "bron_jaar": int((seed or {}).get("jaar", year) or year),
+                    "product_id": product_id,
+                    "product_type": str(source.get("product_type", "") or ""),
+                    "verpakking": verpakking,
+                    "verpakking_key": verpakking_key,
+                    "bron_verkoopstrategie_id": str((seed or {}).get("id", "") or ""),
+                    "strategie_type": str((seed or {}).get("strategie_type", "handmatig") or "handmatig"),
+                    "kanaalmarges": dict((seed or {}).get("kanaalmarges", _default_verkoop_kanaalmarges())),
+                }
+            )
+        )
+        existing_packaging_keys.add(identity)
+
+    completed = [*normalized, *appended]
+
+    concrete_packaging_pairs = {
+        (
+            int(record.get("jaar", 0) or 0),
+            _normalize_verpakking_key(record.get("verpakking_key", record.get("verpakking", ""))),
+        )
+        for record in completed
+        if str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_VERPAKKING
+        and str(record.get("product_id", "") or "")
+    }
+
+    completed = [
+        record
+        for record in completed
+        if not (
+            str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_VERPAKKING
+            and not str(record.get("product_id", "") or "")
+            and (
+                int(record.get("jaar", 0) or 0),
+                _normalize_verpakking_key(record.get("verpakking_key", record.get("verpakking", ""))),
+            )
+            in concrete_packaging_pairs
+        )
+    ]
+
+    completed.sort(
         key=lambda item: (
             int(item.get("jaar", 0) or 0),
             0
@@ -2647,8 +2859,24 @@ def _save_verkoop_records(records: list[dict[str, Any]]) -> bool:
             else 2,
             str(item.get("biernaam", "") or "").lower(),
             str(item.get("verpakking_key", item.get("verpakking", "")) or "").lower(),
-        ),
+        )
     )
+    return completed
+
+
+def normalize_any_verkoop_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Publieke helper voor het normaliseren van verkooprecords."""
+    return _normalize_any_verkoop_record(record)
+
+
+def ensure_complete_verkoop_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Publieke helper die ontbrekende verpakkingsstrategie-records aanvult."""
+    return _ensure_complete_verkoop_records(records)
+
+
+def _save_verkoop_records(records: list[dict[str, Any]]) -> bool:
+    """Slaat gemengde verkooprecords veilig op."""
+    normalized = _ensure_complete_verkoop_records(records)
     return _save_json_value(VERKOOPPRIJZEN_FILE, normalized, "[]")
 
 
@@ -2666,6 +2894,11 @@ def load_verkoopprijzen() -> list[dict[str, Any]]:
     ]
 
 
+def load_all_verkoop_records() -> list[dict[str, Any]]:
+    """Laadt alle verkoop-gerelateerde records veilig in, inclusief strategie-records."""
+    return _ensure_complete_verkoop_records(_load_verkoopprijs_records())
+
+
 def save_verkoopprijzen(data: list[dict[str, Any]]) -> bool:
     """Slaat alle verkoopprijzen veilig op."""
     strategy_records = [
@@ -2680,7 +2913,7 @@ def load_verkoopstrategien() -> list[dict[str, Any]]:
     """Laadt alle jaargebonden verkoopstrategieÃ«n veilig in."""
     return [
         normalize_verkoopstrategie_record(record)
-        for record in _load_verkoopprijs_records()
+        for record in load_all_verkoop_records()
         if isinstance(record, dict)
         and str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_JAAR
     ]
@@ -2703,7 +2936,7 @@ def load_verkoopstrategie_producten() -> list[dict[str, Any]]:
     """Laadt alle verkoopstrategieÃ«n op productniveau veilig in."""
     return [
         normalize_verkoopstrategie_product_record(record)
-        for record in _load_verkoopprijs_records()
+        for record in load_all_verkoop_records()
         if isinstance(record, dict)
         and str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_PRODUCT
     ]
@@ -2713,7 +2946,7 @@ def load_verkoopstrategie_verpakkingen() -> list[dict[str, Any]]:
     """Laadt alle verkoopstrategieÃ«n op verpakkingstype veilig in."""
     return [
         normalize_verkoopstrategie_verpakking_record(record)
-        for record in _load_verkoopprijs_records()
+        for record in load_all_verkoop_records()
         if isinstance(record, dict)
         and str(record.get("record_type", "") or "") == VERKOOPSTRATEGIE_RECORD_TYPE_VERPAKKING
     ]
@@ -3200,6 +3433,8 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         staffels.append(
             {
                 "id": str(row.get("id", "") or uuid4()),
+                "product_id": str(row.get("product_id", "") or ""),
+                "product_type": str(row.get("product_type", "") or ""),
                 "product_key": str(row.get("product_key", "") or ""),
                 "liters": _float_value(row.get("liters")),
                 "korting_pct": _float_value(row.get("korting_pct")),
@@ -3217,7 +3452,10 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": str(row.get("id", "") or uuid4()),
                 "bier_key": str(row.get("bier_key", "") or ""),
+                "product_id": str(row.get("product_id", "") or ""),
+                "product_type": str(row.get("product_type", "") or ""),
                 "product_key": str(row.get("product_key", "") or ""),
+                "verpakking_label": str(row.get("verpakking_label", "") or ""),
                 "aantal": _float_value(row.get("aantal")),
                 "korting_pct": _float_value(row.get("korting_pct")),
             }
@@ -3234,6 +3472,8 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": str(row.get("id", "") or uuid4()),
                 "bier_key": str(row.get("bier_key", "") or ""),
+                "product_id": str(row.get("product_id", "") or ""),
+                "product_type": str(row.get("product_type", "") or ""),
                 "product_key": str(row.get("product_key", "") or ""),
                 "liters": _float_value(row.get("liters")),
                 "korting_pct": _float_value(row.get("korting_pct")),
