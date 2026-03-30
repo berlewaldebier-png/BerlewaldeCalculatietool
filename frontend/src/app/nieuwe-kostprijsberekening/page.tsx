@@ -1,4 +1,4 @@
-import { BerekeningenWizard } from "@/components/BerekeningenWizard";
+import { KostprijsBeheerWorkspace } from "@/components/KostprijsBeheerWorkspace";
 import { PageShell } from "@/components/PageShell";
 import {
   getBasisproducten,
@@ -31,13 +31,13 @@ export default async function NieuweKostprijsberekeningPage() {
 
   return (
     <PageShell
-      title="Nieuwe kostprijsberekening"
-      subtitle="Nieuwe wizard met verticale stappen, overzicht van berekeningen en directe bewerking van de kernvelden."
+      title="Kostprijs beheren"
+      subtitle="Start een nieuwe berekening of open een bestaand dossier en werk het verder uit in de wizard."
       activePath="/nieuwe-kostprijsberekening"
       navigation={navigation}
     >
-      <BerekeningenWizard
-        initialRows={berekeningen}
+      <KostprijsBeheerWorkspace
+        berekeningen={berekeningen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         productie={productie}

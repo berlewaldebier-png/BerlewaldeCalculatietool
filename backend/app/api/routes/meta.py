@@ -49,8 +49,8 @@ def get_navigation() -> list[NavigationItem]:
         ),
         NavigationItem(
             key="nieuwe-kostprijsberekening",
-            label="Nieuwe kostprijsberekening",
-            description="Maak en beheer kostprijsberekeningen.",
+            label="Kostprijs beheren",
+            description="Start nieuwe berekeningen of werk bestaande dossiers bij.",
             href="/nieuwe-kostprijsberekening",
             section="Calculatie",
         ),

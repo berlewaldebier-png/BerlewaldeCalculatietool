@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type InputHTMLAttributes } from "react";
 
+import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
@@ -12,6 +13,8 @@ type StepDefinition = {
   description: string;
 };
 
+type BerekeningProcessType = "Eigen productie" | "Inkoop";
+
 type BerekeningenWizardProps = {
   initialRows: GenericRecord[];
   basisproducten: GenericRecord[];
@@ -19,6 +22,17 @@ type BerekeningenWizardProps = {
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
+  initialSelectedId?: string;
+  startWithNew?: boolean;
+  onBackToLanding?: () => void;
+  onRowsChange?: (rows: GenericRecord[]) => void;
+  onFinish?: () => void;
+};
+
+type PendingDeleteDialog = {
+  title: string;
+  body: string;
+  onConfirm: () => void;
 };
 
 type SummaryProductRow = {
@@ -199,7 +213,73 @@ function hasMeaningfulFacturen(row: GenericRecord) {
   });
 }
 
-function getSteps(row: GenericRecord): StepDefinition[] {
+function getBerekeningProcessType(row: GenericRecord): BerekeningProcessType {
+  const rawType = String(((row.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+  return rawType === "Inkoop" ? "Inkoop" : "Eigen productie";
+}
+
+function buildWizardSteps(row: GenericRecord): StepDefinition[] {
+  const processType = getBerekeningProcessType(row);
+  const meaningfulFacturen = processType === "Inkoop" && hasMeaningfulFacturen(row);
+
+  const steps: StepDefinition[] =
+    processType === "Inkoop"
+      ? [
+          {
+            id: "basis",
+            label: "Basisgegevens",
+            description: "Kies bier, jaar en fiscale uitgangspunten"
+          },
+          {
+            id: "type",
+            label: "Soort berekening",
+            description: "Bevestig dat deze flow op inkoop is gebaseerd"
+          },
+          {
+            id: "input",
+            label: "Inkoopfactuur",
+            description: "Selecteer producten, aantallen en bronkosten"
+          }
+        ]
+      : [
+          {
+            id: "basis",
+            label: "Basisgegevens",
+            description: "Kies bier, jaar en fiscale uitgangspunten"
+          },
+          {
+            id: "type",
+            label: "Soort berekening",
+            description: "Bevestig dat deze flow op eigen productie draait"
+          },
+          {
+            id: "input",
+            label: "Recept",
+            description: "Werk recept, ingredienten en opbrengst uit"
+          }
+        ];
+
+  if (meaningfulFacturen) {
+    steps.push({
+      id: "facturen",
+      label: "Gekoppelde facturen",
+      description: "Verdeel extra kosten over facturen en regels"
+    });
+  }
+
+  steps.push({
+    id: "summary",
+    label: "Samenvatting",
+    description:
+      processType === "Inkoop"
+        ? "Controleer inkoop, accijns en kostprijs per verpakking"
+        : "Controleer ingredienten, verpakking en kostprijs per verpakking"
+  });
+
+  return steps;
+}
+
+function getLegacySteps(row: GenericRecord): StepDefinition[] {
   const type = String(((row.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
   const meaningfulFacturen = type === "Inkoop" && hasMeaningfulFacturen(row);
 
@@ -227,6 +307,13 @@ function getIngredientType(row: GenericRecord) {
 
 function getProductDisplayName(row: GenericRecord) {
   return String(row.verpakking ?? row.omschrijving ?? "").trim();
+}
+
+function getProductUnitLabel(
+  unitId: string,
+  options: ProductUnitOption[]
+) {
+  return options.find((option) => option.id === unitId)?.label ?? "";
 }
 
 function getProductUnitOptions(
@@ -262,6 +349,23 @@ function toSummaryValue(value: unknown): string | number {
 function roundValue(value: number, decimals = 6) {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
+}
+
+function formatDecimalValue(value: number | null | undefined, decimals = 2) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "";
+  }
+
+  return roundValue(value, decimals).toFixed(decimals);
+}
+
+function formatCurrencyDisplay(value: unknown) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "-";
+  }
+
+  return `\u20AC ${roundValue(numericValue, 2).toFixed(2)}`;
 }
 
 function getYearProduction(year: number, productie: Record<string, GenericRecord>) {
@@ -649,22 +753,65 @@ export function BerekeningenWizard({
   samengesteldeProducten,
   productie,
   vasteKosten,
-  tarievenHeffingen
+  tarievenHeffingen,
+  initialSelectedId,
+  startWithNew = false,
+  onBackToLanding,
+  onRowsChange,
+  onFinish
 }: BerekeningenWizardProps) {
-  const normalizedRows = useMemo(() => initialRows.map((row) => normalizeBerekening(row)), [initialRows]);
-  const [rows, setRows] = useState<GenericRecord[]>(normalizedRows);
-  const [selectedId, setSelectedId] = useState<string>(
-    String(normalizedRows[0]?.id ?? createEmptyBerekening().id)
-  );
+  const initialState = useMemo(() => {
+    const normalizedRows = initialRows.map((row) => normalizeBerekening(row));
+
+    if (startWithNew || normalizedRows.length === 0) {
+      const next = createEmptyBerekening();
+      return {
+        rows: [next, ...normalizedRows],
+        selectedId: String(next.id)
+      };
+    }
+
+    const matchedRow = initialSelectedId
+      ? normalizedRows.find((row) => String(row.id) === String(initialSelectedId))
+      : normalizedRows[0];
+
+    return {
+      rows: normalizedRows,
+      selectedId: String(matchedRow?.id ?? normalizedRows[0]?.id ?? createEmptyBerekening().id)
+    };
+  }, [initialRows, initialSelectedId, startWithNew]);
+
+  const [rows, setRows] = useState<GenericRecord[]>(initialState.rows);
+  const [selectedId] = useState<string>(initialState.selectedId);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [status, setStatus] = useState("");
+  const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDeleteDialog | null>(null);
 
   const current =
     rows.find((row) => String(row.id) === selectedId) ?? rows[0] ?? createEmptyBerekening();
-  const steps = getSteps(current);
+  const isEditingExisting = !startWithNew;
+  const processType = getBerekeningProcessType(current);
+  const steps = buildWizardSteps(current);
   const currentIndex = Math.min(activeStepIndex, steps.length - 1);
   const currentStep = steps[currentIndex] ?? steps[0];
+
+  const wizardSidebar = useMemo(
+    () => ({
+      title: "Wizard",
+      steps,
+      activeIndex: currentIndex,
+      onStepSelect: setActiveStepIndex
+    }),
+    [currentIndex, steps]
+  );
+
+  usePageShellWizardSidebar(wizardSidebar);
+
+  function requestDelete(title: string, body: string, onConfirm: () => void) {
+    setPendingDelete({ title, body, onConfirm });
+  }
 
   function buildResultaatSnapshot(row: GenericRecord): ResultaatSnapshot {
     const basisgegevens = (row.basisgegevens as GenericRecord) ?? {};
@@ -745,16 +892,9 @@ export function BerekeningenWizard({
     );
   }
 
-  function addBerekening() {
-    const next = createEmptyBerekening();
-    setRows((currentRows) => [next, ...currentRows]);
-    setSelectedId(String(next.id));
-    setActiveStepIndex(0);
-    setStatus("");
-  }
-
   async function handleSave() {
     setStatus("");
+    setStatusTone(null);
     setIsSaving(true);
     try {
       const payload = rows.map((row) => {
@@ -772,9 +912,41 @@ export function BerekeningenWizard({
         throw new Error("Opslaan mislukt");
       }
       setRows(payload);
+      onRowsChange?.(payload);
       setStatus("Berekeningen opgeslagen.");
+      setStatusTone("success");
+      return true;
     } catch {
       setStatus("Opslaan mislukt.");
+      setStatusTone("error");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleDeleteCurrent() {
+    setStatus("");
+    setStatusTone(null);
+    setIsSaving(true);
+    try {
+      const payload = rows.filter((row) => String(row.id) !== String(current.id));
+      const response = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error("Verwijderen mislukt");
+      }
+      setRows(payload);
+      onRowsChange?.(payload);
+      setStatus("Berekening verwijderd.");
+      setStatusTone("success");
+      onBackToLanding?.();
+    } catch {
+      setStatus("Verwijderen mislukt.");
+      setStatusTone("error");
     } finally {
       setIsSaving(false);
     }
@@ -782,6 +954,7 @@ export function BerekeningenWizard({
 
   function renderBasisStep() {
     const basis = (current.basisgegevens as GenericRecord) ?? {};
+    const belastingsoort = String(basis.belastingsoort ?? "Accijns");
     return (
       <div className="wizard-form-grid">
         {[
@@ -789,8 +962,6 @@ export function BerekeningenWizard({
           ["Jaar", "jaar", "number"],
           ["Stijl", "stijl", "text"],
           ["Alcoholpercentage", "alcoholpercentage", "number"],
-          ["Belastingsoort", "belastingsoort", "text"],
-          ["Tarief accijns", "tarief_accijns", "text"],
           ["BTW-tarief", "btw_tarief", "text"]
         ].map(([label, key, type]) => (
           <label key={key} className="nested-field">
@@ -813,6 +984,44 @@ export function BerekeningenWizard({
             />
           </label>
         ))}
+        <label className="nested-field">
+          <span>Belastingsoort</span>
+          <select
+            className="dataset-input"
+            value={belastingsoort}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                const basisgegevens = draft.basisgegevens as GenericRecord;
+                basisgegevens.belastingsoort = event.target.value;
+                if (event.target.value === "Verbruiksbelasting") {
+                  basisgegevens.tarief_accijns = "";
+                } else if (String(basisgegevens.tarief_accijns ?? "").trim() === "") {
+                  basisgegevens.tarief_accijns = "Hoog";
+                }
+              })
+            }
+          >
+            <option value="Accijns">Accijns</option>
+            <option value="Verbruiksbelasting">Verbruiksbelasting</option>
+          </select>
+        </label>
+        {belastingsoort === "Accijns" ? (
+          <label className="nested-field">
+            <span>Tarief accijns</span>
+            <select
+              className="dataset-input"
+              value={String(basis.tarief_accijns ?? "Hoog")}
+              onChange={(event) =>
+                updateCurrent((draft) => {
+                  (draft.basisgegevens as GenericRecord).tarief_accijns = event.target.value;
+                })
+              }
+            >
+              <option value="Hoog">Hoog</option>
+              <option value="Laag">Laag</option>
+            </select>
+          </label>
+        ) : null}
         <label className="nested-field">
           <span>Status</span>
           <input
@@ -856,14 +1065,14 @@ export function BerekeningenWizard({
     );
   }
 
-  function renderEigenProductieInput() {
+  function renderLegacyEigenProductieInput() {
     const ingredienten =
       ((((current.invoer as GenericRecord).ingredienten as GenericRecord).regels as GenericRecord[]) ??
         []);
     return (
       <div className="wizard-stack">
         <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table">
+          <table className="dataset-editor-table wizard-table-compact">
             <thead>
               <tr>
                 <th>Ingredient</th>
@@ -986,18 +1195,18 @@ export function BerekeningenWizard({
     return (
       <div className="wizard-stack">
         <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table">
+          <table className="dataset-editor-table wizard-table-compact">
             <thead>
               <tr>
                 <th>Ingredient</th>
                 <th>Omschrijving</th>
-                <th>Hoeveelheid</th>
+                <th>Inhoud verpakking</th>
                 <th>Eenheid</th>
-                <th>Prijs</th>
+                <th>Leveranciersprijs</th>
+                <th>Hoeveel in recept</th>
                 <th>Prijs per eenheid</th>
-                <th>Benodigd in recept</th>
                 <th>Kosten recept</th>
-                <th>Actie</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -1005,7 +1214,7 @@ export function BerekeningenWizard({
                 <tr key={String(regel.id ?? index)}>
                   <td>
                     <input
-                      className="dataset-input"
+                      className="dataset-input wizard-unit-input"
                       type="text"
                       value={getIngredientType(regel)}
                       onChange={(event) =>
@@ -1066,7 +1275,7 @@ export function BerekeningenWizard({
                     />
                   </td>
                   <td>
-                    <input
+                    <CurrencyInput
                       className="dataset-input"
                       type="number"
                       step="any"
@@ -1079,15 +1288,6 @@ export function BerekeningenWizard({
                           regels[index].prijs = event.target.value === "" ? null : Number(event.target.value);
                         })
                       }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="dataset-input"
-                      type="number"
-                      step="any"
-                      value={String(roundValue(calculateEigenProductiePrijsPerEenheid(regel)))}
-                      readOnly
                     />
                   </td>
                   <td>
@@ -1108,28 +1308,41 @@ export function BerekeningenWizard({
                     />
                   </td>
                   <td>
-                    <input
-                      className="dataset-input"
+                    <CurrencyInput
+                      className="dataset-input dataset-input-readonly"
                       type="number"
                       step="any"
-                      value={String(roundValue(calculateEigenProductieKostenRecept(regel)))}
+                      value={formatDecimalValue(calculateEigenProductiePrijsPerEenheid(regel))}
+                      readOnly
+                    />
+                  </td>
+                  <td>
+                    <CurrencyInput
+                      className="dataset-input dataset-input-readonly"
+                      type="number"
+                      step="any"
+                      value={formatDecimalValue(calculateEigenProductieKostenRecept(regel))}
                       readOnly
                     />
                   </td>
                   <td>
                     <button
                       type="button"
-                      className="editor-button editor-button-secondary"
+                      className="icon-button-table"
+                      aria-label="Ingredientregel verwijderen"
+                      title="Verwijderen"
                       onClick={() =>
-                        updateCurrent((draft) => {
+                        requestDelete("Ingredientregel verwijderen", "Weet je zeker dat je deze ingredientregel wilt verwijderen?", () =>
+                          updateCurrent((draft) => {
                           const regels =
                             ((((draft.invoer as GenericRecord).ingredienten as GenericRecord)
                               .regels as GenericRecord[]) ?? []);
                           regels.splice(index, 1);
-                        })
+                          })
+                        )
                       }
                     >
-                      Verwijderen
+                      <TrashIcon />
                     </button>
                   </td>
                 </tr>
@@ -1192,95 +1405,76 @@ export function BerekeningenWizard({
           ].map(([label, key]) => (
             <label key={key} className="nested-field">
               <span>{label}</span>
-              <input
-                className="dataset-input"
-                type={key === "verzendkosten" || key === "overige_kosten" ? "number" : "text"}
-                step={key === "verzendkosten" || key === "overige_kosten" ? "any" : undefined}
-                value={String(inkoop[key] ?? "")}
-                onChange={(event) =>
-                  updateCurrent((draft) => {
-                    ((draft.invoer as GenericRecord).inkoop as GenericRecord)[key] =
-                      key === "verzendkosten" || key === "overige_kosten"
-                        ? event.target.value === ""
-                          ? null
-                          : Number(event.target.value)
-                        : event.target.value;
-                  })
-                }
-              />
+              {key === "verzendkosten" || key === "overige_kosten" ? (
+                <CurrencyInput
+                  className="dataset-input"
+                  type="number"
+                  step="any"
+                  value={String(inkoop[key] ?? "")}
+                  onChange={(event) =>
+                    updateCurrent((draft) => {
+                      ((draft.invoer as GenericRecord).inkoop as GenericRecord)[key] =
+                        event.target.value === "" ? null : Number(event.target.value);
+                    })
+                  }
+                />
+              ) : (
+                <input
+                  className="dataset-input"
+                  type="text"
+                  value={String(inkoop[key] ?? "")}
+                  onChange={(event) =>
+                    updateCurrent((draft) => {
+                      ((draft.invoer as GenericRecord).inkoop as GenericRecord)[key] = event.target.value;
+                    })
+                  }
+                />
+              )}
             </label>
           ))}
         </div>
         <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table">
+          <table className="dataset-editor-table wizard-table-compact wizard-table-fit">
             <thead>
               <tr>
                 <th>Aantal</th>
+                <th>Eenheid</th>
+                <th>Factuurbedrag</th>
+                <th>Liters</th>
                 <th>Extra kosten</th>
                 <th>Prijs per eenheid</th>
                 <th>Prijs per liter</th>
-                <th>Liters</th>
-                <th>Subfactuurbedrag</th>
-                <th>Eenheid</th>
-                <th>Actie</th>
+                <th />
               </tr>
             </thead>
             <tbody>
               {factuurregels.map((regel, index) => (
                 <tr key={String(regel.id ?? index)}>
-                  {[
-                    ["aantal", String(regel.aantal ?? "")],
-                    ["extra_kosten", String(roundValue(extraKostenPerRegel))],
-                    ["prijs_per_eenheid", String(roundValue(calculateInkoopPrijsPerEenheid(regel, extraKostenPerRegel)))],
-                    [
-                      "prijs_per_liter",
-                      String(
-                        roundValue(
-                          calculateInkoopPrijsPerLiter(
-                            regel,
-                            extraKostenPerRegel,
+                  <td>
+                    <input
+                      className="dataset-input"
+                      type="number"
+                      step="1"
+                      value={String(regel.aantal ?? "")}
+                      onChange={(event) =>
+                        updateCurrent((draft) => {
+                          const regels =
+                            ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                              .factuurregels as GenericRecord[]) ?? []);
+                          regels[index].aantal = event.target.value === "" ? null : Number(event.target.value);
+                          regels[index].liters = getFactuurRegelLiters(
+                            regels[index],
                             jaar,
                             basisproducten,
                             samengesteldeProducten
-                          )
-                        )
-                      )
-                    ],
-                    [
-                      "liters",
-                      String(getFactuurRegelLiters(regel, jaar, basisproducten, samengesteldeProducten) ?? "")
-                    ],
-                    ["subfactuurbedrag", String(regel.subfactuurbedrag ?? "")]
-                  ].map(([key, value]) => (
-                    <td key={key}>
-                      <input
-                        className="dataset-input"
-                        type="number"
-                        step="any"
-                        value={value}
-                        readOnly={key === "liters" || key === "extra_kosten" || key === "prijs_per_eenheid" || key === "prijs_per_liter"}
-                        onChange={(event) =>
-                          updateCurrent((draft) => {
-                            const regels =
-                              ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                                .factuurregels as GenericRecord[]) ?? []);
-                            if (key === "aantal" || key === "subfactuurbedrag") {
-                              regels[index][key] = event.target.value === "" ? null : Number(event.target.value);
-                              regels[index].liters = getFactuurRegelLiters(
-                                regels[index],
-                                jaar,
-                                basisproducten,
-                                samengesteldeProducten
-                              );
-                            }
-                          })
-                        }
-                      />
-                    </td>
-                  ))}
+                          );
+                        })
+                      }
+                    />
+                  </td>
                   <td>
                     <select
-                      className="dataset-input"
+                      className="dataset-input wizard-unit-select"
                       value={String(regel.eenheid ?? "")}
                       onChange={(event) =>
                         updateCurrent((draft) => {
@@ -1306,19 +1500,86 @@ export function BerekeningenWizard({
                     </select>
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="editor-button editor-button-secondary"
-                      onClick={() =>
+                    <CurrencyInput
+                      className="dataset-input"
+                      type="number"
+                      step="0.01"
+                      value={String(regel.subfactuurbedrag ?? "")}
+                      onChange={(event) =>
                         updateCurrent((draft) => {
                           const regels =
                             ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
                               .factuurregels as GenericRecord[]) ?? []);
-                          regels.splice(index, 1);
+                          regels[index].subfactuurbedrag =
+                            event.target.value === "" ? null : Number(event.target.value);
                         })
                       }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="dataset-input dataset-input-readonly"
+                      type="number"
+                      step="0.01"
+                      value={formatDecimalValue(
+                        getFactuurRegelLiters(regel, jaar, basisproducten, samengesteldeProducten) ?? 0
+                      )}
+                      readOnly
+                    />
+                  </td>
+                  <td>
+                    <CurrencyInput
+                      className="dataset-input dataset-input-readonly"
+                      type="number"
+                      step="0.01"
+                      value={formatDecimalValue(extraKostenPerRegel)}
+                      readOnly
+                    />
+                  </td>
+                  <td>
+                    <CurrencyInput
+                      className="dataset-input dataset-input-readonly"
+                      type="number"
+                      step="0.01"
+                      value={formatDecimalValue(calculateInkoopPrijsPerEenheid(regel, extraKostenPerRegel))}
+                      readOnly
+                    />
+                  </td>
+                  <td>
+                    <CurrencyInput
+                      className="dataset-input dataset-input-readonly"
+                      type="number"
+                      step="0.01"
+                      value={formatDecimalValue(
+                        calculateInkoopPrijsPerLiter(
+                          regel,
+                          extraKostenPerRegel,
+                          jaar,
+                          basisproducten,
+                          samengesteldeProducten
+                        )
+                      )}
+                      readOnly
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="icon-button-table"
+                      aria-label="Factuurregel verwijderen"
+                      title="Verwijderen"
+                      onClick={() =>
+                        requestDelete("Factuurregel verwijderen", "Weet je zeker dat je deze factuurregel wilt verwijderen?", () =>
+                          updateCurrent((draft) => {
+                          const regels =
+                            ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                              .factuurregels as GenericRecord[]) ?? []);
+                          regels.splice(index, 1);
+                          })
+                        )
+                      }
                     >
-                      Verwijderen
+                      <TrashIcon />
                     </button>
                   </td>
                 </tr>
@@ -1355,270 +1616,85 @@ export function BerekeningenWizard({
   function renderFacturenStep() {
     const inkoop = ((current.invoer as GenericRecord).inkoop as GenericRecord) ?? {};
     const facturen = Array.isArray(inkoop.facturen) ? (inkoop.facturen as GenericRecord[]) : [];
+    const gekoppeldeFacturen = facturen.slice(1);
     const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));
     const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten);
+    const gekoppeldeRegels = gekoppeldeFacturen.flatMap((factuur, factuurIndex) => {
+      const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
+      const extraKostenPerRegel =
+        regels.length > 0
+          ? (Number(factuur.verzendkosten ?? 0) + Number(factuur.overige_kosten ?? 0)) / regels.length
+          : 0;
+
+      return regels.map((regel, regelIndex) => ({
+        factuurnummer: String(factuur.factuurnummer ?? `Factuur ${factuurIndex + 2}`),
+        regel,
+        regelIndex,
+        extraKostenPerRegel
+      }));
+    });
+
     return (
       <div className="nested-editor-list">
-        {facturen.map((factuur, index) => (
-          <article key={String(factuur.id ?? index)} className="nested-editor-card">
-            <div className="nested-editor-card-header">
-              <div>
-                <div className="nested-editor-card-title">
-                  Factuur {String(factuur.factuurnummer ?? index + 1)}
-                </div>
-                <div className="nested-editor-card-meta">
-                  Datum {String(factuur.factuurdatum ?? "-")}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() =>
-                  updateCurrent((draft) => {
-                    const allFacturen =
-                      ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                        .facturen as GenericRecord[]) ?? []);
-                    allFacturen.splice(index, 1);
-                  })
-                }
-              >
-                Verwijderen
-              </button>
-            </div>
-            <div className="wizard-form-grid">
-              {[
-                ["Factuurnummer", "factuurnummer"],
-                ["Factuurdatum", "factuurdatum"],
-                ["Verzendkosten", "verzendkosten"],
-                ["Overige kosten", "overige_kosten"]
-              ].map(([label, key]) => (
-                <label key={key} className="nested-field">
-                  <span>{label}</span>
-                  <input
-                    className="dataset-input"
-                    type={key === "verzendkosten" || key === "overige_kosten" ? "number" : "text"}
-                    step={key === "verzendkosten" || key === "overige_kosten" ? "any" : undefined}
-                    value={String(factuur[key] ?? "")}
-                    onChange={(event) =>
-                      updateCurrent((draft) => {
-                        const allFacturen =
-                          ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                            .facturen as GenericRecord[]) ?? []);
-                        allFacturen[index][key] =
-                          key === "verzendkosten" || key === "overige_kosten"
-                            ? event.target.value === ""
-                              ? null
-                              : Number(event.target.value)
-                            : event.target.value;
-                      })
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="dataset-editor-scroll">
-              <table className="dataset-editor-table">
-                <thead>
-                  <tr>
-                    <th>Aantal</th>
-                    <th>Extra kosten</th>
-                    <th>Prijs per eenheid</th>
-                    <th>Prijs per liter</th>
-                    <th>Liters</th>
-                    <th>Subfactuurbedrag</th>
-                    <th>Eenheid</th>
-                    <th>Actie</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : []).map(
-                    (regel, regelIndex, regels) => {
-                      const extraKostenPerRegel =
-                        regels.length > 0
-                          ? (Number(factuur.verzendkosten ?? 0) + Number(factuur.overige_kosten ?? 0)) /
-                            regels.length
-                          : 0;
-
-                      return (
-                        <tr key={String(regel.id ?? regelIndex)}>
-                          {[
-                            ["aantal", String(regel.aantal ?? "")],
-                            ["extra_kosten", String(roundValue(extraKostenPerRegel))],
-                            [
-                              "prijs_per_eenheid",
-                              String(roundValue(calculateInkoopPrijsPerEenheid(regel, extraKostenPerRegel)))
-                            ],
-                            [
-                              "prijs_per_liter",
-                              String(
-                                roundValue(
-                                  calculateInkoopPrijsPerLiter(
-                                    regel,
-                                    extraKostenPerRegel,
-                                    jaar,
-                                    basisproducten,
-                                    samengesteldeProducten
-                                  )
-                                )
-                              )
-                            ],
-                            [
-                              "liters",
-                              String(getFactuurRegelLiters(regel, jaar, basisproducten, samengesteldeProducten) ?? "")
-                            ],
-                            ["subfactuurbedrag", String(regel.subfactuurbedrag ?? "")]
-                          ].map(([key, value]) => (
-                            <td key={key}>
-                              <input
-                                className="dataset-input"
-                                type="number"
-                                step="any"
-                                value={value}
-                                readOnly={
-                                  key === "liters" ||
-                                  key === "extra_kosten" ||
-                                  key === "prijs_per_eenheid" ||
-                                  key === "prijs_per_liter"
-                                }
-                                onChange={(event) =>
-                                  updateCurrent((draft) => {
-                                    const allFacturen =
-                                      ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                                        .facturen as GenericRecord[]) ?? []);
-                                    const factuurRegels = Array.isArray(allFacturen[index].factuurregels)
-                                      ? (allFacturen[index].factuurregels as GenericRecord[])
-                                      : [];
-                                    if (key === "aantal" || key === "subfactuurbedrag") {
-                                      factuurRegels[regelIndex][key] =
-                                        event.target.value === "" ? null : Number(event.target.value);
-                                      factuurRegels[regelIndex].liters = getFactuurRegelLiters(
-                                        factuurRegels[regelIndex],
-                                        jaar,
-                                        basisproducten,
-                                        samengesteldeProducten
-                                      );
-                                    }
-                                  })
-                                }
-                              />
-                            </td>
-                          ))}
-                          <td>
-                            <select
-                              className="dataset-input"
-                              value={String(regel.eenheid ?? "")}
-                              onChange={(event) =>
-                                updateCurrent((draft) => {
-                                  const allFacturen =
-                                    ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                                      .facturen as GenericRecord[]) ?? []);
-                                  const factuurRegels = Array.isArray(allFacturen[index].factuurregels)
-                                    ? (allFacturen[index].factuurregels as GenericRecord[])
-                                    : [];
-                                  factuurRegels[regelIndex].eenheid = event.target.value;
-                                  factuurRegels[regelIndex].liters = getFactuurRegelLiters(
-                                    factuurRegels[regelIndex],
-                                    jaar,
-                                    basisproducten,
-                                    samengesteldeProducten
-                                  );
-                                })
-                              }
-                            >
-                              <option value="">Selecteer verpakking</option>
-                              {unitOptions.map((option) => (
-                                <option key={option.id} value={option.id}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="editor-button editor-button-secondary"
-                              onClick={() =>
-                                updateCurrent((draft) => {
-                                  const allFacturen =
-                                    ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                                      .facturen as GenericRecord[]) ?? []);
-                                  const factuurRegels = Array.isArray(allFacturen[index].factuurregels)
-                                    ? (allFacturen[index].factuurregels as GenericRecord[])
-                                    : [];
-                                  factuurRegels.splice(regelIndex, 1);
-                                })
-                              }
-                            >
-                              Verwijderen
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    }
-                  )}
-                  {(Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [])
-                    .length === 0 ? (
-                    <tr>
-                      <td className="dataset-empty" colSpan={8}>
-                        Nog geen factuurregels voor deze factuur.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="editor-actions">
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() =>
-                  updateCurrent((draft) => {
-                    const allFacturen =
-                      ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                        .facturen as GenericRecord[]) ?? []);
-                    if (!Array.isArray(allFacturen[index].factuurregels)) {
-                      allFacturen[index].factuurregels = [];
-                    }
-                    (allFacturen[index].factuurregels as GenericRecord[]).push({
-                      id: createId(),
-                      aantal: 0,
-                      eenheid: "",
-                      liters: 0,
-                      subfactuurbedrag: 0
-                    });
-                  })
-                }
-              >
-                Factuurregel toevoegen
-              </button>
-            </div>
-          </article>
-        ))}
-        <div className="editor-actions">
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() =>
-              updateCurrent((draft) => {
-                const allFacturen =
-                  ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
-                    .facturen as GenericRecord[]) ?? []);
-                allFacturen.push({
-                  id: createId(),
-                  factuurnummer: "",
-                  factuurdatum: "",
-                  verzendkosten: 0,
-                  overige_kosten: 0,
-                  factuurregels: []
-                });
-              })
-            }
-          >
-            Factuur toevoegen
-          </button>
+        <div className="module-card compact-card">
+          <div className="module-card-title">
+            {gekoppeldeFacturen.length === 1 ? "Gekoppelde factuur" : "Gekoppelde facturen"}
+          </div>
+          <div className="module-card-text">
+            Hier zie je alleen de extra facturen die zijn toegevoegd via Inkoopfacturen. De eerste
+            factuur beheer je in de stap Inkoopfactuur.
+          </div>
         </div>
+        {gekoppeldeFacturen.length === 0 ? (
+          <div className="module-card compact-card">
+            <div className="module-card-text">
+              Nog geen extra facturen gekoppeld via Inkoopfacturen. De eerste factuur beheer je in
+              de stap Inkoopfactuur.
+            </div>
+          </div>
+        ) : null}
+        {gekoppeldeRegels.length > 0 ? (
+          <div className="dataset-editor-scroll">
+            <table className="dataset-editor-table wizard-table-compact wizard-table-fit wizard-linked-facturen-table">
+              <thead>
+                <tr>
+                  <th>Factuurnummer</th>
+                  <th>Aantal</th>
+                  <th>Eenheid</th>
+                  <th>Factuurbedrag</th>
+                  <th>Liters</th>
+                  <th>Extra kosten</th>
+                  <th>Prijs per eenheid</th>
+                  <th>Prijs per liter</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gekoppeldeRegels.map(({ factuurnummer, regel, regelIndex, extraKostenPerRegel }) => (
+                  <tr key={`${factuurnummer}-${String(regel.id ?? regelIndex)}`}>
+                    <td>{factuurnummer}</td>
+                    <td>{formatDecimalValue(Number(regel.aantal ?? 0), 0)}</td>
+                    <td>{getProductUnitLabel(String(regel.eenheid ?? ""), unitOptions) || "-"}</td>
+                    <td>{formatCurrencyDisplay(Number(regel.subfactuurbedrag ?? 0))}</td>
+                    <td>{formatDecimalValue(getFactuurRegelLiters(regel, jaar, basisproducten, samengesteldeProducten) ?? 0)}</td>
+                    <td>{formatCurrencyDisplay(extraKostenPerRegel)}</td>
+                    <td>{formatCurrencyDisplay(calculateInkoopPrijsPerEenheid(regel, extraKostenPerRegel))}</td>
+                    <td>
+                      {formatCurrencyDisplay(
+                        calculateInkoopPrijsPerLiter(
+                          regel,
+                          extraKostenPerRegel,
+                          jaar,
+                          basisproducten,
+                          samengesteldeProducten
+                        )
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -1684,11 +1760,11 @@ export function BerekeningenWizard({
                       <td>{String(row.biernaam ?? "-")}</td>
                       <td>{String(row.soort ?? "-")}</td>
                       <td>{String(row.verpakkingseenheid ?? "-")}</td>
-                      <td>{String(row.primaire_kosten ?? "-")}</td>
-                      <td>{String(row.verpakkingskosten ?? "-")}</td>
-                      <td>{String(row.vaste_kosten ?? "-")}</td>
-                      <td>{String(row.accijns ?? "-")}</td>
-                      <td>{String(row.kostprijs ?? "-")}</td>
+                      <td>{formatCurrencyDisplay(row.primaire_kosten)}</td>
+                      <td>{formatCurrencyDisplay(row.verpakkingskosten)}</td>
+                      <td>{formatCurrencyDisplay(row.vaste_kosten)}</td>
+                      <td>{formatCurrencyDisplay(row.accijns)}</td>
+                      <td>{formatCurrencyDisplay(row.kostprijs)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1712,114 +1788,164 @@ export function BerekeningenWizard({
   }
 
   return (
-    <div className="wizard-page-grid">
-      <section className="content-card wizard-overview-card">
-        <div className="module-card-header">
-          <div className="module-card-title">Berekeningen</div>
-          <div className="module-card-text">
-            Kies een bestaande berekening of start een nieuwe conceptberekening.
-          </div>
-        </div>
-        <div className="editor-actions">
-          <div className="editor-actions-group">
-            <button type="button" className="editor-button" onClick={addBerekening}>
-              Nieuwe berekening
-            </button>
-          </div>
-          <div className="editor-actions-group">
-            {status ? <span className="editor-status">{status}</span> : null}
-          </div>
-        </div>
-        <div className="wizard-record-list">
-          {rows.map((row) => {
-            const basis = (row.basisgegevens as GenericRecord) ?? {};
-            const type = (row.soort_berekening as GenericRecord) ?? {};
-            return (
-              <button
-                type="button"
-                key={String(row.id)}
-                className={`wizard-record-card${String(row.id) === String(current.id) ? " active" : ""}`}
-                onClick={() => {
-                  setSelectedId(String(row.id));
-                  setActiveStepIndex(0);
-                }}
-              >
-                <div className="wizard-record-title">{String(basis.biernaam ?? "Nieuwe berekening")}</div>
-                <div className="wizard-record-meta">
-                  {String(basis.jaar ?? "-")} | {String(type.type ?? "-")} | {String(row.status ?? "-")}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="content-card wizard-main-card">
+    <section className="content-card wizard-main-card">
         <div className="wizard-main-header">
           <div>
             <h2 className="wizard-main-title">
               {String((current.basisgegevens as GenericRecord).biernaam ?? "Nieuwe berekening")}
             </h2>
             <div className="page-text">
-              Werk de kostprijs stap voor stap uit. De rekenlogica blijft uit de bestaande Python-laag komen.
+              {processType === "Inkoop"
+                ? "Werk de inkoopkostprijs stap voor stap uit, inclusief producten, facturen en samenvatting."
+                : "Werk de kostprijs stap voor stap uit vanuit recept, ingredienten en verpakkingen."}
             </div>
           </div>
-          <span className="pill">{String(current.status ?? "concept")}</span>
-        </div>
-
-        <div className="wizard-shell">
-          <aside className="wizard-steps-panel">
-            {steps.map((step, index) => (
+          <div className="wizard-main-header-actions">
+            {onBackToLanding ? (
               <button
                 type="button"
-                key={step.id}
-                className={`wizard-step-link${index === currentIndex ? " active" : ""}`}
-                onClick={() => setActiveStepIndex(index)}
+                className="editor-button editor-button-secondary"
+                onClick={onBackToLanding}
               >
-                <span className="wizard-step-number">{index + 1}</span>
-                <span className="wizard-step-copy">
-                  <span className="wizard-step-label">{step.label}</span>
-                  <span className="wizard-step-text">{step.description}</span>
-                </span>
+                Terug
               </button>
-            ))}
-          </aside>
+            ) : null}
+            {isEditingExisting ? (
+              <button
+                type="button"
+                className="icon-button-table"
+                aria-label="Kostprijs verwijderen"
+                title="Verwijderen"
+                disabled={isSaving}
+                onClick={() =>
+                  requestDelete(
+                    "Kostprijs verwijderen",
+                    `Weet je zeker dat je de kostprijs voor ${String(
+                      (current.basisgegevens as GenericRecord)?.biernaam ?? "dit bier"
+                    )} wilt verwijderen?`,
+                    () => {
+                      void handleDeleteCurrent();
+                    }
+                  )
+                }
+              >
+                <TrashIcon />
+              </button>
+            ) : null}
+            <span className="pill">{String(current.status ?? "concept")}</span>
+          </div>
+        </div>
 
-          <div className="wizard-step-card">
-            <div className="module-card-header">
-              <div className="module-card-title">{currentStep.label}</div>
-              <div className="module-card-text">{currentStep.description}</div>
+        <div className="wizard-shell wizard-shell-single">
+          <div className="wizard-step-card wizard-step-stage-card">
+            <div className="wizard-step-header">
+              <div>
+                <div className="wizard-step-title">
+                  Stap {currentIndex + 1}: {currentStep.label}
+                </div>
+                <div className="wizard-step-description">{currentStep.description}</div>
+              </div>
             </div>
-            {renderStepContent()}
-          </div>
-        </div>
 
-        <div className="editor-actions wizard-footer-actions">
-          <div className="editor-actions-group">
-            <button
-              type="button"
-              className="editor-button editor-button-secondary"
-              onClick={() => setActiveStepIndex(Math.max(0, currentIndex - 1))}
-              disabled={currentIndex === 0}
-            >
-              Vorige
-            </button>
-          </div>
-          <div className="editor-actions-group">
-            <button type="button" className="editor-button editor-button-secondary" onClick={handleSave}>
-              Opslaan
-            </button>
-            <button
-              type="button"
-              className="editor-button"
-              onClick={() => setActiveStepIndex(Math.min(steps.length - 1, currentIndex + 1))}
-              disabled={currentIndex >= steps.length - 1 || isSaving}
-            >
-              {isSaving ? "Opslaan..." : currentIndex >= steps.length - 2 ? "Afronden" : "Volgende"}
-            </button>
+            <div className="wizard-step-body">{renderStepContent()}</div>
+
+            <div className="editor-actions wizard-footer-actions">
+              <div className="editor-actions-group">
+                {currentIndex > 0 ? (
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => setActiveStepIndex(Math.max(0, currentIndex - 1))}
+                  >
+                    Vorige
+                  </button>
+                ) : null}
+              </div>
+              <div className="editor-actions-group">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={handleSave}
+                >
+                  Opslaan
+                </button>
+                <button
+                  type="button"
+                  className="editor-button"
+                  onClick={async () => {
+                    if (currentStep.id === "summary") {
+                      const saved = await handleSave();
+                      if (saved) {
+                        onFinish?.();
+                      }
+                      return;
+                    }
+
+                    setActiveStepIndex(Math.min(steps.length - 1, currentIndex + 1));
+                  }}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Opslaan..." : currentStep.id === "summary" ? "Afronden" : "Volgende"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </section>
+        {status ? (
+          <div className={`editor-status wizard-inline-status${statusTone ? ` ${statusTone}` : ""}`}>
+            {status}
+          </div>
+        ) : null}
+        {pendingDelete ? (
+          <div className="confirm-modal-overlay" role="presentation">
+            <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+              <div className="confirm-modal-title" id="confirm-title">
+                {pendingDelete.title}
+              </div>
+              <div className="confirm-modal-text">{pendingDelete.body}</div>
+              <div className="confirm-modal-actions">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() => setPendingDelete(null)}
+                >
+                  Annuleren
+                </button>
+                <button
+                  type="button"
+                  className="editor-button"
+                  onClick={() => {
+                    pendingDelete.onConfirm();
+                    setPendingDelete(null);
+                  }}
+                >
+                  Verwijderen
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+    </section>
+  );
+}
+
+function CurrencyInput({ className = "", ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className={`currency-input-wrapper${props.readOnly ? " readonly" : ""}`}>
+      <span className="currency-input-prefix">€</span>
+      <input {...props} className={className} />
     </div>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 7h16" />
+      <path d="M9 4h6" />
+      <path d="M7 7l1 12h8l1-12" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
   );
 }

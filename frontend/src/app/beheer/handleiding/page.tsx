@@ -30,7 +30,7 @@ export default async function HandleidingPage() {
         <div className="stack">
           <span>Voer voor grotere wijzigingen het script `scripts/run_regression_checks.ps1` uit.</span>
           <span>Golden scenarios: `Berlewalde Ipa 2025 Inkoop`, `Berlewalde Goudkoorts 2025 Eigen productie` en prijsvoorstel `202603001`.</span>
-          <span>Loop daarnaast handmatig de belangrijkste schermen na: Productie, Vaste kosten, Nieuwe kostprijsberekening, Inkoopfacturen, Recept hercalculatie en Nieuw jaar voorbereiden.</span>
+          <span>Loop daarnaast handmatig de belangrijkste schermen na: Productie, Vaste kosten, Kostprijs beheren, Inkoopfacturen, Recept hercalculatie en Nieuw jaar voorbereiden.</span>
         </div>
       </SectionCard>
     </PageShell>

@@ -2,11 +2,19 @@
 
 import { useMemo, useState } from "react";
 
+import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
 type ProductieMap = Record<string, GenericRecord>;
 type VasteKostenMap = Record<string, GenericRecord[]>;
+type WizardStep = {
+  id: string;
+  label: string;
+  description: string;
+  panelTitle: string;
+  panelDescription: string;
+};
 
 type NieuwJaarWizardProps = {
   initialBerekeningen: GenericRecord[];
@@ -303,12 +311,54 @@ export function NieuwJaarWizard({
     }
   }
 
-  const steps = [
-    { label: "Basis", text: "Bronjaar en doeljaar" },
-    { label: "Jaarset", text: "Datasets selecteren" },
-    { label: "Berekeningen", text: "Preview van bronrecords" },
-    { label: "Afronden", text: "Genereren en opslaan" }
+  const steps: WizardStep[] = [
+    {
+      id: "basis",
+      label: "Basisgegevens",
+      description: "Kies bronjaar, doeljaar en uitgangspunten",
+      panelTitle: "Bronjaar kiezen",
+      panelDescription: "Selecteer het bronjaar en geef aan naar welk doeljaar je wilt kopieren."
+    },
+    {
+      id: "jaarset",
+      label: "Jaarset",
+      description: "Bepaal welke datasets meegaan naar het nieuwe jaar",
+      panelTitle: "Jaarset samenstellen",
+      panelDescription: "Kies welke datasets je wilt overnemen of opnieuw wilt opbouwen."
+    },
+    {
+      id: "berekeningen",
+      label: "Berekeningen",
+      description: "Controleer definitieve bronrecords van het gekozen jaar",
+      panelTitle: "Preview van berekeningen",
+      panelDescription:
+        "Bekijk welke definitieve berekeningen beschikbaar zijn en al in het doeljaar bestaan."
+    },
+    {
+      id: "afronden",
+      label: "Afronden",
+      description: "Genereer de jaarset en schrijf hem direct weg",
+      panelTitle: "Afronden",
+      panelDescription: "Controleer de selectie en maak daarna de nieuwe jaarset aan."
+    }
   ];
+  const currentStep = steps[activeStep] ?? steps[0];
+
+  const wizardSidebar = useMemo(
+    () => ({
+      title: "Wizard",
+      steps: steps.map((step) => ({
+        id: step.id,
+        label: step.label,
+        description: step.description
+      })),
+      activeIndex: activeStep,
+      onStepSelect: setActiveStep
+    }),
+    [activeStep, steps]
+  );
+
+  usePageShellWizardSidebar(wizardSidebar);
 
   return (
     <section className="module-card">
@@ -316,37 +366,17 @@ export function NieuwJaarWizard({
         <div className="module-card-title">Nieuw jaar voorbereiden</div>
         <div className="module-card-text">
           Maak een nieuwe jaarset aan op basis van een bestaand bronjaar en schrijf deze direct weg
-          naar JSON.
+          naar de centrale opslag.
         </div>
       </div>
 
-      <div className="wizard-page-grid">
-        <aside className="wizard-steps-panel">
-          {steps.map((step, index) => (
-            <button
-              key={step.label}
-              type="button"
-              className={`wizard-step-link${activeStep === index ? " active" : ""}`}
-              onClick={() => setActiveStep(index)}
-            >
-              <span className="wizard-step-number">{index + 1}</span>
-              <span className="wizard-step-copy">
-                <strong>{step.label}</strong>
-                <small>{step.text}</small>
-              </span>
-            </button>
-          ))}
-        </aside>
-
-        <div className="wizard-shell wizard-shell-single">
+      <div className="wizard-shell wizard-shell-single">
           {activeStep === 0 ? (
-            <div className="wizard-step-card">
+            <div className="wizard-step-card wizard-step-stage-card">
               <div className="wizard-step-header">
                 <div>
-                  <div className="wizard-step-title">Bronjaar kiezen</div>
-                  <div className="wizard-step-text">
-                    Selecteer het bronjaar en geef aan naar welk doeljaar je wilt kopieren.
-                  </div>
+                  <div className="wizard-step-title">Stap {activeStep + 1}: {currentStep.panelTitle}</div>
+                  <div className="wizard-step-description">{currentStep.panelDescription}</div>
                 </div>
               </div>
 
@@ -386,12 +416,12 @@ export function NieuwJaarWizard({
           ) : null}
 
           {activeStep === 1 ? (
-            <div className="wizard-step-card">
+            <div className="wizard-step-card wizard-step-stage-card">
               <div className="wizard-step-header">
                 <div>
-                  <div className="wizard-step-title">Jaarset samenstellen</div>
-                  <div className="wizard-step-text">
-                    Kies welke datasets meegenomen worden naar {targetYear}.
+                  <div className="wizard-step-title">Stap {activeStep + 1}: {currentStep.panelTitle}</div>
+                  <div className="wizard-step-description">
+                    {currentStep.panelDescription} Doeljaar: {targetYear}.
                   </div>
                 </div>
               </div>
@@ -440,13 +470,12 @@ export function NieuwJaarWizard({
           ) : null}
 
           {activeStep === 2 ? (
-            <div className="wizard-step-card">
+            <div className="wizard-step-card wizard-step-stage-card">
               <div className="wizard-step-header">
                 <div>
-                  <div className="wizard-step-title">Preview van berekeningen</div>
-                  <div className="wizard-step-text">
-                    Overzicht van definitieve bronrecords in {sourceYear} en of ze al bestaan in{" "}
-                    {targetYear}.
+                  <div className="wizard-step-title">Stap {activeStep + 1}: {currentStep.panelTitle}</div>
+                  <div className="wizard-step-description">
+                    {currentStep.panelDescription} Bronjaar: {sourceYear}, doeljaar: {targetYear}.
                   </div>
                 </div>
               </div>
@@ -498,13 +527,11 @@ export function NieuwJaarWizard({
           ) : null}
 
           {activeStep === 3 ? (
-            <div className="wizard-step-card">
+            <div className="wizard-step-card wizard-step-stage-card">
               <div className="wizard-step-header">
                 <div>
-                  <div className="wizard-step-title">Afronden</div>
-                  <div className="wizard-step-text">
-                    Controleer de instellingen en schrijf daarna de nieuwe jaarset weg.
-                  </div>
+                  <div className="wizard-step-title">Stap {activeStep + 1}: {currentStep.panelTitle}</div>
+                  <div className="wizard-step-description">{currentStep.panelDescription}</div>
                 </div>
               </div>
 
@@ -547,7 +574,6 @@ export function NieuwJaarWizard({
               </div>
             </div>
           ) : null}
-        </div>
       </div>
     </section>
   );

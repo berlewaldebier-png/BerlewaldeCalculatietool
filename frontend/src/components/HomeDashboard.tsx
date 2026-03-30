@@ -222,9 +222,9 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
 
               <div className="dashboard-quick-actions">
                 <Link href="/nieuwe-kostprijsberekening" className="dashboard-quick-card">
-                  <div className="dashboard-quick-card-title">Nieuwe kostprijsberekening</div>
+                  <div className="dashboard-quick-card-title">Kostprijs beheren</div>
                   <div className="dashboard-quick-card-text">
-                    Start een nieuwe berekening of werk een bestaand concept bij.
+                    Start een nieuwe berekening of open een bestaand dossier in de wizard.
                   </div>
                 </Link>
 
