@@ -60,6 +60,10 @@ def load_verkoopprijzen() -> list[dict]:
     return storage.load_verkoopprijzen()
 
 
+def load_all_verkoop_records() -> list[dict]:
+    return storage.load_all_verkoop_records()
+
+
 def load_variabele_kosten() -> dict:
     return storage.load_variabele_kosten_data()
 
@@ -119,7 +123,7 @@ def load_dataset_from_json(name: str):
         "bieren": load_bieren,
         "berekeningen": load_berekeningen,
         "prijsvoorstellen": load_prijsvoorstellen,
-        "verkoopprijzen": load_verkoopprijzen,
+        "verkoopprijzen": load_all_verkoop_records,
         "variabele-kosten": load_variabele_kosten,
     }
     return mapping[name]()

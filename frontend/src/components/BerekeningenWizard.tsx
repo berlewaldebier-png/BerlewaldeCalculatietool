@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type InputHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
@@ -85,6 +85,35 @@ function cloneRecord<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function syncPrimaryInkoopFactuur(row: GenericRecord) {
+  const invoer =
+    typeof row.invoer === "object" && row.invoer !== null ? (row.invoer as GenericRecord) : {};
+  const inkoop =
+    typeof invoer.inkoop === "object" && invoer.inkoop !== null ? (invoer.inkoop as GenericRecord) : {};
+  const topLevelFactuurregels = Array.isArray(inkoop.factuurregels)
+    ? (inkoop.factuurregels as GenericRecord[])
+    : [];
+  const facturen = Array.isArray(inkoop.facturen) ? ([...(inkoop.facturen as GenericRecord[])] as GenericRecord[]) : [];
+  const primaryFactuur = (facturen[0] as GenericRecord | undefined) ?? { id: createId() };
+
+  facturen[0] = {
+    ...primaryFactuur,
+    id: String(primaryFactuur.id ?? createId()),
+    factuurnummer: String(inkoop.factuurnummer ?? ""),
+    factuurdatum: String(inkoop.factuurdatum ?? ""),
+    verzendkosten: Number(inkoop.verzendkosten ?? 0),
+    overige_kosten: Number(inkoop.overige_kosten ?? 0),
+    factuurregels: cloneRecord(topLevelFactuurregels)
+  };
+
+  (invoer.inkoop as GenericRecord) = {
+    ...inkoop,
+    factuurregels: topLevelFactuurregels,
+    facturen
+  };
+  row.invoer = invoer;
+}
+
 function normalizeBerekening(raw: GenericRecord): GenericRecord {
   const row = cloneRecord(raw);
   row.id = String(row.id ?? createId());
@@ -149,6 +178,8 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
     typeof row.resultaat_snapshot === "object" && row.resultaat_snapshot !== null
       ? row.resultaat_snapshot
       : {};
+
+  syncPrimaryInkoopFactuur(row);
 
   return row;
 }
@@ -548,7 +579,7 @@ function getSelectedInkoopProducts(
   const enrichedRegels = getInkoopFactuurregels(row);
   const options = getProductUnitOptions(year, basisproducten, samengesteldeProducten);
   const optionMap = new Map(options.map((option) => [option.id, option.source]));
-  const grouped = new Map<string, { product: GenericRecord; totaalBedrag: number; totaalAantal: number }>();
+  const grouped = new Map<string, { product: GenericRecord; hoogstePrijsPerEenheid: number }>();
 
   for (const { regel, extraKostenPerRegel } of enrichedRegels) {
     const eenheidId = String(regel.eenheid ?? "").trim();
@@ -557,19 +588,20 @@ function getSelectedInkoopProducts(
       continue;
     }
 
+    const aantal = Number(regel.aantal ?? 0);
+    const prijsPerEenheid =
+      aantal > 0 ? (Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel) / aantal : 0;
     const bestaand = grouped.get(eenheidId) ?? {
       product,
-      totaalBedrag: 0,
-      totaalAantal: 0
+      hoogstePrijsPerEenheid: 0
     };
-    bestaand.totaalBedrag += Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel;
-    bestaand.totaalAantal += Number(regel.aantal ?? 0);
+    bestaand.hoogstePrijsPerEenheid = Math.max(bestaand.hoogstePrijsPerEenheid, prijsPerEenheid);
     grouped.set(eenheidId, bestaand);
   }
 
   return [...grouped.values()].map((entry) => ({
     product: entry.product,
-    prijsPerEenheid: entry.totaalAantal > 0 ? entry.totaalBedrag / entry.totaalAantal : 0
+    prijsPerEenheid: entry.hoogstePrijsPerEenheid
   }));
 }
 
@@ -782,6 +814,7 @@ export function BerekeningenWizard({
   }, [initialRows, initialSelectedId, startWithNew]);
 
   const [rows, setRows] = useState<GenericRecord[]>(initialState.rows);
+  const rowsRef = useRef<GenericRecord[]>(initialState.rows);
   const [selectedId] = useState<string>(initialState.selectedId);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [status, setStatus] = useState("");
@@ -808,6 +841,10 @@ export function BerekeningenWizard({
   );
 
   usePageShellWizardSidebar(wizardSidebar);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
 
   function requestDelete(title: string, body: string, onConfirm: () => void) {
     setPendingDelete({ title, body, onConfirm });
@@ -880,15 +917,20 @@ export function BerekeningenWizard({
 
   function updateCurrent(updater: (draft: GenericRecord) => void) {
     setRows((currentRows) =>
-      currentRows.map((row) => {
+      {
+        const nextRows = currentRows.map((row) => {
         if (String(row.id) !== String(current.id)) {
           return row;
         }
         const next = cloneRecord(row);
         updater(next);
+        syncPrimaryInkoopFactuur(next);
         next.updated_at = new Date().toISOString();
         return next;
-      })
+      });
+        rowsRef.current = nextRows;
+        return nextRows;
+      }
     );
   }
 
@@ -897,7 +939,8 @@ export function BerekeningenWizard({
     setStatusTone(null);
     setIsSaving(true);
     try {
-      const payload = rows.map((row) => {
+      const sourceRows = rowsRef.current;
+      const payload = sourceRows.map((row) => {
         const next = cloneRecord(row);
         next.bier_snapshot = cloneRecord((row.basisgegevens as GenericRecord) ?? {});
         next.resultaat_snapshot = buildResultaatSnapshot(row);
@@ -911,6 +954,7 @@ export function BerekeningenWizard({
       if (!response.ok) {
         throw new Error("Opslaan mislukt");
       }
+      rowsRef.current = payload;
       setRows(payload);
       onRowsChange?.(payload);
       setStatus("Berekeningen opgeslagen.");
@@ -930,7 +974,7 @@ export function BerekeningenWizard({
     setStatusTone(null);
     setIsSaving(true);
     try {
-      const payload = rows.filter((row) => String(row.id) !== String(current.id));
+      const payload = rowsRef.current.filter((row) => String(row.id) !== String(current.id));
       const response = await fetch(`${API_BASE_URL}/data/berekeningen`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -939,6 +983,7 @@ export function BerekeningenWizard({
       if (!response.ok) {
         throw new Error("Verwijderen mislukt");
       }
+      rowsRef.current = payload;
       setRows(payload);
       onRowsChange?.(payload);
       setStatus("Berekening verwijderd.");

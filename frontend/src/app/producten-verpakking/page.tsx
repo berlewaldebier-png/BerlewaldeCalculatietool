@@ -102,6 +102,7 @@ export default async function ProductenVerpakkingPage() {
           beschikbaar_voor_samengesteld: false
         }}
         columns={[
+          { key: "id", label: "ID", width: "150px" },
           { key: "jaar", label: "Jaar", type: "number", width: "110px" },
           { key: "omschrijving", label: "Omschrijving", width: "280px" },
           { key: "hoeveelheid", label: "Hoeveelheid", type: "number", width: "140px" },
@@ -128,6 +129,7 @@ export default async function ProductenVerpakkingPage() {
           totale_verpakkingskosten: 0
         }}
         fields={[
+          { key: "id", label: "ID" },
           { key: "jaar", label: "Jaar", type: "number" },
           { key: "omschrijving", label: "Omschrijving" },
           {
@@ -191,6 +193,7 @@ export default async function ProductenVerpakkingPage() {
           totale_verpakkingskosten: 0
         }}
         fields={[
+          { key: "id", label: "ID" },
           { key: "jaar", label: "Jaar", type: "number" },
           { key: "omschrijving", label: "Omschrijving" },
           { key: "totale_inhoud_liter", label: "Totale inhoud (liter)", type: "number" },
