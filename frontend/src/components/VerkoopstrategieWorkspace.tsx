@@ -13,7 +13,6 @@ type PackagingRow = {
   bron_jaar: number;
   product_id: string;
   product_type: "basis" | "samengesteld" | "";
-  verpakking_key: string;
   verpakking: string;
   bron_verkoopstrategie_id: string;
   strategie_type: string;
@@ -31,7 +30,6 @@ type BeerOverviewRow = {
 
 type PackagingSource = {
   id: string;
-  key: string;
   label: string;
   jaar: number;
   type: "basis" | "samengesteld";
@@ -64,10 +62,6 @@ function normalizeMargins(raw: unknown): Record<string, number> {
   >;
 }
 
-function toPackagingKey(kind: "basis" | "samengesteld", label: string) {
-  return `${kind}|${label.trim().toLowerCase()}`;
-}
-
 function normalizeVerkoopstrategieRow(row: GenericRecord): PackagingRow {
   return {
     id: String(row.id ?? ""),
@@ -79,7 +73,6 @@ function normalizeVerkoopstrategieRow(row: GenericRecord): PackagingRow {
       String(row.product_type ?? "") === "basis" || String(row.product_type ?? "") === "samengesteld"
         ? (String(row.product_type ?? "") as "basis" | "samengesteld")
         : "",
-    verpakking_key: String(row.verpakking_key ?? ""),
     verpakking: String(row.verpakking ?? ""),
     bron_verkoopstrategie_id: String(row.bron_verkoopstrategie_id ?? ""),
     strategie_type: String(row.strategie_type ?? "handmatig"),
@@ -99,7 +92,6 @@ function buildPackagingSources(
 ): PackagingSource[] {
   const basis = basisproducten.map((row) => ({
     id: String(row.id ?? ""),
-    key: toPackagingKey("basis", String(row.omschrijving ?? "")),
     label: String(row.omschrijving ?? ""),
     jaar: Number(row.jaar ?? 0),
     type: "basis" as const
@@ -107,7 +99,6 @@ function buildPackagingSources(
 
   const samengesteld = samengesteldeProducten.map((row) => ({
     id: String(row.id ?? ""),
-    key: toPackagingKey("samengesteld", String(row.omschrijving ?? "")),
     label: String(row.omschrijving ?? ""),
     jaar: Number(row.jaar ?? 0),
     type: "samengesteld" as const
@@ -207,7 +198,7 @@ export function VerkoopstrategieWorkspace({
       const existing = existingForYear.find(
         (row) =>
           (source.id && row.product_id === source.id) ||
-          (!source.id && row.verpakking_key === source.key)
+          (!source.id && row.verpakking === source.label)
       );
       if (existing) {
         return existing;
@@ -220,7 +211,6 @@ export function VerkoopstrategieWorkspace({
         bron_jaar: selectedYear,
         product_id: source.id,
         product_type: source.type,
-        verpakking_key: source.key,
         verpakking: source.label,
         bron_verkoopstrategie_id: "",
         strategie_type: "handmatig",
@@ -233,8 +223,8 @@ export function VerkoopstrategieWorkspace({
       (row) =>
         !sourcesForYear.some(
           (source) =>
-            (source.id && row.product_id === source.id) ||
-            (!source.id && source.key === row.verpakking_key)
+          (source.id && row.product_id === source.id) ||
+          (!source.id && source.label === row.verpakking)
         )
     );
 
@@ -285,7 +275,6 @@ export function VerkoopstrategieWorkspace({
         bron_jaar: selectedYear,
         product_id: "",
         product_type: "",
-        verpakking_key: "",
         verpakking: "",
         bron_verkoopstrategie_id: "",
         strategie_type: "handmatig",
@@ -392,9 +381,7 @@ export function VerkoopstrategieWorkspace({
                   <div className="nested-editor-card-title">
                     {row.verpakking || "Nieuwe verpakking"}
                   </div>
-                  <div className="nested-editor-card-meta">
-                    ID: {row.product_id || "(nog leeg)"} | Key: {row.verpakking_key || "(nog leeg)"}
-                  </div>
+                  <div className="nested-editor-card-meta">Product ID: {row.product_id || "(nog leeg)"}</div>
                 </div>
                 <button
                   type="button"
@@ -425,21 +412,12 @@ export function VerkoopstrategieWorkspace({
                   />
                 </label>
                 <label className="nested-field">
-                  <span>Producttype</span>
+                  <span>Product type</span>
                   <input
                     className="dataset-input"
                     type="text"
                     value={row.product_type}
                     onChange={(event) => updatePackagingRow(row._uiId, "product_type", event.target.value)}
-                  />
-                </label>
-                <label className="nested-field">
-                  <span>Verpakking key</span>
-                  <input
-                    className="dataset-input"
-                    type="text"
-                    value={row.verpakking_key}
-                    onChange={(event) => updatePackagingRow(row._uiId, "verpakking_key", event.target.value)}
                   />
                 </label>
                 <label className="nested-field">

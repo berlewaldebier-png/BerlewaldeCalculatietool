@@ -9,7 +9,6 @@ type VerkoopstrategieRow = {
   record_type: string;
   jaar: number;
   bron_jaar: number;
-  verpakking_key: string;
   verpakking: string;
   bron_verkoopstrategie_id: string;
   strategie_type: string;
@@ -50,7 +49,6 @@ function normalizeRow(row: Record<string, unknown>): VerkoopstrategieRow {
     record_type: String(row.record_type ?? ""),
     jaar: Number(row.jaar ?? new Date().getFullYear()),
     bron_jaar: Number(row.bron_jaar ?? new Date().getFullYear()),
-    verpakking_key: String(row.verpakking_key ?? ""),
     verpakking: String(row.verpakking ?? ""),
     bron_verkoopstrategie_id: String(row.bron_verkoopstrategie_id ?? ""),
     strategie_type: String(row.strategie_type ?? ""),
@@ -213,15 +211,6 @@ export function VerkoopstrategieEditor({
                   type="text"
                   value={row.verpakking}
                   onChange={(event) => updateField(row._uiId, "verpakking", event.target.value)}
-                />
-              </label>
-              <label className="nested-field">
-                <span>Verpakking key</span>
-                <input
-                  className="dataset-input"
-                  type="text"
-                  value={row.verpakking_key}
-                  onChange={(event) => updateField(row._uiId, "verpakking_key", event.target.value)}
                 />
               </label>
               <label className="nested-field">

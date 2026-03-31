@@ -22,9 +22,9 @@ type PrijsvoorstelRow = Record<string, unknown> & {
   voorsteltype: string;
   liters_basis: string;
   kanaal: string;
-  bier_key: string;
-  product_bier_keys: string[];
-  deleted_product_pairs: unknown[];
+  bier_id: string;
+  selected_bier_ids: string[];
+  deleted_product_refs: unknown[];
   staffels: Record<string, unknown>[];
   product_rows: Record<string, unknown>[];
   beer_rows: Record<string, unknown>[];
@@ -70,11 +70,11 @@ function toInternalRow(row: Record<string, unknown>): PrijsvoorstelRow {
     voorsteltype: String(row.voorsteltype ?? ""),
     liters_basis: String(row.liters_basis ?? ""),
     kanaal: String(row.kanaal ?? ""),
-    bier_key: String(row.bier_key ?? ""),
-    product_bier_keys: Array.isArray(row.product_bier_keys)
-      ? row.product_bier_keys.map((item) => String(item))
+    bier_id: String(row.bier_id ?? ""),
+    selected_bier_ids: Array.isArray(row.selected_bier_ids)
+      ? row.selected_bier_ids.map((item) => String(item))
       : [],
-    deleted_product_pairs: Array.isArray(row.deleted_product_pairs) ? row.deleted_product_pairs : [],
+    deleted_product_refs: Array.isArray(row.deleted_product_refs) ? row.deleted_product_refs : [],
     staffels: normalizeNestedRows(row.staffels),
     product_rows: normalizeNestedRows(row.product_rows),
     beer_rows: normalizeNestedRows(row.beer_rows),
@@ -132,7 +132,7 @@ export function PrijsvoorstelEditor({
 
   function addNestedItem(
     rowId: string,
-    key: "product_bier_keys" | "staffels" | "product_rows" | "beer_rows"
+    key: "selected_bier_ids" | "staffels" | "product_rows" | "beer_rows"
   ) {
     setRows((current) =>
       current.map((row) => {
@@ -140,16 +140,16 @@ export function PrijsvoorstelEditor({
           return row;
         }
 
-        if (key === "product_bier_keys") {
-          return { ...row, product_bier_keys: [...row.product_bier_keys, ""] };
+        if (key === "selected_bier_ids") {
+          return { ...row, selected_bier_ids: [...row.selected_bier_ids, ""] };
         }
 
         const template =
           key === "staffels"
-            ? { id: createUiId(), liters: 0, korting_pct: 0, product_key: "" }
+            ? { id: createUiId(), liters: 0, korting_pct: 0, product_id: "" }
             : key === "product_rows"
-              ? { id: createUiId(), aantal: 0, bier_key: "", korting_pct: 0, product_key: "" }
-              : { id: createUiId(), liters: 0, bier_key: "", korting_pct: 0, product_key: "" };
+              ? { id: createUiId(), aantal: 0, bier_id: "", korting_pct: 0, product_id: "" }
+              : { id: createUiId(), liters: 0, bier_id: "", korting_pct: 0, product_id: "" };
 
         return { ...row, [key]: [...row[key], template] };
       })
@@ -158,7 +158,7 @@ export function PrijsvoorstelEditor({
 
   function removeNestedItem(
     rowId: string,
-    key: "product_bier_keys" | "staffels" | "product_rows" | "beer_rows",
+    key: "selected_bier_ids" | "staffels" | "product_rows" | "beer_rows",
     index: number
   ) {
     setRows((current) =>
@@ -167,10 +167,10 @@ export function PrijsvoorstelEditor({
           return row;
         }
 
-        if (key === "product_bier_keys") {
-          const next = [...row.product_bier_keys];
+        if (key === "selected_bier_ids") {
+          const next = [...row.selected_bier_ids];
           next.splice(index, 1);
-          return { ...row, product_bier_keys: next };
+          return { ...row, selected_bier_ids: next };
         }
 
         const next = [...row[key]];
@@ -180,16 +180,16 @@ export function PrijsvoorstelEditor({
     );
   }
 
-  function updateProductBeerKey(rowId: string, index: number, value: string) {
+  function updateSelectedBeerId(rowId: string, index: number, value: string) {
     setRows((current) =>
       current.map((row) => {
         if (row._uiId !== rowId) {
           return row;
         }
 
-        const next = [...row.product_bier_keys];
+        const next = [...row.selected_bier_ids];
         next[index] = value;
-        return { ...row, product_bier_keys: next };
+        return { ...row, selected_bier_ids: next };
       })
     );
   }
@@ -275,7 +275,7 @@ export function PrijsvoorstelEditor({
                 ["voorsteltype", "Voorsteltype"],
                 ["liters_basis", "Liters basis"],
                 ["kanaal", "Kanaal"],
-                ["bier_key", "Hoofdbier"],
+                ["bier_id", "Bier ID"],
                 ["opmerking", "Opmerking"]
               ].map(([key, label]) => (
                 <label key={key} className="nested-field">
@@ -290,11 +290,11 @@ export function PrijsvoorstelEditor({
                         updateRow(row._uiId, { [key]: event.target.value === "" ? 0 : Number(event.target.value) })
                       }
                     />
-                  ) : key === "bier_key" ? (
+                  ) : key === "bier_id" ? (
                     <select
                       className="dataset-input"
-                      value={row.bier_key}
-                      onChange={(event) => updateRow(row._uiId, { bier_key: event.target.value })}
+                      value={row.bier_id}
+                      onChange={(event) => updateRow(row._uiId, { bier_id: event.target.value })}
                     >
                       <option value="">Kies...</option>
                       {beerOptions.map((option) => (
@@ -317,29 +317,29 @@ export function PrijsvoorstelEditor({
 
             <div className="nested-subsection">
               <div className="nested-subsection-header">
-                <div className="nested-subsection-title">Gekoppelde bieren</div>
+                <div className="nested-subsection-title">Gekoppelde bier-ID's</div>
                 <button
                   type="button"
                   className="editor-button editor-button-secondary"
-                  onClick={() => addNestedItem(row._uiId, "product_bier_keys")}
+                  onClick={() => addNestedItem(row._uiId, "selected_bier_ids")}
                 >
                   Bier toevoegen
                 </button>
               </div>
-              {row.product_bier_keys.length === 0 ? (
+              {row.selected_bier_ids.length === 0 ? (
                 <div className="nested-empty">Nog geen gekoppelde bieren.</div>
               ) : (
                 <div className="nested-rows">
-                  {row.product_bier_keys.map((beerKey, index) => (
+                  {row.selected_bier_ids.map((beerId, index) => (
                     <div key={`${row._uiId}-beerkey-${index}`} className="nested-row-card">
                       <div className="nested-row-grid nested-row-grid-compact">
                         <label className="nested-field">
-                          <span>Bier</span>
+                          <span>Bier ID</span>
                           <select
                             className="dataset-input"
-                            value={beerKey}
+                            value={beerId}
                             onChange={(event) =>
-                              updateProductBeerKey(row._uiId, index, event.target.value)
+                              updateSelectedBeerId(row._uiId, index, event.target.value)
                             }
                           >
                             <option value="">Kies...</option>
@@ -355,7 +355,7 @@ export function PrijsvoorstelEditor({
                         <button
                           type="button"
                           className="editor-button editor-button-secondary"
-                          onClick={() => removeNestedItem(row._uiId, "product_bier_keys", index)}
+                          onClick={() => removeNestedItem(row._uiId, "selected_bier_ids", index)}
                         >
                           Regel verwijderen
                         </button>
@@ -387,10 +387,10 @@ export function PrijsvoorstelEditor({
                   />
                   <NestedSelectField
                     label="Product"
-                    value={String(nestedRow.product_key ?? "")}
+                    value={String(nestedRow.product_id ?? "")}
                     options={productOptions}
                     onChange={(value) =>
-                      updateNestedArray(row._uiId, "staffels", index, "product_key", value)
+                      updateNestedArray(row._uiId, "staffels", index, "product_id", value)
                     }
                   />
                 </>
@@ -405,19 +405,19 @@ export function PrijsvoorstelEditor({
               renderFields={(nestedRow, index) => (
                 <>
                   <NestedSelectField
-                    label="Bier"
-                    value={String(nestedRow.bier_key ?? "")}
+                    label="Bier ID"
+                    value={String(nestedRow.bier_id ?? "")}
                     options={beerOptions}
                     onChange={(value) =>
-                      updateNestedArray(row._uiId, "product_rows", index, "bier_key", value)
+                      updateNestedArray(row._uiId, "product_rows", index, "bier_id", value)
                     }
                   />
                   <NestedSelectField
-                    label="Product"
-                    value={String(nestedRow.product_key ?? "")}
+                    label="Product ID"
+                    value={String(nestedRow.product_id ?? "")}
                     options={productOptions}
                     onChange={(value) =>
-                      updateNestedArray(row._uiId, "product_rows", index, "product_key", value)
+                      updateNestedArray(row._uiId, "product_rows", index, "product_id", value)
                     }
                   />
                   <NestedNumberField
@@ -446,19 +446,19 @@ export function PrijsvoorstelEditor({
               renderFields={(nestedRow, index) => (
                 <>
                   <NestedSelectField
-                    label="Bier"
-                    value={String(nestedRow.bier_key ?? "")}
+                    label="Bier ID"
+                    value={String(nestedRow.bier_id ?? "")}
                     options={beerOptions}
                     onChange={(value) =>
-                      updateNestedArray(row._uiId, "beer_rows", index, "bier_key", value)
+                      updateNestedArray(row._uiId, "beer_rows", index, "bier_id", value)
                     }
                   />
                   <NestedSelectField
-                    label="Product"
-                    value={String(nestedRow.product_key ?? "")}
+                    label="Product ID"
+                    value={String(nestedRow.product_id ?? "")}
                     options={productOptions}
                     onChange={(value) =>
-                      updateNestedArray(row._uiId, "beer_rows", index, "product_key", value)
+                      updateNestedArray(row._uiId, "beer_rows", index, "product_id", value)
                     }
                   />
                   <NestedNumberField

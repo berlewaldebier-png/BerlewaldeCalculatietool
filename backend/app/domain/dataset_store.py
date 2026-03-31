@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from app.domain import legacy_storage, postgres_storage
 from utils.storage import (
+    MODEL_A_DATASET_NAMES,
+    build_model_a_canonical_datasets,
     ensure_complete_verkoop_records,
     load_all_verkoop_records,
     normalize_any_verkoop_record,
@@ -23,6 +26,19 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "prijsvoorstellen": [],
     "verkoopprijzen": [],
     "variabele-kosten": {},
+    "products": [],
+    "product-years": [],
+    "product-year-components": [],
+    "product-components": [],
+    "sales-strategy-years": [],
+    "sales-strategy-products": [],
+    "cost-calcs": [],
+    "cost-calc-inputs": [],
+    "cost-calc-results": [],
+    "cost-calc-lines": [],
+    "quotes": [],
+    "quote-lines": [],
+    "quote-staffels": [],
 }
 
 
@@ -45,6 +61,11 @@ def require_postgres() -> None:
 def load_dataset(name: str) -> Any:
     require_postgres()
     default_value = DATASET_DEFAULTS[name]
+    if name in MODEL_A_DATASET_NAMES:
+        payload = postgres_storage.load_dataset(name, default_value)
+        if payload in (None, [], {}):
+            return build_model_a_canonical_datasets().get(name, default_value)
+        return payload
     payload = postgres_storage.load_dataset(name, default_value)
     if name == "berekeningen" and isinstance(payload, list):
         return [
@@ -66,6 +87,8 @@ def load_dataset(name: str) -> Any:
 
 def save_dataset(name: str, data: Any) -> bool:
     require_postgres()
+    if name in MODEL_A_DATASET_NAMES:
+        return postgres_storage.save_dataset(name, data)
     if name == "berekeningen" and isinstance(data, list):
         payload = [
             normalize_berekening_record(record)
@@ -87,11 +110,27 @@ def save_dataset(name: str, data: Any) -> bool:
 
 def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
     results: dict[str, bool] = {}
+    canonical_payloads = build_model_a_canonical_datasets()
     for dataset_name in get_dataset_names():
-        payload = legacy_storage.load_dataset_from_json(dataset_name)
+        if dataset_name in MODEL_A_DATASET_NAMES:
+            payload = canonical_payloads.get(dataset_name, DATASET_DEFAULTS[dataset_name])
+        else:
+            payload = legacy_storage.load_dataset_from_json(dataset_name)
         results[dataset_name] = postgres_storage.save_dataset(
             dataset_name,
             payload,
             overwrite=overwrite,
+        )
+    return results
+
+
+def reset_all_datasets_to_defaults() -> dict[str, bool]:
+    require_postgres()
+    results: dict[str, bool] = {}
+    for dataset_name, default_value in DATASET_DEFAULTS.items():
+        results[dataset_name] = postgres_storage.save_dataset(
+            dataset_name,
+            deepcopy(default_value),
+            overwrite=True,
         )
     return results

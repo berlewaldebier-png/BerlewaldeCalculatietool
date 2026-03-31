@@ -128,6 +128,13 @@ def put_dataset(name: str, data: Any) -> dict[str, bool]:
     return {"saved": dataset_store.save_dataset(name, data)}
 
 
+@router.get("/dataset/{name}")
+def get_dataset(name: str) -> Any:
+    if name not in dataset_store.get_dataset_names():
+        raise HTTPException(status_code=404, detail="Unknown dataset")
+    return dataset_store.load_dataset(name)
+
+
 @router.get("/storage-status", response_model=StorageStatus)
 def get_storage_status() -> StorageStatus:
     return StorageStatus(**postgres_storage.storage_status())
