@@ -4,6 +4,7 @@ import {
   getBasisproducten,
   getBerekeningen,
   getBieren,
+  getDataset,
   getNavigation,
   getProductie,
   getPrijsvoorstellen,
@@ -19,6 +20,7 @@ export default async function PrijsvoorstelPage() {
     bieren,
     berekeningen,
     verkoopprijzen,
+    channels,
     basisproducten,
     samengesteldeProducten
   ] = await Promise.all([
@@ -28,6 +30,7 @@ export default async function PrijsvoorstelPage() {
     getBieren(),
     getBerekeningen(),
     getVerkoopprijzen(),
+    getDataset("channels"),
     getBasisproducten(),
     getSamengesteldeProducten()
   ]);
@@ -50,6 +53,7 @@ export default async function PrijsvoorstelPage() {
         bieren={bieren}
         berekeningen={berekeningen}
         verkoopprijzen={verkoopprijzen}
+        channels={channels}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
       />

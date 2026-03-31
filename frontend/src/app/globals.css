@@ -1315,6 +1315,19 @@ a {
   background: linear-gradient(180deg, rgba(245, 248, 255, 0.95) 0%, rgba(238, 243, 255, 0.98) 100%);
 }
 
+.dataset-input-override-active {
+  background: linear-gradient(180deg, #fff9dc 0%, #fff3b8 100%);
+  border-color: #e6cf72;
+  color: #7a5a00;
+  font-weight: 700;
+}
+
+.dataset-input-override-active:focus {
+  border-color: #d9b93b;
+  box-shadow: 0 0 0 4px rgba(230, 207, 114, 0.28);
+  background: linear-gradient(180deg, #fff9dc 0%, #fff0a3 100%);
+}
+
 .icon-button-table {
   width: 40px;
   height: 40px;
@@ -1334,6 +1347,29 @@ a {
   border-color: #e1b7b7;
   background: #fff5f5;
   color: #a14141;
+}
+
+.icon-button-table.icon-button-neutral:hover {
+  border-color: var(--accent-border);
+  background: #f3f7ff;
+  color: var(--accent-strong);
+}
+
+.table-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.table-sort-button:hover {
+  color: var(--accent-strong);
 }
 
 .visibility-toggle-button {

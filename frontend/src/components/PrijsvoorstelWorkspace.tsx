@@ -12,6 +12,7 @@ type PrijsvoorstelWorkspaceProps = {
   bieren: GenericRecord[];
   berekeningen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
+  channels: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
 };
@@ -25,6 +26,7 @@ export function PrijsvoorstelWorkspace({
   bieren,
   berekeningen,
   verkoopprijzen,
+  channels,
   basisproducten,
   samengesteldeProducten
 }: PrijsvoorstelWorkspaceProps) {
@@ -69,6 +71,7 @@ export function PrijsvoorstelWorkspace({
         bieren={bieren}
         berekeningen={berekeningen}
         verkoopprijzen={verkoopprijzen}
+        channels={channels}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         startWithNew
@@ -87,6 +90,7 @@ export function PrijsvoorstelWorkspace({
         bieren={bieren}
         berekeningen={berekeningen}
         verkoopprijzen={verkoopprijzen}
+        channels={channels}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         initialSelectedId={selectedId}

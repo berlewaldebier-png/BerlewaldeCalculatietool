@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
 
@@ -11,6 +12,7 @@ type FieldDefinition = {
   key: string;
   label: string;
   type?: FieldType;
+  readOnly?: boolean;
 };
 
 type NestedOption = {
@@ -19,12 +21,21 @@ type NestedOption = {
   payload?: Record<string, unknown>;
 };
 
+type NestedOptionResolverArgs = {
+  row: InternalRow;
+  nestedRows: Record<string, unknown>[];
+  nestedIndex: number;
+  nestedRow: Record<string, unknown>;
+};
+
 type NestedFieldDefinition = {
   key: string;
   label: string;
   type?: NestedFieldType;
   readOnly?: boolean;
-  options?: NestedOption[];
+  options?: NestedOption[] | ((args: NestedOptionResolverArgs) => NestedOption[]);
+  resetOnSelect?: boolean;
+  preserveOnSelect?: string[];
 };
 
 type NestedComputedField = {
@@ -36,6 +47,12 @@ type NestedComputedField = {
 type ParentAggregate = {
   targetKey: string;
   sourceKey: string;
+};
+
+type CompactSummaryColumn = {
+  key: string;
+  label: string;
+  type?: "text" | "number" | "count";
 };
 
 type NestedCollectionEditorProps = {
@@ -51,6 +68,7 @@ type NestedCollectionEditorProps = {
   nestedRowTemplate: Record<string, unknown>;
   nestedComputedFields?: NestedComputedField[];
   parentAggregates?: ParentAggregate[];
+  compactSummaryColumns?: CompactSummaryColumn[];
 };
 
 type InternalRow = Record<string, unknown> & {
@@ -101,6 +119,17 @@ function applyParentAggregates(
   return nextRow;
 }
 
+function resolveNestedOptions(
+  field: NestedFieldDefinition,
+  args: NestedOptionResolverArgs
+) {
+  if (typeof field.options === "function") {
+    return field.options(args);
+  }
+
+  return field.options ?? [];
+}
+
 export function NestedCollectionEditor({
   endpoint,
   title,
@@ -113,8 +142,10 @@ export function NestedCollectionEditor({
   nestedFields,
   nestedRowTemplate,
   nestedComputedFields = [],
-  parentAggregates = []
+  parentAggregates = [],
+  compactSummaryColumns
 }: NestedCollectionEditorProps) {
+  const router = useRouter();
   const preparedRows = useMemo<InternalRow[]>(
     () =>
       initialRows.map((row) => ({
@@ -127,6 +158,27 @@ export function NestedCollectionEditor({
   const [rows, setRows] = useState<InternalRow[]>(preparedRows);
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+
+  function TrashIcon() {
+    return (
+      <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 7V5h6v2" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M7 7l1 12h8l1-12" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v5M14 11v5" />
+      </svg>
+    );
+  }
+
+  function EditIcon() {
+    return (
+      <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 20h4l10-10-4-4L4 16v4Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="m12 6 4 4" />
+      </svg>
+    );
+  }
 
   function updateField(rowId: string, key: string, value: unknown) {
     setRows((current) =>
@@ -150,13 +202,32 @@ export function NestedCollectionEditor({
           ? [...(row[nestedKey] as Record<string, unknown>[])]
           : [];
         const currentNestedRow = { ...(nestedRows[nestedIndex] ?? {}) };
-        let nextNestedRow: Record<string, unknown> = {
-          ...currentNestedRow,
-          [field.key]: rawValue
-        };
+        const optionArgs = {
+          row,
+          nestedRows,
+          nestedIndex,
+          nestedRow: currentNestedRow
+        } satisfies NestedOptionResolverArgs;
+        let nextNestedRow: Record<string, unknown>;
+
+        if (field.type === "select" && field.resetOnSelect) {
+          const preservedKeys = new Set(field.preserveOnSelect ?? []);
+          nextNestedRow = {
+            ...nestedRowTemplate,
+            ...Object.fromEntries(
+              Object.entries(currentNestedRow).filter(([key]) => preservedKeys.has(key))
+            ),
+            [field.key]: rawValue
+          };
+        } else {
+          nextNestedRow = {
+            ...currentNestedRow,
+            [field.key]: rawValue
+          };
+        }
 
         if (field.type === "select") {
-          const option = field.options?.find((item) => item.value === rawValue);
+          const option = resolveNestedOptions(field, optionArgs).find((item) => item.value === rawValue);
           if (option?.payload) {
             nextNestedRow = {
               ...nextNestedRow,
@@ -186,6 +257,7 @@ export function NestedCollectionEditor({
 
   function deleteRow(rowId: string) {
     setRows((current) => current.filter((row) => row._uiId !== rowId));
+    setExpandedRowId((current) => (current === rowId ? null : current));
   }
 
   function addNestedRow(rowId: string) {
@@ -255,11 +327,142 @@ export function NestedCollectionEditor({
       }
 
       setStatus("Opgeslagen.");
+      router.refresh();
     } catch {
       setStatus("Opslaan mislukt.");
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function renderDetailEditor(row: InternalRow) {
+    const nestedRows = Array.isArray(row[nestedKey])
+      ? (row[nestedKey] as Record<string, unknown>[])
+      : [];
+
+    return (
+      <>
+        <div className="nested-editor-grid">
+          {fields.map((field) => (
+            <label key={field.key} className="nested-field">
+              <span>{field.label}</span>
+              <input
+                className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                type={field.type === "number" ? "number" : "text"}
+                step={field.type === "number" ? "any" : undefined}
+                value={
+                  row[field.key] === null || row[field.key] === undefined ? "" : String(row[field.key])
+                }
+                readOnly={field.readOnly}
+                onChange={(event) => {
+                  const nextValue =
+                    field.type === "number"
+                      ? event.target.value === ""
+                        ? null
+                        : Number(event.target.value)
+                      : event.target.value;
+                  updateField(row._uiId, field.key, nextValue);
+                }}
+              />
+            </label>
+          ))}
+        </div>
+
+        <div className="nested-subsection">
+          <div className="nested-subsection-header">
+            <div className="nested-subsection-title">{nestedLabel}</div>
+            <button
+              type="button"
+              className="editor-button editor-button-secondary"
+              onClick={() => addNestedRow(row._uiId)}
+            >
+              {nestedLabel.slice(0, -1) || "Regel"} toevoegen
+            </button>
+          </div>
+
+          {nestedRows.length === 0 ? (
+            <div className="nested-empty">Nog geen {nestedLabel.toLowerCase()}.</div>
+          ) : (
+            <div className="nested-rows">
+              {nestedRows.map((nestedRow, nestedIndex) => (
+                <div key={`${row._uiId}-${nestedIndex}`} className="nested-row-card">
+                  <div className="nested-row-grid">
+                    {nestedFields.map((field) => {
+                      const fieldValue =
+                        nestedRow[field.key] === null || nestedRow[field.key] === undefined
+                          ? ""
+                          : String(nestedRow[field.key]);
+
+                      if (field.type === "select") {
+                        const options = resolveNestedOptions(field, {
+                          row,
+                          nestedRows,
+                          nestedIndex,
+                          nestedRow
+                        });
+                        return (
+                          <label key={field.key} className="nested-field">
+                            <span>{field.label}</span>
+                            <select
+                              className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                              value={fieldValue}
+                              disabled={field.readOnly}
+                              onChange={(event) =>
+                                updateNestedRow(row._uiId, nestedIndex, field, event.target.value)
+                              }
+                            >
+                              <option value="">Kies...</option>
+                              {options.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      }
+
+                      return (
+                        <label key={field.key} className="nested-field">
+                          <span>{field.label}</span>
+                          <input
+                            className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                            type={field.type === "number" ? "number" : "text"}
+                            step={field.type === "number" ? "any" : undefined}
+                            value={fieldValue}
+                            readOnly={field.readOnly}
+                            onChange={(event) => {
+                              const nextValue =
+                                field.type === "number"
+                                  ? event.target.value === ""
+                                    ? null
+                                    : Number(event.target.value)
+                                  : event.target.value;
+                              updateNestedRow(row._uiId, nestedIndex, field, nextValue);
+                            }}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="nested-row-actions">
+                    <button
+                      type="button"
+                      className="icon-button-table"
+                      aria-label="Regel verwijderen"
+                      title="Regel verwijderen"
+                      onClick={() => deleteNestedRow(row._uiId, nestedIndex)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    );
   }
 
   return (
@@ -278,149 +481,116 @@ export function NestedCollectionEditor({
         </div>
       </div>
 
-      <div className="nested-editor-list">
-        {rows.length === 0 ? (
-          <div className="nested-empty">Nog geen records. Voeg hieronder een eerste record toe.</div>
-        ) : null}
-        {rows.map((row) => {
-          const nestedRows = Array.isArray(row[nestedKey])
-            ? (row[nestedKey] as Record<string, unknown>[])
-            : [];
+      {compactSummaryColumns ? (
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table">
+            <thead>
+              <tr>
+                {compactSummaryColumns.map((column) => (
+                  <th key={column.key}>{column.label}</th>
+                ))}
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td className="dataset-empty" colSpan={compactSummaryColumns.length + 1}>
+                    Nog geen records. Voeg hieronder een eerste record toe.
+                  </td>
+                </tr>
+              ) : null}
+              {rows.map((row) => {
+                const nestedRows = Array.isArray(row[nestedKey])
+                  ? (row[nestedKey] as Record<string, unknown>[])
+                  : [];
+                const isExpanded = expandedRowId === row._uiId;
 
-          return (
+                return (
+                  <Fragment key={row._uiId}>
+                    <tr
+                      onClick={() =>
+                        setExpandedRowId((current) => (current === row._uiId ? null : row._uiId))
+                      }
+                      style={{ cursor: "pointer" }}
+                    >
+                      {compactSummaryColumns.map((column) => {
+                        const displayValue =
+                          column.type === "count"
+                            ? nestedRows.length
+                            : row[column.key] ?? "";
+                        return <td key={column.key}>{String(displayValue)}</td>;
+                      })}
+                      <td>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.55rem" }}>
+                          <button
+                            type="button"
+                            className="icon-button-table"
+                            aria-label="Bewerken"
+                            title="Bewerken"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setExpandedRowId((current) => (current === row._uiId ? null : row._uiId));
+                            }}
+                          >
+                            <EditIcon />
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button-table"
+                            aria-label="Verwijderen"
+                            title="Verwijderen"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              deleteRow(row._uiId);
+                            }}
+                          >
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded ? (
+                      <tr>
+                        <td colSpan={compactSummaryColumns.length + 1}>
+                          <div className="nested-editor-card">{renderDetailEditor(row)}</div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="nested-editor-list">
+          {rows.length === 0 ? (
+            <div className="nested-empty">Nog geen records. Voeg hieronder een eerste record toe.</div>
+          ) : null}
+          {rows.map((row) => (
             <article key={row._uiId} className="nested-editor-card">
               <div className="nested-editor-card-header">
                 <div>
                   <div className="nested-editor-card-title">
                     {String(row.omschrijving ?? "Nieuw record")}
                   </div>
-                  <div className="nested-editor-card-meta">ID: {String(row.id ?? "(nieuw)")}</div>
                 </div>
                 <button
                   type="button"
-                  className="editor-button editor-button-secondary"
+                  className="icon-button-table"
+                  aria-label="Verwijderen"
+                  title="Verwijderen"
                   onClick={() => deleteRow(row._uiId)}
                 >
-                  Verwijderen
+                  <TrashIcon />
                 </button>
               </div>
-
-              <div className="nested-editor-grid">
-                {fields.map((field) => (
-                  <label key={field.key} className="nested-field">
-                    <span>{field.label}</span>
-                    <input
-                      className="dataset-input"
-                      type={field.type === "number" ? "number" : "text"}
-                      step={field.type === "number" ? "any" : undefined}
-                      value={
-                        row[field.key] === null || row[field.key] === undefined
-                          ? ""
-                          : String(row[field.key])
-                      }
-                      onChange={(event) => {
-                        const nextValue =
-                          field.type === "number"
-                            ? event.target.value === ""
-                              ? null
-                              : Number(event.target.value)
-                            : event.target.value;
-                        updateField(row._uiId, field.key, nextValue);
-                      }}
-                    />
-                  </label>
-                ))}
-              </div>
-
-              <div className="nested-subsection">
-                <div className="nested-subsection-header">
-                  <div className="nested-subsection-title">{nestedLabel}</div>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => addNestedRow(row._uiId)}
-                  >
-                    {nestedLabel.slice(0, -1) || "Regel"} toevoegen
-                  </button>
-                </div>
-
-                {nestedRows.length === 0 ? (
-                  <div className="nested-empty">Nog geen {nestedLabel.toLowerCase()}.</div>
-                ) : (
-                  <div className="nested-rows">
-                    {nestedRows.map((nestedRow, nestedIndex) => (
-                      <div key={`${row._uiId}-${nestedIndex}`} className="nested-row-card">
-                        <div className="nested-row-grid">
-                          {nestedFields.map((field) => {
-                            const fieldValue =
-                              nestedRow[field.key] === null || nestedRow[field.key] === undefined
-                                ? ""
-                                : String(nestedRow[field.key]);
-
-                            if (field.type === "select") {
-                              return (
-                                <label key={field.key} className="nested-field">
-                                  <span>{field.label}</span>
-                                  <select
-                                    className="dataset-input"
-                                    value={fieldValue}
-                                    disabled={field.readOnly}
-                                    onChange={(event) =>
-                                      updateNestedRow(row._uiId, nestedIndex, field, event.target.value)
-                                    }
-                                  >
-                                    <option value="">Kies...</option>
-                                    {(field.options ?? []).map((option) => (
-                                      <option key={option.value} value={option.value}>
-                                        {option.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                              );
-                            }
-
-                            return (
-                              <label key={field.key} className="nested-field">
-                                <span>{field.label}</span>
-                                <input
-                                  className="dataset-input"
-                                  type={field.type === "number" ? "number" : "text"}
-                                  step={field.type === "number" ? "any" : undefined}
-                                  value={fieldValue}
-                                  readOnly={field.readOnly}
-                                  onChange={(event) => {
-                                    const nextValue =
-                                      field.type === "number"
-                                        ? event.target.value === ""
-                                          ? null
-                                          : Number(event.target.value)
-                                        : event.target.value;
-                                    updateNestedRow(row._uiId, nestedIndex, field, nextValue);
-                                  }}
-                                />
-                              </label>
-                            );
-                          })}
-                        </div>
-                        <div className="nested-row-actions">
-                          <button
-                            type="button"
-                            className="editor-button editor-button-secondary"
-                            onClick={() => deleteNestedRow(row._uiId, nestedIndex)}
-                          >
-                            Regel verwijderen
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {renderDetailEditor(row)}
             </article>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
 
       <div className="editor-actions">
         <div className="editor-actions-group">

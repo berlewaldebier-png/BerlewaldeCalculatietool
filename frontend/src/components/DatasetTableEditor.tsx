@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
 
@@ -14,6 +15,7 @@ type EditorColumn = {
   label: string;
   type?: ColumnType;
   width?: string;
+  readOnly?: boolean;
 };
 
 type SaveShape = "array" | "recordByYear" | "groupByYearList";
@@ -46,6 +48,17 @@ function stripInternal(row: InternalRow) {
   return rest;
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 7V5h6v2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 7l1 12h8l1-12" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
 export function DatasetTableEditor({
   endpoint,
   title,
@@ -56,18 +69,26 @@ export function DatasetTableEditor({
   saveShape = "array",
   yearKey = "jaar"
 }: DatasetTableEditorProps) {
+  const router = useRouter();
   const preparedRows = useMemo<InternalRow[]>(
     () =>
-      initialRows.map((row) => ({
-        ...row,
-        _uiId: String(row.id ?? createUiId())
-      })),
+      initialRows.map((row, index) => {
+        const rawId = String(row.id ?? "").trim();
+        return {
+          ...row,
+          _uiId: rawId ? `${rawId}-${index}` : createUiId()
+        };
+      }),
     [initialRows]
   );
 
   const [rows, setRows] = useState<InternalRow[]>(preparedRows);
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const readOnlyKeys = useMemo(
+    () => new Set(columns.filter((column) => column.readOnly).map((column) => column.key)),
+    [columns]
+  );
 
   function updateCell(rowId: string, key: string, value: EditorValue) {
     setRows((current) =>
@@ -90,7 +111,12 @@ export function DatasetTableEditor({
   }
 
   function buildPayload() {
-    const cleanRows = rows.map(stripInternal);
+    const cleanRows = rows.map((row) => {
+      const stripped = stripInternal(row);
+      return Object.fromEntries(
+        Object.entries(stripped).filter(([key]) => !readOnlyKeys.has(key))
+      ) as EditorRow;
+    });
 
     if (saveShape === "array") {
       return cleanRows;
@@ -137,6 +163,7 @@ export function DatasetTableEditor({
       }
 
       setStatus("Opgeslagen.");
+      router.refresh();
     } catch {
       setStatus("Opslaan mislukt.");
     } finally {
@@ -154,7 +181,7 @@ export function DatasetTableEditor({
       <div className="editor-toolbar">
         <div className="editor-toolbar-meta">
           <span className="editor-pill">{rows.length} regels</span>
-          <span className="muted">Direct bewerken en opslaan in de tijdelijke JSON-opslag.</span>
+          <span className="muted">Direct bewerken en opslaan via de API-opslag.</span>
         </div>
       </div>
 
@@ -167,7 +194,7 @@ export function DatasetTableEditor({
                   {column.label}
                 </th>
               ))}
-              <th>Actie</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -191,6 +218,7 @@ export function DatasetTableEditor({
                           <input
                             type="checkbox"
                             checked={Boolean(value)}
+                            disabled={column.readOnly}
                             onChange={(event) =>
                               updateCell(row._uiId, column.key, event.target.checked)
                             }
@@ -204,10 +232,11 @@ export function DatasetTableEditor({
                   return (
                     <td key={column.key}>
                       <input
-                        className="dataset-input"
+                        className={`dataset-input ${column.readOnly ? "dataset-input-readonly" : ""}`.trim()}
                         type={type === "number" ? "number" : "text"}
                         step={type === "number" ? "any" : undefined}
                         value={value === null || value === undefined ? "" : String(value)}
+                        readOnly={column.readOnly}
                         onChange={(event) => {
                           const nextValue =
                             type === "number"
@@ -224,10 +253,12 @@ export function DatasetTableEditor({
                 <td>
                   <button
                     type="button"
-                    className="editor-button editor-button-secondary"
+                    className="icon-button-table"
+                    aria-label="Verwijderen"
+                    title="Verwijderen"
                     onClick={() => deleteRow(row._uiId)}
                   >
-                    Verwijderen
+                    <TrashIcon />
                   </button>
                 </td>
               </tr>

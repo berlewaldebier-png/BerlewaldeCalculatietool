@@ -222,15 +222,9 @@ function createEmptyBerekening(): GenericRecord {
 function hasMeaningfulFacturen(row: GenericRecord) {
   const inkoop = ((row.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
   const facturen = Array.isArray(inkoop.facturen) ? (inkoop.facturen as GenericRecord[]) : [];
-  const factuurregels = Array.isArray(inkoop.factuurregels)
-    ? (inkoop.factuurregels as GenericRecord[])
-    : [];
+  const gekoppeldeFacturen = facturen.slice(1);
 
-  if (factuurregels.length > 0) {
-    return true;
-  }
-
-  return facturen.some((factuur) => {
+  return gekoppeldeFacturen.some((factuur) => {
     const regels = Array.isArray(factuur.factuurregels)
       ? (factuur.factuurregels as GenericRecord[])
       : [];
@@ -353,7 +347,6 @@ function getProductUnitOptions(
   samengesteldeProducten: GenericRecord[]
 ): ProductUnitOption[] {
   const basis = basisproducten
-    .filter((row) => Number(row.jaar ?? 0) === year)
     .map((row) => ({
       id: String(row.id ?? ""),
       label: String(row.omschrijving ?? ""),
@@ -362,7 +355,6 @@ function getProductUnitOptions(
     }));
 
   const samengesteld = samengesteldeProducten
-    .filter((row) => Number(row.jaar ?? 0) === year)
     .map((row) => ({
       id: String(row.id ?? ""),
       label: String(row.omschrijving ?? ""),
@@ -954,14 +946,66 @@ export function BerekeningenWizard({
       if (!response.ok) {
         throw new Error("Opslaan mislukt");
       }
-      rowsRef.current = payload;
-      setRows(payload);
-      onRowsChange?.(payload);
+      const refreshedResponse = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+        cache: "no-store"
+      });
+      const refreshedRows = refreshedResponse.ok
+        ? ((await refreshedResponse.json()) as GenericRecord[])
+        : payload;
+      rowsRef.current = refreshedRows;
+      setRows(refreshedRows);
+      onRowsChange?.(refreshedRows);
       setStatus("Berekeningen opgeslagen.");
       setStatusTone("success");
       return true;
     } catch {
       setStatus("Opslaan mislukt.");
+      setStatusTone("error");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleFinalize() {
+    setStatus("");
+    setStatusTone(null);
+    setIsSaving(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const payload = rowsRef.current.map((row) => {
+        const next = cloneRecord(row);
+        if (String(next.id) === String(current.id)) {
+          next.status = "definitief";
+          next.finalized_at = nowIso;
+          next.updated_at = nowIso;
+        }
+        next.bier_snapshot = cloneRecord((next.basisgegevens as GenericRecord) ?? {});
+        next.resultaat_snapshot = buildResultaatSnapshot(next);
+        return next;
+      });
+      const response = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error("Afronden mislukt");
+      }
+      const refreshedResponse = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+        cache: "no-store"
+      });
+      const refreshedRows = refreshedResponse.ok
+        ? ((await refreshedResponse.json()) as GenericRecord[])
+        : payload;
+      rowsRef.current = refreshedRows;
+      setRows(refreshedRows);
+      onRowsChange?.(refreshedRows);
+      setStatus("Berekening definitief gemaakt.");
+      setStatusTone("success");
+      return true;
+    } catch {
+      setStatus("Afronden mislukt.");
       setStatusTone("error");
       return false;
     } finally {
@@ -1796,7 +1840,9 @@ export function BerekeningenWizard({
                   {records.length === 0 ? (
                     <tr>
                       <td className="dataset-empty" colSpan={8}>
-                        Nog geen producten gevonden voor {jaar}.
+                        {soort === "Inkoop"
+                          ? "Er zijn nog geen producten opgebouwd vanuit de huidige inkoopinvoer."
+                          : "Er zijn nog geen producten opgebouwd vanuit het huidige recept en de verpakkingselectie."}
                       </td>
                     </tr>
                   ) : null}
@@ -1919,7 +1965,7 @@ export function BerekeningenWizard({
                   className="editor-button"
                   onClick={async () => {
                     if (currentStep.id === "summary") {
-                      const saved = await handleSave();
+                      const saved = await handleFinalize();
                       if (saved) {
                         onFinish?.();
                       }

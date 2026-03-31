@@ -2,315 +2,276 @@
 
 import { useMemo, useState } from "react";
 
+import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
-
-type PackagingRow = {
-  id: string;
-  record_type: string;
-  jaar: number;
-  bron_jaar: number;
-  product_id: string;
-  product_type: "basis" | "samengesteld" | "";
-  verpakking: string;
-  bron_verkoopstrategie_id: string;
-  strategie_type: string;
-  kanaalmarges: Record<string, number>;
-  _uiId: string;
+type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number; default_factor: number };
+type StrategyRow = {
+  id: string; record_type: string; jaar: number; bier_id: string; biernaam: string; product_id: string;
+  product_type: "basis" | "samengesteld" | ""; verpakking: string; strategie_type: string; kostprijs: number;
+  sell_in_margins: Record<string, number>; sell_out_factors: Record<string, number | "">; sell_out_advice_prices: Record<string, number | "">; _uiId: string;
 };
-
-type BeerOverviewRow = {
-  biernaam: string;
-  stijl: string;
-  alcoholpercentage: number | string;
-  belastingsoort: string;
-  tarief_accijns: string;
+type ProductViewRow = {
+  productId: string; productType: "basis" | "samengesteld"; product: string;
+  marginOverrides: Record<string, number | "">; factorOverrides: Record<string, number | "">;
+  activeMargins: Record<string, number>; activeFactors: Record<string, number>;
+  isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
 };
-
-type PackagingSource = {
-  id: string;
-  label: string;
-  jaar: number;
-  type: "basis" | "samengesteld";
+type BeerViewRow = {
+  id: string; bierId: string; biernaam: string; productId: string; productType: "basis" | "samengesteld" | ""; product: string; kostprijs: number;
+  productMargins: Record<string, number>; marginOverrides: Record<string, number | "">; activeMargins: Record<string, number>; sellInPrices: Record<string, number>;
+  productFactors: Record<string, number>; factorOverrides: Record<string, number | "">; activeFactors: Record<string, number>; sellOutPrices: Record<string, number>;
+  isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
 };
+type Props = { endpoint: string; verkoopprijzen: GenericRecord[]; basisproducten: GenericRecord[]; samengesteldeProducten: GenericRecord[]; bieren: GenericRecord[]; berekeningen: GenericRecord[]; channels: GenericRecord[] };
 
-type VerkoopstrategieWorkspaceProps = {
-  endpoint: string;
-  verkoopprijzen: GenericRecord[];
-  basisproducten: GenericRecord[];
-  samengesteldeProducten: GenericRecord[];
-  bieren: GenericRecord[];
-  berekeningen: GenericRecord[];
-};
+const DEFAULT_CHANNELS: ChannelRow[] = [
+  { id: "horeca", code: "horeca", naam: "Horeca", actief: true, volgorde: 10, default_marge_pct: 50, default_factor: 3.5 },
+  { id: "retail", code: "retail", naam: "Supermarkt", actief: true, volgorde: 20, default_marge_pct: 30, default_factor: 2.4 },
+  { id: "slijterij", code: "slijterij", naam: "Slijterij", actief: true, volgorde: 30, default_marge_pct: 40, default_factor: 3 },
+  { id: "zakelijk", code: "zakelijk", naam: "Speciaalzaak", actief: true, volgorde: 40, default_marge_pct: 45, default_factor: 3.2 },
+  { id: "particulier", code: "particulier", naam: "Particulier", actief: false, volgorde: 50, default_marge_pct: 50, default_factor: 3 }
+];
 
-const CHANNELS = ["particulier", "zakelijk", "retail", "horeca", "slijterij"] as const;
+const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+const money = (v: number) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+const num = (v: number) => new Intl.NumberFormat("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
+const calcSellPrice = (cost: number, margin: number) => (margin >= 100 ? cost : cost / Math.max(0.0001, 1 - margin / 100));
+const normalizeMap = (raw: unknown, codes: string[]) => Object.fromEntries(codes.map((code) => {
+  const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const value = src[code];
+  return [code, value === "" || value === null || value === undefined ? "" : Number(value)];
+})) as Record<string, number | "">;
+const inputClass = (hasOverride: boolean) => hasOverride ? "dataset-input dataset-input-override-active" : "dataset-input";
 
-function createUiId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function normalizeChannels(raw: GenericRecord[]) {
+  const source = Array.isArray(raw) && raw.length > 0 ? raw : DEFAULT_CHANNELS;
+  const byCode = new Map(DEFAULT_CHANNELS.map((row) => [row.code, row]));
+  source.forEach((row) => {
+    const code = String(row.code ?? row.id ?? "").trim().toLowerCase();
+    if (!code) return;
+    byCode.set(code, {
+      id: String(row.id ?? row.code ?? createUiId()),
+      code,
+      naam: String(row.naam ?? ("label" in row ? row.label : undefined) ?? row.code ?? "").trim(),
+      actief: Boolean(row.actief ?? true),
+      volgorde: Number(row.volgorde ?? 999),
+      default_marge_pct: Number(row.default_marge_pct ?? byCode.get(code)?.default_marge_pct ?? 50),
+      default_factor: Number(row.default_factor ?? byCode.get(code)?.default_factor ?? 3)
+    });
+  });
+  return [...byCode.values()].map((row) => ({
+    id: String(row.id ?? row.code ?? createUiId()),
+    code: String(row.code ?? row.id ?? "").trim().toLowerCase(),
+    naam: String(row.naam ?? ("label" in row ? row.label : undefined) ?? row.code ?? "").trim(),
+    actief: Boolean(row.actief ?? true),
+    volgorde: Number(row.volgorde ?? 999),
+    default_marge_pct: Number(row.default_marge_pct ?? 50),
+    default_factor: Number(row.default_factor ?? 3)
+  })).filter((row) => row.code && row.naam && row.code !== "groothandel").sort((a, b) => (a.volgorde === b.volgorde ? a.naam.localeCompare(b.naam, "nl-NL") : a.volgorde - b.volgorde));
 }
 
-function normalizeMargins(raw: unknown): Record<string, number> {
-  const source = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-  return Object.fromEntries(CHANNELS.map((channel) => [channel, Number(source[channel] ?? 50)])) as Record<
-    string,
-    number
-  >;
-}
-
-function normalizeVerkoopstrategieRow(row: GenericRecord): PackagingRow {
+function normalizeStrategyRow(row: GenericRecord, channelCodes: string[]): StrategyRow {
+  const marginsSrc = typeof row.sell_in_margins === "object" && row.sell_in_margins !== null ? (row.sell_in_margins as Record<string, unknown>) : typeof row.kanaalmarges === "object" && row.kanaalmarges !== null ? (row.kanaalmarges as Record<string, unknown>) : {};
   return {
-    id: String(row.id ?? ""),
-    record_type: String(row.record_type ?? "verkoopstrategie_verpakking"),
-    jaar: Number(row.jaar ?? new Date().getFullYear()),
-    bron_jaar: Number(row.bron_jaar ?? new Date().getFullYear()),
-    product_id: String(row.product_id ?? ""),
-    product_type:
-      String(row.product_type ?? "") === "basis" || String(row.product_type ?? "") === "samengesteld"
-        ? (String(row.product_type ?? "") as "basis" | "samengesteld")
-        : "",
-    verpakking: String(row.verpakking ?? ""),
-    bron_verkoopstrategie_id: String(row.bron_verkoopstrategie_id ?? ""),
-    strategie_type: String(row.strategie_type ?? "handmatig"),
-    kanaalmarges: normalizeMargins(row.kanaalmarges),
+    id: String(row.id ?? ""), record_type: String(row.record_type ?? "verkoopstrategie_verpakking"), jaar: Number(row.jaar ?? new Date().getFullYear()),
+    bier_id: String(row.bier_id ?? ""), biernaam: String(row.biernaam ?? ""), product_id: String(row.product_id ?? ""),
+    product_type: String(row.product_type ?? "") === "basis" || String(row.product_type ?? "") === "samengesteld" ? (String(row.product_type ?? "") as "basis" | "samengesteld") : "",
+    verpakking: String(row.verpakking ?? ""), strategie_type: String(row.strategie_type ?? "default"), kostprijs: Number(row.kostprijs ?? 0),
+    sell_in_margins: Object.fromEntries(channelCodes.map((code) => [code, Number(marginsSrc[code] ?? 0)])) as Record<string, number>,
+    sell_out_factors: normalizeMap(row.sell_out_factors ?? row.adviesfactoren, channelCodes),
+    sell_out_advice_prices: normalizeMap(row.sell_out_advice_prices ?? row.adviesprijzen, channelCodes),
     _uiId: String(row.id ?? createUiId())
   };
 }
 
-function stripInternal(row: PackagingRow) {
-  const { _uiId, ...rest } = row;
-  return rest;
-}
+const stripInternal = (row: StrategyRow) => {
+  const { _uiId, sell_in_margins, sell_out_factors, sell_out_advice_prices, ...rest } = row;
+  return { ...rest, kanaalmarges: sell_in_margins, sell_in_margins, sell_out_factors, adviesfactoren: sell_out_factors, sell_out_advice_prices, adviesprijzen: sell_out_advice_prices };
+};
 
-function buildPackagingSources(
-  basisproducten: GenericRecord[],
-  samengesteldeProducten: GenericRecord[]
-): PackagingSource[] {
-  const basis = basisproducten.map((row) => ({
-    id: String(row.id ?? ""),
-    label: String(row.omschrijving ?? ""),
-    jaar: Number(row.jaar ?? 0),
-    type: "basis" as const
-  }));
-
-  const samengesteld = samengesteldeProducten.map((row) => ({
-    id: String(row.id ?? ""),
-    label: String(row.omschrijving ?? ""),
-    jaar: Number(row.jaar ?? 0),
-    type: "samengesteld" as const
-  }));
-
-  return [...basis, ...samengesteld].sort((left, right) => left.label.localeCompare(right.label));
-}
-
-function buildBeerOverview(
-  selectedYear: number,
-  berekeningen: GenericRecord[],
-  bieren: GenericRecord[]
-): BeerOverviewRow[] {
-  const bierByName = new Map(
-    bieren.map((bier) => [String(bier.biernaam ?? "").trim().toLowerCase(), bier])
-  );
-
-  const unique = new Map<string, BeerOverviewRow>();
-  for (const record of berekeningen) {
-    if (String(record.status ?? "").trim().toLowerCase() !== "definitief") {
-      continue;
-    }
-
-    const basisgegevens =
-      typeof record.basisgegevens === "object" && record.basisgegevens !== null
-        ? (record.basisgegevens as GenericRecord)
-        : {};
-    const jaar = Number(basisgegevens.jaar ?? 0);
-    if (jaar !== selectedYear) {
-      continue;
-    }
-
-    const biernaam = String(basisgegevens.biernaam ?? "").trim();
-    if (!biernaam || unique.has(biernaam.toLowerCase())) {
-      continue;
-    }
-
-    const stamdata = bierByName.get(biernaam.toLowerCase()) ?? {};
-    unique.set(biernaam.toLowerCase(), {
-      biernaam,
-      stijl: String(stamdata.stijl ?? ""),
-      alcoholpercentage:
-        stamdata.alcoholpercentage === undefined || stamdata.alcoholpercentage === null
-          ? ""
-          : Number(stamdata.alcoholpercentage),
-      belastingsoort: String(stamdata.belastingsoort ?? ""),
-      tarief_accijns: String(stamdata.tarief_accijns ?? "")
+export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisproducten, samengesteldeProducten, bieren, berekeningen, channels }: Props) {
+  const normalizedChannels = useMemo(() => normalizeChannels(channels), [channels]);
+  const activeChannels = useMemo(() => normalizedChannels.filter((channel) => channel.actief), [normalizedChannels]);
+  const channelCodes = useMemo(() => normalizedChannels.map((channel) => channel.code), [normalizedChannels]);
+  const channelDefaults = useMemo(() => Object.fromEntries(normalizedChannels.map((channel) => [channel.code, { margin: channel.default_marge_pct, factor: channel.default_factor }])) as Record<string, { margin: number; factor: number }>, [normalizedChannels]);
+  const productSources = useMemo(() => [...basisproducten.map((row) => ({ id: String(row.id ?? ""), label: String(row.omschrijving ?? ""), type: "basis" as const })), ...samengesteldeProducten.map((row) => ({ id: String(row.id ?? ""), label: String(row.omschrijving ?? ""), type: "samengesteld" as const }))].filter((row) => row.id && row.label).sort((a, b) => a.label.localeCompare(b.label, "nl-NL")), [basisproducten, samengesteldeProducten]);
+  const productIdByLabel = useMemo(() => new Map(productSources.map((row) => [row.label.trim().toLowerCase(), row.id])), [productSources]);
+  const basisProductParentMap = useMemo(() => {
+    const parents = new Map<string, { productId: string; label: string }[]>();
+    samengesteldeProducten.forEach((row) => {
+      const compositeId = String(row.id ?? "");
+      const compositeLabel = String(row.omschrijving ?? "");
+      const basisRows = Array.isArray(row.basisproducten) ? (row.basisproducten as GenericRecord[]) : [];
+      basisRows.forEach((basisRow) => {
+        const basisId = String(basisRow.basisproduct_id ?? "");
+        if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) return;
+        const current = parents.get(basisId) ?? [];
+        current.push({ productId: compositeId, label: compositeLabel });
+        parents.set(basisId, current);
+      });
     });
-  }
-
-  return [...unique.values()].sort((left, right) => left.biernaam.localeCompare(right.biernaam));
-}
-
-export function VerkoopstrategieWorkspace({
-  endpoint,
-  verkoopprijzen,
-  basisproducten,
-  samengesteldeProducten,
-  bieren,
-  berekeningen
-}: VerkoopstrategieWorkspaceProps) {
-  const normalizedRows = useMemo(
-    () => verkoopprijzen.map((row) => normalizeVerkoopstrategieRow(row)),
-    [verkoopprijzen]
-  );
-  const packagingSources = useMemo(
-    () => buildPackagingSources(basisproducten, samengesteldeProducten),
-    [basisproducten, samengesteldeProducten]
-  );
-
-  const availableYears = useMemo(() => {
-    const years = new Set<number>();
-    for (const source of packagingSources) {
-      if (source.jaar) {
-        years.add(source.jaar);
-      }
-    }
-    for (const row of normalizedRows) {
-      if (row.jaar) {
-        years.add(row.jaar);
-      }
-    }
-    return [...years].sort((left, right) => right - left);
-  }, [normalizedRows, packagingSources]);
-
-  const [rows, setRows] = useState<PackagingRow[]>(normalizedRows);
+    return new Map(
+      [...parents.entries()]
+        .filter(([, items]) => items.length === 1)
+        .map(([basisId, items]) => [basisId, items[0]])
+    );
+  }, [samengesteldeProducten]);
+  const [rows, setRows] = useState<StrategyRow[]>(() => verkoopprijzen.map((row) => normalizeStrategyRow(row, channelCodes)));
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [selectedYear, setSelectedYear] = useState<number>(availableYears[0] ?? new Date().getFullYear());
-  const [activeTab, setActiveTab] = useState<"verpakkingen" | "bieren">("verpakkingen");
+  const [activeTab, setActiveTab] = useState<"kanalen" | "sell-in" | "sell-out" | "bieren">("kanalen");
+  const [selectedYear, setSelectedYear] = useState<number>(Math.max(new Date().getFullYear(), ...verkoopprijzen.map((row) => Number(row.jaar ?? 0)), ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0))).filter((year) => Number.isFinite(year))));
 
-  const visiblePackagingRows = useMemo(() => {
-    const sourcesForYear = packagingSources.filter((row) => row.jaar === selectedYear);
-    const existingForYear = rows.filter((row) => row.jaar === selectedYear);
-
-    const merged = sourcesForYear.map((source) => {
-      const existing = existingForYear.find(
-        (row) =>
-          (source.id && row.product_id === source.id) ||
-          (!source.id && row.verpakking === source.label)
-      );
-      if (existing) {
-        return existing;
-      }
-
+  const productOverrideRows = useMemo<ProductViewRow[]>(() => {
+    const relevantRows = rows.filter((row) => (row.jaar === 0 || row.jaar === selectedYear) && row.record_type === "verkoopstrategie_verpakking");
+    const byProduct = new Map<string, StrategyRow>();
+    relevantRows.forEach((row) => {
+      const current = byProduct.get(row.product_id);
+      if (!current || current.jaar === 0) byProduct.set(row.product_id, row);
+    });
+    return productSources.map((product) => {
+      const parentComposite = product.type === "basis" ? basisProductParentMap.get(product.id) : undefined;
+      const effectiveProductId = parentComposite?.productId ?? product.id;
+      const found = byProduct.get(effectiveProductId);
+      const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
+        const value = found?.sell_in_margins?.[code];
+        return [code, value === undefined || value === channelDefaults[code]?.margin ? "" : Number(value)];
+      })) as Record<string, number | "">;
+      const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
+        const value = found?.sell_out_factors?.[code];
+        return [code, value === "" || value === undefined || Number(value) === channelDefaults[code]?.factor ? "" : Number(value)];
+      })) as Record<string, number | "">;
       return {
-        id: "",
-        record_type: "verkoopstrategie_verpakking",
-        jaar: selectedYear,
-        bron_jaar: selectedYear,
-        product_id: source.id,
-        product_type: source.type,
-        verpakking: source.label,
-        bron_verkoopstrategie_id: "",
-        strategie_type: "handmatig",
-        kanaalmarges: normalizeMargins({}),
-        _uiId: createUiId()
+        productId: product.id,
+        productType: product.type,
+        product: product.label,
+        marginOverrides,
+        factorOverrides,
+        activeMargins: Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? channelDefaults[code]?.margin ?? 50 : Number(marginOverrides[code])])) as Record<string, number>,
+        activeFactors: Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? channelDefaults[code]?.factor ?? 3 : Number(factorOverrides[code])])) as Record<string, number>,
+        isReadOnly: Boolean(parentComposite),
+        followsProductId: parentComposite?.productId ?? "",
+        followsProductLabel: parentComposite?.label ?? ""
       };
     });
+  }, [basisProductParentMap, channelCodes, channelDefaults, productSources, rows, selectedYear]);
 
-    const additional = existingForYear.filter(
-      (row) =>
-        !sourcesForYear.some(
-          (source) =>
-          (source.id && row.product_id === source.id) ||
-          (!source.id && source.label === row.verpakking)
-        )
-    );
+  const sellRows = useMemo<BeerViewRow[]>(() => {
+    const bierById = new Map(bieren.map((bier) => [String(bier.id ?? ""), bier]));
+    const productById = new Map(productOverrideRows.map((row) => [row.productId, row]));
+    const beerOverrides = new Map(rows.filter((row) => row.jaar === selectedYear && row.record_type === "verkoopstrategie_product").map((row) => [`${row.bier_id}::${row.product_id}`, row]));
+    const out: BeerViewRow[] = [];
 
-    return [...merged, ...additional];
-  }, [packagingSources, rows, selectedYear]);
+    berekeningen.forEach((record) => {
+      if (String(record.status ?? "").toLowerCase() !== "definitief") return;
+      const basisgegevens = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? (record.basisgegevens as GenericRecord) : {};
+      if (Number(basisgegevens.jaar ?? 0) !== selectedYear) return;
+      const bierId = String(record.bier_id ?? "");
+      const biernaam = String(basisgegevens.biernaam ?? "").trim() || String((bierById.get(bierId) ?? {}).biernaam ?? "").trim();
+      if (!biernaam) return;
+      const producten = typeof record.resultaat_snapshot === "object" && record.resultaat_snapshot !== null ? ((record.resultaat_snapshot as GenericRecord).producten as GenericRecord | undefined) : undefined;
+      const productRows = [
+        ...(Array.isArray(producten?.basisproducten) ? (producten?.basisproducten as GenericRecord[]) : []),
+        ...(Array.isArray(producten?.samengestelde_producten) ? (producten?.samengestelde_producten as GenericRecord[]) : [])
+      ];
+      productRows.forEach((productRow) => {
+        const rawProduct = String(productRow.verpakking ?? productRow.verpakkingseenheid ?? productRow.omschrijving ?? "").trim();
+        const productId = String(productRow.product_id ?? "") || productIdByLabel.get(rawProduct.toLowerCase()) || "";
+        const product = String(productRow.verpakking ?? productRow.verpakkingseenheid ?? productRow.omschrijving ?? "").trim();
+        if (!productId || !product) return;
+        const productDefaults = productById.get(productId);
+        const followProductId = productDefaults?.followsProductId ?? "";
+        const productMargins = productDefaults?.activeMargins ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.margin ?? 50])) as Record<string, number>;
+        const productFactors = productDefaults?.activeFactors ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.factor ?? 3])) as Record<string, number>;
+        const override = beerOverrides.get(`${bierId}::${followProductId || productId}`);
+        const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
+          const value = override?.sell_in_margins?.[code];
+          return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
+        })) as Record<string, number | "">;
+        const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
+          const value = override?.sell_out_factors?.[code];
+          return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
+        })) as Record<string, number | "">;
+        const activeMargins = Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? productMargins[code] : Number(marginOverrides[code])])) as Record<string, number>;
+        const activeFactors = Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])) as Record<string, number>;
+        const kostprijs = Number(productRow.kostprijs ?? 0);
+        const sellInPrices = Object.fromEntries(channelCodes.map((code) => [code, calcSellPrice(kostprijs, activeMargins[code])])) as Record<string, number>;
+        const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
+        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: (String(productRow.product_type ?? "") as "basis" | "samengesteld" | "") || "", product, kostprijs, productMargins, marginOverrides, activeMargins, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+      });
+    });
+    return out.sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
+  }, [bieren, berekeningen, channelCodes, channelDefaults, productIdByLabel, productOverrideRows, rows, selectedYear]);
 
-  const beerOverview = useMemo(
-    () => buildBeerOverview(selectedYear, berekeningen, bieren),
-    [selectedYear, berekeningen, bieren]
-  );
-
-  function syncVisibleRows(nextVisibleRows: PackagingRow[]) {
+  function upsertProduct(productId: string, updater: (row: StrategyRow | null) => StrategyRow | null) {
     setRows((current) => {
-      const otherYears = current.filter((row) => row.jaar !== selectedYear);
-      return [...otherYears, ...nextVisibleRows];
+      const existing = current.find((row) => row.jaar === selectedYear && row.record_type === "verkoopstrategie_verpakking" && row.product_id === productId) ?? null;
+      const source = productSources.find((item) => item.id === productId);
+      const next = updater(existing ?? {
+        id: "", record_type: "verkoopstrategie_verpakking", jaar: selectedYear, bier_id: "", biernaam: "", product_id: productId, product_type: source?.type ?? "", verpakking: source?.label ?? "", strategie_type: "override", kostprijs: 0, sell_in_margins: {}, sell_out_factors: {}, sell_out_advice_prices: {}, _uiId: createUiId()
+      });
+      return [...current.filter((row) => !(row.jaar === selectedYear && row.record_type === "verkoopstrategie_verpakking" && row.product_id === productId)), ...(next ? [next] : [])];
     });
   }
 
-  function updatePackagingRow(rowId: string, field: keyof PackagingRow, value: unknown) {
-    const nextVisibleRows = visiblePackagingRows.map((row) =>
-      row._uiId === rowId ? { ...row, [field]: value } : row
-    );
-    syncVisibleRows(nextVisibleRows);
+  function upsertBeer(viewRow: BeerViewRow, updater: (row: StrategyRow | null) => StrategyRow | null) {
+    setRows((current) => {
+      const existing = current.find((row) => row.jaar === selectedYear && row.record_type === "verkoopstrategie_product" && row.bier_id === viewRow.bierId && row.product_id === viewRow.productId) ?? null;
+      const next = updater(existing ?? {
+        id: "", record_type: "verkoopstrategie_product", jaar: selectedYear, bier_id: viewRow.bierId, biernaam: viewRow.biernaam, product_id: viewRow.productId, product_type: viewRow.productType, verpakking: viewRow.product, strategie_type: "override", kostprijs: viewRow.kostprijs, sell_in_margins: {}, sell_out_factors: {}, sell_out_advice_prices: {}, _uiId: createUiId()
+      });
+      return [...current.filter((row) => !(row.jaar === selectedYear && row.record_type === "verkoopstrategie_product" && row.bier_id === viewRow.bierId && row.product_id === viewRow.productId)), ...(next ? [next] : [])];
+    });
   }
 
-  function updateMargin(rowId: string, channel: (typeof CHANNELS)[number], value: number) {
-    const nextVisibleRows = visiblePackagingRows.map((row) =>
-      row._uiId === rowId
-        ? {
-            ...row,
-            kanaalmarges: {
-              ...row.kanaalmarges,
-              [channel]: value
-            }
-          }
-        : row
-    );
-    syncVisibleRows(nextVisibleRows);
+  function updateProductMargin(productId: string, channel: string, value: number | "") {
+    upsertProduct(productId, (row) => {
+      const nextMargins = { ...row!.sell_in_margins };
+      if (value === "") delete nextMargins[channel]; else nextMargins[channel] = value;
+      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+    });
   }
 
-  function addManualPackagingRow() {
-    syncVisibleRows([
-      ...visiblePackagingRows,
-      {
-        id: "",
-        record_type: "verkoopstrategie_verpakking",
-        jaar: selectedYear,
-        bron_jaar: selectedYear,
-        product_id: "",
-        product_type: "",
-        verpakking: "",
-        bron_verkoopstrategie_id: "",
-        strategie_type: "handmatig",
-        kanaalmarges: normalizeMargins({}),
-        _uiId: createUiId()
-      }
-    ]);
+  function updateProductFactor(productId: string, channel: string, value: number | "") {
+    upsertProduct(productId, (row) => {
+      const nextFactors = { ...row!.sell_out_factors };
+      if (value === "") delete nextFactors[channel]; else nextFactors[channel] = value;
+      const nextMargins = Object.fromEntries(Object.entries(row!.sell_in_margins).filter(([, margin]) => margin !== null && margin !== undefined));
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+    });
   }
 
-  function deletePackagingRow(rowId: string) {
-    syncVisibleRows(visiblePackagingRows.filter((row) => row._uiId !== rowId));
+  function updateBeerMargin(viewRow: BeerViewRow, channel: string, value: number | "") {
+    upsertBeer(viewRow, (row) => {
+      const nextMargins = { ...row!.sell_in_margins };
+      if (value === "") delete nextMargins[channel]; else nextMargins[channel] = value;
+      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+    });
+  }
+
+  function updateBeerFactor(viewRow: BeerViewRow, channel: string, value: number | "") {
+    upsertBeer(viewRow, (row) => {
+      const nextFactors = { ...row!.sell_out_factors };
+      if (value === "") delete nextFactors[channel]; else nextFactors[channel] = value;
+      const nextMargins = Object.fromEntries(Object.entries(row!.sell_in_margins).filter(([, margin]) => margin !== null && margin !== undefined));
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+    });
   }
 
   async function handleSave() {
     setStatus("");
     setIsSaving(true);
-
     try {
-      const effectiveRows = [
-        ...rows.filter((row) => row.jaar !== selectedYear),
-        ...visiblePackagingRows
-      ];
-      const payload = effectiveRows.map(stripInternal);
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rows.map(stripInternal))
       });
-
-      if (!response.ok) {
-        throw new Error("Opslaan mislukt");
-      }
-
-      setRows(effectiveRows);
+      if (!response.ok) throw new Error("Opslaan mislukt");
       setStatus("Opgeslagen.");
     } catch {
       setStatus("Opslaan mislukt.");
@@ -323,198 +284,258 @@ export function VerkoopstrategieWorkspace({
     <section className="module-card">
       <div className="module-card-header">
         <div className="module-card-title">Verkoopstrategie</div>
-        <div className="module-card-text">
-          Verpakkingen uit Producten &amp; verpakking worden automatisch per jaar getoond. Daarnaast is er een overzicht
-          van alle bieren in datzelfde jaar.
-        </div>
-      </div>
-
-      <div className="editor-toolbar">
-        <div className="editor-toolbar-meta">
-          <span className="editor-pill">{visiblePackagingRows.length} verpakkingen</span>
-          <span className="muted">Jaar selecteren en daarna per tabblad beheren.</span>
-        </div>
-        <div className="editor-actions-group">
-          <label className="nested-field">
-            <span>Jaar</span>
-            <select
-              className="dataset-input"
-              value={String(selectedYear)}
-              onChange={(event) => setSelectedYear(Number(event.target.value))}
-            >
-              {availableYears.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <div className="module-card-text">Kanaaldefaults vormen de basis. Daar bovenop kun je per product of per bier/product afwijken.</div>
       </div>
 
       <div className="tab-strip">
-        <button
-          type="button"
-          className={`tab-button ${activeTab === "verpakkingen" ? "active" : ""}`}
-          onClick={() => setActiveTab("verpakkingen")}
-        >
-          Verpakkingen {selectedYear}
-        </button>
-        <button
-          type="button"
-          className={`tab-button ${activeTab === "bieren" ? "active" : ""}`}
-          onClick={() => setActiveTab("bieren")}
-        >
-          Bieren {selectedYear}
-        </button>
+        <button type="button" className={`tab-button ${activeTab === "kanalen" ? "active" : ""}`} onClick={() => setActiveTab("kanalen")}>Kanalen</button>
+        <button type="button" className={`tab-button ${activeTab === "sell-in" ? "active" : ""}`} onClick={() => setActiveTab("sell-in")}>Sell-in</button>
+        <button type="button" className={`tab-button ${activeTab === "sell-out" ? "active" : ""}`} onClick={() => setActiveTab("sell-out")}>Sell-out</button>
+        <button type="button" className={`tab-button ${activeTab === "bieren" ? "active" : ""}`} onClick={() => setActiveTab("bieren")}>Bieren</button>
       </div>
 
-      {activeTab === "verpakkingen" ? (
-        <div className="nested-editor-list">
-          {visiblePackagingRows.length === 0 ? (
-            <div className="nested-empty">Nog geen verpakkingen gevonden voor {selectedYear}.</div>
-          ) : null}
-          {visiblePackagingRows.map((row) => (
-            <article key={row._uiId} className="nested-editor-card">
-              <div className="nested-editor-card-header">
-                <div>
-                  <div className="nested-editor-card-title">
-                    {row.verpakking || "Nieuwe verpakking"}
-                  </div>
-                  <div className="nested-editor-card-meta">Product ID: {row.product_id || "(nog leeg)"}</div>
-                </div>
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={() => deletePackagingRow(row._uiId)}
-                >
-                  Verwijderen
-                </button>
-              </div>
-
-              <div className="nested-editor-grid">
-                <label className="nested-field">
-                  <span>Product ID</span>
-                  <input
-                    className="dataset-input"
-                    type="text"
-                    value={row.product_id}
-                    onChange={(event) => updatePackagingRow(row._uiId, "product_id", event.target.value)}
-                  />
-                </label>
-                <label className="nested-field">
-                  <span>Verpakking</span>
-                  <input
-                    className="dataset-input"
-                    type="text"
-                    value={row.verpakking}
-                    onChange={(event) => updatePackagingRow(row._uiId, "verpakking", event.target.value)}
-                  />
-                </label>
-                <label className="nested-field">
-                  <span>Product type</span>
-                  <input
-                    className="dataset-input"
-                    type="text"
-                    value={row.product_type}
-                    onChange={(event) => updatePackagingRow(row._uiId, "product_type", event.target.value)}
-                  />
-                </label>
-                <label className="nested-field">
-                  <span>Strategietype</span>
-                  <input
-                    className="dataset-input"
-                    type="text"
-                    value={row.strategie_type}
-                    onChange={(event) => updatePackagingRow(row._uiId, "strategie_type", event.target.value)}
-                  />
-                </label>
-              </div>
-
-              <div className="nested-subsection">
-                <div className="nested-subsection-header">
-                  <div className="nested-subsection-title">Kanaalmarges</div>
-                </div>
-                <div className="nested-row-card">
-                  <div className="nested-row-grid">
-                    {CHANNELS.map((channel) => (
-                      <label key={channel} className="nested-field">
-                        <span>{channel}</span>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          step="any"
-                          value={String(row.kanaalmarges[channel] ?? 0)}
-                          onChange={(event) =>
-                            updateMargin(
-                              row._uiId,
-                              channel,
-                              event.target.value === "" ? 0 : Number(event.target.value)
-                            )
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
+      {activeTab === "kanalen" ? (
+        <DatasetTableEditor
+          endpoint="/data/dataset/channels"
+          initialRows={normalizedChannels}
+          addRowTemplate={{ id: "", code: "", naam: "", actief: true, volgorde: 999, default_marge_pct: 50, default_factor: 3 }}
+          columns={[
+            { key: "naam", label: "Kanaal", width: "220px" },
+            { key: "code", label: "Code", width: "140px" },
+            { key: "default_marge_pct", label: "Default marge %", type: "number", width: "150px" },
+            { key: "default_factor", label: "Default factor", type: "number", width: "150px" },
+            { key: "actief", label: "Actief", type: "checkbox", width: "110px" },
+            { key: "volgorde", label: "Volgorde", type: "number", width: "120px" }
+          ]}
+          title="Kanalen"
+          description="Nieuwe kanalen krijgen hier meteen een standaard marge en factor mee."
+        />
       ) : (
-        <div className="data-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Stijl</th>
-                <th>Alcohol %</th>
-                <th>Belastingsoort</th>
-                <th>Tarief accijns</th>
-              </tr>
-            </thead>
-            <tbody>
-              {beerOverview.length === 0 ? (
-                <tr>
-                  <td className="dataset-empty" colSpan={5}>
-                    Nog geen bieren gevonden voor {selectedYear}.
-                  </td>
-                </tr>
-              ) : (
-                beerOverview.map((row) => (
-                  <tr key={row.biernaam}>
-                    <td>{row.biernaam}</td>
-                    <td>{row.stijl}</td>
-                    <td>{row.alcoholpercentage}</td>
-                    <td>{row.belastingsoort}</td>
-                    <td>{row.tarief_accijns}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+        <>
+          <div className="editor-toolbar">
+            <div className="editor-toolbar-meta">
+              <span className="editor-pill">{productSources.length} producten</span>
+              <span className="muted">Actieve kanalen: {activeChannels.map((channel) => channel.naam).join(", ") || "geen"}</span>
+            </div>
+            <div className="editor-actions-group">
+              <label className="nested-field">
+                <span>Jaar</span>
+                <select className="dataset-input" value={String(selectedYear)} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+                  {Array.from(new Set([selectedYear, ...rows.map((row) => row.jaar), ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))]))
+                    .filter((year) => Number.isFinite(year) && year > 0)
+                    .sort((a, b) => b - a)
+                    .map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+            </div>
+          </div>
 
-      <div className="editor-actions">
-        <div className="editor-actions-group">
-          {activeTab === "verpakkingen" ? (
-            <button
-              type="button"
-              className="editor-button editor-button-secondary"
-              onClick={addManualPackagingRow}
-            >
-              Extra verpakking toevoegen
-            </button>
+          {activeTab === "sell-in" ? (
+            <div className="stack" style={{ gap: "1rem" }}>
+              <details open className="module-card compact-card">
+                <summary className="module-card-title" style={{ cursor: "pointer" }}>Kanaaldefaults</summary>
+                <div className="data-table" style={{ marginTop: "0.75rem" }}>
+                  <table>
+                    <thead><tr><th>Kanaal</th><th>Default marge %</th></tr></thead>
+                    <tbody>{activeChannels.map((channel) => <tr key={channel.code}><td>{channel.naam}</td><td>{num(channel.default_marge_pct)}</td></tr>)}</tbody>
+                  </table>
+                </div>
+              </details>
+
+              <details open className="module-card compact-card">
+                <summary className="module-card-title" style={{ cursor: "pointer" }}>Productoverrides</summary>
+                <div className="module-card-text" style={{ marginTop: "0.5rem", marginBottom: "0.9rem" }}>Laat een cel leeg om de kanaaldefault te gebruiken.</div>
+                <div className="data-table">
+                  <table>
+                    <thead><tr><th>Product</th><th>Type</th>{activeChannels.map((channel) => <th key={channel.code}>{channel.naam}</th>)}</tr></thead>
+                    <tbody>
+                      {productOverrideRows.map((row) => (
+                        <tr key={row.productId}>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{row.product}</div>
+                            {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                          </td>
+                          <td><div className="dataset-input dataset-input-readonly">{row.productType}</div></td>
+                          {activeChannels.map((channel) => (
+                            <td key={`${row.productId}-${channel.code}`}>
+                              <input className={`${inputClass(row.marginOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()} type="number" step="any" placeholder={String(channel.default_marge_pct)} value={row.marginOverrides[channel.code] === "" ? "" : String(row.marginOverrides[channel.code])} readOnly={row.isReadOnly} onChange={(event) => updateProductMargin(row.productId, channel.code, event.target.value === "" ? "" : Number(event.target.value))} />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+
+              <details open className="module-card compact-card">
+                <summary className="module-card-title" style={{ cursor: "pointer" }}>Sell-in prijzen</summary>
+                <div className="module-card-text" style={{ marginTop: "0.5rem", marginBottom: "0.9rem" }}>Definitieve kostprijsberekeningen met defaultmarge en overrides per bier/product.</div>
+                <div className="data-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Bier</th><th>Product</th><th>Kostprijs</th>
+                        {activeChannels.map((channel) => <th key={`${channel.code}-override`}>{channel.naam}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sellRows.length === 0 ? (
+                        <tr><td className="dataset-empty" colSpan={3 + activeChannels.length}>Nog geen definitieve kostprijsberekeningen gevonden voor {selectedYear}.</td></tr>
+                      ) : sellRows.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.biernaam}</td>
+                          <td>
+                            <div>{row.product}</div>
+                            {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                          </td>
+                          <td>{money(row.kostprijs)}</td>
+                          {activeChannels.map((channel) => (
+                            <td key={`${row.id}-${channel.code}-override`}>
+                              <div className="stack" style={{ gap: "0.35rem" }}>
+                                <input
+                                  className={`${inputClass(row.marginOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                  type="number"
+                                  step="any"
+                                  placeholder={String(row.productMargins[channel.code])}
+                                  value={row.marginOverrides[channel.code] === "" ? "" : String(row.marginOverrides[channel.code])}
+                                  readOnly={row.isReadOnly}
+                                  onChange={(event) => updateBeerMargin(row, channel.code, event.target.value === "" ? "" : Number(event.target.value))}
+                                />
+                                <div className="dataset-input dataset-input-readonly">
+                                  {num(row.activeMargins[channel.code])}% · {money(row.sellInPrices[channel.code])}
+                                </div>
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
           ) : null}
-        </div>
-        <div className="editor-actions-group">
-          {status ? <span className="editor-status">{status}</span> : null}
-          <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>
-            {isSaving ? "Opslaan..." : "Opslaan"}
-          </button>
-        </div>
-      </div>
+
+          {activeTab === "sell-out" ? (
+            <div className="stack" style={{ gap: "1rem" }}>
+              <details open className="module-card compact-card">
+                <summary className="module-card-title" style={{ cursor: "pointer" }}>Kanaaldefaults</summary>
+                <div className="data-table" style={{ marginTop: "0.75rem" }}>
+                  <table>
+                    <thead><tr><th>Kanaal</th><th>Default factor</th></tr></thead>
+                    <tbody>{activeChannels.map((channel) => <tr key={channel.code}><td>{channel.naam}</td><td>{num(channel.default_factor)}</td></tr>)}</tbody>
+                  </table>
+                </div>
+              </details>
+
+              <details open className="module-card compact-card">
+                <summary className="module-card-title" style={{ cursor: "pointer" }}>Productoverrides</summary>
+                <div className="module-card-text" style={{ marginTop: "0.5rem", marginBottom: "0.9rem" }}>Laat een cel leeg om de kanaalfactor te gebruiken.</div>
+                <div className="data-table">
+                  <table>
+                    <thead><tr><th>Product</th><th>Type</th>{activeChannels.map((channel) => <th key={channel.code}>{channel.naam}</th>)}</tr></thead>
+                    <tbody>
+                      {productOverrideRows.map((row) => (
+                        <tr key={`${row.productId}-factor`}>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{row.product}</div>
+                            {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                          </td>
+                          <td><div className="dataset-input dataset-input-readonly">{row.productType}</div></td>
+                          {activeChannels.map((channel) => (
+                            <td key={`${row.productId}-${channel.code}-factor`}>
+                              <input className={`${inputClass(row.factorOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()} type="number" step="any" placeholder={String(channel.default_factor)} value={row.factorOverrides[channel.code] === "" ? "" : String(row.factorOverrides[channel.code])} readOnly={row.isReadOnly} onChange={(event) => updateProductFactor(row.productId, channel.code, event.target.value === "" ? "" : Number(event.target.value))} />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+
+              <details open className="module-card compact-card">
+                <summary className="module-card-title" style={{ cursor: "pointer" }}>Sell-out prijzen</summary>
+                <div className="data-table" style={{ marginTop: "0.75rem" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Bier</th><th>Product</th>
+                        {activeChannels.map((channel) => <th key={`${channel.code}-override-factor`}>{channel.naam}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sellRows.length === 0 ? (
+                        <tr><td className="dataset-empty" colSpan={2 + activeChannels.length}>Nog geen definitieve kostprijsberekeningen gevonden voor {selectedYear}.</td></tr>
+                      ) : sellRows.map((row) => (
+                        <tr key={`${row.id}-sellout`}>
+                          <td>{row.biernaam}</td>
+                          <td>
+                            <div>{row.product}</div>
+                            {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                          </td>
+                          {activeChannels.map((channel) => (
+                            <td key={`${row.id}-${channel.code}-override-factor`}>
+                              <div className="stack" style={{ gap: "0.35rem" }}>
+                                <input
+                                  className={`${inputClass(row.factorOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                  type="number"
+                                  step="any"
+                                  placeholder={String(row.productFactors[channel.code])}
+                                  value={row.factorOverrides[channel.code] === "" ? "" : String(row.factorOverrides[channel.code])}
+                                  readOnly={row.isReadOnly}
+                                  onChange={(event) => updateBeerFactor(row, channel.code, event.target.value === "" ? "" : Number(event.target.value))}
+                                />
+                                <div className="dataset-input dataset-input-readonly">
+                                  x {num(row.activeFactors[channel.code])} · {money(row.sellOutPrices[channel.code])}
+                                </div>
+                              </div>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+          ) : null}
+
+          {activeTab === "bieren" ? (
+            <div className="data-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Bier</th><th>Product</th><th>Kostprijs</th>
+                    {activeChannels.map((channel) => <th key={`in-${channel.code}`}>{channel.naam} verkoopprijs</th>)}
+                    {activeChannels.map((channel) => <th key={`out-${channel.code}`}>{channel.naam} adviesprijs</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sellRows.length === 0 ? (
+                    <tr><td className="dataset-empty" colSpan={3 + activeChannels.length * 2}>Nog geen bieren gevonden voor {selectedYear}.</td></tr>
+                  ) : sellRows.map((row) => (
+                    <tr key={`${row.bierId}-${row.productId}`}>
+                      <td>{row.biernaam}</td><td>{row.product}</td><td>{money(row.kostprijs)}</td>
+                      {activeChannels.map((channel) => <td key={`${row.id}-in-${channel.code}`}>{money(row.sellInPrices[channel.code])}</td>)}
+                      {activeChannels.map((channel) => <td key={`${row.id}-out-${channel.code}`}>{money(row.sellOutPrices[channel.code])}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          <div className="editor-actions">
+            <div className="editor-actions-group" />
+            <div className="editor-actions-group">
+              {status ? <span className="editor-status">{status}</span> : null}
+              <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>{isSaving ? "Opslaan..." : "Opslaan"}</button>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
