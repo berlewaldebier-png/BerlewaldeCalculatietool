@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -14,6 +14,7 @@ type PrijsvoorstelWizardProps = {
   bieren: GenericRecord[];
   berekeningen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
+  channels: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   initialSelectedId?: string;
@@ -34,7 +35,19 @@ type SelectOption = {
   label: string;
 };
 
-type KanaalKey = "zakelijk" | "retail" | "horeca" | "slijterij";
+type ChannelOption = {
+  value: string;
+  label: string;
+  defaultMarginPct: number;
+  defaultFactor: number;
+};
+
+const DEFAULT_CHANNEL_OPTIONS: ChannelOption[] = [
+  { value: "horeca", label: "Horeca", defaultMarginPct: 50, defaultFactor: 3.5 },
+  { value: "retail", label: "Supermarkt", defaultMarginPct: 30, defaultFactor: 2.4 },
+  { value: "slijterij", label: "Slijterij", defaultMarginPct: 40, defaultFactor: 3 },
+  { value: "zakelijk", label: "Speciaalzaak", defaultMarginPct: 45, defaultFactor: 3.2 }
+];
 
 type ProductDefinition = {
   id: string;
@@ -72,9 +85,14 @@ type LitersDisplayRow = {
   liters: number;
   kortingPct: number;
   kostprijsPerLiter: number;
-  adviesprijzen: Record<string, number>;
-  basisprijs: number;
-  verkoopprijs: number;
+  offerPrijs: number;
+  sellInPrijs: number;
+  sellOutPrijs: number;
+  sellInMargePct: number;
+  sellOutFactor: number;
+  offerByChannel: Record<string, number>;
+  sellInByChannel: Record<string, number>;
+  sellOutByChannel: Record<string, number>;
   omzet: number;
   kosten: number;
   kortingEur: number;
@@ -94,23 +112,20 @@ type ProductDisplayRow = {
   aantal: number;
   kortingPct: number;
   kostprijsPerStuk: number;
-  adviesprijzen: Record<string, number>;
-  basisprijs: number;
-  verkoopprijs: number;
+  offerPrijs: number;
+  sellInPrijs: number;
+  sellOutPrijs: number;
+  sellInMargePct: number;
+  sellOutFactor: number;
+  offerByChannel: Record<string, number>;
+  sellInByChannel: Record<string, number>;
+  sellOutByChannel: Record<string, number>;
   omzet: number;
   kosten: number;
   kortingEur: number;
   margeEur: number;
   margePct: number;
-  kanaalMargePct: number;
 };
-
-const KANAAL_OPTIONS = [
-  { value: "zakelijk", label: "Zakelijk" },
-  { value: "retail", label: "Retail" },
-  { value: "horeca", label: "Horeca" },
-  { value: "slijterij", label: "Slijterij" }
-];
 
 const LITERS_BASIS_OPTIONS = [
   {
@@ -150,6 +165,20 @@ const steps: StepDefinition[] = [
     id: "samenvatting",
     label: "Samenvatting",
     description: "Controleer de commerciële uitkomst en rond het prijsvoorstel af."
+  }
+];
+
+const wizardSteps: StepDefinition[] = [
+  ...steps.slice(0, 3),
+  {
+    id: "samenvatting",
+    label: "Samenvatting",
+    description: "Controleer kostprijs, sell-in en sell-out voor het gekozen kanaal."
+  },
+  {
+    id: "afronden",
+    label: "Afronden",
+    description: "Voeg een opmerking toe, vraag een concept-PDF op en rond het voorstel definitief af."
   }
 ];
 
@@ -255,9 +284,25 @@ function getSnapshotProductCost(row: GenericRecord) {
 }
 
 function pickLatestKnownProductRows(rows: GenericRecord[], targetYear: number) {
+  const rowsWithYear = rows.filter((row) => {
+    const yearValue = Number(row.jaar ?? 0);
+    return Number.isFinite(yearValue) && yearValue > 0;
+  });
+
+  if (rowsWithYear.length === 0) {
+    const byId = new Map<string, GenericRecord>();
+    rows.forEach((row) => {
+      const id = String(row.id ?? "");
+      if (id && !byId.has(id)) {
+        byId.set(id, row);
+      }
+    });
+    return [...byId.values()];
+  }
+
   const byId = new Map<string, GenericRecord>();
 
-  [...rows]
+  [...rowsWithYear]
     .filter((row) => Number(row.jaar ?? 0) <= targetYear)
     .sort((left, right) => Number(right.jaar ?? 0) - Number(left.jaar ?? 0))
     .forEach((row) => {
@@ -272,7 +317,7 @@ function pickLatestKnownProductRows(rows: GenericRecord[], targetYear: number) {
   }
 
   const fallback = new Map<string, GenericRecord>();
-  [...rows]
+  [...rowsWithYear]
     .sort((left, right) => Number(right.jaar ?? 0) - Number(left.jaar ?? 0))
     .forEach((row) => {
       const id = String(row.id ?? "");
@@ -305,9 +350,11 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
         included: isIncluded(row.included),
         cost_at_quote: toNumber(row.cost_at_quote, 0),
         sales_price_at_quote: toNumber(row.sales_price_at_quote, 0),
+        sell_out_price_at_quote: toNumber(row.sell_out_price_at_quote, 0),
         revenue_at_quote: toNumber(row.revenue_at_quote, 0),
         margin_at_quote: toNumber(row.margin_at_quote, 0),
         target_margin_pct_at_quote: toNumber(row.target_margin_pct_at_quote, 0),
+        sell_out_factor_at_quote: toNumber(row.sell_out_factor_at_quote, 0),
         channel_at_quote: String(row.channel_at_quote ?? ""),
         verpakking_label: String(row.verpakking_label ?? "")
       }))
@@ -318,9 +365,11 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
         included: isIncluded(row.included),
         cost_at_quote: toNumber(row.cost_at_quote, 0),
         sales_price_at_quote: toNumber(row.sales_price_at_quote, 0),
+        sell_out_price_at_quote: toNumber(row.sell_out_price_at_quote, 0),
         revenue_at_quote: toNumber(row.revenue_at_quote, 0),
         margin_at_quote: toNumber(row.margin_at_quote, 0),
         target_margin_pct_at_quote: toNumber(row.target_margin_pct_at_quote, 0),
+        sell_out_factor_at_quote: toNumber(row.sell_out_factor_at_quote, 0),
         channel_at_quote: String(row.channel_at_quote ?? ""),
         verpakking_label: String(row.verpakking_label ?? "")
       }))
@@ -339,8 +388,18 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
     opmerking: String(raw.opmerking ?? ""),
     jaar: Number(raw.jaar ?? new Date().getFullYear()),
     voorsteltype: String(raw.voorsteltype ?? "Op basis van producten"),
+    offer_level: String(raw.offer_level ?? "samengesteld"),
     liters_basis: String(raw.liters_basis ?? "een_bier"),
     kanaal: String(raw.kanaal ?? "horeca"),
+    pricing_channel: String(raw.pricing_channel ?? raw.kanaal ?? "horeca"),
+    selected_kanalen: Array.isArray(raw.selected_kanalen)
+      ? raw.selected_kanalen.map((value) => String(value ?? "")).filter(Boolean)
+      : [],
+    reference_channels: Array.isArray(raw.reference_channels)
+      ? raw.reference_channels.map((value) => String(value ?? "")).filter(Boolean)
+      : [],
+    pricing_method: String(raw.pricing_method ?? "sell_in"),
+    groothandel_marge_pct: Number(raw.groothandel_marge_pct ?? 0),
     bier_id: String(raw.bier_id ?? ""),
     selected_bier_ids: Array.isArray(raw.selected_bier_ids)
       ? raw.selected_bier_ids.map((value) => String(value ?? ""))
@@ -367,8 +426,14 @@ function createEmptyPrijsvoorstel(): GenericRecord {
     opmerking: "",
     jaar: new Date().getFullYear(),
     voorsteltype: "Op basis van producten",
+    offer_level: "samengesteld",
     liters_basis: "een_bier",
     kanaal: "horeca",
+    pricing_channel: "horeca",
+    selected_kanalen: [],
+    reference_channels: [],
+    pricing_method: "sell_in",
+    groothandel_marge_pct: 0,
     bier_id: "",
     selected_bier_ids: [],
     deleted_product_refs: [],
@@ -403,6 +468,7 @@ export function PrijsvoorstelWizard({
   bieren,
   berekeningen,
   verkoopprijzen,
+  channels,
   basisproducten,
   samengesteldeProducten,
   initialSelectedId,
@@ -447,11 +513,55 @@ export function PrijsvoorstelWizard({
   const current =
     rows.find((row) => String(row.id) === selectedId) ?? rows[0] ?? createEmptyPrijsvoorstel();
   const isEditingExisting = !startWithNew;
-  const currentStep = steps[activeStepIndex] ?? steps[0];
+  const channelOptions = useMemo<ChannelOption[]>(
+    () => {
+      const byCode = new Map(DEFAULT_CHANNEL_OPTIONS.map((option) => [option.value, option]));
+      (Array.isArray(channels) ? channels : []).forEach((row) => {
+        const value = String(row.code ?? row.id ?? "").trim().toLowerCase();
+        if (!value || value === "particulier") return;
+        byCode.set(value, {
+          value,
+          label: String(row.naam ?? row.code ?? "").trim() || value,
+          defaultMarginPct: toNumber(row.default_marge_pct, byCode.get(value)?.defaultMarginPct ?? 50),
+          defaultFactor: toNumber(row.default_factor, byCode.get(value)?.defaultFactor ?? 1)
+        });
+      });
+      return [...byCode.values()].sort((left, right) => left.label.localeCompare(right.label, "nl-NL"));
+    },
+    [channels]
+  );
+  const defaultKanaal = channelOptions[0]?.value ?? "horeca";
+  const currentStep = wizardSteps[activeStepIndex] ?? wizardSteps[0];
   const currentYear = Number(current.jaar ?? new Date().getFullYear());
-  const currentKanaal = String(current.kanaal ?? "horeca") as KanaalKey;
+  const pricingMethod = String(current.pricing_method ?? "sell_in");
+  const pricingChannel = String(current.pricing_channel ?? current.kanaal ?? defaultKanaal)
+    .trim()
+    .toLowerCase();
+  const referenceChannelValues = Array.from(
+    new Set(
+      (Array.isArray(current.reference_channels) ? (current.reference_channels as string[]) : [])
+        .map((value) => String(value ?? "").trim().toLowerCase())
+        .filter((value) => Boolean(value) && value !== pricingChannel)
+    )
+  );
+  const legacySelectedKanaalValues = Array.from(
+    new Set(
+      (Array.isArray(current.selected_kanalen) ? (current.selected_kanalen as string[]) : [])
+        .map((value) => String(value ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+  const effectiveSelectedKanaalValues =
+    pricingMethod === "sell_out"
+      ? [pricingChannel || defaultKanaal, ...referenceChannelValues]
+      : [pricingChannel || legacySelectedKanaalValues[0] || String(current.kanaal ?? defaultKanaal)];
+  const currentKanaal = effectiveSelectedKanaalValues[0] ?? defaultKanaal;
+  const isMultiKanaalMode = pricingMethod !== "sell_out" && effectiveSelectedKanaalValues.length > 1;
+  const hasReferenceChannels = pricingMethod === "sell_out" && referenceChannelValues.length > 0;
   const isLitersMode = String(current.voorsteltype ?? "") === "Op basis van liters";
+  const offerLevel = String(current.offer_level ?? "samengesteld");
   const litersBasis = String(current.liters_basis ?? "een_bier");
+  const groothandelMargePct = toNumber(current.groothandel_marge_pct, 0);
 
   const bierNameMap = useMemo(() => {
     const fromMaster = new Map<string, string>();
@@ -467,6 +577,19 @@ export function PrijsvoorstelWizard({
     }
     return fromMaster;
   }, [bieren, berekeningen]);
+
+  const channelOptionMap = useMemo(
+    () => new Map(channelOptions.map((option) => [option.value, option])),
+    [channelOptions]
+  );
+  const selectedChannelOptions = useMemo(
+    () => effectiveSelectedKanaalValues.map((value) => channelOptionMap.get(value)).filter((value): value is ChannelOption => Boolean(value)),
+    [channelOptionMap, effectiveSelectedKanaalValues]
+  );
+  const referenceChannelOptions = useMemo(
+    () => referenceChannelValues.map((value) => channelOptionMap.get(value)).filter((value): value is ChannelOption => Boolean(value)),
+    [channelOptionMap, referenceChannelValues]
+  );
 
   const productDefinitionMap = useMemo(() => {
     const map = new Map<string, ProductDefinition>();
@@ -593,26 +716,44 @@ export function PrijsvoorstelWizard({
     );
   }
 
-  function extractKanaalMarges(record?: GenericRecord | null) {
-    const kanaalmarges = (record?.kanaalmarges as GenericRecord | undefined) ?? {};
-
-    return {
-      zakelijk: toNumber(kanaalmarges.zakelijk, 0),
-      retail: toNumber(kanaalmarges.retail, 0),
-      horeca: toNumber(kanaalmarges.horeca, 0),
-      slijterij: toNumber(kanaalmarges.slijterij, 0)
-    };
+  function getChannelDefaultMargin(channelCode: string) {
+    return channelOptionMap.get(channelCode)?.defaultMarginPct ?? 0;
   }
 
-  function extractKanaalprijzen(record?: GenericRecord | null) {
-    const kanaalprijzen = (record?.kanaalprijzen as GenericRecord | undefined) ?? {};
+  function getChannelDefaultFactor(channelCode: string) {
+    return channelOptionMap.get(channelCode)?.defaultFactor ?? 1;
+  }
 
-    return {
-      zakelijk: toNumber(kanaalprijzen.zakelijk, Number.NaN),
-      retail: toNumber(kanaalprijzen.retail, Number.NaN),
-      horeca: toNumber(kanaalprijzen.horeca, Number.NaN),
-      slijterij: toNumber(kanaalprijzen.slijterij, Number.NaN)
-    };
+  function getSellInMarginForChannel(record: GenericRecord | null | undefined, channelCode: string) {
+    const sellInMargins = (record?.sell_in_margins as GenericRecord | undefined) ?? {};
+    const kanaalmarges = (record?.kanaalmarges as GenericRecord | undefined) ?? {};
+    const directValue = sellInMargins[channelCode] ?? kanaalmarges[channelCode];
+    return directValue === undefined || directValue === null || directValue === ""
+      ? getChannelDefaultMargin(channelCode)
+      : toNumber(directValue, getChannelDefaultMargin(channelCode));
+  }
+
+  function getSellInPriceOverrideForChannel(record: GenericRecord | null | undefined, channelCode: string) {
+    const sellInPrices = (record?.sell_in_prices as GenericRecord | undefined) ?? {};
+    const kanaalprijzen = (record?.kanaalprijzen as GenericRecord | undefined) ?? {};
+    const directValue = sellInPrices[channelCode] ?? kanaalprijzen[channelCode];
+    return directValue === undefined || directValue === null || directValue === "" ? Number.NaN : toNumber(directValue, Number.NaN);
+  }
+
+  function getSellOutFactorForChannel(record: GenericRecord | null | undefined, channelCode: string) {
+    const sellOutFactors = (record?.sell_out_factors as GenericRecord | undefined) ?? {};
+    const adviesfactoren = (record?.adviesfactoren as GenericRecord | undefined) ?? {};
+    const directValue = sellOutFactors[channelCode] ?? adviesfactoren[channelCode];
+    return directValue === undefined || directValue === null || directValue === ""
+      ? getChannelDefaultFactor(channelCode)
+      : toNumber(directValue, getChannelDefaultFactor(channelCode));
+  }
+
+  function getSellOutPriceOverrideForChannel(record: GenericRecord | null | undefined, channelCode: string) {
+    const sellOutPrices = (record?.sell_out_advice_prices as GenericRecord | undefined) ?? {};
+    const adviesprijzen = (record?.adviesprijzen as GenericRecord | undefined) ?? {};
+    const directValue = sellOutPrices[channelCode] ?? adviesprijzen[channelCode];
+    return directValue === undefined || directValue === null || directValue === "" ? Number.NaN : toNumber(directValue, Number.NaN);
   }
 
   function getEffectiveVerkoopstrategieForProduct(
@@ -622,7 +763,7 @@ export function PrijsvoorstelWizard({
     verpakking: string
   ) {
     const normalizedPackaging = normalizeKey(verpakking);
-    const productStrategy = verkoopstrategieWindow
+    const bierProductStrategies = verkoopstrategieWindow
       .filter((record) => {
         if (String(record.record_type ?? "") !== "verkoopstrategie_product") {
           return false;
@@ -630,55 +771,77 @@ export function PrijsvoorstelWizard({
         if (String(record.bier_id ?? "") !== bierId) {
           return false;
         }
-        if (productId) {
-          return (
-            String(record.product_id ?? "") === productId &&
-            (!productType || String(record.product_type ?? "") === productType) &&
-            normalizeKey(record.strategie_type) === "uitzondering"
-          );
-        }
-        return false;
+        const strategyType = normalizeKey(record.strategie_type);
+        return strategyType === "override" || strategyType === "uitzondering" || strategyType === "";
       })
-      .sort(sortLatestStrategy)[0];
+      .sort(sortLatestStrategy);
 
-    if (productStrategy) {
-      return productStrategy;
+    if (productId) {
+      const exactBierProductStrategy = bierProductStrategies.find(
+        (record) =>
+          String(record.product_id ?? "") === productId &&
+          (!productType || String(record.product_type ?? "") === productType)
+      );
+      if (exactBierProductStrategy) {
+        return exactBierProductStrategy;
+      }
+
+      const bierProductIdStrategy = bierProductStrategies.find(
+        (record) => String(record.product_id ?? "") === productId
+      );
+      if (bierProductIdStrategy) {
+        return bierProductIdStrategy;
+      }
     }
 
-    const verpakkingStrategy = verkoopstrategieWindow
+    if (normalizedPackaging) {
+      const bierPackagingStrategy = bierProductStrategies.find(
+        (record) => normalizeKey(record.verpakking) === normalizedPackaging
+      );
+      if (bierPackagingStrategy) {
+        return bierPackagingStrategy;
+      }
+    }
+
+    const productStrategies = verkoopstrategieWindow
       .filter((record) => {
         if (String(record.record_type ?? "") !== "verkoopstrategie_verpakking") {
           return false;
         }
-        if (productId && String(record.product_id ?? "") === productId) {
-          return !productType || String(record.product_type ?? "") === productType;
-        }
-        const recordPackaging = normalizeKey(record.verpakking);
-
-        return !!(
-          normalizedPackaging && recordPackaging === normalizedPackaging
-        );
+        return true;
       })
-      .sort(sortLatestStrategy)[0];
+      .sort(sortLatestStrategy);
 
-    if (verpakkingStrategy) {
-      return verpakkingStrategy;
+    if (productId) {
+      const exactProductStrategy = productStrategies.find(
+        (record) =>
+          String(record.product_id ?? "") === productId &&
+          (!productType || String(record.product_type ?? "") === productType)
+      );
+      if (exactProductStrategy) {
+        return exactProductStrategy;
+      }
+
+      const productIdStrategy = productStrategies.find(
+        (record) => String(record.product_id ?? "") === productId
+      );
+      if (productIdStrategy) {
+        return productIdStrategy;
+      }
+    }
+
+    if (normalizedPackaging) {
+      const packagingStrategy = productStrategies.find(
+        (record) => normalizeKey(record.verpakking) === normalizedPackaging
+      );
+      if (packagingStrategy) {
+        return packagingStrategy;
+      }
     }
 
     return verkoopstrategieWindow
       .filter((record) => String(record.record_type ?? "") === "jaarstrategie")
       .sort(sortLatestStrategy)[0];
-  }
-
-  function getKanaalMarges(
-    bierId: string,
-    productId: string,
-    productType: string,
-    verpakking: string
-  ) {
-    return extractKanaalMarges(
-      getEffectiveVerkoopstrategieForProduct(bierId, productId, productType, verpakking)
-    );
   }
 
   function getHighestCostForBier(bierId: string) {
@@ -1018,18 +1181,14 @@ export function PrijsvoorstelWizard({
       snapshotRows.map((row) => [normalizeKey(row.verpakking), row])
     );
     const allKnownProducts = [
-      ...basisproducten
-        .filter((row) => Number(row.jaar ?? 0) === currentYear)
-        .map((row) => ({
+      ...pickLatestKnownProductRows(basisproducten, currentYear).map((row) => ({
           id: String(row.id ?? ""),
           key: `basis|${normalizeKey(row.omschrijving)}`,
           kind: "basis" as const,
           verpakking: String(row.omschrijving ?? ""),
           litersPerProduct: toNumber(row.inhoud_per_eenheid_liter, 0)
         })),
-      ...samengesteldeProducten
-        .filter((row) => Number(row.jaar ?? 0) === currentYear)
-        .map((row) => ({
+      ...pickLatestKnownProductRows(samengesteldeProducten, currentYear).map((row) => ({
           id: String(row.id ?? ""),
           key: `samengesteld|${normalizeKey(row.omschrijving)}`,
           kind: "samengesteld" as const,
@@ -1077,12 +1236,13 @@ export function PrijsvoorstelWizard({
     });
   }
 
-  function buildChannelPrices(
+  function buildPricingForChannel(
     cost: number,
     bierId: string,
     productId: string,
     productType: string,
-    verpakking: string
+    verpakking: string,
+    channelCode: string
   ) {
     const strategy = getEffectiveVerkoopstrategieForProduct(
       bierId,
@@ -1090,21 +1250,35 @@ export function PrijsvoorstelWizard({
       productType,
       verpakking
     );
-    const marges = extractKanaalMarges(strategy);
-    const explicitPrices = extractKanaalprijzen(strategy);
+    const sellInMarginPct = getSellInMarginForChannel(strategy, channelCode);
+    const explicitSellInPrice = getSellInPriceOverrideForChannel(strategy, channelCode);
+    const sellInPrice =
+      Number.isFinite(explicitSellInPrice) && explicitSellInPrice > 0
+        ? explicitSellInPrice
+        : calculatePriceFromMargin(cost, sellInMarginPct);
+    const sellOutFactor = getSellOutFactorForChannel(strategy, channelCode);
+    const explicitSellOutPrice = getSellOutPriceOverrideForChannel(strategy, channelCode);
+    const sellOutPrice =
+      Number.isFinite(explicitSellOutPrice) && explicitSellOutPrice > 0
+        ? explicitSellOutPrice
+        : sellInPrice * sellOutFactor;
 
-    const fallbackPrice = (channel: keyof typeof marges, explicitPrice: number) =>
-      Number.isFinite(explicitPrice) && explicitPrice > 0
-        ? explicitPrice
-        : calculatePriceFromMargin(cost, marges[channel]);
+    const offerPrice =
+      pricingMethod === "sell_out"
+        ? sellInPrice * Math.max(0, 1 - groothandelMargePct / 100)
+        : sellInPrice;
 
-    return {
-      zakelijk: fallbackPrice("zakelijk", explicitPrices.zakelijk),
-      retail: fallbackPrice("retail", explicitPrices.retail),
-      horeca: fallbackPrice("horeca", explicitPrices.horeca),
-      slijterij: fallbackPrice("slijterij", explicitPrices.slijterij)
-    };
+    return { sellInMarginPct, sellInPrice, sellOutFactor, sellOutPrice, offerPrice };
   }
+
+  const currentKanaalLabel = channelOptionMap.get(currentKanaal)?.label ?? currentKanaal;
+  const selectedKanaalLabels = selectedChannelOptions.map((option) => option.label).join(", ");
+  const referenceKanaalLabels = referenceChannelOptions.map((option) => option.label).join(", ");
+  const costPriceLabel = "Kostprijs";
+  const offerPriceLabel = pricingMethod === "sell_out" ? "Groothandel prijs" : "Inkoop prijs";
+  const standardSellInLabel = pricingMethod === "sell_out" ? "Normale verkoopprijs" : "Inkoop prijs";
+  const marketAdviceLabel = "Marktadvies prijs";
+  const discountAmountLabel = "Korting";
 
   function syncBeerRowsForSingleBeer(bierId: string, existingRows: GenericRecord[]) {
     const existingMap = new Map<string, GenericRecord>(
@@ -1265,20 +1439,27 @@ export function PrijsvoorstelWizard({
           productDefinitionMap.get(`id|${rowProductId}`)?.label ||
           "-";
         const kortingPct = toNumber(row.korting_pct, 0);
-        const adviesprijzen = buildChannelPrices(
-          kostprijsPerLiter,
-          bierId,
-          snapshot?.productId ?? rowProductId,
-          snapshot?.productType ??
-            (String(row.product_type ?? "") as "basis" | "samengesteld" | ""),
-          verpakking
-        );
-        const basisprijs = adviesprijzen[currentKanaal] ?? 0;
-        const verkoopprijs = basisprijs * Math.max(0, 1 - kortingPct / 100);
+        const pricingByChannel = Object.fromEntries(
+          selectedChannelOptions.map((option) => [
+            option.value,
+            buildPricingForChannel(
+              kostprijsPerLiter,
+              bierId,
+              snapshot?.productId ?? rowProductId,
+              snapshot?.productType ??
+                (String(row.product_type ?? "") as "basis" | "samengesteld" | ""),
+              verpakking,
+              option.value
+            )
+          ])
+        ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+        const pricing = pricingByChannel[currentKanaal];
+        const offerPrijs = pricing.offerPrice;
+        const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
         const liters = toNumber(row.liters, 0);
         const omzet = liters * verkoopprijs;
         const kosten = liters * kostprijsPerLiter;
-        const kortingEur = liters * Math.max(0, basisprijs - verkoopprijs);
+        const kortingEur = liters * Math.max(0, offerPrijs - verkoopprijs);
         const margeEur = omzet - kosten;
         return {
           id: String(row.id ?? ""),
@@ -1296,9 +1477,14 @@ export function PrijsvoorstelWizard({
           liters,
           kortingPct,
           kostprijsPerLiter,
-          adviesprijzen,
-          basisprijs,
-          verkoopprijs,
+          offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
+          sellInByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellInPrice])),
+          sellOutByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellOutPrice])),
+          offerPrijs,
+          sellInPrijs: pricing.sellInPrice,
+          sellOutPrijs: pricing.sellOutPrice,
+          sellInMargePct: pricing.sellInMarginPct,
+          sellOutFactor: pricing.sellOutFactor,
           omzet,
           kosten,
           kortingEur,
@@ -1313,13 +1499,16 @@ export function PrijsvoorstelWizard({
         const bierId = String(row.bier_id ?? "");
         const highest = getHighestCostForBier(bierId);
         const kortingPct = toNumber(row.korting_pct, 0);
-        const adviesprijzen = buildChannelPrices(highest.cost, bierId, "", "", "liter");
-        const basisprijs = adviesprijzen[currentKanaal] ?? 0;
-        const verkoopprijs = basisprijs * Math.max(0, 1 - kortingPct / 100);
+        const pricingByChannel = Object.fromEntries(
+          selectedChannelOptions.map((option) => [option.value, buildPricingForChannel(highest.cost, bierId, "", "", "liter", option.value)])
+        ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+        const pricing = pricingByChannel[currentKanaal];
+        const offerPrijs = pricing.offerPrice;
+        const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
         const liters = toNumber(row.liters, 0);
         const omzet = liters * verkoopprijs;
         const kosten = liters * highest.cost;
-        const kortingEur = liters * Math.max(0, basisprijs - verkoopprijs);
+        const kortingEur = liters * Math.max(0, offerPrijs - verkoopprijs);
         const margeEur = omzet - kosten;
         return {
           id: String(row.id ?? ""),
@@ -1331,9 +1520,14 @@ export function PrijsvoorstelWizard({
           liters,
           kortingPct,
           kostprijsPerLiter: highest.cost,
-          adviesprijzen,
-          basisprijs,
-          verkoopprijs,
+          offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
+          sellInByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellInPrice])),
+          sellOutByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellOutPrice])),
+          offerPrijs,
+          sellInPrijs: pricing.sellInPrice,
+          sellOutPrijs: pricing.sellOutPrice,
+          sellInMargePct: pricing.sellInMarginPct,
+          sellOutFactor: pricing.sellOutFactor,
           omzet,
           kosten,
           kortingEur,
@@ -1346,13 +1540,16 @@ export function PrijsvoorstelWizard({
     const overall = getHighestCostOverall();
     return currentBeerRows.map((row) => {
       const kortingPct = toNumber(row.korting_pct, 0);
-      const adviesprijzen = buildChannelPrices(overall.cost, overall.bierKey, "", "", "liter");
-      const basisprijs = adviesprijzen[currentKanaal] ?? 0;
-      const verkoopprijs = basisprijs * Math.max(0, 1 - kortingPct / 100);
+      const pricingByChannel = Object.fromEntries(
+        selectedChannelOptions.map((option) => [option.value, buildPricingForChannel(overall.cost, overall.bierKey, "", "", "liter", option.value)])
+      ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+      const pricing = pricingByChannel[currentKanaal];
+      const offerPrijs = pricing.offerPrice;
+      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const liters = toNumber(row.liters, 0);
       const omzet = liters * verkoopprijs;
       const kosten = liters * overall.cost;
-      const kortingEur = liters * Math.max(0, basisprijs - verkoopprijs);
+      const kortingEur = liters * Math.max(0, offerPrijs - verkoopprijs);
       const margeEur = omzet - kosten;
       return {
         id: String(row.id ?? ""),
@@ -1364,9 +1561,14 @@ export function PrijsvoorstelWizard({
         liters,
         kortingPct,
         kostprijsPerLiter: overall.cost,
-        adviesprijzen,
-        basisprijs,
-        verkoopprijs,
+        offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
+        sellInByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellInPrice])),
+        sellOutByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellOutPrice])),
+        offerPrijs,
+        sellInPrijs: pricing.sellInPrice,
+        sellOutPrijs: pricing.sellOutPrice,
+        sellInMargePct: pricing.sellInMarginPct,
+        sellOutFactor: pricing.sellOutFactor,
         omzet,
         kosten,
         kortingEur,
@@ -1379,6 +1581,7 @@ export function PrijsvoorstelWizard({
     current.bier_id,
     bierNameMap,
     currentKanaal,
+    selectedChannelOptions,
     isLitersMode,
     litersBasis,
     verkoopstrategieWindow
@@ -1397,6 +1600,36 @@ export function PrijsvoorstelWizard({
       ),
     [litersDisplayRows]
   );
+
+  const offerteLitersRows = useMemo(() => {
+    if (offerLevel === "basis") {
+      const basisRows = litersDisplayRows.filter((row) => row.productType === "basis");
+      return basisRows.length > 0 ? basisRows : litersDisplayRows;
+    }
+    const compositeRows = litersDisplayRows.filter((row) => row.productType === "samengesteld");
+    return compositeRows.length > 0 ? compositeRows : litersDisplayRows;
+  }, [offerLevel, litersDisplayRows]);
+
+  const offerteLitersTotals = useMemo(
+    () =>
+      offerteLitersRows.filter((row) => row.included).reduce(
+        (totals, row) => ({
+          omzet: totals.omzet + row.omzet,
+          kosten: totals.kosten + row.kosten,
+          kortingEur: totals.kortingEur + row.kortingEur,
+          margeEur: totals.margeEur + row.margeEur
+        }),
+        { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 }
+      ),
+    [offerteLitersRows]
+  );
+
+  const derivedBasisLitersRows = useMemo(() => {
+    if (!isLitersMode || offerLevel !== "samengesteld") {
+      return [];
+    }
+    return litersDisplayRows.filter((row) => row.productType === "basis");
+  }, [isLitersMode, offerLevel, litersDisplayRows]);
 
   const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
     const currentProductRows = Array.isArray(current.product_rows) ? (current.product_rows as GenericRecord[]) : [];
@@ -1423,25 +1656,34 @@ export function PrijsvoorstelWizard({
       const definition = rowProductId ? productDefinitionMap.get(`id|${rowProductId}`) : undefined;
       const verpakking = snapshot?.verpakking ?? definition?.label ?? "-";
       const kostprijsPerStuk = snapshot?.costPerPiece ?? 0;
-      let adviesprijzen = buildChannelPrices(
+      const buildPricingSet = (
+        targetCost: number,
+        targetProductId: string,
+        targetProductType: "basis" | "samengesteld" | "",
+        targetPackaging: string
+      ) =>
+        Object.fromEntries(
+          selectedChannelOptions.map((option) => [
+            option.value,
+            buildPricingForChannel(
+              targetCost,
+              bierId,
+              targetProductId,
+              targetProductType,
+              targetPackaging,
+              option.value
+            )
+          ])
+        ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+
+      let pricingByChannel = buildPricingSet(
         kostprijsPerStuk,
-        bierId,
         snapshot?.productId ?? rowProductId,
         snapshot?.productType ?? rowProductType,
         verpakking
       );
-      let kanaalMargePct =
-        getKanaalMarges(
-          bierId,
-          snapshot?.productId ?? rowProductId,
-          snapshot?.productType ?? rowProductType,
-          verpakking
-        )[
-          currentKanaal as keyof ReturnType<typeof extractKanaalMarges>
-        ] ?? 0;
-
-      const hasDirectStrategyPricing =
-        Object.values(adviesprijzen).some((value) => value > 0) || kanaalMargePct > 0;
+      let pricing = pricingByChannel[currentKanaal];
+      const hasDirectStrategyPricing = pricing.sellInPrice > 0 || pricing.sellInMarginPct > 0;
 
       if (
         !hasDirectStrategyPricing &&
@@ -1456,39 +1698,39 @@ export function PrijsvoorstelWizard({
         );
 
         if (parentSnapshot) {
-          const parentPrices = buildChannelPrices(
+          const divisor = toNumber(snapshot.derivedFromAantal, 0);
+          const parentPricingByChannel = buildPricingSet(
             parentSnapshot.costPerPiece,
-            bierId,
             parentSnapshot.productId,
             parentSnapshot.productType,
             parentSnapshot.verpakking
           );
-          const divisor = toNumber(snapshot.derivedFromAantal, 0);
-          adviesprijzen = {
-            zakelijk: parentPrices.zakelijk / divisor,
-            retail: parentPrices.retail / divisor,
-            horeca: parentPrices.horeca / divisor,
-            slijterij: parentPrices.slijterij / divisor
-          };
-          kanaalMargePct =
-            getKanaalMarges(
-              bierId,
-              parentSnapshot.productId,
-              parentSnapshot.productType,
-              parentSnapshot.verpakking
-            )[
-              currentKanaal as keyof ReturnType<typeof extractKanaalMarges>
-            ] ?? 0;
+          pricingByChannel = Object.fromEntries(
+            selectedChannelOptions.map((option) => {
+              const channelPricing = parentPricingByChannel[option.value];
+              return [
+                option.value,
+                {
+                  sellInMarginPct: channelPricing.sellInMarginPct,
+                  sellInPrice: channelPricing.sellInPrice / divisor,
+                  sellOutFactor: channelPricing.sellOutFactor,
+                  sellOutPrice: channelPricing.sellOutPrice / divisor,
+                  offerPrice: channelPricing.offerPrice / divisor
+                }
+              ];
+            })
+          ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+          pricing = pricingByChannel[currentKanaal];
         }
       }
 
-      const basisprijs = adviesprijzen[currentKanaal] ?? 0;
+      const offerPrijs = pricing.offerPrice;
       const kortingPct = toNumber(row.korting_pct, 0);
       const aantal = toNumber(row.aantal, 0);
-      const verkoopprijs = basisprijs * Math.max(0, 1 - kortingPct / 100);
+      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const omzet = aantal * verkoopprijs;
       const kosten = aantal * kostprijsPerStuk;
-      const kortingEur = aantal * Math.max(0, basisprijs - verkoopprijs);
+      const kortingEur = aantal * Math.max(0, offerPrijs - verkoopprijs);
       const margeEur = omzet - kosten;
       return {
         id: String(row.id ?? ""),
@@ -1502,18 +1744,22 @@ export function PrijsvoorstelWizard({
         aantal,
         kortingPct,
         kostprijsPerStuk,
-        adviesprijzen,
-        basisprijs,
-        verkoopprijs,
+        offerPrijs,
+        sellInPrijs: pricing.sellInPrice,
+        sellOutPrijs: pricing.sellOutPrice,
+        sellInMargePct: pricing.sellInMarginPct,
+        sellOutFactor: pricing.sellOutFactor,
+        offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
+        sellInByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellInPrice])),
+        sellOutByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellOutPrice])),
         omzet,
         kosten,
         kortingEur,
         margeEur,
-        margePct: calculateMarginPercentage(omzet, kosten),
-        kanaalMargePct
+        margePct: calculateMarginPercentage(omzet, kosten)
       };
     });
-  }, [current.product_rows, bierNameMap, currentKanaal, productDefinitionMap, verkoopstrategieWindow]);
+  }, [current.product_rows, bierNameMap, currentKanaal, productDefinitionMap, selectedChannelOptions, verkoopstrategieWindow]);
 
   const productTotals = useMemo(
     () =>
@@ -1529,10 +1775,68 @@ export function PrijsvoorstelWizard({
     [productDisplayRows]
   );
 
+  const offerteProductRows = useMemo(() => {
+    if (offerLevel === "basis") {
+      return productDisplayRows.filter((row) => row.productType === "basis");
+    }
+    const compositeRows = productDisplayRows.filter((row) => row.productType === "samengesteld");
+    return compositeRows.length > 0 ? compositeRows : productDisplayRows;
+  }, [offerLevel, productDisplayRows]);
+
+  const offerteProductTotals = useMemo(
+    () =>
+      offerteProductRows.filter((row) => row.included).reduce(
+        (totals, row) => ({
+          omzet: totals.omzet + row.omzet,
+          kosten: totals.kosten + row.kosten,
+          kortingEur: totals.kortingEur + row.kortingEur,
+          margeEur: totals.margeEur + row.margeEur
+        }),
+        { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 }
+      ),
+    [offerteProductRows]
+  );
+
+  const derivedBasisRows = useMemo(() => {
+    if (isLitersMode || offerLevel !== "samengesteld") {
+      return [];
+    }
+
+    const compositeDefinitions = new Map(
+      pickLatestKnownProductRows(samengesteldeProducten, currentYear).map((row) => [String(row.id ?? ""), row])
+    );
+    const baseLabels = new Map(
+      pickLatestKnownProductRows(basisproducten, currentYear).map((row) => [String(row.id ?? ""), String(row.omschrijving ?? "")])
+    );
+
+    return offerteProductRows.flatMap((row) => {
+      const composite = compositeDefinitions.get(row.productId);
+      const components = Array.isArray(composite?.basisproducten) ? (composite?.basisproducten as GenericRecord[]) : [];
+      return components
+        .filter((component) => {
+          const basisId = String(component.basisproduct_id ?? "");
+          return Boolean(basisId) && !basisId.startsWith("verpakkingsonderdeel:");
+        })
+        .map((component) => {
+          const basisId = String(component.basisproduct_id ?? "");
+          const factor = Math.max(1, toNumber(component.aantal, 1));
+          return {
+            id: `${row.id}-${basisId}`,
+            biernaam: row.biernaam,
+            product: baseLabels.get(basisId) ?? basisId,
+            aantal: row.aantal * factor,
+            offerPrijs: row.offerPrijs / factor,
+            sellInPrijs: row.sellInPrijs / factor,
+            sellOutPrijs: row.sellOutPrijs / factor
+          };
+        });
+    });
+  }, [basisproducten, currentYear, isLitersMode, offerLevel, offerteProductRows, samengesteldeProducten]);
+
   const wizardSidebar = useMemo(
     () => ({
       title: "Wizard",
-      steps,
+      steps: wizardSteps,
       activeIndex: activeStepIndex,
       onStepSelect: setActiveStepIndex
     }),
@@ -1578,10 +1882,12 @@ export function PrijsvoorstelWizard({
           ...item,
           included: display.included,
           cost_at_quote: display.kostprijsPerStuk,
-          sales_price_at_quote: display.verkoopprijs,
+          sales_price_at_quote: display.offerPrijs,
+          sell_out_price_at_quote: display.sellOutPrijs,
           revenue_at_quote: display.omzet,
           margin_at_quote: display.margeEur,
-          target_margin_pct_at_quote: display.kanaalMargePct,
+          target_margin_pct_at_quote: display.sellInMargePct,
+          sell_out_factor_at_quote: display.sellOutFactor,
           channel_at_quote: currentKanaal,
           verpakking_label: display.verpakking
         };
@@ -1593,21 +1899,16 @@ export function PrijsvoorstelWizard({
       if (!display) {
         return item;
       }
-      const targetMarginPct =
-        getKanaalMarges(
-          display.bierKey,
-          display.productId ?? "",
-          display.productType ?? "",
-          display.verpakking
-        )[currentKanaal as keyof ReturnType<typeof extractKanaalMarges>] ?? 0;
       return {
         ...item,
         included: display.included,
         cost_at_quote: display.kostprijsPerLiter,
-        sales_price_at_quote: display.verkoopprijs,
+        sales_price_at_quote: display.offerPrijs,
+        sell_out_price_at_quote: display.sellOutPrijs,
         revenue_at_quote: display.omzet,
         margin_at_quote: display.margeEur,
-        target_margin_pct_at_quote: targetMarginPct,
+        target_margin_pct_at_quote: display.sellInMargePct,
+        sell_out_factor_at_quote: display.sellOutFactor,
         channel_at_quote: currentKanaal,
         verpakking_label: display.verpakking
       };
@@ -1616,7 +1917,7 @@ export function PrijsvoorstelWizard({
     return next;
   }
 
-  async function handleSave() {
+  async function handleSave(finalize = false) {
     setStatus("");
     setStatusTone(null);
     setIsSaving(true);
@@ -1627,7 +1928,12 @@ export function PrijsvoorstelWizard({
         if (String(next.id ?? "").trim() === "") {
           next.id = createId();
         }
-        return withFrozenPricing(next);
+        const frozen = withFrozenPricing(next);
+        if (String(frozen.id ?? "") === String(current.id)) {
+          frozen.status = finalize ? "definitief" : "concept";
+          frozen.finalized_at = finalize ? new Date().toISOString() : "";
+        }
+        return frozen;
       });
 
       const response = await fetch(`${API_BASE_URL}/data/prijsvoorstellen`, {
@@ -1642,7 +1948,7 @@ export function PrijsvoorstelWizard({
 
       setRows(payload);
       onRowsChange?.(payload);
-      setStatus("Prijsvoorstel opgeslagen.");
+      setStatus(finalize ? "Prijsvoorstel definitief gemaakt." : "Prijsvoorstel opgeslagen.");
       setStatusTone("success");
       return true;
     } catch {
@@ -1999,7 +2305,7 @@ export function PrijsvoorstelWizard({
     return (
       <UitgangspuntenStep
         row={current}
-        kanaalOptions={KANAAL_OPTIONS}
+        kanaalOptions={channelOptions}
         litersBasisOptions={LITERS_BASIS_OPTIONS}
         onChange={updateCurrent}
       />
@@ -2079,9 +2385,8 @@ export function PrijsvoorstelWizard({
     const selectedBeerIds = Array.isArray(current.selected_bier_ids)
       ? (current.selected_bier_ids as string[]).filter(Boolean)
       : [];
-    const kanaalLabel =
-      KANAAL_OPTIONS.find((option) => option.value === currentKanaal)?.label ?? currentKanaal;
-    const totalMargePct = calculateMarginPercentage(litersTotals.omzet, litersTotals.kosten);
+    const kanaalLabel = currentKanaalLabel;
+    const totalMargePct = calculateMarginPercentage(offerteLitersTotals.omzet, offerteLitersTotals.kosten);
 
     return (
       <div className="wizard-stack">
@@ -2129,25 +2434,25 @@ export function PrijsvoorstelWizard({
 
         <div className="stats-grid wizard-stats-grid prijs-info-grid">
           <div className="stat-card">
-            <div className="stat-label">Kanaal</div>
-            <div className="stat-value small">{kanaalLabel}</div>
+            <div className="stat-label">{isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
+            <div className="stat-value small">{isMultiKanaalMode ? selectedKanaalLabels : kanaalLabel}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(litersTotals.omzet)}</div>
+            <div className="stat-value small">{formatEuro(offerteLitersTotals.omzet)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(litersTotals.kosten)}</div>
+            <div className="stat-value small">{formatEuro(offerteLitersTotals.kosten)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(litersTotals.kortingEur)}</div>
+            <div className="stat-value small">{formatEuro(offerteLitersTotals.kortingEur)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale marge</div>
             <div className="stat-value small">
-              {formatEuro(litersTotals.margeEur)} ({formatPercentage(totalMargePct)})
+              {formatEuro(offerteLitersTotals.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
         </div>
@@ -2160,18 +2465,42 @@ export function PrijsvoorstelWizard({
                 <th>Product</th>
                 <th>Liters</th>
                 <th>Korting %</th>
-                <th>Kost prijs / L</th>
-                <th>Verkoop prijs / L</th>
-                <th>Omzet</th>
-                <th>Kosten</th>
-                <th>Korting €</th>
-                <th>Winst</th>
-                <th>Onze marge</th>
+                <th>{costPriceLabel}</th>
+                {isMultiKanaalMode
+                  ? selectedChannelOptions.map((option) => (
+                      <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
+                    ))
+                  : <th>{offerPriceLabel}</th>}
+                {pricingMethod === "sell_out" && isMultiKanaalMode
+                  ? selectedChannelOptions.map((option) => (
+                      <th key={`${option.value}-sellin`}>{standardSellInLabel} {option.label}</th>
+                    ))
+                  : null}
+                {pricingMethod === "sell_out" && isMultiKanaalMode
+                  ? selectedChannelOptions.map((option) => (
+                      <th key={`${option.value}-sellout`}>{marketAdviceLabel} {option.label}</th>
+                    ))
+                  : null}
+                {!isMultiKanaalMode && pricingMethod === "sell_out" ? (
+                  <>
+                    <th>{standardSellInLabel}</th>
+                    <th>{marketAdviceLabel}</th>
+                  </>
+                ) : null}
+                {!isMultiKanaalMode ? (
+                  <>
+                    <th>Omzet</th>
+                    <th>Kosten</th>
+                    <th>{discountAmountLabel}</th>
+                    <th>Winst</th>
+                    <th>Onze marge</th>
+                  </>
+                ) : null}
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {litersDisplayRows.map((row) => (
+              {offerteLitersRows.map((row) => (
                 <tr key={row.id} className={row.included ? "" : "is-excluded"}>
                   <td>{row.biernaam}</td>
                   <td>{row.verpakking}</td>
@@ -2181,6 +2510,7 @@ export function PrijsvoorstelWizard({
                       type="number"
                       min={0}
                       step="0.01"
+                      style={{ minWidth: "8.5rem" }}
                       value={String(row.liters)}
                       onChange={(event) =>
                         updateBeerRow(row.id, "liters", Number(event.target.value || 0))
@@ -2193,6 +2523,7 @@ export function PrijsvoorstelWizard({
                       type="number"
                       min={0}
                       step="0.1"
+                      style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
                       onChange={(event) =>
                         updateBeerRow(row.id, "korting_pct", Number(event.target.value || 0))
@@ -2200,12 +2531,48 @@ export function PrijsvoorstelWizard({
                     />
                   </td>
                   <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kostprijsPerLiter)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.verkoopprijs)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kosten)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kortingEur)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.margeEur)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatPercentage(row.margePct)}</div></td>
+                  {isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <td key={`${option.value}-offer`}>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(row.offerByChannel[option.value] ?? 0)}
+                          </div>
+                        </td>
+                      ))
+                    : (
+                      <>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.offerPrijs)}</div></td>
+                        {pricingMethod === "sell_out" ? (
+                          <>
+                            <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.sellInPrijs)}</div></td>
+                            <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.sellOutPrijs)}</div></td>
+                          </>
+                        ) : null}
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kosten)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kortingEur)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.margeEur)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatPercentage(row.margePct)}</div></td>
+                      </>
+                    )}
+                  {pricingMethod === "sell_out" && isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <td key={`${option.value}-sellin`}>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(row.sellInByChannel[option.value] ?? 0)}
+                          </div>
+                        </td>
+                      ))
+                    : null}
+                  {pricingMethod === "sell_out" && isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <td key={`${option.value}-sellout`}>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(row.sellOutByChannel[option.value] ?? 0)}
+                          </div>
+                        </td>
+                      ))
+                    : null}
                   <td>
                     {renderIncludeToggle(
                       row.included,
@@ -2215,9 +2582,9 @@ export function PrijsvoorstelWizard({
                   </td>
                 </tr>
               ))}
-              {litersDisplayRows.length === 0 ? (
+              {offerteLitersRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="prijs-empty-cell">
+                  <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length + (pricingMethod === "sell_out" ? selectedChannelOptions.length * 2 : 0) : pricingMethod === "sell_out" ? 14 : 12} className="prijs-empty-cell">
                     Kies eerst een bier of zet een literscenario klaar om de offerte op te bouwen.
                   </td>
                 </tr>
@@ -2225,6 +2592,40 @@ export function PrijsvoorstelWizard({
             </tbody>
           </table>
         </div>
+        {offerLevel === "samengesteld" && derivedBasisLitersRows.length > 0 ? (
+          <div className="module-card compact-card">
+            <div className="module-card-title">Afgeleide basisproducten</div>
+            <div className="module-card-text">
+              Deze basisproducten volgen readonly het samengestelde product en tellen niet mee in omzet of winst.
+            </div>
+            <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+              <table className="dataset-editor-table wizard-table-compact">
+                <thead>
+                  <tr>
+                    <th>Bier</th>
+                    <th>Basisproduct</th>
+                    <th>Liters</th>
+                    <th>{offerPriceLabel}</th>
+                    <th>{standardSellInLabel}</th>
+                    <th>{marketAdviceLabel}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {derivedBasisLitersRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.biernaam}</td>
+                      <td>{row.verpakking}</td>
+                      <td>{formatNumber(row.liters)}</td>
+                      <td>{formatEuro(row.offerPrijs)}</td>
+                      <td>{formatEuro(row.sellInPrijs)}</td>
+                      <td>{formatEuro(row.sellOutPrijs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -2233,9 +2634,8 @@ export function PrijsvoorstelWizard({
     const selectedBeerIds = Array.isArray(current.selected_bier_ids)
       ? (current.selected_bier_ids as string[]).filter(Boolean)
       : [];
-    const kanaalLabel =
-      KANAAL_OPTIONS.find((option) => option.value === currentKanaal)?.label ?? currentKanaal;
-    const totalMargePct = calculateMarginPercentage(productTotals.omzet, productTotals.kosten);
+    const kanaalLabel = currentKanaalLabel;
+    const totalMargePct = calculateMarginPercentage(offerteProductTotals.omzet, offerteProductTotals.kosten);
 
     return (
       <div className="wizard-stack">
@@ -2250,25 +2650,25 @@ export function PrijsvoorstelWizard({
 
         <div className="stats-grid wizard-stats-grid prijs-info-grid">
           <div className="stat-card">
-            <div className="stat-label">Kanaal</div>
-            <div className="stat-value small">{kanaalLabel}</div>
+            <div className="stat-label">{isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
+            <div className="stat-value small">{isMultiKanaalMode ? selectedKanaalLabels : kanaalLabel}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(productTotals.omzet)}</div>
+            <div className="stat-value small">{formatEuro(offerteProductTotals.omzet)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(productTotals.kosten)}</div>
+            <div className="stat-value small">{formatEuro(offerteProductTotals.kosten)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(productTotals.kortingEur)}</div>
+            <div className="stat-value small">{formatEuro(offerteProductTotals.kortingEur)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale marge</div>
             <div className="stat-value small">
-              {formatEuro(productTotals.margeEur)} ({formatPercentage(totalMargePct)})
+              {formatEuro(offerteProductTotals.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
         </div>
@@ -2281,18 +2681,42 @@ export function PrijsvoorstelWizard({
                 <th>Product</th>
                 <th>Aantal</th>
                 <th>Korting %</th>
-                <th>Kostprijs / stuk</th>
-                <th>Verkoopprijs / stuk</th>
-                <th>Omzet</th>
-                <th>Kosten</th>
-                <th>Korting €</th>
-                <th>Winst</th>
-                <th>Onze marge</th>
+                <th>{costPriceLabel}</th>
+                {isMultiKanaalMode
+                  ? selectedChannelOptions.map((option) => (
+                      <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
+                    ))
+                  : <th>{offerPriceLabel}</th>}
+                {pricingMethod === "sell_out" && isMultiKanaalMode
+                  ? selectedChannelOptions.map((option) => (
+                      <th key={`${option.value}-sellin`}>{standardSellInLabel} {option.label}</th>
+                    ))
+                  : null}
+                {pricingMethod === "sell_out" && isMultiKanaalMode
+                  ? selectedChannelOptions.map((option) => (
+                      <th key={`${option.value}-sellout`}>{marketAdviceLabel} {option.label}</th>
+                    ))
+                  : null}
+                {!isMultiKanaalMode && pricingMethod === "sell_out" ? (
+                  <>
+                    <th>{standardSellInLabel}</th>
+                    <th>{marketAdviceLabel}</th>
+                  </>
+                ) : null}
+                {!isMultiKanaalMode ? (
+                  <>
+                    <th>Omzet</th>
+                    <th>Kosten</th>
+                    <th>{discountAmountLabel}</th>
+                    <th>Winst</th>
+                    <th>Onze marge</th>
+                  </>
+                ) : null}
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {productDisplayRows.map((row) => (
+              {offerteProductRows.map((row) => (
                 <tr key={row.id} className={row.included ? "" : "is-excluded"}>
                   <td>{row.biernaam}</td>
                   <td>{row.verpakking}</td>
@@ -2302,6 +2726,7 @@ export function PrijsvoorstelWizard({
                       type="number"
                       min={0}
                       step="1"
+                      style={{ minWidth: "8rem" }}
                       value={String(row.aantal)}
                       onChange={(event) =>
                         updateProductRow(row.id, "aantal", Number(event.target.value || 0))
@@ -2314,6 +2739,7 @@ export function PrijsvoorstelWizard({
                       type="number"
                       min={0}
                       step="0.1"
+                      style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
                       onChange={(event) =>
                         updateProductRow(row.id, "korting_pct", Number(event.target.value || 0))
@@ -2321,16 +2747,52 @@ export function PrijsvoorstelWizard({
                     />
                   </td>
                   <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kostprijsPerStuk)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.verkoopprijs)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kosten)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kortingEur)}</div></td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.margeEur)}</div></td>
-                  <td>
-                    <div className="dataset-input dataset-input-readonly">
-                      {formatPercentage(row.margePct)}
-                    </div>
-                  </td>
+                  {isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <td key={`${option.value}-offer`}>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(row.offerByChannel[option.value] ?? 0)}
+                          </div>
+                        </td>
+                      ))
+                    : (
+                      <>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.offerPrijs)}</div></td>
+                        {pricingMethod === "sell_out" ? (
+                          <>
+                            <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.sellInPrijs)}</div></td>
+                            <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.sellOutPrijs)}</div></td>
+                          </>
+                        ) : null}
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kosten)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kortingEur)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.margeEur)}</div></td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatPercentage(row.margePct)}
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  {pricingMethod === "sell_out" && isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <td key={`${option.value}-sellin`}>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(row.sellInByChannel[option.value] ?? 0)}
+                          </div>
+                        </td>
+                      ))
+                    : null}
+                  {pricingMethod === "sell_out" && isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <td key={`${option.value}-sellout`}>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(row.sellOutByChannel[option.value] ?? 0)}
+                          </div>
+                        </td>
+                      ))
+                    : null}
                   <td>
                     {renderIncludeToggle(
                       row.included,
@@ -2340,11 +2802,109 @@ export function PrijsvoorstelWizard({
                   </td>
                 </tr>
               ))}
-              {productDisplayRows.length === 0 ? (
+              {offerteProductRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="prijs-empty-cell">
+                  <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length + (pricingMethod === "sell_out" ? selectedChannelOptions.length * 2 : 0) : pricingMethod === "sell_out" ? 14 : 12} className="prijs-empty-cell">
                     Kies eerst een of meer bieren om de productofferte op te bouwen.
                   </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {offerLevel === "samengesteld" && derivedBasisRows.length > 0 ? (
+          <div className="module-card compact-card">
+            <div className="module-card-title">Afgeleide basisproducten</div>
+            <div className="module-card-text">
+              Deze basisproducten volgen readonly het samengestelde product en tellen niet mee in omzet of winst.
+            </div>
+            <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+              <table className="dataset-editor-table wizard-table-compact">
+                <thead>
+                  <tr>
+                    <th>Bier</th>
+                    <th>Basisproduct</th>
+                    <th>Aantal</th>
+                    <th>{offerPriceLabel}</th>
+                    <th>{standardSellInLabel}</th>
+                    <th>{marketAdviceLabel}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {derivedBasisRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.biernaam}</td>
+                      <td>{row.product}</td>
+                      <td>{formatNumber(row.aantal, 0)}</td>
+                      <td>{formatEuro(row.offerPrijs)}</td>
+                      <td>{formatEuro(row.sellInPrijs)}</td>
+                      <td>{formatEuro(row.sellOutPrijs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderOfferteStep() {
+    return (
+      <div className="wizard-stack">
+        {isLitersMode ? renderLitersOfferte() : renderProductOfferte()}
+        {hasReferenceChannels ? renderReferenceTable(false) : null}
+      </div>
+    );
+  }
+
+  function renderReferenceTable(isSummary: boolean) {
+    const rows = (isLitersMode ? offerteLitersRows : offerteProductRows).filter((row) => row.included);
+
+    return (
+      <div className="wizard-stack">
+        <div className="module-card compact-card">
+          <div className="module-card-title">Referentiekanalen</div>
+          <div className="module-card-text">
+            Deze tabel toont per referentiekanaal hoe de groothandelprijs zich verhoudt tot de standaard inkoopsprijs. {isSummary ? "Gebruik dit als commerciële controle in de samenvatting." : "Gebruik dit als extra informatie voor de groothandel."}
+          </div>
+        </div>
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table wizard-table-compact">
+            <thead>
+              <tr>
+                <th>Bier</th>
+                <th>Product</th>
+                <th>Kanaal</th>
+                <th>{offerPriceLabel}</th>
+                <th>{standardSellInLabel}</th>
+                <th>Groothandelsmarge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.flatMap((row) =>
+                referenceChannelOptions.map((option) => {
+                  const groothandelPrijs = row.offerPrijs;
+                  const inkoopsprijs = row.sellInByChannel[option.value] ?? 0;
+                  const groothandelMargePct =
+                    inkoopsprijs > 0 ? ((inkoopsprijs - groothandelPrijs) / inkoopsprijs) * 100 : 0;
+
+                  return (
+                    <tr key={`${row.id}-${option.value}-reference`}>
+                      <td>{row.biernaam}</td>
+                      <td>{row.verpakking}</td>
+                      <td>{option.label}</td>
+                      <td>{formatEuro(groothandelPrijs)}</td>
+                      <td>{formatEuro(inkoopsprijs)}</td>
+                      <td>{formatPercentage(groothandelMargePct)}</td>
+                    </tr>
+                  );
+                })
+              )}
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="prijs-empty-cell">Nog geen referentielijnen opgebouwd.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -2354,12 +2914,58 @@ export function PrijsvoorstelWizard({
     );
   }
 
-  function renderOfferteStep() {
-    return isLitersMode ? renderLitersOfferte() : renderProductOfferte();
-  }
-
   function renderSummaryTable() {
     if (isLitersMode) {
+      if (isMultiKanaalMode) {
+        return (
+          <div className="dataset-editor-scroll">
+            <table className="dataset-editor-table wizard-table-compact">
+              <thead>
+                <tr>
+                  <th>Bier</th>
+                  <th>Verpakking</th>
+                  <th>Liters</th>
+                  <th>{costPriceLabel}</th>
+                  {pricingMethod === "sell_out"
+                    ? selectedChannelOptions.flatMap((option) => [
+                        <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>,
+                        <th key={`${option.value}-sellin`}>{standardSellInLabel} {option.label}</th>,
+                        <th key={`${option.value}-sellout`}>{marketAdviceLabel} {option.label}</th>
+                      ])
+                    : selectedChannelOptions.map((option) => (
+                        <th key={`${option.value}-sellin`}>{offerPriceLabel} {option.label}</th>
+                      ))}
+                </tr>
+              </thead>
+              <tbody>
+                {offerteLitersRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.biernaam}</td>
+                    <td>{row.verpakking}</td>
+                    <td>{formatNumber(row.liters)}</td>
+                    <td>{formatEuro(row.kostprijsPerLiter)}</td>
+                    {pricingMethod === "sell_out"
+                      ? selectedChannelOptions.flatMap((option) => [
+                          <td key={`${row.id}-${option.value}-offer`}>{formatEuro(row.offerByChannel[option.value] ?? 0)}</td>,
+                          <td key={`${row.id}-${option.value}-sellin`}>{formatEuro(row.sellInByChannel[option.value] ?? 0)}</td>,
+                          <td key={`${row.id}-${option.value}-sellout`}>{formatEuro(row.sellOutByChannel[option.value] ?? 0)}</td>
+                        ])
+                      : selectedChannelOptions.map((option) => (
+                          <td key={`${row.id}-${option.value}-sellin`}>{formatEuro(row.sellInByChannel[option.value] ?? 0)}</td>
+                        ))}
+                  </tr>
+                ))}
+                {offerteLitersRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4 + selectedChannelOptions.length * (pricingMethod === "sell_out" ? 3 : 1)} className="prijs-empty-cell">Nog geen liters-offerte opgebouwd.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+
       return (
         <div className="dataset-editor-scroll">
           <table className="dataset-editor-table wizard-table-compact">
@@ -2368,29 +2974,77 @@ export function PrijsvoorstelWizard({
                 <th>Bier</th>
                 <th>Verpakking</th>
                 <th>Liters</th>
-                <th>Inkoopprijs / L</th>
-                <th>Adviesprijs zakelijk</th>
-                <th>Adviesprijs retail</th>
-                <th>Adviesprijs horeca</th>
-                <th>Adviesprijs slijterij</th>
+                <th>{costPriceLabel}</th>
+                <th>{offerPriceLabel} {currentKanaalLabel}</th>
+                {pricingMethod === "sell_out" ? <th>{standardSellInLabel} {currentKanaalLabel}</th> : null}
+                <th>{marketAdviceLabel} {currentKanaalLabel}</th>
               </tr>
             </thead>
             <tbody>
-              {litersDisplayRows.map((row) => (
+              {offerteLitersRows.map((row) => (
                 <tr key={row.id}>
                   <td>{row.biernaam}</td>
                   <td>{row.verpakking}</td>
                   <td>{formatNumber(row.liters)}</td>
                   <td>{formatEuro(row.kostprijsPerLiter)}</td>
-                  <td>{formatEuro(row.adviesprijzen.zakelijk)}</td>
-                  <td>{formatEuro(row.adviesprijzen.retail)}</td>
-                  <td>{formatEuro(row.adviesprijzen.horeca)}</td>
-                  <td>{formatEuro(row.adviesprijzen.slijterij)}</td>
+                  <td>{formatEuro(pricingMethod === "sell_out" ? row.offerPrijs : row.sellInPrijs)}</td>
+                  {pricingMethod === "sell_out" ? <td>{formatEuro(row.sellInPrijs)}</td> : null}
+                  <td>{formatEuro(row.sellOutPrijs)}</td>
                 </tr>
               ))}
-              {litersDisplayRows.length === 0 ? (
+              {offerteLitersRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="prijs-empty-cell">Nog geen liters-offerte opgebouwd.</td>
+                  <td colSpan={pricingMethod === "sell_out" ? 7 : 6} className="prijs-empty-cell">Nog geen liters-offerte opgebouwd.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    if (isMultiKanaalMode) {
+      return (
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table wizard-table-compact">
+            <thead>
+              <tr>
+                <th>Bier</th>
+                <th>Product</th>
+                <th>Aantal</th>
+                <th>{costPriceLabel}</th>
+                {pricingMethod === "sell_out"
+                  ? selectedChannelOptions.flatMap((option) => [
+                      <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>,
+                      <th key={`${option.value}-sellin`}>{standardSellInLabel} {option.label}</th>,
+                      <th key={`${option.value}-sellout`}>{marketAdviceLabel} {option.label}</th>
+                    ])
+                  : selectedChannelOptions.map((option) => (
+                      <th key={`${option.value}-sellin`}>{offerPriceLabel} {option.label}</th>
+                    ))}
+              </tr>
+            </thead>
+            <tbody>
+              {offerteProductRows.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.biernaam}</td>
+                  <td>{row.verpakking}</td>
+                  <td>{formatNumber(row.aantal, 0)}</td>
+                  <td>{formatEuro(row.kostprijsPerStuk)}</td>
+                  {pricingMethod === "sell_out"
+                    ? selectedChannelOptions.flatMap((option) => [
+                        <td key={`${row.id}-${option.value}-offer`}>{formatEuro(row.offerByChannel[option.value] ?? 0)}</td>,
+                        <td key={`${row.id}-${option.value}-sellin`}>{formatEuro(row.sellInByChannel[option.value] ?? 0)}</td>,
+                        <td key={`${row.id}-${option.value}-sellout`}>{formatEuro(row.sellOutByChannel[option.value] ?? 0)}</td>
+                      ])
+                    : selectedChannelOptions.map((option) => (
+                        <td key={`${row.id}-${option.value}-sellin`}>{formatEuro(row.sellInByChannel[option.value] ?? 0)}</td>
+                      ))}
+                </tr>
+              ))}
+              {offerteProductRows.length === 0 ? (
+                <tr>
+                  <td colSpan={4 + selectedChannelOptions.length * (pricingMethod === "sell_out" ? 3 : 1)} className="prijs-empty-cell">Nog geen productofferte opgebouwd.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -2407,29 +3061,27 @@ export function PrijsvoorstelWizard({
               <th>Bier</th>
               <th>Product</th>
               <th>Aantal</th>
-              <th>Kostprijs / stuk</th>
-              <th>Adviesprijs zakelijk</th>
-              <th>Adviesprijs retail</th>
-              <th>Adviesprijs horeca</th>
-              <th>Adviesprijs slijterij</th>
+              <th>{costPriceLabel}</th>
+              <th>{offerPriceLabel} {currentKanaalLabel}</th>
+              {pricingMethod === "sell_out" ? <th>{standardSellInLabel} {currentKanaalLabel}</th> : null}
+              <th>{marketAdviceLabel} {currentKanaalLabel}</th>
             </tr>
           </thead>
           <tbody>
-            {productDisplayRows.map((row) => (
+            {offerteProductRows.map((row) => (
               <tr key={row.id}>
                 <td>{row.biernaam}</td>
                 <td>{row.verpakking}</td>
                 <td>{formatNumber(row.aantal, 0)}</td>
                 <td>{formatEuro(row.kostprijsPerStuk)}</td>
-                <td>{formatEuro(row.adviesprijzen.zakelijk)}</td>
-                <td>{formatEuro(row.adviesprijzen.retail)}</td>
-                <td>{formatEuro(row.adviesprijzen.horeca)}</td>
-                <td>{formatEuro(row.adviesprijzen.slijterij)}</td>
+                <td>{formatEuro(pricingMethod === "sell_out" ? row.offerPrijs : row.sellInPrijs)}</td>
+                {pricingMethod === "sell_out" ? <td>{formatEuro(row.sellInPrijs)}</td> : null}
+                <td>{formatEuro(row.sellOutPrijs)}</td>
               </tr>
             ))}
-            {productDisplayRows.length === 0 ? (
+            {offerteProductRows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="prijs-empty-cell">Nog geen productofferte opgebouwd.</td>
+                <td colSpan={pricingMethod === "sell_out" ? 7 : 6} className="prijs-empty-cell">Nog geen productofferte opgebouwd.</td>
               </tr>
             ) : null}
           </tbody>
@@ -2439,7 +3091,7 @@ export function PrijsvoorstelWizard({
   }
 
   function renderSamenvattingStep() {
-    const gekozenKanaal = KANAAL_OPTIONS.find((option) => option.value === currentKanaal)?.label ?? currentKanaal;
+    const gekozenKanaal = currentKanaalLabel;
 
     return (
       <div className="wizard-stack">
@@ -2453,20 +3105,94 @@ export function PrijsvoorstelWizard({
             <div className="stat-value small">{currentYear}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Referentiekanaal</div>
+            <div className="stat-label">{pricingMethod === "sell_out" ? "Prijsbepalend kanaal" : isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
             <div className="stat-value small">{gekozenKanaal}</div>
           </div>
+          {hasReferenceChannels ? (
+            <div className="stat-card">
+              <div className="stat-label">Referentiekanalen</div>
+              <div className="stat-value small">{referenceKanaalLabels}</div>
+            </div>
+          ) : null}
         </div>
 
         <div className="module-card compact-card">
           <div className="module-card-title">Commerciële samenvatting</div>
           <div className="module-card-text">
-            Hieronder zie je de kostprijzen en de afgeleide adviesprijzen per kanaal op basis van
-            de huidige kostprijsberekeningen en verkoopstrategie van {currentYear}.
+            Hieronder zie je de kostprijzen en de afgeleide sell-in en sell-out per gekozen kanaal
+            op basis van de huidige kostprijsberekeningen en verkoopstrategie van {currentYear}.
           </div>
         </div>
 
         {renderSummaryTable()}
+        {hasReferenceChannels ? renderReferenceTable(true) : null}
+      </div>
+    );
+  }
+
+  function handleConceptPdf() {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const pdfChannelHeaders = isMultiKanaalMode
+      ? selectedChannelOptions.map((option) => `<th>${offerPriceLabel} ${option.label}</th>`).join("")
+      : `<th>${offerPriceLabel}</th><th>${marketAdviceLabel}</th>`;
+    const tableRows = (isLitersMode ? litersDisplayRows : productDisplayRows)
+      .filter((row) => row.included)
+      .map((row) =>
+        `<tr>
+          <td>${row.biernaam}</td>
+          <td>${row.verpakking}</td>
+          <td>${isLitersMode ? formatNumber((row as LitersDisplayRow).liters) : formatNumber((row as ProductDisplayRow).aantal, 0)}</td>
+          <td>${isLitersMode ? formatEuro((row as LitersDisplayRow).kostprijsPerLiter) : formatEuro((row as ProductDisplayRow).kostprijsPerStuk)}</td>
+          ${
+            isMultiKanaalMode
+              ? selectedChannelOptions.map((option) => `<td>${formatEuro(row.offerByChannel[option.value] ?? 0)}</td>`).join("")
+              : `<td>${formatEuro(row.offerPrijs)}</td><td>${formatEuro(row.sellOutPrijs)}</td>`
+          }
+        </tr>`
+      )
+      .join("");
+    const printWindow = window.open("", "_blank", "width=1100,height=800");
+    if (!printWindow) {
+      return;
+    }
+    printWindow.document.write(`<!doctype html><html><head><title>Conceptofferte ${String(current.offertenummer || "")}</title><style>body{font-family:Segoe UI,sans-serif;padding:24px;color:#18223a}h1,h2{margin:0 0 12px}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d7e1f4;padding:10px;text-align:left}th{background:#f3f7ff}</style></head><body><h1>Conceptofferte</h1><p><strong>Klant:</strong> ${String(current.klantnaam || "-")}<br/><strong>${isMultiKanaalMode ? "Kanalen" : "Kanaal"}:</strong> ${isMultiKanaalMode ? selectedKanaalLabels : currentKanaalLabel}<br/><strong>Jaar:</strong> ${currentYear}</p><h2>Overzicht</h2><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRows || `<tr><td colspan="${isMultiKanaalMode ? 4 + selectedChannelOptions.length : 6}">Nog geen offertelijnen.</td></tr>`}</tbody></table><p style="margin-top:24px;"><strong>Opmerking:</strong><br/>${String(current.opmerking ?? "").replace(/\n/g, "<br/>") || "-"}</p></body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
+  function renderAfrondenStep() {
+    return (
+      <div className="wizard-stack">
+        <div className="module-card compact-card">
+          <div className="module-card-title">Afronden</div>
+          <div className="module-card-text">
+            Voeg eventueel nog een opmerking toe en vraag daarna een concept-PDF op voordat je het prijsvoorstel definitief maakt.
+          </div>
+        </div>
+        <label className="nested-field">
+          <span>Opmerking</span>
+          <textarea
+            className="dataset-input"
+            rows={6}
+            value={String(current.opmerking ?? "")}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                draft.opmerking = event.target.value;
+              })
+            }
+          />
+        </label>
+        <div className="editor-actions">
+          <div className="editor-actions-group" />
+          <div className="editor-actions-group">
+            <button type="button" className="editor-button editor-button-secondary" onClick={handleConceptPdf}>
+              Concept-PDF
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -2475,7 +3201,8 @@ export function PrijsvoorstelWizard({
     if (currentStep.id === "basis") return renderBasisStep();
     if (currentStep.id === "uitgangspunten") return renderUitgangspuntenStep();
     if (currentStep.id === "offerte") return renderOfferteStep();
-    return renderSamenvattingStep();
+    if (currentStep.id === "samenvatting") return renderSamenvattingStep();
+    return renderAfrondenStep();
   }
 
   return (
@@ -2556,7 +3283,7 @@ export function PrijsvoorstelWizard({
                 type="button"
                 className="editor-button editor-button-secondary"
                 onClick={() => {
-                  void handleSave();
+                  void handleSave(false);
                 }}
               >
                 Opslaan
@@ -2566,18 +3293,18 @@ export function PrijsvoorstelWizard({
                 className="editor-button"
                 disabled={isSaving}
                 onClick={async () => {
-                  if (currentStep.id === "samenvatting") {
-                    const saved = await handleSave();
+                  if (currentStep.id === "afronden") {
+                    const saved = await handleSave(true);
                     if (saved) {
                       onFinish?.();
                     }
                     return;
                   }
 
-                  setActiveStepIndex(Math.min(steps.length - 1, activeStepIndex + 1));
+                  setActiveStepIndex(Math.min(wizardSteps.length - 1, activeStepIndex + 1));
                 }}
               >
-                {isSaving ? "Opslaan..." : currentStep.id === "samenvatting" ? "Afronden" : "Volgende"}
+                {isSaving ? "Opslaan..." : currentStep.id === "afronden" ? "Afronden" : "Volgende"}
               </button>
             </div>
           </div>
@@ -2740,3 +3467,4 @@ function SearchableMultiSelect({
     </div>
   );
 }
+

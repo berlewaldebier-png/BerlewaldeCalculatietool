@@ -19,12 +19,35 @@ PRIJSVOORSTELLEN_FILE = DATA_DIR / "prijsvoorstellen.json"
 TARIEVEN_HEFFINGEN_FILE = DATA_DIR / "tarieven_heffingen.json"
 VARIABELE_KOSTEN_FILE = DATA_DIR / "variabele_kosten.json"
 VERPAKKINGSONDERDELEN_FILE = DATA_DIR / "verpakkingsonderdelen.json"
+PACKAGING_COMPONENT_PRICES_FILE = DATA_DIR / "packaging_component_prices.json"
 BASISPRODUCTEN_FILE = DATA_DIR / "basisproducten.json"
 SAMENGESTELDE_PRODUCTEN_FILE = DATA_DIR / "samengestelde_producten.json"
 SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX = "verpakkingsonderdeel:"
 DEFAULT_BELASTINGSOORT = "Accijns"
 DEFAULT_TARIEF_ACCIJNS = "Hoog"
 DEFAULT_BTW_TARIEF = "21%"
+
+
+def _get_postgres_storage_module():
+    try:
+        from app.domain import postgres_storage  # type: ignore
+    except ImportError:
+        return None
+    return postgres_storage
+
+
+def _load_postgres_dataset(dataset_name: str) -> Any | None:
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        return None
+    return postgres_storage.load_dataset(dataset_name, None)
+
+
+def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        return False
+    return postgres_storage.save_dataset(dataset_name, data, overwrite=True)
 
 
 def _read_local_json_text(file_path: Path, default_content: str) -> str:
@@ -1748,6 +1771,471 @@ def delete_samengesteld_product(
     return save_samengestelde_producten(filtered)
 
 
+def _normalize_packaging_component_master_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(record.get("id", "") or uuid4()),
+        "component_key": str(record.get("component_key") or record.get("id") or uuid4()),
+        "omschrijving": str(record.get("omschrijving", "") or ""),
+        "beschikbaar_voor_samengesteld": bool(
+            record.get("beschikbaar_voor_samengesteld", False)
+        ),
+    }
+
+
+def _normalize_packaging_component_price_record(record: dict[str, Any]) -> dict[str, Any]:
+    try:
+        jaar = int(record.get("jaar", 0) or 0)
+    except (TypeError, ValueError):
+        jaar = 0
+
+    return {
+        "id": str(record.get("id", "") or uuid4()),
+        "verpakkingsonderdeel_id": str(record.get("verpakkingsonderdeel_id", "") or ""),
+        "jaar": jaar,
+        "prijs_per_stuk": float(record.get("prijs_per_stuk", 0.0) or 0.0),
+    }
+
+
+def load_packaging_component_masters() -> list[dict[str, Any]]:
+    postgres_payload = _load_postgres_dataset("packaging-components")
+    data = postgres_payload if isinstance(postgres_payload, list) else []
+    if not isinstance(data, list):
+        return []
+
+    normalized = [
+        _normalize_packaging_component_master_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    if normalized != data:
+        _save_postgres_dataset("packaging-components", normalized)
+
+    return sorted(
+        normalized,
+        key=lambda item: (
+            str(item.get("omschrijving", "") or "").lower(),
+            str(item.get("component_key", "") or ""),
+        ),
+    )
+
+
+def save_packaging_component_masters(data: list[dict[str, Any]]) -> bool:
+    normalized = [
+        _normalize_packaging_component_master_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    return _save_postgres_dataset("packaging-components", normalized)
+
+
+def load_packaging_component_prices() -> list[dict[str, Any]]:
+    postgres_payload = _load_postgres_dataset("packaging-component-prices")
+    data = postgres_payload if isinstance(postgres_payload, list) else []
+    if not isinstance(data, list):
+        return []
+
+    normalized = [
+        _normalize_packaging_component_price_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    if normalized != data:
+        _save_postgres_dataset("packaging-component-prices", normalized)
+
+    return sorted(
+        normalized,
+        key=lambda item: (
+            int(item.get("jaar", 0) or 0),
+            str(item.get("verpakkingsonderdeel_id", "") or ""),
+        ),
+    )
+
+
+def save_packaging_component_prices(data: list[dict[str, Any]]) -> bool:
+    normalized = [
+        _normalize_packaging_component_price_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    return _save_postgres_dataset("packaging-component-prices", normalized)
+
+
+def _get_master_product_years() -> list[int]:
+    years = {
+        int(item.get("jaar", 0) or 0)
+        for item in load_packaging_component_prices()
+        if int(item.get("jaar", 0) or 0) > 0
+    }
+    years.update(get_productie_years())
+    return sorted(year for year in years if year > 0)
+
+
+def _latest_packaging_price_by_component_id() -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for row in load_packaging_component_prices():
+        component_id = str(row.get("verpakkingsonderdeel_id", "") or "")
+        if not component_id:
+            continue
+        current = latest.get(component_id)
+        current_year = int(current.get("jaar", 0) or 0) if current else -1
+        row_year = int(row.get("jaar", 0) or 0)
+        if row_year >= current_year:
+            latest[component_id] = row
+    return latest
+
+
+def _packaging_price_lookup_for_year(year: int | str) -> dict[str, dict[str, Any]]:
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
+        year_value = 0
+
+    return {
+        str(row.get("verpakkingsonderdeel_id", "") or ""): row
+        for row in load_packaging_component_prices()
+        if int(row.get("jaar", 0) or 0) == year_value
+    }
+
+
+def normalize_verpakkingsonderdeel_record(
+    record: dict[str, Any],
+    *,
+    default_year: int | None = None,
+    default_component_key: str | None = None,
+    preserve_id: str | None = None,
+) -> dict[str, Any]:
+    normalized = _normalize_packaging_component_master_record(
+        {
+            **record,
+            "id": str(preserve_id or record.get("id") or uuid4()),
+            "component_key": str(
+                record.get("component_key")
+                or default_component_key
+                or record.get("id")
+                or uuid4()
+            ),
+        }
+    )
+    if default_year is not None or record.get("jaar") is not None:
+        try:
+            normalized["jaar"] = int(record.get("jaar", default_year) or 0)
+        except (TypeError, ValueError):
+            normalized["jaar"] = int(default_year or 0)
+    if "prijs_per_stuk" in record:
+        normalized["prijs_per_stuk"] = float(record.get("prijs_per_stuk", 0.0) or 0.0)
+    return normalized
+
+
+def load_verpakkingsonderdelen(year: int | str | None = None) -> list[dict[str, Any]]:
+    masters = load_packaging_component_masters()
+    if year is None:
+        latest_prices = _latest_packaging_price_by_component_id()
+        return [
+            {
+                **row,
+                "prijs_per_stuk": float(
+                    (latest_prices.get(str(row.get("id", "") or ""), {}) or {}).get("prijs_per_stuk", 0.0) or 0.0
+                ),
+            }
+            for row in masters
+        ]
+
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
+        year_value = 0
+    price_lookup = _packaging_price_lookup_for_year(year_value)
+
+    return [
+        {
+            **row,
+            "jaar": year_value,
+            "prijs_per_stuk": float(
+                (price_lookup.get(str(row.get("id", "") or ""), {}) or {}).get("prijs_per_stuk", 0.0) or 0.0
+            ),
+        }
+        for row in masters
+    ]
+
+
+def save_verpakkingsonderdelen(data: list[dict[str, Any]]) -> bool:
+    masters: list[dict[str, Any]] = []
+    prijs_rows = load_packaging_component_prices()
+    prijs_index = {
+        (
+            str(row.get("verpakkingsonderdeel_id", "") or ""),
+            int(row.get("jaar", 0) or 0),
+        ): index
+        for index, row in enumerate(prijs_rows)
+    }
+
+    for record in data:
+        if not isinstance(record, dict):
+            continue
+        normalized = _normalize_packaging_component_master_record(record)
+        masters.append(normalized)
+        try:
+            jaar = int(record.get("jaar", 0) or 0)
+        except (TypeError, ValueError):
+            jaar = 0
+        if jaar > 0 and "prijs_per_stuk" in record:
+            prijs_row = _normalize_packaging_component_price_record(
+                {
+                    "verpakkingsonderdeel_id": normalized["id"],
+                    "jaar": jaar,
+                    "prijs_per_stuk": record.get("prijs_per_stuk", 0.0),
+                }
+            )
+            index_key = (str(prijs_row["verpakkingsonderdeel_id"]), int(prijs_row["jaar"]))
+            if index_key in prijs_index:
+                prijs_rows[prijs_index[index_key]] = {
+                    **prijs_rows[prijs_index[index_key]],
+                    **prijs_row,
+                }
+            else:
+                prijs_rows.append(prijs_row)
+                prijs_index[index_key] = len(prijs_rows) - 1
+
+    return save_packaging_component_masters(masters) and save_packaging_component_prices(prijs_rows)
+
+
+def _normalize_basisproduct_onderdeel_row(row: dict[str, Any]) -> dict[str, Any]:
+    onderdeel_id = str(row.get("verpakkingsonderdeel_id", "") or "")
+    gekoppeld_onderdeel = get_verpakkingsonderdeel_by_id(onderdeel_id)
+    return {
+        "verpakkingsonderdeel_id": onderdeel_id,
+        "omschrijving": str(
+            row.get("omschrijving", "")
+            or (gekoppeld_onderdeel or {}).get("omschrijving", "")
+            or ""
+        ),
+        "hoeveelheid": float(row.get("hoeveelheid", 0.0) or 0.0),
+    }
+
+
+def normalize_basisproduct_record(record: dict[str, Any]) -> dict[str, Any]:
+    onderdelen = [
+        _normalize_basisproduct_onderdeel_row(row)
+        for row in record.get("onderdelen", [])
+        if isinstance(row, dict)
+    ]
+    return {
+        "id": str(record.get("id", "") or uuid4()),
+        "omschrijving": str(record.get("omschrijving", "") or ""),
+        "inhoud_per_eenheid_liter": float(record.get("inhoud_per_eenheid_liter", 0.0) or 0.0),
+        "onderdelen": onderdelen,
+        "totale_verpakkingskosten": float(record.get("totale_verpakkingskosten", 0.0) or 0.0),
+    }
+
+
+def load_basisproducten(year: int | str | None = None) -> list[dict[str, Any]]:
+    postgres_payload = _load_postgres_dataset("base-product-masters")
+    data = postgres_payload if isinstance(postgres_payload, list) else []
+    if not isinstance(data, list):
+        return []
+
+    normalized = [
+        normalize_basisproduct_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    if normalized != data:
+        _save_postgres_dataset("base-product-masters", normalized)
+    return normalized
+
+
+def save_basisproducten(data: list[dict[str, Any]]) -> bool:
+    normalized = [
+        normalize_basisproduct_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    return _save_postgres_dataset("base-product-masters", normalized)
+
+
+def resolve_basisproduct_for_year(
+    basisproduct: dict[str, Any],
+    year: int | str,
+) -> dict[str, Any]:
+    normalized = normalize_basisproduct_record(basisproduct)
+    prijs_lookup = _packaging_price_lookup_for_year(year)
+    resolved_rows: list[dict[str, Any]] = []
+
+    for row in normalized.get("onderdelen", []):
+        onderdeel_id = str(row.get("verpakkingsonderdeel_id", "") or "")
+        onderdeel = get_verpakkingsonderdeel_by_id(onderdeel_id)
+        prijs_row = prijs_lookup.get(onderdeel_id, {})
+        hoeveelheid = float(row.get("hoeveelheid", 0.0) or 0.0)
+        prijs_per_stuk = float(prijs_row.get("prijs_per_stuk", 0.0) or 0.0)
+        resolved_rows.append(
+            {
+                "verpakkingsonderdeel_id": onderdeel_id,
+                "omschrijving": str(
+                    (onderdeel or {}).get("omschrijving", row.get("omschrijving", "")) or ""
+                ),
+                "jaar": int(year),
+                "hoeveelheid": hoeveelheid,
+                "prijs_per_stuk": prijs_per_stuk,
+                "totale_kosten": bereken_basisproduct_regel_kosten(hoeveelheid, prijs_per_stuk),
+            }
+        )
+
+    return {
+        **normalized,
+        "jaar": int(year),
+        "onderdelen": resolved_rows,
+        "totale_verpakkingskosten": bereken_basisproduct_totaal(resolved_rows),
+    }
+
+
+def load_basisproducten_for_year(year: int | str) -> list[dict[str, Any]]:
+    return [
+        resolve_basisproduct_for_year(basisproduct, year)
+        for basisproduct in load_basisproducten()
+    ]
+
+
+def normalize_samengesteld_product_record(record: dict[str, Any]) -> dict[str, Any]:
+    basisproducten = [
+        _normalize_samengesteld_basisproduct_row(row)
+        for row in record.get("basisproducten", [])
+        if isinstance(row, dict)
+    ]
+    return {
+        "id": str(record.get("id", "") or uuid4()),
+        "omschrijving": str(record.get("omschrijving", "") or ""),
+        "basisproducten": basisproducten,
+        "totale_inhoud_liter": bereken_samengesteld_product_totaal_inhoud(basisproducten),
+        "totale_verpakkingskosten": float(record.get("totale_verpakkingskosten", 0.0) or 0.0),
+    }
+
+
+def load_samengestelde_producten(year: int | str | None = None) -> list[dict[str, Any]]:
+    postgres_payload = _load_postgres_dataset("composite-product-masters")
+    data = postgres_payload if isinstance(postgres_payload, list) else []
+    if not isinstance(data, list):
+        return []
+
+    normalized = [
+        normalize_samengesteld_product_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    if normalized != data:
+        _save_postgres_dataset("composite-product-masters", normalized)
+    return normalized
+
+
+def save_samengestelde_producten(data: list[dict[str, Any]]) -> bool:
+    normalized = [
+        normalize_samengesteld_product_record(record)
+        for record in data
+        if isinstance(record, dict)
+    ]
+    return _save_postgres_dataset("composite-product-masters", normalized)
+
+
+def resolve_samengesteld_product_for_year(
+    samengesteld_product: dict[str, Any],
+    year: int | str,
+    *,
+    basisproducten_lookup: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    normalized = normalize_samengesteld_product_record(samengesteld_product)
+    if basisproducten_lookup is None:
+        basisproducten_lookup = {
+            str(item.get("id", "") or ""): item
+            for item in load_basisproducten_for_year(year)
+        }
+
+    resolved_rows: list[dict[str, Any]] = []
+    for row in normalized.get("basisproducten", []):
+        basisproduct_id = str(row.get("basisproduct_id", "") or "")
+        basisproduct = _resolve_samengesteld_bouwblok_for_year(
+            basisproduct_id,
+            year,
+            basisproducten_lookup=basisproducten_lookup,
+        )
+        aantal = float(row.get("aantal", 0.0) or 0.0)
+        inhoud_per_eenheid = float(
+            (basisproduct or {}).get("inhoud_per_eenheid_liter", 0.0) or 0.0
+        )
+        verpakkingskosten_per_eenheid = float(
+            (basisproduct or {}).get("totale_verpakkingskosten", 0.0) or 0.0
+        )
+        resolved_rows.append(
+            {
+                "basisproduct_id": basisproduct_id,
+                "omschrijving": str(
+                    (basisproduct or {}).get("omschrijving", row.get("omschrijving", "")) or ""
+                ),
+                "aantal": aantal,
+                "inhoud_per_eenheid_liter": inhoud_per_eenheid,
+                "totale_inhoud_liter": aantal * inhoud_per_eenheid,
+                "verpakkingskosten_per_eenheid": verpakkingskosten_per_eenheid,
+                "totale_verpakkingskosten": bereken_basisproduct_regel_kosten(
+                    aantal,
+                    verpakkingskosten_per_eenheid,
+                ),
+            }
+        )
+
+    return {
+        **normalized,
+        "jaar": int(year),
+        "basisproducten": resolved_rows,
+        "totale_inhoud_liter": bereken_samengesteld_product_totaal_inhoud(resolved_rows),
+        "totale_verpakkingskosten": bereken_samengesteld_product_totaal_verpakkingskosten(
+            resolved_rows
+        ),
+    }
+
+
+def load_samengestelde_producten_for_year(year: int | str) -> list[dict[str, Any]]:
+    basisproducten_lookup = {
+        str(item.get("id", "") or ""): item
+        for item in load_basisproducten_for_year(year)
+    }
+    return [
+        resolve_samengesteld_product_for_year(
+            samengesteld_product,
+            year,
+            basisproducten_lookup=basisproducten_lookup,
+        )
+        for samengesteld_product in load_samengestelde_producten()
+    ]
+
+
+def build_verpakkingsonderdelen_legacy_projection() -> list[dict[str, Any]]:
+    years = _get_master_product_years()
+    if not years:
+        return load_verpakkingsonderdelen()
+    rows: list[dict[str, Any]] = []
+    for year in years:
+        rows.extend(load_verpakkingsonderdelen(year))
+    return rows
+
+
+def build_basisproducten_legacy_projection() -> list[dict[str, Any]]:
+    years = _get_master_product_years()
+    if not years:
+        return load_basisproducten()
+    rows: list[dict[str, Any]] = []
+    for year in years:
+        rows.extend(load_basisproducten_for_year(year))
+    return rows
+
+
+def build_samengestelde_producten_legacy_projection() -> list[dict[str, Any]]:
+    years = _get_master_product_years()
+    if not years:
+        return load_samengestelde_producten()
+    rows: list[dict[str, Any]] = []
+    for year in years:
+        rows.extend(load_samengestelde_producten_for_year(year))
+    return rows
+
+
 def load_json_data() -> dict[str, Any]:
     """Laadt productiegegevens veilig in."""
     return _load_json_value(PRODUCTIE_FILE, {})
@@ -2098,7 +2586,11 @@ def bereken_integrale_kostprijs_samengesteld_product(
 
 def load_bieren() -> list[dict[str, Any]]:
     """Laadt alle bieren uit de centrale bierlijst."""
-    data = _load_json_value(BIEREN_FILE, [])
+    postgres_payload = _load_postgres_dataset("bieren")
+    if isinstance(postgres_payload, list):
+        data = postgres_payload
+    else:
+        data = _load_json_value(BIEREN_FILE, [])
     if not isinstance(data, list):
         return []
 
@@ -2107,6 +2599,9 @@ def load_bieren() -> list[dict[str, Any]]:
         if not isinstance(bier, dict):
             continue
         normalized_bieren.append(normalize_bier_record(bier))
+
+    if isinstance(postgres_payload, list) and normalized_bieren != data:
+        _save_postgres_dataset("bieren", normalized_bieren)
 
     return normalized_bieren
 
@@ -2140,7 +2635,14 @@ def get_bieren_met_berekening_voor_jaar(year: int | str) -> list[dict[str, Any]]
 
 def save_bieren(data: list[dict[str, Any]]) -> bool:
     """Slaat de centrale bierlijst veilig op."""
-    return _save_json_value(BIEREN_FILE, data, "[]")
+    normalized = [
+        normalize_bier_record(bier)
+        for bier in data
+        if isinstance(bier, dict)
+    ]
+    if _save_postgres_dataset("bieren", normalized):
+        return True
+    return _save_json_value(BIEREN_FILE, normalized, "[]")
 
 
 def _collect_referenced_bier_ids() -> set[str]:
@@ -2435,9 +2937,101 @@ def update_bier(
     return False
 
 
+def _sync_bieren_with_berekeningen(
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], bool]:
+    bieren = load_bieren()
+    bieren_by_id = {str(bier.get("id", "") or ""): bier for bier in bieren}
+    bieren_by_name = {
+        str(bier.get("biernaam", "") or "").strip().lower(): bier
+        for bier in bieren
+        if str(bier.get("biernaam", "") or "").strip()
+    }
+    changed = False
+
+    for record in records:
+        basisgegevens = record.get("basisgegevens", {})
+        if not isinstance(basisgegevens, dict):
+            basisgegevens = {}
+        biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
+        if not biernaam:
+            continue
+
+        stijl = str(basisgegevens.get("stijl", "") or "").strip()
+        alcoholpercentage = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
+        belastingsoort = str(
+            basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT
+        )
+        tarief_accijns = str(
+            basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS
+        )
+        btw_tarief = str(basisgegevens.get("btw_tarief", DEFAULT_BTW_TARIEF) or DEFAULT_BTW_TARIEF)
+
+        bier_id = str(record.get("bier_id", "") or "").strip()
+        existing = bieren_by_id.get(bier_id) if bier_id else None
+        if existing is None:
+            existing = bieren_by_name.get(biernaam.lower())
+
+        if existing is None:
+            bier = normalize_bier_record(
+                {
+                    "id": bier_id or str(uuid4()),
+                    "biernaam": biernaam,
+                    "stijl": stijl,
+                    "alcoholpercentage": alcoholpercentage,
+                    "belastingsoort": belastingsoort,
+                    "tarief_accijns": tarief_accijns,
+                    "btw_tarief": btw_tarief,
+                    "created_at": _now_iso(),
+                    "updated_at": _now_iso(),
+                }
+            )
+            bieren.append(bier)
+            bieren_by_id[str(bier["id"])] = bier
+            bieren_by_name[biernaam.lower()] = bier
+            existing = bier
+            changed = True
+        else:
+            updated_bier = normalize_bier_record(
+                {
+                    **existing,
+                    "biernaam": biernaam,
+                    "stijl": stijl,
+                    "alcoholpercentage": alcoholpercentage,
+                    "belastingsoort": belastingsoort,
+                    "tarief_accijns": tarief_accijns,
+                    "btw_tarief": btw_tarief,
+                    "updated_at": _now_iso(),
+                }
+            )
+            if updated_bier != existing:
+                for index, bier in enumerate(bieren):
+                    if str(bier.get("id", "") or "") == str(updated_bier["id"]):
+                        bieren[index] = updated_bier
+                        break
+                bieren_by_id[str(updated_bier["id"])] = updated_bier
+                bieren_by_name[biernaam.lower()] = updated_bier
+                existing = updated_bier
+                changed = True
+
+        resolved_bier_id = str(existing.get("id", "") or "")
+        if str(record.get("bier_id", "") or "").strip() != resolved_bier_id:
+            record["bier_id"] = resolved_bier_id
+            changed = True
+
+    if changed:
+        save_bieren(bieren)
+
+    return records, changed
+
+
 def load_berekeningen() -> list[dict[str, Any]]:
     """Laadt alle berekeningen voor Nieuwe kostprijsberekening."""
-    data = _load_json_value(BEREKENINGEN_FILE, [])
+    postgres_payload = _load_postgres_dataset("berekeningen")
+    if isinstance(postgres_payload, list):
+        data = postgres_payload
+    else:
+        data = _load_json_value(BEREKENINGEN_FILE, [])
     if not isinstance(data, list):
         return []
 
@@ -2446,6 +3040,13 @@ def load_berekeningen() -> list[dict[str, Any]]:
         if not isinstance(record, dict):
             continue
         normalized_records.append(normalize_berekening_record(record))
+
+    normalized_records, changed = _sync_bieren_with_berekeningen(normalized_records)
+    if changed:
+        if isinstance(postgres_payload, list):
+            _save_postgres_dataset("berekeningen", normalized_records)
+        else:
+            _save_json_value(BEREKENINGEN_FILE, normalized_records, "[]")
 
     return normalized_records
 
@@ -2520,6 +3121,21 @@ VERKOOPSTRATEGIE_RECORD_TYPE_VERPAKKING = "verkoopstrategie_verpakking"
 
 def _normalize_verpakking_key(value: Any) -> str:
     return str(value or "").strip().lower()
+
+
+def _normalize_channel_price_map(raw: Any) -> dict[str, float | None]:
+    source = raw if isinstance(raw, dict) else {}
+    normalized: dict[str, float | None] = {}
+    for categorie in VERKOOPSTRATEGIE_CATEGORIEN:
+        value = source.get(categorie)
+        if value in ("", None):
+            normalized[categorie] = None
+            continue
+        try:
+            normalized[categorie] = float(value)
+        except (TypeError, ValueError):
+            normalized[categorie] = None
+    return normalized
 
 
 def normalize_verkoopstrategie_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -2601,6 +3217,17 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
     kanaalprijzen_source = record.get("kanaalprijzen", {})
     if not isinstance(kanaalprijzen_source, dict):
         kanaalprijzen_source = {}
+    sell_in_prices_source = record.get("sell_in_prices", kanaalprijzen_source)
+    if not isinstance(sell_in_prices_source, dict):
+        sell_in_prices_source = {}
+    sell_out_prices_source = record.get(
+        "sell_out_advice_prices", record.get("adviesprijzen", {})
+    )
+    if not isinstance(sell_out_prices_source, dict):
+        sell_out_prices_source = {}
+    sell_out_factors_source = record.get("sell_out_factors", record.get("adviesfactoren", {}))
+    if not isinstance(sell_out_factors_source, dict):
+        sell_out_factors_source = {}
 
     kanaalmarges: dict[str, float] = {}
     kanaalprijzen: dict[str, float | None] = {}
@@ -2610,11 +3237,15 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
         kanaalmarges[categorie] = _float_value(
             kanaalmarges_source.get(categorie, record.get(legacy_margin_key, 0.0))
         )
-        price_value = kanaalprijzen_source.get(categorie, record.get(legacy_price_key))
+        price_value = sell_in_prices_source.get(
+            categorie, kanaalprijzen_source.get(categorie, record.get(legacy_price_key))
+        )
         if price_value in ("", None):
             kanaalprijzen[categorie] = None
         else:
             kanaalprijzen[categorie] = _float_value(price_value)
+    sell_out_prices = _normalize_channel_price_map(sell_out_prices_source)
+    sell_out_factors = _normalize_channel_price_map(sell_out_factors_source)
 
     created_at = str(record.get("created_at", "") or "") or _now_iso()
     updated_at = str(record.get("updated_at", "") or "") or created_at
@@ -2637,6 +3268,12 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
         "kostprijs_per_liter": _float_value(record.get("kostprijs_per_liter")),
         "kanaalmarges": kanaalmarges,
         "kanaalprijzen": kanaalprijzen,
+        "sell_in_margins": dict(kanaalmarges),
+        "sell_in_prices": dict(kanaalprijzen),
+        "sell_out_advice_prices": sell_out_prices,
+        "sell_out_factors": sell_out_factors,
+        "adviesprijzen": dict(sell_out_prices),
+        "adviesfactoren": dict(sell_out_factors),
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -2664,13 +3301,37 @@ def normalize_verkoopstrategie_verpakking_record(record: dict[str, Any]) -> dict
     kanaalmarges_source = record.get("kanaalmarges", {})
     if not isinstance(kanaalmarges_source, dict):
         kanaalmarges_source = {}
+    sell_in_margins_source = record.get("sell_in_margins", kanaalmarges_source)
+    if not isinstance(sell_in_margins_source, dict):
+        sell_in_margins_source = {}
+    sell_in_prices_source = record.get("sell_in_prices", record.get("kanaalprijzen", {}))
+    if not isinstance(sell_in_prices_source, dict):
+        sell_in_prices_source = {}
+    sell_out_prices_source = record.get(
+        "sell_out_advice_prices", record.get("adviesprijzen", {})
+    )
+    if not isinstance(sell_out_prices_source, dict):
+        sell_out_prices_source = {}
+    sell_out_factors_source = record.get("sell_out_factors", record.get("adviesfactoren", {}))
+    if not isinstance(sell_out_factors_source, dict):
+        sell_out_factors_source = {}
 
     kanaalmarges: dict[str, float] = {}
+    kanaalprijzen: dict[str, float | None] = {}
     for categorie in VERKOOPSTRATEGIE_CATEGORIEN:
         legacy_margin_key = f"{categorie}_marge_pct"
         kanaalmarges[categorie] = _float_value(
-            kanaalmarges_source.get(categorie, record.get(legacy_margin_key, 0.0))
+            sell_in_margins_source.get(
+                categorie, kanaalmarges_source.get(categorie, record.get(legacy_margin_key, 0.0))
+            )
         )
+        price_value = sell_in_prices_source.get(categorie)
+        if price_value in ("", None):
+            kanaalprijzen[categorie] = None
+        else:
+            kanaalprijzen[categorie] = _float_value(price_value)
+    sell_out_prices = _normalize_channel_price_map(sell_out_prices_source)
+    sell_out_factors = _normalize_channel_price_map(sell_out_factors_source)
 
     created_at = str(record.get("created_at", "") or "") or _now_iso()
     updated_at = str(record.get("updated_at", "") or "") or created_at
@@ -2687,6 +3348,13 @@ def normalize_verkoopstrategie_verpakking_record(record: dict[str, Any]) -> dict
         "bron_verkoopstrategie_id": str(record.get("bron_verkoopstrategie_id", "") or ""),
         "strategie_type": str(record.get("strategie_type", "") or ""),
         "kanaalmarges": kanaalmarges,
+        "kanaalprijzen": kanaalprijzen,
+        "sell_in_margins": dict(kanaalmarges),
+        "sell_in_prices": dict(kanaalprijzen),
+        "sell_out_advice_prices": sell_out_prices,
+        "sell_out_factors": sell_out_factors,
+        "adviesprijzen": dict(sell_out_prices),
+        "adviesfactoren": dict(sell_out_factors),
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -3490,9 +4158,11 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
                 "included": bool(row.get("included", True)),
                 "cost_at_quote": _float_value(row.get("cost_at_quote")),
                 "sales_price_at_quote": _float_value(row.get("sales_price_at_quote")),
+                "sell_out_price_at_quote": _float_value(row.get("sell_out_price_at_quote")),
                 "revenue_at_quote": _float_value(row.get("revenue_at_quote")),
                 "margin_at_quote": _float_value(row.get("margin_at_quote")),
                 "target_margin_pct_at_quote": _float_value(row.get("target_margin_pct_at_quote")),
+                "sell_out_factor_at_quote": _float_value(row.get("sell_out_factor_at_quote")),
                 "channel_at_quote": str(row.get("channel_at_quote", "") or ""),
             }
         )
@@ -3516,9 +4186,11 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
                 "verpakking_label": str(row.get("verpakking_label", "") or ""),
                 "cost_at_quote": _float_value(row.get("cost_at_quote")),
                 "sales_price_at_quote": _float_value(row.get("sales_price_at_quote")),
+                "sell_out_price_at_quote": _float_value(row.get("sell_out_price_at_quote")),
                 "revenue_at_quote": _float_value(row.get("revenue_at_quote")),
                 "margin_at_quote": _float_value(row.get("margin_at_quote")),
                 "target_margin_pct_at_quote": _float_value(row.get("target_margin_pct_at_quote")),
+                "sell_out_factor_at_quote": _float_value(row.get("sell_out_factor_at_quote")),
                 "channel_at_quote": str(row.get("channel_at_quote", "") or ""),
             }
         )
@@ -3529,6 +4201,14 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
     selected_bier_ids = [
         str(value or "")
         for value in selected_bier_ids_source
+        if str(value or "").strip()
+    ]
+    selected_kanalen_source = record.get("selected_kanalen", [])
+    if not isinstance(selected_kanalen_source, list):
+        selected_kanalen_source = []
+    selected_kanalen = [
+        str(value or "")
+        for value in selected_kanalen_source
         if str(value or "").strip()
     ]
 
@@ -3568,6 +4248,9 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         "voorsteltype": str(record.get("voorsteltype", "") or ""),
         "liters_basis": str(record.get("liters_basis", "een_bier") or "een_bier"),
         "kanaal": str(record.get("kanaal", "") or ""),
+        "selected_kanalen": selected_kanalen,
+        "pricing_method": str(record.get("pricing_method", "sell_in") or "sell_in"),
+        "groothandel_marge_pct": _float_value(record.get("groothandel_marge_pct")),
         "bier_id": str(record.get("bier_id", "") or ""),
         "selected_bier_ids": selected_bier_ids,
         "deleted_product_refs": deleted_product_refs,
@@ -3901,6 +4584,9 @@ def save_berekeningen(data: list[dict[str, Any]]) -> bool:
         for record in data
         if isinstance(record, dict)
     ]
+    normalized_records, _ = _sync_bieren_with_berekeningen(normalized_records)
+    if _save_postgres_dataset("berekeningen", normalized_records):
+        return True
     return _save_json_value(BEREKENINGEN_FILE, normalized_records, "[]")
 
 
@@ -4357,6 +5043,9 @@ def _build_model_a_product_maps() -> tuple[
 
     product_seen: set[str] = set()
     product_year_seen: set[str] = set()
+    source_years = _get_master_product_years()
+    if not source_years:
+        source_years = [datetime.now().year]
 
     for basisproduct in load_basisproducten():
         name = str(basisproduct.get("omschrijving", "") or "")
@@ -4384,43 +5073,52 @@ def _build_model_a_product_maps() -> tuple[
             )
             product_seen.add(product_id)
 
-        year = int(basisproduct.get("jaar", 0) or 0)
-        product_year_id = _model_a_id("product-year", product_id, year)
-        if product_year_id not in product_year_seen:
-            product_years.append(
-                {
-                    "id": product_year_id,
-                    "product_id": product_id,
-                    "year": year,
-                    "content_liter": float(basisproduct.get("inhoud_per_eenheid_liter", 0.0) or 0.0),
-                    "total_packaging_cost": float(basisproduct.get("totale_verpakkingskosten", 0.0) or 0.0),
-                    "available_for_sale": True,
-                    "available_for_composite": False,
-                }
-            )
-            product_year_seen.add(product_year_id)
+        for year in source_years:
+            resolved_basisproduct = resolve_basisproduct_for_year(basisproduct, year)
+            product_year_id = _model_a_id("product-year", product_id, year)
+            if product_year_id not in product_year_seen:
+                product_years.append(
+                    {
+                        "id": product_year_id,
+                        "product_id": product_id,
+                        "year": year,
+                        "content_liter": float(
+                            resolved_basisproduct.get("inhoud_per_eenheid_liter", 0.0) or 0.0
+                        ),
+                        "total_packaging_cost": float(
+                            resolved_basisproduct.get("totale_verpakkingskosten", 0.0) or 0.0
+                        ),
+                        "available_for_sale": True,
+                        "available_for_composite": False,
+                    }
+                )
+                product_year_seen.add(product_year_id)
 
-        for component in basisproduct.get("onderdelen", []) if isinstance(basisproduct.get("onderdelen", []), list) else []:
-            if not isinstance(component, dict):
-                continue
-            packaging_component_id = str(component.get("verpakkingsonderdeel_id", "") or "")
-            product_year_components.append(
-                {
-                    "id": _model_a_id(
-                        "product-year-component",
-                        product_year_id,
-                        packaging_component_id,
-                        component.get("verpakkingsonderdeel_key"),
-                    ),
-                    "product_year_id": product_year_id,
-                    "packaging_component_id": packaging_component_id,
-                    "component_key": str(component.get("verpakkingsonderdeel_key", "") or ""),
-                    "description": str(component.get("omschrijving", "") or ""),
-                    "quantity": float(component.get("hoeveelheid", 0.0) or 0.0),
-                    "price_per_piece": float(component.get("prijs_per_stuk", 0.0) or 0.0),
-                    "total_cost": float(component.get("totale_kosten", 0.0) or 0.0),
-                }
-            )
+            for component in (
+                resolved_basisproduct.get("onderdelen", [])
+                if isinstance(resolved_basisproduct.get("onderdelen", []), list)
+                else []
+            ):
+                if not isinstance(component, dict):
+                    continue
+                packaging_component_id = str(component.get("verpakkingsonderdeel_id", "") or "")
+                product_year_components.append(
+                    {
+                        "id": _model_a_id(
+                            "product-year-component",
+                            product_year_id,
+                            packaging_component_id,
+                            component.get("omschrijving"),
+                        ),
+                        "product_year_id": product_year_id,
+                        "packaging_component_id": packaging_component_id,
+                        "component_key": str(component.get("omschrijving", "") or ""),
+                        "description": str(component.get("omschrijving", "") or ""),
+                        "quantity": float(component.get("hoeveelheid", 0.0) or 0.0),
+                        "price_per_piece": float(component.get("prijs_per_stuk", 0.0) or 0.0),
+                        "total_cost": float(component.get("totale_kosten", 0.0) or 0.0),
+                    }
+                )
 
     for samengesteld in load_samengestelde_producten():
         name = str(samengesteld.get("omschrijving", "") or "")
@@ -4448,21 +5146,26 @@ def _build_model_a_product_maps() -> tuple[
             )
             product_seen.add(product_id)
 
-        year = int(samengesteld.get("jaar", 0) or 0)
-        product_year_id = _model_a_id("product-year", product_id, year)
-        if product_year_id not in product_year_seen:
-            product_years.append(
-                {
-                    "id": product_year_id,
-                    "product_id": product_id,
-                    "year": year,
-                    "content_liter": float(samengesteld.get("totale_inhoud_liter", 0.0) or 0.0),
-                    "total_packaging_cost": float(samengesteld.get("totale_verpakkingskosten", 0.0) or 0.0),
-                    "available_for_sale": True,
-                    "available_for_composite": True,
-                }
-            )
-            product_year_seen.add(product_year_id)
+        for year in source_years:
+            resolved_samengesteld = resolve_samengesteld_product_for_year(samengesteld, year)
+            product_year_id = _model_a_id("product-year", product_id, year)
+            if product_year_id not in product_year_seen:
+                product_years.append(
+                    {
+                        "id": product_year_id,
+                        "product_id": product_id,
+                        "year": year,
+                        "content_liter": float(
+                            resolved_samengesteld.get("totale_inhoud_liter", 0.0) or 0.0
+                        ),
+                        "total_packaging_cost": float(
+                            resolved_samengesteld.get("totale_verpakkingskosten", 0.0) or 0.0
+                        ),
+                        "available_for_sale": True,
+                        "available_for_composite": True,
+                    }
+                )
+                product_year_seen.add(product_year_id)
 
         for component in samengesteld.get("basisproducten", []) if isinstance(samengesteld.get("basisproducten", []), list) else []:
             if not isinstance(component, dict):

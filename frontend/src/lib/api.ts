@@ -108,3 +108,7 @@ export function getVerkoopprijzen() {
 export function getVariabeleKosten() {
   return apiGet<Record<string, unknown>>("/data/variabele-kosten");
 }
+
+export function getDataset(name: string) {
+  return apiGet<GenericRecord[]>(`/data/dataset/${name}`);
+}

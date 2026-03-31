@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 
 from app.domain import dataset_store, postgres_storage
 from app.schemas.storage import StorageStatus
@@ -122,7 +122,7 @@ def put_variabele_kosten(data: dict[str, Any]) -> dict[str, bool]:
 
 
 @router.put("/dataset/{name}")
-def put_dataset(name: str, data: Any) -> dict[str, bool]:
+def put_dataset(name: str, data: Any = Body(...)) -> dict[str, bool]:
     if name not in dataset_store.get_dataset_names():
         raise HTTPException(status_code=404, detail="Unknown dataset")
     return {"saved": dataset_store.save_dataset(name, data)}
