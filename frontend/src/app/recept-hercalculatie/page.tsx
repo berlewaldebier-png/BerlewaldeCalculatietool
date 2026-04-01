@@ -1,9 +1,22 @@
 import { PageShell } from "@/components/PageShell";
 import { ReceptHercalculatieManager } from "@/components/ReceptHercalculatieManager";
-import { getBerekeningen, getNavigation } from "@/lib/api";
+import {
+  getBasisproducten,
+  getBerekeningen,
+  getDataset,
+  getNavigation,
+  getSamengesteldeProducten
+} from "@/lib/api";
 
 export default async function ReceptHercalculatiePage() {
-  const [navigation, berekeningen] = await Promise.all([getNavigation(), getBerekeningen()]);
+  const [navigation, berekeningen, basisproducten, samengesteldeProducten, kostprijsproductactiveringen] =
+    await Promise.all([
+      getNavigation(),
+      getBerekeningen(),
+      getBasisproducten(),
+      getSamengesteldeProducten(),
+      getDataset("kostprijsproductactiveringen")
+    ]);
 
   return (
     <PageShell
@@ -12,7 +25,12 @@ export default async function ReceptHercalculatiePage() {
       activePath="/recept-hercalculatie"
       navigation={navigation}
     >
-      <ReceptHercalculatieManager initialRows={berekeningen} />
+      <ReceptHercalculatieManager
+        initialRows={berekeningen}
+        basisproducten={basisproducten}
+        samengesteldeProducten={samengesteldeProducten}
+        kostprijsproductactiveringen={kostprijsproductactiveringen}
+      />
     </PageShell>
   );
 }
