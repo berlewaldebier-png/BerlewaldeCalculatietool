@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Iterator
 
 from app import config  # noqa: F401
@@ -89,6 +89,7 @@ def load_dataset(name: str, default_value: Any) -> Any:
 
 def save_dataset(name: str, data: Any, overwrite: bool = True) -> bool:
     ensure_schema()
+    now = datetime.now(UTC)
     with connect() as conn:
         with conn.cursor() as cur:
             if overwrite:
@@ -99,7 +100,7 @@ def save_dataset(name: str, data: Any, overwrite: bool = True) -> bool:
                     ON CONFLICT (dataset_name)
                     DO UPDATE SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at
                     """,
-                    (name, json.dumps(data, ensure_ascii=False), datetime.utcnow()),
+                    (name, json.dumps(data, ensure_ascii=False), now),
                 )
             else:
                 cur.execute(
@@ -108,7 +109,7 @@ def save_dataset(name: str, data: Any, overwrite: bool = True) -> bool:
                     VALUES (%s, %s::jsonb, %s)
                     ON CONFLICT (dataset_name) DO NOTHING
                     """,
-                    (name, json.dumps(data, ensure_ascii=False), datetime.utcnow()),
+                    (name, json.dumps(data, ensure_ascii=False), now),
                 )
         conn.commit()
     return True

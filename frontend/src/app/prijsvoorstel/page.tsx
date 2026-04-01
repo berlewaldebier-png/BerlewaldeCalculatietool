@@ -2,9 +2,9 @@ import { PageShell } from "@/components/PageShell";
 import { PrijsvoorstelWorkspace } from "@/components/PrijsvoorstelWorkspace";
 import {
   getBasisproducten,
-  getBerekeningen,
   getBieren,
   getDataset,
+  getKostprijsversies,
   getNavigation,
   getProductie,
   getPrijsvoorstellen,
@@ -21,6 +21,7 @@ export default async function PrijsvoorstelPage() {
     berekeningen,
     verkoopprijzen,
     channels,
+    kostprijsproductactiveringen,
     basisproducten,
     samengesteldeProducten
   ] = await Promise.all([
@@ -28,9 +29,10 @@ export default async function PrijsvoorstelPage() {
     getPrijsvoorstellen(),
     getProductie(),
     getBieren(),
-    getBerekeningen(),
+    getKostprijsversies(),
     getVerkoopprijzen(),
     getDataset("channels"),
+    getDataset("kostprijsproductactiveringen"),
     getBasisproducten(),
     getSamengesteldeProducten()
   ]);
@@ -54,6 +56,7 @@ export default async function PrijsvoorstelPage() {
         berekeningen={berekeningen}
         verkoopprijzen={verkoopprijzen}
         channels={channels}
+        kostprijsproductactiveringen={kostprijsproductactiveringen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
       />

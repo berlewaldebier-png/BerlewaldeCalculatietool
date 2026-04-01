@@ -73,6 +73,8 @@ type ResultaatSnapshot = {
   };
 };
 
+const KOSTPRIJSVERSIES_API = `${API_BASE_URL}/data/kostprijsversies`;
+
 function createId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -118,6 +120,16 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
   const row = cloneRecord(raw);
   row.id = String(row.id ?? createId());
   row.status = String(row.status ?? "concept");
+  row.jaar = Number(row.jaar ?? (row.basisgegevens as GenericRecord | undefined)?.jaar ?? new Date().getFullYear());
+  row.versie_nummer = Number(row.versie_nummer ?? 0);
+  row.type = String(row.type ?? "");
+  row.kostprijs = Number(row.kostprijs ?? 0);
+  row.brontype = String(row.brontype ?? "stam");
+  row.bron_id = String(row.bron_id ?? "");
+  row.effectief_vanaf = String(row.effectief_vanaf ?? "");
+  row.is_actief = Boolean(row.is_actief ?? false);
+  row.aangemaakt_op = String(row.aangemaakt_op ?? row.created_at ?? "");
+  row.aangepast_op = String(row.aangepast_op ?? row.updated_at ?? "");
   row.record_type = String(row.record_type ?? "kostprijsberekening");
   row.calculation_variant = String(row.calculation_variant ?? "origineel");
   row.last_completed_step = Number(row.last_completed_step ?? 1);
@@ -188,6 +200,14 @@ function createEmptyBerekening(): GenericRecord {
   return normalizeBerekening({
     id: createId(),
     bier_id: "",
+    jaar: 0,
+    versie_nummer: 0,
+    type: "productie",
+    kostprijs: 0,
+    brontype: "stam",
+    bron_id: "",
+    effectief_vanaf: "",
+    is_actief: false,
     record_type: "kostprijsberekening",
     calculation_variant: "origineel",
     bron_berekening_id: "",
@@ -215,6 +235,8 @@ function createEmptyBerekening(): GenericRecord {
     last_completed_step: 1,
     created_at: "",
     updated_at: "",
+    aangemaakt_op: "",
+    aangepast_op: "",
     finalized_at: ""
   });
 }
@@ -344,7 +366,8 @@ function getProductUnitLabel(
 function getProductUnitOptions(
   year: number,
   basisproducten: GenericRecord[],
-  samengesteldeProducten: GenericRecord[]
+  samengesteldeProducten: GenericRecord[],
+  fallbackRow?: GenericRecord
 ): ProductUnitOption[] {
   const basis = basisproducten
     .map((row) => ({
@@ -362,7 +385,60 @@ function getProductUnitOptions(
       source: row
     }));
 
-  return [...basis, ...samengesteld].sort((left, right) => left.label.localeCompare(right.label));
+  const fallbackProducten =
+    typeof fallbackRow?.resultaat_snapshot === "object" && fallbackRow.resultaat_snapshot !== null
+      ? (((fallbackRow.resultaat_snapshot as GenericRecord).producten as GenericRecord) ?? {})
+      : {};
+  const fallbackBasis = Array.isArray(fallbackProducten.basisproducten)
+    ? (fallbackProducten.basisproducten as GenericRecord[])
+    : [];
+  const fallbackSamengesteld = Array.isArray(fallbackProducten.samengestelde_producten)
+    ? (fallbackProducten.samengestelde_producten as GenericRecord[])
+    : [];
+
+  const fallbackOptions: ProductUnitOption[] =
+    basis.length === 0 && samengesteld.length === 0
+      ? [
+          ...fallbackBasis.map((row) => ({
+            id: String(
+              row.product_id ?? row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""
+            ),
+            label: String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""),
+            litersPerUnit: Number(row.liters_per_product ?? row.inhoud_per_eenheid_liter ?? 0),
+            source: {
+              ...row,
+              id: String(
+                row.product_id ?? row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""
+              ),
+              omschrijving: String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""),
+              inhoud_per_eenheid_liter: Number(
+                row.liters_per_product ?? row.inhoud_per_eenheid_liter ?? 0
+              )
+            }
+          })),
+          ...fallbackSamengesteld.map((row) => ({
+            id: String(
+              row.product_id ?? row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""
+            ),
+            label: String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""),
+            litersPerUnit: Number(row.liters_per_product ?? row.totale_inhoud_liter ?? 0),
+            source: {
+              ...row,
+              id: String(
+                row.product_id ?? row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""
+              ),
+              omschrijving: String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""),
+              totale_inhoud_liter: Number(
+                row.liters_per_product ?? row.totale_inhoud_liter ?? 0
+              )
+            }
+          }))
+        ]
+      : [];
+
+  return [...basis, ...samengesteld, ...fallbackOptions]
+    .filter((option, index, options) => option.id && options.findIndex((item) => item.id === option.id) === index)
+    .sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function toSummaryValue(value: unknown): string | number {
@@ -399,11 +475,12 @@ function getFactuurRegelLiters(
   regel: GenericRecord,
   year: number,
   basisproducten: GenericRecord[],
-  samengesteldeProducten: GenericRecord[]
+  samengesteldeProducten: GenericRecord[],
+  fallbackRow?: GenericRecord
 ) {
   const aantal = Number(regel.aantal ?? 0);
   const eenheidId = String(regel.eenheid ?? "").trim();
-  const options = getProductUnitOptions(year, basisproducten, samengesteldeProducten);
+  const options = getProductUnitOptions(year, basisproducten, samengesteldeProducten, fallbackRow);
   const match = options.find((option) => option.id === eenheidId);
 
   if (match && aantal > 0) {
@@ -452,9 +529,16 @@ function calculateInkoopPrijsPerLiter(
   extraKostenPerRegel: number,
   year: number,
   basisproducten: GenericRecord[],
-  samengesteldeProducten: GenericRecord[]
+  samengesteldeProducten: GenericRecord[],
+  fallbackRow?: GenericRecord
 ) {
-  const liters = getFactuurRegelLiters(regel, year, basisproducten, samengesteldeProducten);
+  const liters = getFactuurRegelLiters(
+    regel,
+    year,
+    basisproducten,
+    samengesteldeProducten,
+    fallbackRow
+  );
   if (liters <= 0) {
     return 0;
   }
@@ -476,7 +560,7 @@ function getSelectedInkoopProductRows(
     Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : []
   );
   const regels = factuurRegelsUitFacturen.length > 0 ? factuurRegelsUitFacturen : topLevelFactuurregels;
-  const options = getProductUnitOptions(year, basisproducten, samengesteldeProducten);
+  const options = getProductUnitOptions(year, basisproducten, samengesteldeProducten, row);
   const optionMap = new Map(options.map((option) => [option.id, option.source]));
   const seen = new Set<string>();
   const selected: GenericRecord[] = [];
@@ -569,7 +653,7 @@ function getSelectedInkoopProducts(
   samengesteldeProducten: GenericRecord[]
 ): SelectedInkoopProduct[] {
   const enrichedRegels = getInkoopFactuurregels(row);
-  const options = getProductUnitOptions(year, basisproducten, samengesteldeProducten);
+  const options = getProductUnitOptions(year, basisproducten, samengesteldeProducten, row);
   const optionMap = new Map(options.map((option) => [option.id, option.source]));
   const grouped = new Map<string, { product: GenericRecord; hoogstePrijsPerEenheid: number }>();
 
@@ -674,7 +758,7 @@ function calculateVariabeleKostenPerLiter(
 
     const totaleLiters = enrichedRegels.reduce(
       (sum, item) =>
-        sum + getFactuurRegelLiters(item.regel, year, basisproducten, samengesteldeProducten),
+        sum + getFactuurRegelLiters(item.regel, year, basisproducten, samengesteldeProducten, row),
       0
     );
     const totaleKosten = enrichedRegels.reduce(
@@ -938,7 +1022,7 @@ export function BerekeningenWizard({
         next.resultaat_snapshot = buildResultaatSnapshot(row);
         return next;
       });
-      const response = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+      const response = await fetch(KOSTPRIJSVERSIES_API, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -946,7 +1030,7 @@ export function BerekeningenWizard({
       if (!response.ok) {
         throw new Error("Opslaan mislukt");
       }
-      const refreshedResponse = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+      const refreshedResponse = await fetch(KOSTPRIJSVERSIES_API, {
         cache: "no-store"
       });
       const refreshedRows = refreshedResponse.ok
@@ -955,7 +1039,7 @@ export function BerekeningenWizard({
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
       onRowsChange?.(refreshedRows);
-      setStatus("Berekeningen opgeslagen.");
+      setStatus("Kostprijsversies opgeslagen.");
       setStatusTone("success");
       return true;
     } catch {
@@ -984,7 +1068,7 @@ export function BerekeningenWizard({
         next.resultaat_snapshot = buildResultaatSnapshot(next);
         return next;
       });
-      const response = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+      const response = await fetch(KOSTPRIJSVERSIES_API, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -992,7 +1076,7 @@ export function BerekeningenWizard({
       if (!response.ok) {
         throw new Error("Afronden mislukt");
       }
-      const refreshedResponse = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+      const refreshedResponse = await fetch(KOSTPRIJSVERSIES_API, {
         cache: "no-store"
       });
       const refreshedRows = refreshedResponse.ok
@@ -1001,7 +1085,7 @@ export function BerekeningenWizard({
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
       onRowsChange?.(refreshedRows);
-      setStatus("Berekening definitief gemaakt.");
+      setStatus("Kostprijsversie definitief gemaakt.");
       setStatusTone("success");
       return true;
     } catch {
@@ -1019,7 +1103,7 @@ export function BerekeningenWizard({
     setIsSaving(true);
     try {
       const payload = rowsRef.current.filter((row) => String(row.id) !== String(current.id));
-      const response = await fetch(`${API_BASE_URL}/data/berekeningen`, {
+      const response = await fetch(KOSTPRIJSVERSIES_API, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1036,6 +1120,36 @@ export function BerekeningenWizard({
     } catch {
       setStatus("Verwijderen mislukt.");
       setStatusTone("error");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleActivate() {
+    setStatus("");
+    setStatusTone(null);
+    setIsSaving(true);
+    try {
+      const response = await fetch(`${KOSTPRIJSVERSIES_API}/${String(current.id ?? "")}/activate`, {
+        method: "POST"
+      });
+      if (!response.ok) {
+        throw new Error("Activeren mislukt");
+      }
+      const refreshedResponse = await fetch(KOSTPRIJSVERSIES_API, { cache: "no-store" });
+      const refreshedRows = refreshedResponse.ok
+        ? ((await refreshedResponse.json()) as GenericRecord[])
+        : rowsRef.current;
+      rowsRef.current = refreshedRows;
+      setRows(refreshedRows);
+      onRowsChange?.(refreshedRows);
+      setStatus("Kostprijsversie geactiveerd.");
+      setStatusTone("success");
+      return true;
+    } catch {
+      setStatus("Activeren mislukt.");
+      setStatusTone("error");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -1481,7 +1595,7 @@ export function BerekeningenWizard({
       ? (inkoop.factuurregels as GenericRecord[])
       : [];
     const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));
-    const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten);
+    const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten, current);
     const extraKostenPerRegel = calculateInkoopExtraKostenPerRegel(inkoop, factuurregels.length);
     return (
       <div className="wizard-stack">
@@ -1555,7 +1669,8 @@ export function BerekeningenWizard({
                             regels[index],
                             jaar,
                             basisproducten,
-                            samengesteldeProducten
+                            samengesteldeProducten,
+                            draft
                           );
                         })
                       }
@@ -1575,7 +1690,8 @@ export function BerekeningenWizard({
                             regels[index],
                             jaar,
                             basisproducten,
-                            samengesteldeProducten
+                            samengesteldeProducten,
+                            draft
                           );
                         })
                       }
@@ -1611,7 +1727,13 @@ export function BerekeningenWizard({
                       type="number"
                       step="0.01"
                       value={formatDecimalValue(
-                        getFactuurRegelLiters(regel, jaar, basisproducten, samengesteldeProducten) ?? 0
+                        getFactuurRegelLiters(
+                          regel,
+                          jaar,
+                          basisproducten,
+                          samengesteldeProducten,
+                          current
+                        ) ?? 0
                       )}
                       readOnly
                     />
@@ -1645,7 +1767,8 @@ export function BerekeningenWizard({
                           extraKostenPerRegel,
                           jaar,
                           basisproducten,
-                          samengesteldeProducten
+                          samengesteldeProducten,
+                          current
                         )
                       )}
                       readOnly
@@ -1707,7 +1830,7 @@ export function BerekeningenWizard({
     const facturen = Array.isArray(inkoop.facturen) ? (inkoop.facturen as GenericRecord[]) : [];
     const gekoppeldeFacturen = facturen.slice(1);
     const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));
-    const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten);
+    const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten, current);
     const gekoppeldeRegels = gekoppeldeFacturen.flatMap((factuur, factuurIndex) => {
       const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
       const extraKostenPerRegel =
@@ -1923,7 +2046,22 @@ export function BerekeningenWizard({
                 <TrashIcon />
               </button>
             ) : null}
-            <span className="pill">{String(current.status ?? "concept")}</span>
+            {String(current.status ?? "") === "definitief" && !Boolean(current.is_actief) ? (
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                disabled={isSaving}
+                onClick={() => {
+                  void handleActivate();
+                }}
+              >
+                Activeer
+              </button>
+            ) : null}
+            <span className="pill">
+              {String(current.status ?? "concept")}
+              {Boolean(current.is_actief) ? " | actief" : ""}
+            </span>
           </div>
         </div>
 

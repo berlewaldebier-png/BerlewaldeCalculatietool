@@ -2,7 +2,7 @@ import { KostprijsBeheerWorkspace } from "@/components/KostprijsBeheerWorkspace"
 import { PageShell } from "@/components/PageShell";
 import {
   getBasisproducten,
-  getBerekeningen,
+  getKostprijsversies,
   getNavigation,
   getProductie,
   getSamengesteldeProducten,
@@ -21,7 +21,7 @@ export default async function NieuweKostprijsberekeningPage() {
     tarievenHeffingen
   ] = await Promise.all([
     getNavigation(),
-    getBerekeningen(),
+    getKostprijsversies(),
     getBasisproducten(),
     getSamengesteldeProducten(),
     getProductie(),
@@ -32,7 +32,7 @@ export default async function NieuweKostprijsberekeningPage() {
   return (
     <PageShell
       title="Kostprijs beheren"
-      subtitle="Start een nieuwe berekening of open een bestaand dossier en werk het verder uit in de wizard."
+      subtitle="Start een nieuwe kostprijsversie of open een bestaand dossier en werk het verder uit in de wizard."
       activePath="/nieuwe-kostprijsberekening"
       navigation={navigation}
     >

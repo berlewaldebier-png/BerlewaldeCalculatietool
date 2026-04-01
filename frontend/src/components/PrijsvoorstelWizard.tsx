@@ -15,6 +15,7 @@ type PrijsvoorstelWizardProps = {
   berekeningen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
   channels: GenericRecord[];
+  kostprijsproductactiveringen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   initialSelectedId?: string;
@@ -59,6 +60,7 @@ type ProductDefinition = {
 type ProductSnapshotRow = {
   bierKey: string;
   biernaam: string;
+  kostprijsversieId: string;
   productId: string;
   productType: "basis" | "samengesteld";
   productKey: string;
@@ -77,6 +79,7 @@ type LitersDisplayRow = {
   id: string;
   bierKey: string;
   biernaam: string;
+  kostprijsversieId: string;
   included: boolean;
   productId?: string;
   productType?: "basis" | "samengesteld";
@@ -104,6 +107,7 @@ type ProductDisplayRow = {
   id: string;
   bierKey: string;
   biernaam: string;
+  kostprijsversieId: string;
   included: boolean;
   productId: string;
   productType: "basis" | "samengesteld";
@@ -141,7 +145,7 @@ const LITERS_BASIS_OPTIONS = [
   {
     value: "hoogste_kostprijs",
     label: "Hoogste kostprijs algemeen",
-    description: "Gebruik de hoogste bekende kostprijs van alle definitieve bieren in dit jaar."
+    description: "Gebruik de hoogste bekende kostprijs van alle actieve kostprijsversies in dit jaar."
   }
 ];
 
@@ -239,6 +243,38 @@ function firstPositiveNumber(...values: unknown[]) {
     }
   }
   return 0;
+}
+
+function getEnrichedInkoopFactuurregels(berekening: GenericRecord) {
+  const inkoop = (((berekening.invoer as GenericRecord | undefined)?.inkoop as GenericRecord | undefined) ??
+    {}) as GenericRecord;
+  const topLevelFactuurregels = Array.isArray(inkoop.factuurregels)
+    ? (inkoop.factuurregels as GenericRecord[])
+    : [];
+  const facturen = Array.isArray(inkoop.facturen) ? (inkoop.facturen as GenericRecord[]) : [];
+  const factuurRegelsUitFacturen = facturen.flatMap((factuur) => {
+    const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
+    const extraPerRegel =
+      regels.length > 0
+        ? (toNumber(factuur.verzendkosten, 0) + toNumber(factuur.overige_kosten, 0)) / regels.length
+        : 0;
+    return regels.map((regel) => ({ regel, extraKostenPerRegel: extraPerRegel }));
+  });
+
+  if (factuurRegelsUitFacturen.length > 0) {
+    return factuurRegelsUitFacturen;
+  }
+
+  const topLevelExtraPerRegel =
+    topLevelFactuurregels.length > 0
+      ? (toNumber(inkoop.verzendkosten, 0) + toNumber(inkoop.overige_kosten, 0)) /
+        topLevelFactuurregels.length
+      : 0;
+
+  return topLevelFactuurregels.map((regel) => ({
+    regel,
+    extraKostenPerRegel: topLevelExtraPerRegel
+  }));
 }
 
 function formatEuro(value: unknown) {
@@ -347,6 +383,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
   const normalizeProductRows = Array.isArray(raw.product_rows)
     ? (raw.product_rows as GenericRecord[]).map((row) => ({
         ...row,
+        kostprijsversie_id: String(row.kostprijsversie_id ?? ""),
         included: isIncluded(row.included),
         cost_at_quote: toNumber(row.cost_at_quote, 0),
         sales_price_at_quote: toNumber(row.sales_price_at_quote, 0),
@@ -362,6 +399,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
   const normalizeBeerRows = Array.isArray(raw.beer_rows)
     ? (raw.beer_rows as GenericRecord[]).map((row) => ({
         ...row,
+        kostprijsversie_id: String(row.kostprijsversie_id ?? ""),
         included: isIncluded(row.included),
         cost_at_quote: toNumber(row.cost_at_quote, 0),
         sales_price_at_quote: toNumber(row.sales_price_at_quote, 0),
@@ -404,6 +442,9 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
     selected_bier_ids: Array.isArray(raw.selected_bier_ids)
       ? raw.selected_bier_ids.map((value) => String(value ?? ""))
       : [],
+    kostprijsversie_ids: Array.isArray(raw.kostprijsversie_ids)
+      ? raw.kostprijsversie_ids.map((value) => String(value ?? "")).filter(Boolean)
+      : [],
     deleted_product_refs: Array.isArray(raw.deleted_product_refs) ? raw.deleted_product_refs : [],
     staffels: Array.isArray(raw.staffels) ? raw.staffels : [],
     product_rows: normalizeProductRows,
@@ -436,6 +477,7 @@ function createEmptyPrijsvoorstel(): GenericRecord {
     groothandel_marge_pct: 0,
     bier_id: "",
     selected_bier_ids: [],
+    kostprijsversie_ids: [],
     deleted_product_refs: [],
     staffels: [],
     product_rows: [],
@@ -469,6 +511,7 @@ export function PrijsvoorstelWizard({
   berekeningen,
   verkoopprijzen,
   channels,
+  kostprijsproductactiveringen,
   basisproducten,
   samengesteldeProducten,
   initialSelectedId,
@@ -624,45 +667,75 @@ export function PrijsvoorstelWizard({
     return map;
   }, [basisproducten, samengesteldeProducten, currentYear]);
 
-  const definitiveBerekeningen = useMemo(
+  const definitieveKostprijsversies = useMemo(
     () => berekeningen.filter((record) => normalizeKey(record.status) === "definitief"),
     [berekeningen]
   );
 
-  const definitiveBerekeningenCurrentYear = useMemo(
+  const definitieveKostprijsversiesCurrentYear = useMemo(
     () =>
-      berekeningen.filter((record) => {
-        const statusValue = normalizeKey(record.status);
-        const jaar = Number((record.basisgegevens as GenericRecord | undefined)?.jaar ?? 0);
-        return statusValue === "definitief" && jaar === currentYear;
+      definitieveKostprijsversies.filter((record) => {
+        const jaar = Number(record.jaar ?? (record.basisgegevens as GenericRecord | undefined)?.jaar ?? 0);
+        return jaar === currentYear;
       }),
-    [berekeningen, currentYear]
+    [definitieveKostprijsversies, currentYear]
   );
 
-  const definitiveBerekeningenHistoryWindow = useMemo(() => {
-    const minimumYear = currentYear - 1;
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
+  const kostprijsproductActiveringenCurrentYear = useMemo(
+    () =>
+      (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).filter((row) => {
+        const jaar = Number(row.jaar ?? 0);
+        return jaar === currentYear;
+      }),
+    [kostprijsproductactiveringen, currentYear]
+  );
 
-    return definitiveBerekeningen.filter((record) => {
-      const jaar = Number((record.basisgegevens as GenericRecord | undefined)?.jaar ?? 0);
-      if (jaar < minimumYear) {
-        return false;
+  const actieveKostprijsversieIdsCurrentYear = useMemo(() => {
+    const ids = new Set<string>();
+    for (const row of kostprijsproductActiveringenCurrentYear) {
+      const id = String(row.kostprijsversie_id ?? "");
+      if (id) {
+        ids.add(id);
       }
-
-      const knownAt = String(record.finalized_at ?? record.updated_at ?? "");
-      if (!knownAt) {
-        return true;
+    }
+    if (ids.size === 0) {
+      for (const record of definitieveKostprijsversiesCurrentYear) {
+        if (Boolean(record.is_actief)) {
+          ids.add(String(record.id ?? ""));
+        }
       }
+    }
+    if (ids.size === 0) {
+      const latestByBeer = new Map<string, GenericRecord>();
+      for (const record of [...definitieveKostprijsversiesCurrentYear].sort((left, right) =>
+        String(right.effectief_vanaf ?? right.finalized_at ?? right.updated_at ?? "").localeCompare(
+          String(left.effectief_vanaf ?? left.finalized_at ?? left.updated_at ?? "")
+        )
+      )) {
+        const bierId = String(record.bier_id ?? "");
+        if (!bierId || latestByBeer.has(bierId)) {
+          continue;
+        }
+        latestByBeer.set(bierId, record);
+      }
+      for (const record of latestByBeer.values()) {
+        ids.add(String(record.id ?? ""));
+      }
+    }
+    return ids;
+  }, [kostprijsproductActiveringenCurrentYear, definitieveKostprijsversiesCurrentYear]);
 
-      const parsed = new Date(knownAt);
-      return !Number.isNaN(parsed.getTime()) && parsed <= today;
-    });
-  }, [currentYear, definitiveBerekeningen]);
+  const actieveKostprijsversiesCurrentYear = useMemo(
+    () =>
+      definitieveKostprijsversiesCurrentYear.filter((record) =>
+        actieveKostprijsversieIdsCurrentYear.has(String(record.id ?? ""))
+      ),
+    [actieveKostprijsversieIdsCurrentYear, definitieveKostprijsversiesCurrentYear]
+  );
 
   const bierOptions = useMemo<SelectOption[]>(() => {
     const seen = new Set<string>();
-    return definitiveBerekeningenCurrentYear
+    const options = actieveKostprijsversiesCurrentYear
       .map((record) => {
         const bierKey = String(record.bier_id ?? "");
         if (!bierKey || seen.has(bierKey)) {
@@ -677,31 +750,107 @@ export function PrijsvoorstelWizard({
       })
       .filter((value): value is SelectOption => value !== null)
       .sort((left, right) => left.label.localeCompare(right.label, "nl-NL"));
-  }, [bierNameMap, definitiveBerekeningenCurrentYear]);
+
+    const selectedBeerIds = Array.isArray(current.selected_bier_ids)
+      ? (current.selected_bier_ids as string[]).filter(Boolean)
+      : [];
+    const currentBeerId = String(current.bier_id ?? "");
+    for (const bierId of [currentBeerId, ...selectedBeerIds]) {
+      if (!bierId || seen.has(bierId)) {
+        continue;
+      }
+      options.push({
+        value: bierId,
+        label: bierNameMap.get(bierId) || bierId
+      });
+      seen.add(bierId);
+    }
+
+    return options.sort((left, right) => left.label.localeCompare(right.label, "nl-NL"));
+  }, [actieveKostprijsversiesCurrentYear, bierNameMap, current.bier_id, current.selected_bier_ids]);
 
   const verkoopstrategieWindow = useMemo(
     () => verkoopprijzen.filter((row) => Number(row.jaar ?? 0) <= currentYear),
     [verkoopprijzen, currentYear]
   );
 
-  function getLatestBerekeningForBier(bierId: string) {
-    const currentYearMatches = definitiveBerekeningenCurrentYear.filter(
-      (record) => String(record.bier_id ?? "") === bierId
-    );
-    const fallbackMatches = definitiveBerekeningenHistoryWindow.filter(
-      (record) => String(record.bier_id ?? "") === bierId
-    );
+  function getKostprijsversieById(kostprijsversieId: string) {
+    return berekeningen.find((record) => String(record.id ?? "") === String(kostprijsversieId ?? ""));
+  }
 
-    return (currentYearMatches.length > 0 ? currentYearMatches : fallbackMatches)
+  function getActiveProductActivation(bierId: string, productId: string) {
+    const matches = kostprijsproductActiveringenCurrentYear.filter(
+      (row) =>
+        String(row.bier_id ?? "") === String(bierId ?? "") &&
+        String(row.product_id ?? "") === String(productId ?? "")
+    );
+    if (matches.length === 0) {
+      return null;
+    }
+    return [...matches].sort((left, right) =>
+      String(right.effectief_vanaf ?? right.updated_at ?? "").localeCompare(
+        String(left.effectief_vanaf ?? left.updated_at ?? "")
+      )
+    )[0];
+  }
+
+  function getActiveKostprijsversieForBier(bierId: string) {
+    const activationVersionIds = kostprijsproductActiveringenCurrentYear
+      .filter((row) => String(row.bier_id ?? "") === bierId)
+      .map((row) => String(row.kostprijsversie_id ?? ""))
+      .filter(Boolean);
+    if (activationVersionIds.length > 0) {
+      const activationSet = new Set(activationVersionIds);
+      return definitieveKostprijsversies
+        .filter((record) => activationSet.has(String(record.id ?? "")))
+        .sort((left, right) =>
+          String(right.effectief_vanaf ?? right.finalized_at ?? right.updated_at ?? "").localeCompare(
+            String(left.effectief_vanaf ?? left.finalized_at ?? left.updated_at ?? "")
+          )
+        )[0];
+    }
+    return actieveKostprijsversiesCurrentYear
+      .filter((record) => String(record.bier_id ?? "") === bierId)
       .sort((left, right) =>
-        String(right.finalized_at ?? right.updated_at ?? "").localeCompare(
-          String(left.finalized_at ?? left.updated_at ?? "")
+        String(right.effectief_vanaf ?? right.finalized_at ?? right.updated_at ?? "").localeCompare(
+          String(left.effectief_vanaf ?? left.finalized_at ?? left.updated_at ?? "")
         )
       )[0];
   }
 
+  function getEffectiveKostprijsversieForBier(bierId: string, kostprijsversieId?: string) {
+    if (kostprijsversieId) {
+      const fixed = getKostprijsversieById(kostprijsversieId);
+      if (fixed) {
+        return fixed;
+      }
+    }
+    return getActiveKostprijsversieForBier(bierId);
+  }
+
+  function getEffectiveKostprijsversieForProduct(
+    bierId: string,
+    productId: string,
+    fallbackKostprijsversieId?: string
+  ) {
+    if (fallbackKostprijsversieId) {
+      const fixed = getKostprijsversieById(fallbackKostprijsversieId);
+      if (fixed) {
+        return fixed;
+      }
+    }
+    const activation = getActiveProductActivation(bierId, productId);
+    if (activation) {
+      const activeVersion = getKostprijsversieById(String(activation.kostprijsversie_id ?? ""));
+      if (activeVersion) {
+        return activeVersion;
+      }
+    }
+    return getActiveKostprijsversieForBier(bierId);
+  }
+
   function getBerekeningTypeForBier(bierId: string) {
-    const berekening = getLatestBerekeningForBier(bierId);
+    const berekening = getActiveKostprijsversieForBier(bierId);
     return normalizeKey((berekening?.soort_berekening as GenericRecord | undefined)?.type);
   }
 
@@ -845,10 +994,11 @@ export function PrijsvoorstelWizard({
   }
 
   function getHighestCostForBier(bierId: string) {
-    return definitiveBerekeningenHistoryWindow.reduce<{
+    return actieveKostprijsversiesCurrentYear.reduce<{
       cost: number;
       bronjaar: number;
       biernaam: string;
+      kostprijsversieId: string;
     }>(
       (currentHighest, record) => {
         if (String(record.bier_id ?? "") !== bierId) {
@@ -861,25 +1011,27 @@ export function PrijsvoorstelWizard({
         if (cost > currentHighest.cost) {
           return {
             cost,
-            bronjaar: Number((record.basisgegevens as GenericRecord | undefined)?.jaar ?? currentYear),
+            bronjaar: Number(record.jaar ?? (record.basisgegevens as GenericRecord | undefined)?.jaar ?? currentYear),
             biernaam:
               normalizeText((record.basisgegevens as GenericRecord | undefined)?.biernaam) ||
               bierNameMap.get(bierId) ||
-              bierId
+              bierId,
+            kostprijsversieId: String(record.id ?? "")
           };
         }
         return currentHighest;
       },
-      { cost: 0, bronjaar: currentYear, biernaam: bierNameMap.get(bierId) || bierId }
+      { cost: 0, bronjaar: currentYear, biernaam: bierNameMap.get(bierId) || bierId, kostprijsversieId: "" }
     );
   }
 
   function getHighestCostOverall() {
-    return definitiveBerekeningenHistoryWindow.reduce<{
+    return actieveKostprijsversiesCurrentYear.reduce<{
       cost: number;
       bierKey: string;
       biernaam: string;
       bronjaar: number;
+      kostprijsversieId: string;
     }>(
       (currentHighest, record) => {
         const bierKey = String(record.bier_id ?? "");
@@ -895,24 +1047,25 @@ export function PrijsvoorstelWizard({
               normalizeText((record.basisgegevens as GenericRecord | undefined)?.biernaam) ||
               bierNameMap.get(bierKey) ||
               bierKey,
-            bronjaar: Number((record.basisgegevens as GenericRecord | undefined)?.jaar ?? currentYear)
+            bronjaar: Number(record.jaar ?? (record.basisgegevens as GenericRecord | undefined)?.jaar ?? currentYear),
+            kostprijsversieId: String(record.id ?? "")
           };
         }
         return currentHighest;
       },
-      { cost: 0, bierKey: "", biernaam: "-", bronjaar: currentYear }
+      { cost: 0, bierKey: "", biernaam: "-", bronjaar: currentYear, kostprijsversieId: "" }
     );
   }
 
   function getHighestLiterRowsForBier(bierId: string) {
     const highestByPackaging = new Map<string, ProductSnapshotRow>();
 
-    for (const record of definitiveBerekeningenHistoryWindow) {
+    for (const record of actieveKostprijsversiesCurrentYear) {
       if (String(record.bier_id ?? "") !== bierId) {
         continue;
       }
 
-      for (const snapshotRow of getSnapshotProductRowsForBier(String(record.bier_id ?? ""))) {
+      for (const snapshotRow of getSnapshotProductRowsForBier(String(record.bier_id ?? ""), String(record.id ?? ""))) {
         if (snapshotRow.litersPerProduct <= 0) {
           continue;
         }
@@ -936,12 +1089,10 @@ export function PrijsvoorstelWizard({
     return [...highestByPackaging.values()];
   }
 
-  function getSnapshotProductRowsForBier(bierId: string): ProductSnapshotRow[] {
-    const berekening = getLatestBerekeningForBier(bierId);
-    if (!berekening) {
-      return [];
-    }
-
+  function getSnapshotProductRowsFromBerekening(
+    bierId: string,
+    berekening: GenericRecord
+  ): ProductSnapshotRow[] {
     const biernaam =
       normalizeText((berekening.basisgegevens as GenericRecord | undefined)?.biernaam) ||
       bierNameMap.get(bierId) ||
@@ -963,6 +1114,39 @@ export function PrijsvoorstelWizard({
         row
       ])
     );
+    const invoicePriceByUnitId = new Map<
+      string,
+      { costPerPiece: number; litersPerProduct: number; sourcePackaging: string }
+    >();
+    for (const { regel, extraKostenPerRegel } of getEnrichedInkoopFactuurregels(berekening)) {
+      const unitId = String(regel.eenheid ?? "").trim();
+      if (!unitId) {
+        continue;
+      }
+      const source = basisById.get(unitId) ?? samengesteldById.get(unitId);
+      if (!source) {
+        continue;
+      }
+      const aantal = toNumber(regel.aantal, 0);
+      const costPerPiece =
+        aantal > 0 ? (toNumber(regel.subfactuurbedrag, 0) + extraKostenPerRegel) / aantal : 0;
+      if (costPerPiece <= 0) {
+        continue;
+      }
+      const litersPerProduct = firstPositiveNumber(
+        regel.liters && aantal > 0 ? toNumber(regel.liters, 0) / aantal : 0,
+        source.inhoud_per_eenheid_liter,
+        source.totale_inhoud_liter
+      );
+      const current = invoicePriceByUnitId.get(unitId);
+      if (!current || costPerPiece > current.costPerPiece) {
+        invoicePriceByUnitId.set(unitId, {
+          costPerPiece,
+          litersPerProduct,
+          sourcePackaging: String(source.omschrijving ?? "")
+        });
+      }
+    }
     const resolveProductDefinition = (
       productId: string,
       productType: string,
@@ -1001,6 +1185,7 @@ export function PrijsvoorstelWizard({
       return {
         bierKey: bierId,
         biernaam,
+        kostprijsversieId: String(berekening.id ?? ""),
         productId: definitionByPackaging?.id ?? "",
         productType: explicitKind,
         productKey: `${explicitKind}|${normalizeKey(verpakking)}`,
@@ -1019,13 +1204,7 @@ export function PrijsvoorstelWizard({
 
     if (getBerekeningTypeForBier(bierId) === "inkoop") {
       const historicalSnapshotByPackaging = new Map<string, ProductSnapshotRow>();
-      for (const record of definitiveBerekeningenHistoryWindow) {
-        if (String(record.bier_id ?? "") !== bierId) {
-          continue;
-        }
-        if (normalizeKey((record.soort_berekening as GenericRecord | undefined)?.type) !== "inkoop") {
-          continue;
-        }
+      for (const record of [berekening]) {
 
         const historicalProducten =
           (record.resultaat_snapshot as GenericRecord | undefined)?.producten as GenericRecord | undefined;
@@ -1054,6 +1233,7 @@ export function PrijsvoorstelWizard({
           const candidate: ProductSnapshotRow = {
             bierKey: bierId,
             biernaam,
+            kostprijsversieId: String(record.id ?? ""),
             productId: definition?.id ?? "",
             productType: definition?.kind ?? "samengesteld",
             productKey: definition?.key ?? `samengesteld|${packagingKey}`,
@@ -1082,12 +1262,7 @@ export function PrijsvoorstelWizard({
       const snapshotByPackaging = new Map<string, ProductSnapshotRow>(
         snapshotRows.map((row) => [normalizeKey(row.verpakking), row])
       );
-      const facturen =
-        (((berekening.invoer as GenericRecord | undefined)?.inkoop as GenericRecord | undefined)
-          ?.facturen as GenericRecord[] | undefined) ?? [];
-      const factuurRegels = facturen.flatMap((factuur) =>
-        Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : []
-      );
+      const factuurRegels = getEnrichedInkoopFactuurregels(berekening).map(({ regel }) => regel);
 
       const seenUnitIds = new Set<string>();
       const resultRows = new Map<string, ProductSnapshotRow>();
@@ -1110,6 +1285,7 @@ export function PrijsvoorstelWizard({
           }
           const kind = basis ? "basis" : "samengesteld";
           const verpakking = String(source.omschrijving ?? "");
+          const invoicePrice = invoicePriceByUnitId.get(unitId);
           const snapshot =
             historicalSnapshotByPackaging.get(normalizeKey(verpakking)) ??
             snapshotByPackaging.get(normalizeKey(verpakking));
@@ -1118,17 +1294,20 @@ export function PrijsvoorstelWizard({
           rows.push({
             bierKey: bierId,
             biernaam,
+            kostprijsversieId: String(berekening.id ?? ""),
             productId: String(source.id ?? ""),
             productType: kind,
             productKey: `${kind}|${normalizeKey(verpakking)}`,
             verpakking,
             litersPerProduct: firstPositiveNumber(
               snapshot?.litersPerProduct,
+              invoicePrice?.litersPerProduct,
               source.inhoud_per_eenheid_liter,
               source.totale_inhoud_liter
             ),
-            costPerPiece: snapshot?.costPerPiece ?? 0,
-            sourcePackaging: snapshot?.sourcePackaging ?? verpakking
+            costPerPiece: snapshot?.costPerPiece ?? invoicePrice?.costPerPiece ?? 0,
+            sourcePackaging:
+              snapshot?.sourcePackaging ?? invoicePrice?.sourcePackaging ?? verpakking
           });
 
           if (!basis && Array.isArray(source.basisproducten)) {
@@ -1147,6 +1326,7 @@ export function PrijsvoorstelWizard({
               rows.push({
                 bierKey: bierId,
                 biernaam,
+                kostprijsversieId: String(berekening.id ?? ""),
                 productId: basisProductId,
                 productType: "basis",
                 productKey: `basis|${normalizeKey(basisVerpakking)}`,
@@ -1155,7 +1335,11 @@ export function PrijsvoorstelWizard({
                   basisSnapshot?.litersPerProduct,
                   basisRow.inhoud_per_eenheid_liter
                 ),
-                costPerPiece: basisSnapshot?.costPerPiece ?? 0,
+                costPerPiece:
+                  basisSnapshot?.costPerPiece ??
+                  (invoicePrice?.costPerPiece && toNumber(basisRow.aantal, 0) > 0
+                    ? invoicePrice.costPerPiece / toNumber(basisRow.aantal, 0)
+                    : 0),
                 sourcePackaging: basisSnapshot?.sourcePackaging ?? basisVerpakking,
                 derivedFromProductId: String(source.id ?? ""),
                 derivedFromProductType: kind,
@@ -1220,6 +1404,7 @@ export function PrijsvoorstelWizard({
       return {
         bierKey: bierId,
         biernaam,
+        kostprijsversieId: String(berekening.id ?? ""),
         productId: existing?.productId ?? product.id,
         productType: existing?.productType ?? product.kind,
         productKey: product.key,
@@ -1234,6 +1419,43 @@ export function PrijsvoorstelWizard({
         sourcePackaging: existing?.sourcePackaging ?? product.verpakking
       };
     });
+  }
+
+  function getSnapshotProductRowsForBier(bierId: string, fixedKostprijsversieId = ""): ProductSnapshotRow[] {
+    if (fixedKostprijsversieId) {
+      const fixed = getEffectiveKostprijsversieForBier(bierId, fixedKostprijsversieId);
+      return fixed ? getSnapshotProductRowsFromBerekening(bierId, fixed) : [];
+    }
+
+    const activeProductActivations = kostprijsproductActiveringenCurrentYear.filter(
+      (row) => String(row.bier_id ?? "") === String(bierId ?? "")
+    );
+    if (activeProductActivations.length === 0) {
+      const fallback = getActiveKostprijsversieForBier(bierId);
+      return fallback ? getSnapshotProductRowsFromBerekening(bierId, fallback) : [];
+    }
+
+    const rowsByProductKey = new Map<string, ProductSnapshotRow>();
+    for (const activation of activeProductActivations) {
+      const productId = String(activation.product_id ?? "");
+      const version = getEffectiveKostprijsversieForProduct(
+        bierId,
+        productId,
+        String(activation.kostprijsversie_id ?? "")
+      );
+      if (!version) {
+        continue;
+      }
+      const versionRows = getSnapshotProductRowsFromBerekening(bierId, version);
+      const matchingRow =
+        versionRows.find((row) => String(row.productId ?? "") === productId) ??
+        versionRows.find((row) => normalizeKey(row.verpakking) === normalizeKey(String(activation.verpakking ?? "")));
+      if (matchingRow) {
+        rowsByProductKey.set(matchingRow.productKey, matchingRow);
+      }
+    }
+
+    return [...rowsByProductKey.values()];
   }
 
   function buildPricingForChannel(
@@ -1294,6 +1516,7 @@ export function PrijsvoorstelWizard({
         product_id: snapshotRow.productId,
         product_type: snapshotRow.productType,
         bier_id: bierId,
+        kostprijsversie_id: String(existing?.kostprijsversie_id ?? snapshotRow.kostprijsversieId ?? ""),
         verpakking_label: snapshotRow.verpakking,
         liters: toNumber(existing?.liters, 0),
         korting_pct: toNumber(existing?.korting_pct, 0),
@@ -1328,6 +1551,7 @@ export function PrijsvoorstelWizard({
           bier_id: bierId,
           product_id: productId,
           product_type: productType,
+          kostprijsversie_id: String(existing?.kostprijsversie_id ?? row.kostprijsversie_id ?? ""),
           verpakking_label: verpakkingLabel,
           liters: toNumber(existing?.liters, 0),
           korting_pct: toNumber(existing?.korting_pct, toNumber(row.korting_pct, 0)),
@@ -1346,6 +1570,7 @@ export function PrijsvoorstelWizard({
       return {
         id: String(existing?.id ?? createId()),
         bier_id: bierId,
+        kostprijsversie_id: String(existing?.kostprijsversie_id ?? getActiveKostprijsversieForBier(bierId)?.id ?? ""),
         product_id: "",
         product_type: "",
         liters: toNumber(existing?.liters, 0),
@@ -1361,6 +1586,7 @@ export function PrijsvoorstelWizard({
       {
         id: String(first.id ?? createId()),
         bier_id: "",
+        kostprijsversie_id: String(first.kostprijsversie_id ?? ""),
         product_id: "",
         product_type: "",
         liters: toNumber(first.liters, 0),
@@ -1390,6 +1616,7 @@ export function PrijsvoorstelWizard({
           product_id: snapshotRow.productId,
           product_type: snapshotRow.productType,
           bier_id: bierId,
+          kostprijsversie_id: String(existing?.kostprijsversie_id ?? snapshotRow.kostprijsversieId ?? ""),
           verpakking_label: snapshotRow.verpakking,
           aantal: toNumber(existing?.aantal, 0),
           korting_pct: toNumber(existing?.korting_pct, 0),
@@ -1423,8 +1650,11 @@ export function PrijsvoorstelWizard({
 
       return sourceRows.map((row) => {
         const bierId = String(row.bier_id ?? current.bier_id ?? "");
+        const kostprijsversieId = String(row.kostprijsversie_id ?? "");
         const rowProductId = String(row.product_id ?? "");
-        const snapshots = getHighestLiterRowsForBier(bierId);
+        const snapshots = kostprijsversieId
+          ? getSnapshotProductRowsForBier(bierId, kostprijsversieId)
+          : getHighestLiterRowsForBier(bierId);
         const snapshot = snapshots.find(
           (item) =>
             (rowProductId && item.productId === rowProductId) ||
@@ -1465,6 +1695,7 @@ export function PrijsvoorstelWizard({
           id: String(row.id ?? ""),
           bierKey: bierId,
           biernaam: bierNameMap.get(bierId) || "-",
+          kostprijsversieId: snapshot?.kostprijsversieId ?? kostprijsversieId,
           included: isIncluded(row.included),
           productId: snapshot?.productId ?? rowProductId,
           productType:
@@ -1497,7 +1728,18 @@ export function PrijsvoorstelWizard({
     if (litersBasis === "meerdere_bieren") {
       return currentBeerRows.map((row) => {
         const bierId = String(row.bier_id ?? "");
-        const highest = getHighestCostForBier(bierId);
+        const fixedVersion = String(row.kostprijsversie_id ?? "");
+        const highest = fixedVersion
+          ? {
+              ...getHighestCostForBier(bierId),
+              cost: toNumber(
+                (getKostprijsversieById(fixedVersion)?.resultaat_snapshot as GenericRecord | undefined)
+                  ?.integrale_kostprijs_per_liter,
+                0
+              ),
+              kostprijsversieId: fixedVersion
+            }
+          : getHighestCostForBier(bierId);
         const kortingPct = toNumber(row.korting_pct, 0);
         const pricingByChannel = Object.fromEntries(
           selectedChannelOptions.map((option) => [option.value, buildPricingForChannel(highest.cost, bierId, "", "", "liter", option.value)])
@@ -1514,6 +1756,7 @@ export function PrijsvoorstelWizard({
           id: String(row.id ?? ""),
           bierKey: bierId,
           biernaam: highest.biernaam,
+          kostprijsversieId: highest.kostprijsversieId,
           included: isIncluded(row.included),
           productKey: "",
           verpakking: "Literregel",
@@ -1539,28 +1782,45 @@ export function PrijsvoorstelWizard({
 
     const overall = getHighestCostOverall();
     return currentBeerRows.map((row) => {
+      const fixedVersion = String(row.kostprijsversie_id ?? "");
+      const effectiveOverall = fixedVersion
+        ? {
+            ...overall,
+            cost: toNumber(
+              (getKostprijsversieById(fixedVersion)?.resultaat_snapshot as GenericRecord | undefined)
+                ?.integrale_kostprijs_per_liter,
+              0
+            ),
+            bierKey: String(getKostprijsversieById(fixedVersion)?.bier_id ?? overall.bierKey),
+            biernaam:
+              normalizeText((getKostprijsversieById(fixedVersion)?.basisgegevens as GenericRecord | undefined)?.biernaam) ||
+              overall.biernaam,
+            kostprijsversieId: fixedVersion
+          }
+        : overall;
       const kortingPct = toNumber(row.korting_pct, 0);
       const pricingByChannel = Object.fromEntries(
-        selectedChannelOptions.map((option) => [option.value, buildPricingForChannel(overall.cost, overall.bierKey, "", "", "liter", option.value)])
+        selectedChannelOptions.map((option) => [option.value, buildPricingForChannel(effectiveOverall.cost, effectiveOverall.bierKey, "", "", "liter", option.value)])
       ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
       const pricing = pricingByChannel[currentKanaal];
       const offerPrijs = pricing.offerPrice;
       const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const liters = toNumber(row.liters, 0);
       const omzet = liters * verkoopprijs;
-      const kosten = liters * overall.cost;
+      const kosten = liters * effectiveOverall.cost;
       const kortingEur = liters * Math.max(0, offerPrijs - verkoopprijs);
       const margeEur = omzet - kosten;
       return {
-        id: String(row.id ?? ""),
-        bierKey: overall.bierKey,
-        biernaam: overall.biernaam,
-        included: isIncluded(row.included),
+          id: String(row.id ?? ""),
+        bierKey: effectiveOverall.bierKey,
+        biernaam: effectiveOverall.biernaam,
+        kostprijsversieId: effectiveOverall.kostprijsversieId,
+          included: isIncluded(row.included),
         productKey: "",
         verpakking: "Algemene literregel",
         liters,
         kortingPct,
-        kostprijsPerLiter: overall.cost,
+        kostprijsPerLiter: effectiveOverall.cost,
         offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
         sellInByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellInPrice])),
         sellOutByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].sellOutPrice])),
@@ -1636,7 +1896,8 @@ export function PrijsvoorstelWizard({
 
     return currentProductRows.map((row) => {
       const bierId = String(row.bier_id ?? "");
-      const snapshotRowsForBier = getSnapshotProductRowsForBier(bierId);
+      const fixedKostprijsversieId = String(row.kostprijsversie_id ?? "");
+      const snapshotRowsForBier = getSnapshotProductRowsForBier(bierId, fixedKostprijsversieId);
       const explicitLabel = String(row.verpakking_label ?? "");
       const rowProductId = String(row.product_id ?? "");
       const rowProductType =
@@ -1736,6 +1997,7 @@ export function PrijsvoorstelWizard({
         id: String(row.id ?? ""),
         bierKey: bierId,
         biernaam: bierNameMap.get(bierId) || "-",
+        kostprijsversieId: snapshot?.kostprijsversieId ?? fixedKostprijsversieId,
         included: isIncluded(row.included),
         productId: snapshot?.productId ?? rowProductId,
         productType: snapshot?.productType ?? (rowProductType || "basis"),
@@ -1881,6 +2143,7 @@ export function PrijsvoorstelWizard({
         return {
           ...item,
           included: display.included,
+          kostprijsversie_id: display.kostprijsversieId,
           cost_at_quote: display.kostprijsPerStuk,
           sales_price_at_quote: display.offerPrijs,
           sell_out_price_at_quote: display.sellOutPrijs,
@@ -1902,6 +2165,7 @@ export function PrijsvoorstelWizard({
       return {
         ...item,
         included: display.included,
+        kostprijsversie_id: display.kostprijsversieId,
         cost_at_quote: display.kostprijsPerLiter,
         sales_price_at_quote: display.offerPrijs,
         sell_out_price_at_quote: display.sellOutPrijs,
@@ -1913,6 +2177,15 @@ export function PrijsvoorstelWizard({
         verpakking_label: display.verpakking
       };
     });
+
+    next.kostprijsversie_ids = [
+      ...new Set(
+        [
+          ...(Array.isArray(next.product_rows) ? (next.product_rows as GenericRecord[]).map((item) => String(item.kostprijsversie_id ?? "")) : []),
+          ...(Array.isArray(next.beer_rows) ? (next.beer_rows as GenericRecord[]).map((item) => String(item.kostprijsversie_id ?? "")) : [])
+        ].filter(Boolean)
+      )
+    ];
 
     return next;
   }
@@ -2419,7 +2692,7 @@ export function PrijsvoorstelWizard({
           ) : (
             <div className="editor-actions-group">
               <span className="muted">
-                Gebruik de hoogste bekende kostprijs van alle definitieve bieren in {currentYear}.
+                Gebruik de hoogste bekende kostprijs van alle actieve kostprijsversies in {currentYear}.
               </span>
               <button
                 type="button"
@@ -2642,8 +2915,8 @@ export function PrijsvoorstelWizard({
         <div className="module-card compact-card">
           <div className="module-card-title">Bieren voor dit voorstel</div>
           <div className="module-card-text">
-            Kies één of meer definitieve bieren. De app haalt daarna automatisch de gekoppelde
-            producten en kostprijzen op uit de bekende kostprijsberekeningen.
+            Kies één of meer bieren met een actieve kostprijsversie. De app haalt daarna automatisch de gekoppelde
+            producten en kostprijzen op uit de actieve kostprijsversies.
           </div>
           {renderBeerSelectionList(selectedBeerIds, handleBeerMultiSelection)}
         </div>
@@ -3120,7 +3393,7 @@ export function PrijsvoorstelWizard({
           <div className="module-card-title">Commerciële samenvatting</div>
           <div className="module-card-text">
             Hieronder zie je de kostprijzen en de afgeleide sell-in en sell-out per gekozen kanaal
-            op basis van de huidige kostprijsberekeningen en verkoopstrategie van {currentYear}.
+            op basis van de actieve kostprijsversies en verkoopstrategie van {currentYear}.
           </div>
         </div>
 

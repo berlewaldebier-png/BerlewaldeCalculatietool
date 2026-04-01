@@ -1,0 +1,376 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 4 /Kids [3 0 R 5 0 R 7 0 R 9 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 999 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 2696 >>
+stream
+BT
+/F1 9 Tf
+30 560 Td
+11 TL
+(Berlewalde CalculatieTool - Compleet Datamodel \(ERD\)) Tj
+T*
+() Tj
+T*
+(Legenda: PK = primary key, FK = foreign key, * = meerdere records) Tj
+T*
+() Tj
+T*
+(STAMDATA) Tj
+T*
+(+----------------------+        +-------------------------------+) Tj
+T*
+(| BIEREN               |        | CHANNELS                      |) Tj
+T*
+(| PK id                |        | PK id / code                  |) Tj
+T*
+(| biernaam             |        | naam, actief, volgorde        |) Tj
+T*
+(| stijl                |        | default_marge_pct             |) Tj
+T*
+(| alcoholpercentage    |        | default_factor                |) Tj
+T*
+(| belastingsoort       |        +-------------------------------+) Tj
+T*
+(| tarief_accijns       |) Tj
+T*
+(| btw_tarief           |) Tj
+T*
+(+----------------------+) Tj
+T*
+() Tj
+T*
+(+------------------------------+    1 --- *   +-------------------------------+) Tj
+T*
+(| PACKAGING_COMPONENTS         |--------------| PACKAGING_COMPONENT_PRICES     |) Tj
+T*
+(| PK id                        |              | PK id                          |) Tj
+T*
+(| omschrijving                 |              | FK verpakkingsonderdeel_id     |) Tj
+T*
+(| beschikbaar_voor_samengesteld|              | jaar, prijs_per_stuk           |) Tj
+T*
+(+------------------------------+              +-------------------------------+) Tj
+T*
+() Tj
+T*
+(+------------------------------+              +------------------------------+) Tj
+T*
+(| BASE_PRODUCT_MASTERS         |              | COMPOSITE_PRODUCT_MASTERS    |) Tj
+T*
+(| PK id                        |              | PK id                        |) Tj
+T*
+(| omschrijving                 |              | omschrijving                 |) Tj
+T*
+(| inhoud_per_eenheid_liter     |              | totale_inhoud_liter          |) Tj
+T*
+(| basisproducten[]             |              | basisproducten[]             |) Tj
+T*
+(+------------------------------+              +------------------------------+) Tj
+T*
+() Tj
+T*
+(Relaties stamdata) Tj
+T*
+(- PACKAGING_COMPONENTS -> BASE_PRODUCT_MASTERS via gekoppelde onderdelen) Tj
+T*
+(- BASE_PRODUCT_MASTERS -> COMPOSITE_PRODUCT_MASTERS via basisproducten[]) Tj
+T*
+(- PACKAGING_COMPONENTS kunnen ook direct in COMPOSITE_PRODUCT_MASTERS voorkomen) Tj
+T*
+() Tj
+T*
+(KOSTPRIJSVERSIES) Tj
+T*
+(+----------------------------------------------+) Tj
+T*
+(| KOSTPRIJSVERSIES                             |) Tj
+T*
+(| PK id                                        |) Tj
+T*
+(| FK bier_id -> BIEREN.id                      |) Tj
+T*
+(| jaar                                         |) Tj
+T*
+(| versie_nummer                                |) Tj
+T*
+(| type \(inkoop | productie\)                    |) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 999 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 2650 >>
+stream
+BT
+/F1 9 Tf
+30 560 Td
+11 TL
+(| kostprijs                                    |) Tj
+T*
+(| brontype \(stam | factuur | hercalculatie\)    |) Tj
+T*
+(| bron_id                                      |) Tj
+T*
+(| effectief_vanaf                              |) Tj
+T*
+(| is_actief                                    |) Tj
+T*
+(| status \(concept | definitief\)                |) Tj
+T*
+(| bier_snapshot, invoer, resultaat_snapshot    |) Tj
+T*
+(| aangemaakt_op, aangepast_op                  |) Tj
+T*
+(+----------------------------------------------+) Tj
+T*
+() Tj
+T*
+(Regels kostprijsversies) Tj
+T*
+(- Een bier kan meerdere kostprijsversies per jaar hebben) Tj
+T*
+(- Per bier + jaar is exact 1 definitieve versie actief) Tj
+T*
+(- Nieuwe offertes gebruiken altijd de actieve versie) Tj
+T*
+() Tj
+T*
+(VERKOOPSTRATEGIE) Tj
+T*
+(+-------------------------------+      +------------------------------------+) Tj
+T*
+(| SALES_STRATEGY_YEARS          |      | SALES_STRATEGY_PRODUCTS           |) Tj
+T*
+(| PK id                         |      | PK id                            |) Tj
+T*
+(| year                          |      | FK product_id -> PRODUCTS.id      |) Tj
+T*
+(| kanaalmarges                  |      | year, record_type                |) Tj
+T*
+(+-------------------------------+      | kanaalmarges / sell_in_margins    |) Tj
+T*
+(                                         | sell_in_prices                   |) Tj
+T*
+(                                         | sell_out_advice_prices           |) Tj
+T*
+(                                         | sell_out_factors                |) Tj
+T*
+(                                         +------------------------------------+) Tj
+T*
+() Tj
+T*
+(KANAALDEFAULTS komen uit CHANNELS; product- en bieroverrides leven in verkoopprijzen-records.) Tj
+T*
+() Tj
+T*
+(MODEL A / CANONIEKE PRODUCTPROJECTIE) Tj
+T*
+(+--------------------+      +----------------------+      +---------------------------+) Tj
+T*
+(| PRODUCTS           |1---* | PRODUCT_YEARS        |1---* | PRODUCT_YEAR_COMPONENTS   |) Tj
+T*
+(| PK id              |      | PK id                |      | PK id                     |) Tj
+T*
+(| legacy refs / naam |      | FK product_id        |      | FK product_year_id        |) Tj
+T*
+(+--------------------+      | year                 |      | FK component product_id   |) Tj
+T*
+(                            +----------------------+      +---------------------------+) Tj
+T*
+() Tj
+T*
+(+---------------------------+) Tj
+T*
+(| PRODUCT_COMPONENTS        |) Tj
+T*
+(| PK id                     |) Tj
+T*
+(| FK composite product_id   |) Tj
+T*
+(| FK child product_id       |) Tj
+T*
+(+---------------------------+) Tj
+T*
+() Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 999 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 2822 >>
+stream
+BT
+/F1 9 Tf
+30 560 Td
+11 TL
+(KOSTPRIJSPROJECTIE) Tj
+T*
+(+---------------------------+     1---1  +--------------------------+) Tj
+T*
+(| COST_CALCS                |------------| COST_CALC_INPUTS         |) Tj
+T*
+(| PK id                     |            | FK cost_calc_id          |) Tj
+T*
+(| FK beer_id                |            | payload                  |) Tj
+T*
+(| year, version_number      |            +--------------------------+) Tj
+T*
+(| calc_type, source_type    |) Tj
+T*
+(| source_id, unit_cost      |     1---1  +--------------------------+) Tj
+T*
+(| status, is_active         |------------| COST_CALC_RESULTS        |) Tj
+T*
+(| effective_from            |            | FK cost_calc_id          |) Tj
+T*
+(+---------------------------+            | integral_cost_per_liter  |) Tj
+T*
+(                                         | variable_cost_per_liter  |) Tj
+T*
+(                                         | direct_fixed_cost_per_l. |) Tj
+T*
+(                                         +--------------------------+) Tj
+T*
+() Tj
+T*
+(+---------------------------+) Tj
+T*
+(| COST_CALC_LINES           |) Tj
+T*
+(| PK id                     |) Tj
+T*
+(| FK cost_calc_id           |) Tj
+T*
+(| FK product_id             |) Tj
+T*
+(| source_kind, packaging    |) Tj
+T*
+(| unit_cost, liter_cost     |) Tj
+T*
+(+---------------------------+) Tj
+T*
+() Tj
+T*
+(OFFERTE / PRICING) Tj
+T*
+(+---------------------------+        1 --- *    +-----------------------------+) Tj
+T*
+(| QUOTES                    |-------------------| QUOTE_LINES                 |) Tj
+T*
+(| PK id                     |                   | PK id                       |) Tj
+T*
+(| FK beer_id                |                   | FK quote_id                 |) Tj
+T*
+(| year, status              |                   | line_type \(product/liter\)   |) Tj
+T*
+(| quote_type                |                   | FK product_id               |) Tj
+T*
+(| channel / pricing_channel |                   | FK cost_version_id          |) Tj
+T*
+(| reference_channels[]      |                   | quantity / liters           |) Tj
+T*
+(| pricing_method            |                   | discount_pct                |) Tj
+T*
+(| offer_level               |                   | cost_at_quote               |) Tj
+T*
+(| cost_version_ids[]        |                   | sales_price_at_quote        |) Tj
+T*
+(+---------------------------+                   | sell_out_price_at_quote     |) Tj
+T*
+(                                                | margin_at_quote             |) Tj
+T*
+(                                                | channel_at_quote            |) Tj
+T*
+(                                                +-----------------------------+) Tj
+T*
+() Tj
+T*
+(+---------------------------+) Tj
+T*
+(| QUOTE_STAFFELS            |) Tj
+T*
+(| PK id                     |) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 999 0 R >> >> /Contents 10 0 R >>
+endobj
+10 0 obj
+<< /Length 811 >>
+stream
+BT
+/F1 9 Tf
+30 560 Td
+11 TL
+(| FK quote_id               |) Tj
+T*
+(| FK product_id             |) Tj
+T*
+(| liters, discount_pct      |) Tj
+T*
+(+---------------------------+) Tj
+T*
+() Tj
+T*
+(Belangrijkste relaties) Tj
+T*
+(- BIEREN 1 --- * KOSTPRIJSVERSIES) Tj
+T*
+(- BIEREN 1 --- * COST_CALCS \(canonieke projectie van kostprijsversies\)) Tj
+T*
+(- PRODUCTS 1 --- * SALES_STRATEGY_PRODUCTS) Tj
+T*
+(- QUOTES 1 --- * QUOTE_LINES) Tj
+T*
+(- KOSTPRIJSVERSIES 1 --- * QUOTE_LINES via kostprijsversie_id) Tj
+T*
+() Tj
+T*
+(Gedrag in de app) Tj
+T*
+(- Kostprijs beheren schrijft kostprijsversies) Tj
+T*
+(- Prijsvoorstel leest actieve kostprijsversies) Tj
+T*
+(- Offertelines bevriezen prijzen en bewaren de gebruikte kostprijsversie) Tj
+T*
+(- Verkoopstrategie leest actieve kostprijsversies voor bier/product overrides) Tj
+ET
+endstream
+endobj
+999 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000133 00000 n 
+0000000261 00000 n 
+0000003008 00000 n 
+0000003136 00000 n 
+0000005837 00000 n 
+0000005965 00000 n 
+0000008838 00000 n 
+0000008967 00000 n 
+0000009829 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+9899
+%%EOF
+

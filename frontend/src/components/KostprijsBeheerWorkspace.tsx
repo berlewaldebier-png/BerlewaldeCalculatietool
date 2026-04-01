@@ -97,9 +97,9 @@ export function KostprijsBeheerWorkspace({
     return (
       <section className="module-card">
         <div className="module-card-header">
-          <div className="module-card-title">Bestaande berekening aanpassen</div>
+          <div className="module-card-title">Bestaande kostprijsversie aanpassen</div>
           <div className="module-card-text">
-            Kies een concept of definitieve berekening en open daarna de wizard.
+            Kies een concept of definitieve kostprijsversie en open daarna de wizard.
           </div>
         </div>
 
@@ -149,6 +149,8 @@ export function KostprijsBeheerWorkspace({
                 </div>
                 <div className="kostprijs-record-meta">
                   {String(basis.jaar ?? "-")} | {String(type.type ?? "-")} | {String(row.status ?? "-")}
+                  {Boolean(row.is_actief) ? " | actief" : ""}
+                  {Number(row.versie_nummer ?? 0) > 0 ? ` | v${Number(row.versie_nummer)}` : ""}
                 </div>
                 <div className="kostprijs-record-text">
                   {String(basis.stijl ?? "Geen stijl opgegeven")}
@@ -168,12 +170,12 @@ export function KostprijsBeheerWorkspace({
 
   return (
     <section className="module-card">
-      <div className="module-card-header">
-        <div className="module-card-title">Kostprijs beheren</div>
-        <div className="module-card-text">
-          Kies of je een nieuwe berekening wilt starten of een bestaande berekening wilt aanpassen.
+        <div className="module-card-header">
+          <div className="module-card-title">Kostprijs beheren</div>
+          <div className="module-card-text">
+          Kies of je een nieuwe kostprijsversie wilt starten of een bestaande versie wilt aanpassen.
+          </div>
         </div>
-      </div>
 
       <div className="kostprijs-choice-grid">
         <button
@@ -194,7 +196,7 @@ export function KostprijsBeheerWorkspace({
         >
           <div className="dashboard-quick-card-title">Bestaande aanpassen</div>
           <div className="dashboard-quick-card-text">
-            Open een concept of definitieve berekening en werk deze verder uit in de wizard.
+            Open een concept of definitieve kostprijsversie en werk deze verder uit in de wizard.
           </div>
         </button>
       </div>

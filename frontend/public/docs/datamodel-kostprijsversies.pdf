@@ -1,0 +1,102 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 1 /Kids [3 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 1289 >>
+stream
+BT
+/F1 16 Tf
+50 800 Td
+20 TL
+(Berlewalde CalculatieTool) Tj
+T*
+(Datamodel kostprijsversies) Tj
+T*
+() Tj
+T*
+(Kern) Tj
+T*
+(- Bier is stamdata met een vaste bier_id.) Tj
+T*
+(- Kostprijsversie hoort bij bier_id + jaar + versie_nummer.) Tj
+T*
+(- Per bier en jaar is precies een definitieve versie actief.) Tj
+T*
+(- Nieuwe offertes gebruiken altijd de actieve kostprijsversie.) Tj
+T*
+(- Offertelines bewaren kostprijsversie_id zodat historie stabiel blijft.) Tj
+T*
+() Tj
+T*
+(Belangrijkste velden op kostprijsversie) Tj
+T*
+(- id) Tj
+T*
+(- bier_id) Tj
+T*
+(- jaar) Tj
+T*
+(- versie_nummer) Tj
+T*
+(- type \\(inkoop of productie\\)) Tj
+T*
+(- kostprijs) Tj
+T*
+(- brontype \\(stam, factuur, hercalculatie\\)) Tj
+T*
+(- bron_id) Tj
+T*
+(- effectief_vanaf) Tj
+T*
+(- is_actief) Tj
+T*
+(- aangemaakt_op) Tj
+T*
+(- aangepast_op) Tj
+T*
+() Tj
+T*
+(Bronflow) Tj
+T*
+(- Kostprijswizard maakt concept of definitieve kostprijsversies.) Tj
+T*
+(- Inkoopfacturen en hercalculatie kunnen een nieuwe versie opleveren.) Tj
+T*
+(- Activatie bepaalt vanaf wanneer nieuwe offertes die versie gebruiken.) Tj
+T*
+() Tj
+T*
+(Offertes) Tj
+T*
+(- Quote en quote-lines bewaren bevroren prijzen.) Tj
+T*
+(- Quote-lines bewaren daarnaast kostprijsversie_id.) Tj
+T*
+(- Activeren van een nieuwe versie verandert bestaande offertes niet.) Tj
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1651
+%%EOF
+

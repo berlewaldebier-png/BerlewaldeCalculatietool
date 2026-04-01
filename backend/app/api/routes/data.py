@@ -91,6 +91,44 @@ def put_berekeningen(data: list[dict[str, Any]]) -> dict[str, bool]:
     return {"saved": dataset_store.save_dataset("berekeningen", data)}
 
 
+@router.get("/kostprijsversies")
+def get_kostprijsversies() -> list[dict]:
+    return dataset_store.load_dataset("kostprijsversies")
+
+
+@router.put("/kostprijsversies")
+def put_kostprijsversies(data: list[dict[str, Any]]) -> dict[str, bool]:
+    return {"saved": dataset_store.save_dataset("kostprijsversies", data)}
+
+
+@router.post("/kostprijsversies/{version_id}/activate")
+def post_activate_kostprijsversie(version_id: str) -> dict[str, Any]:
+    activated = dataset_store.activate_cost_version(version_id)
+    if activated is None:
+        raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden of niet definitief")
+    return {"activated": True, "record": activated}
+
+
+@router.post("/kostprijsversies/{version_id}/activate-products")
+def post_activate_kostprijsversie_products(
+    version_id: str,
+    data: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    product_ids = data.get("product_ids", [])
+    if not isinstance(product_ids, list):
+        raise HTTPException(status_code=400, detail="product_ids moet een lijst zijn")
+    activated = dataset_store.activate_cost_version_products(
+        version_id,
+        [str(product_id or "") for product_id in product_ids if str(product_id or "").strip()],
+    )
+    if activated is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Kostprijsversie of productkoppeling niet gevonden of niet definitief",
+        )
+    return {"activated": True, "record": activated}
+
+
 @router.get("/prijsvoorstellen")
 def get_prijsvoorstellen() -> list[dict]:
     return dataset_store.load_dataset("prijsvoorstellen")

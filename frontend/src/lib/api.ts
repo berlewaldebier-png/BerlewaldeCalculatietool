@@ -97,6 +97,10 @@ export function getBerekeningen() {
   return apiGet<GenericRecord[]>("/data/berekeningen");
 }
 
+export function getKostprijsversies() {
+  return apiGet<GenericRecord[]>("/data/kostprijsversies");
+}
+
 export function getPrijsvoorstellen() {
   return apiGet<GenericRecord[]>("/data/prijsvoorstellen");
 }

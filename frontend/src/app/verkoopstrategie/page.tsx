@@ -11,7 +11,7 @@ import {
 } from "@/lib/api";
 
 export default async function VerkoopstrategiePage() {
-  const [navigation, verkoopprijzen, basisproducten, samengesteldeProducten, bieren, berekeningen, channels] =
+  const [navigation, verkoopprijzen, basisproducten, samengesteldeProducten, bieren, berekeningen, channels, kostprijsproductactiveringen] =
     await Promise.all([
       getNavigation(),
       getVerkoopprijzen(),
@@ -19,7 +19,8 @@ export default async function VerkoopstrategiePage() {
       getSamengesteldeProducten(),
       getBieren(),
       getBerekeningen(),
-      getDataset("channels")
+      getDataset("channels"),
+      getDataset("kostprijsproductactiveringen")
     ]);
 
   return (
@@ -37,6 +38,7 @@ export default async function VerkoopstrategiePage() {
         bieren={bieren}
         berekeningen={berekeningen}
         channels={channels}
+        kostprijsproductactiveringen={kostprijsproductactiveringen}
       />
     </PageShell>
   );

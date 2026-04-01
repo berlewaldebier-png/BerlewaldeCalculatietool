@@ -2,7 +2,7 @@
 
 import json
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -14,12 +14,15 @@ PRODUCTIE_FILE = DATA_DIR / "productie.json"
 VASTE_KOSTEN_FILE = DATA_DIR / "vaste_kosten.json"
 BIEREN_FILE = DATA_DIR / "bieren.json"
 BEREKENINGEN_FILE = DATA_DIR / "berekeningen.json"
+KOSTPRIJSVERSIES_FILE = DATA_DIR / "kostprijsversies.json"
+KOSTPRIJSPRODUCTACTIVERINGEN_FILE = DATA_DIR / "kostprijsproductactiveringen.json"
 VERKOOPPRIJZEN_FILE = DATA_DIR / "verkoopprijzen.json"
 PRIJSVOORSTELLEN_FILE = DATA_DIR / "prijsvoorstellen.json"
 TARIEVEN_HEFFINGEN_FILE = DATA_DIR / "tarieven_heffingen.json"
 VARIABELE_KOSTEN_FILE = DATA_DIR / "variabele_kosten.json"
 VERPAKKINGSONDERDELEN_FILE = DATA_DIR / "verpakkingsonderdelen.json"
 PACKAGING_COMPONENT_PRICES_FILE = DATA_DIR / "packaging_component_prices.json"
+PACKAGING_COMPONENT_PRICE_VERSIONS_FILE = DATA_DIR / "packaging_component_price_versions.json"
 BASISPRODUCTEN_FILE = DATA_DIR / "basisproducten.json"
 SAMENGESTELDE_PRODUCTEN_FILE = DATA_DIR / "samengestelde_producten.json"
 SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX = "verpakkingsonderdeel:"
@@ -48,6 +51,14 @@ def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
     if postgres_storage is None or not postgres_storage.uses_postgres():
         return False
     return postgres_storage.save_dataset(dataset_name, data, overwrite=True)
+
+
+def _load_postgres_first_list(dataset_name: str, fallback_path: Path) -> list[Any]:
+    postgres_payload = _load_postgres_dataset(dataset_name)
+    if isinstance(postgres_payload, list):
+        return postgres_payload
+    fallback = _load_json_value(fallback_path, [])
+    return fallback if isinstance(fallback, list) else []
 
 
 def _read_local_json_text(file_path: Path, default_content: str) -> str:
@@ -128,6 +139,11 @@ def ensure_bieren_storage() -> Path:
 def ensure_berekeningen_storage() -> Path:
     """Maakt het JSON-bestand voor berekeningen aan."""
     return _ensure_json_file(BEREKENINGEN_FILE, "[]")
+
+
+def ensure_kostprijsversies_storage() -> Path:
+    """Maakt het JSON-bestand voor kostprijsversies aan."""
+    return _ensure_json_file(KOSTPRIJSVERSIES_FILE, "[]")
 
 
 def ensure_verkoopprijzen_storage() -> Path:
@@ -350,6 +366,499 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
     }
 
 
+def _factuur_is_meaningful(factuur: dict[str, Any] | None) -> bool:
+    normalized = normalize_inkoop_factuur_record(factuur)
+    if str(normalized.get("factuurnummer", "") or "").strip():
+        return True
+    if str(normalized.get("factuurdatum", "") or "").strip():
+        return True
+    if float(normalized.get("verzendkosten", 0.0) or 0.0) > 0:
+        return True
+    if float(normalized.get("overige_kosten", 0.0) or 0.0) > 0:
+        return True
+
+    for row in normalized.get("factuurregels", []):
+        if not isinstance(row, dict):
+            continue
+        if float(row.get("aantal", 0.0) or 0.0) > 0:
+            return True
+        if float(row.get("liters", 0.0) or 0.0) > 0:
+            return True
+        if float(row.get("subfactuurbedrag", 0.0) or 0.0) > 0:
+            return True
+        if str(row.get("eenheid", "") or "").strip():
+            return True
+    return False
+
+
+def _sanitize_inkoop_facturen(facturen: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not isinstance(facturen, list):
+        return []
+    return [
+        normalize_inkoop_factuur_record(factuur)
+        for factuur in facturen
+        if isinstance(factuur, dict) and _factuur_is_meaningful(factuur)
+    ]
+
+
+def _cleanup_kostprijsversie_references(
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], bool]:
+    changed = False
+    existing_ids = {
+        str(record.get("id", "") or "")
+        for record in records
+        if isinstance(record, dict) and str(record.get("id", "") or "").strip()
+    }
+    cleaned_records: list[dict[str, Any]] = []
+
+    for source_record in records:
+        if not isinstance(source_record, dict):
+            changed = True
+            continue
+
+        record = normalize_berekening_record(source_record)
+        invoer = record.get("invoer", {}) if isinstance(record.get("invoer", {}), dict) else {}
+        inkoop = invoer.get("inkoop", {}) if isinstance(invoer.get("inkoop", {}), dict) else {}
+        original_facturen = inkoop.get("facturen", [])
+        sanitized_facturen = _sanitize_inkoop_facturen(original_facturen)
+
+        original_factuur_count = len(original_facturen) if isinstance(original_facturen, list) else 0
+        if len(sanitized_facturen) != original_factuur_count:
+            changed = True
+
+        if sanitized_facturen:
+            first_factuur = sanitized_facturen[0]
+            record.setdefault("invoer", {})
+            if isinstance(record["invoer"], dict):
+                record["invoer"]["inkoop"] = {
+                    **inkoop,
+                    "facturen": sanitized_facturen,
+                    "factuurnummer": str(first_factuur.get("factuurnummer", "") or ""),
+                    "factuurdatum": str(first_factuur.get("factuurdatum", "") or ""),
+                    "verzendkosten": float(first_factuur.get("verzendkosten", 0.0) or 0.0),
+                    "overige_kosten": float(first_factuur.get("overige_kosten", 0.0) or 0.0),
+                    "factuurregels": deepcopy(first_factuur.get("factuurregels", [])),
+                }
+        elif str(record.get("brontype", "") or "") == "factuur" and str(record.get("status", "") or "") == "concept":
+            changed = True
+            continue
+
+        bron_berekening_id = str(record.get("bron_berekening_id", "") or "")
+        if bron_berekening_id and bron_berekening_id not in existing_ids:
+            record["bron_berekening_id"] = ""
+            changed = True
+
+        if str(record.get("brontype", "") or "") == "hercalculatie":
+            bron_id = str(record.get("bron_id", "") or "")
+            if bron_id and bron_id not in existing_ids:
+                record["bron_id"] = ""
+                changed = True
+
+        cleaned_records.append(record)
+
+    return cleaned_records, changed
+
+
+def normalize_kostprijsproduct_activering_record(
+    record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source = record if isinstance(record, dict) else {}
+    created_at = str(source.get("created_at", "") or "") or _now_iso()
+    updated_at = str(source.get("updated_at", "") or "") or created_at
+    return {
+        "id": str(source.get("id", "") or uuid4()),
+        "bier_id": str(source.get("bier_id", "") or ""),
+        "jaar": int(source.get("jaar", 0) or 0),
+        "product_id": str(source.get("product_id", "") or ""),
+        "product_type": str(source.get("product_type", "") or ""),
+        "kostprijsversie_id": str(source.get("kostprijsversie_id", "") or ""),
+        "effectief_vanaf": str(
+            source.get("effectief_vanaf", "") or source.get("effective_from", "") or ""
+        ),
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+
+
+def load_kostprijsproductactiveringen() -> list[dict[str, Any]]:
+    postgres_payload = _load_postgres_dataset("kostprijsproductactiveringen")
+    if isinstance(postgres_payload, list):
+        data = postgres_payload
+    else:
+        data = _load_json_value(KOSTPRIJSPRODUCTACTIVERINGEN_FILE, [])
+    if not isinstance(data, list):
+        return []
+    return [
+        normalize_kostprijsproduct_activering_record(row)
+        for row in data
+        if isinstance(row, dict)
+    ]
+
+
+def _known_bier_ids() -> set[str]:
+    return {
+        str(record.get("id", "") or "")
+        for record in load_bieren()
+        if isinstance(record, dict) and str(record.get("id", "") or "")
+    }
+
+
+def _known_kostprijsversie_ids() -> set[str]:
+    return {
+        str(record.get("id", "") or "")
+        for record in load_kostprijsversies()
+        if isinstance(record, dict) and str(record.get("id", "") or "")
+    }
+
+
+def _known_product_refs() -> set[tuple[str, str]]:
+    refs: set[tuple[str, str]] = set()
+    for record in load_basisproducten():
+        if not isinstance(record, dict):
+            continue
+        product_id = str(record.get("id", "") or "")
+        if product_id:
+            refs.add((product_id, "basis"))
+    for record in load_samengestelde_producten():
+        if not isinstance(record, dict):
+            continue
+        product_id = str(record.get("id", "") or "")
+        if product_id:
+            refs.add((product_id, "samengesteld"))
+    return refs
+
+
+def _validate_kostprijsproductactiveringen(
+    rows: list[dict[str, Any]],
+    *,
+    known_bieren: set[str] | None = None,
+    known_versions: set[str] | None = None,
+    known_products: set[tuple[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    known_bieren = known_bieren if known_bieren is not None else _known_bier_ids()
+    known_versions = known_versions if known_versions is not None else _known_kostprijsversie_ids()
+    known_products = known_products if known_products is not None else _known_product_refs()
+    validated: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, int, str]] = set()
+    for row in rows:
+        normalized = normalize_kostprijsproduct_activering_record(row)
+        bier_id = str(normalized.get("bier_id", "") or "")
+        product_id = str(normalized.get("product_id", "") or "")
+        product_type = str(normalized.get("product_type", "") or "").strip().lower()
+        version_id = str(normalized.get("kostprijsversie_id", "") or "")
+        unique_key = (bier_id, int(normalized.get("jaar", 0) or 0), product_id)
+        if (
+            not bier_id
+            or bier_id not in known_bieren
+            or not product_id
+            or (product_id, product_type) not in known_products
+            or not version_id
+            or version_id not in known_versions
+            or unique_key in seen_keys
+        ):
+            continue
+        seen_keys.add(unique_key)
+        validated.append(normalized)
+    return validated
+
+
+def save_kostprijsproductactiveringen(data: list[dict[str, Any]]) -> bool:
+    normalized = _validate_kostprijsproductactiveringen(
+        [row for row in data if isinstance(row, dict)]
+    )
+    if _save_postgres_dataset("kostprijsproductactiveringen", normalized):
+        return True
+    return _save_json_value(
+        KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
+        normalized,
+        "[]",
+    )
+
+
+def _resolve_kostprijsproduct_refs(
+    record: dict[str, Any],
+    basisproducten_by_id: dict[str, dict[str, Any]],
+    samengestelde_by_id: dict[str, dict[str, Any]],
+    basis_by_name: dict[str, str],
+    samengesteld_by_name: dict[str, str],
+) -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _append(product_id: str, product_type: str) -> None:
+        normalized_id = str(product_id or "")
+        normalized_type = str(product_type or "")
+        if not normalized_id or not normalized_type:
+            return
+        identity = (normalized_type, normalized_id)
+        if identity in seen:
+            return
+        seen.add(identity)
+        refs.append(
+            {
+                "product_id": normalized_id,
+                "product_type": normalized_type,
+            }
+        )
+
+    producten = record.get("resultaat_snapshot", {}).get("producten", {})
+    if isinstance(producten, dict):
+        for row in producten.get("basisproducten", []):
+            if not isinstance(row, dict):
+                continue
+            product_id = str(row.get("product_id", "") or "")
+            verpakking = _normalize_verpakking_key(
+                row.get("verpakking")
+                or row.get("verpakkingseenheid")
+                or row.get("omschrijving")
+            )
+            if not product_id and verpakking:
+                product_id = basis_by_name.get(verpakking, "")
+            _append(product_id, "basis")
+        for row in producten.get("samengestelde_producten", []):
+            if not isinstance(row, dict):
+                continue
+            product_id = str(row.get("product_id", "") or "")
+            verpakking = _normalize_verpakking_key(
+                row.get("verpakking")
+                or row.get("verpakkingseenheid")
+                or row.get("omschrijving")
+            )
+            if not product_id and verpakking:
+                product_id = samengesteld_by_name.get(verpakking, "")
+            _append(product_id, "samengesteld")
+
+    inkoop = ((record.get("invoer", {}) or {}).get("inkoop", {}) or {})
+    if isinstance(inkoop, dict):
+        facturen = inkoop.get("facturen", [])
+        if not isinstance(facturen, list):
+            facturen = []
+        for factuur in facturen:
+            if not isinstance(factuur, dict):
+                continue
+            regels = factuur.get("factuurregels", [])
+            if not isinstance(regels, list):
+                regels = []
+            for regel in regels:
+                if not isinstance(regel, dict):
+                    continue
+                unit_id = str(regel.get("eenheid", "") or "").strip()
+                if unit_id in basisproducten_by_id:
+                    _append(unit_id, "basis")
+                    continue
+                samengesteld = samengestelde_by_id.get(unit_id)
+                if samengesteld:
+                    _append(unit_id, "samengesteld")
+                    onderdelen = samengesteld.get("basisproducten", [])
+                    if isinstance(onderdelen, list):
+                        for onderdeel in onderdelen:
+                            if not isinstance(onderdeel, dict):
+                                continue
+                            basis_id = str(onderdeel.get("basisproduct_id", "") or "")
+                            if basis_id.startswith(SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX):
+                                continue
+                            if basis_id in basisproducten_by_id:
+                                _append(basis_id, "basis")
+
+    return refs
+
+
+def _sync_kostprijsproductactiveringen(
+    records: list[dict[str, Any]],
+    activations: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    basisproducten = [
+        row for row in load_basisproducten() if isinstance(row, dict)
+    ]
+    samengestelde_producten = [
+        row for row in load_samengestelde_producten() if isinstance(row, dict)
+    ]
+    basisproducten_by_id = {
+        str(row.get("id", "") or ""): row for row in basisproducten if str(row.get("id", "") or "")
+    }
+    samengestelde_by_id = {
+        str(row.get("id", "") or ""): row
+        for row in samengestelde_producten
+        if str(row.get("id", "") or "")
+    }
+    basis_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in basisproducten
+        if _normalize_verpakking_key(row.get("omschrijving")) and str(row.get("id", "") or "")
+    }
+    samengesteld_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in samengestelde_producten
+        if _normalize_verpakking_key(row.get("omschrijving")) and str(row.get("id", "") or "")
+    }
+
+    definitive_records = [
+        record
+        for record in records
+        if str(record.get("status", "") or "") == "definitief"
+    ]
+    record_by_id = {
+        str(record.get("id", "") or ""): record
+        for record in definitive_records
+        if str(record.get("id", "") or "")
+    }
+    product_refs_by_version: dict[str, list[dict[str, str]]] = {
+        version_id: _resolve_kostprijsproduct_refs(
+            record,
+            basisproducten_by_id,
+            samengestelde_by_id,
+            basis_by_name,
+            samengesteld_by_name,
+        )
+        for version_id, record in record_by_id.items()
+    }
+    version_has_product = {
+        version_id: {
+            (ref["product_type"], ref["product_id"])
+            for ref in refs
+            if ref.get("product_id") and ref.get("product_type")
+        }
+        for version_id, refs in product_refs_by_version.items()
+    }
+
+    carriers_by_group: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
+    for version_id, record in record_by_id.items():
+        bier_id = str(record.get("bier_id", "") or "")
+        jaar = int(record.get("jaar", 0) or 0)
+        for ref in product_refs_by_version.get(version_id, []):
+            product_id = str(ref.get("product_id", "") or "")
+            if not bier_id or not jaar or not product_id:
+                continue
+            carriers_by_group.setdefault((bier_id, jaar, product_id), []).append(
+                {
+                    "version_id": version_id,
+                    "product_type": str(ref.get("product_type", "") or ""),
+                    "record": record,
+                }
+            )
+
+    cleaned: list[dict[str, Any]] = []
+    by_group: dict[tuple[str, int, str], dict[str, Any]] = {}
+    for row in activations:
+        normalized = normalize_kostprijsproduct_activering_record(row)
+        bier_id = str(normalized.get("bier_id", "") or "")
+        jaar = int(normalized.get("jaar", 0) or 0)
+        product_id = str(normalized.get("product_id", "") or "")
+        version_id = str(normalized.get("kostprijsversie_id", "") or "")
+        if not bier_id or not jaar or not product_id or not version_id:
+            continue
+        record = record_by_id.get(version_id)
+        if not record:
+            continue
+        if str(record.get("bier_id", "") or "") != bier_id or int(record.get("jaar", 0) or 0) != jaar:
+            continue
+        if (str(normalized.get("product_type", "") or ""), product_id) not in version_has_product.get(version_id, set()) and any(
+            product_id == existing_product_id for (_, existing_product_id) in version_has_product.get(version_id, set())
+        ) is False:
+            continue
+        group_key = (bier_id, jaar, product_id)
+        current = by_group.get(group_key)
+        if current is None or (
+            str(normalized.get("updated_at", "") or ""),
+            str(normalized.get("id", "") or ""),
+        ) > (
+            str(current.get("updated_at", "") or ""),
+            str(current.get("id", "") or ""),
+        ):
+            by_group[group_key] = normalized
+
+    for group_key, carriers in carriers_by_group.items():
+        if group_key in by_group:
+            continue
+        carriers.sort(
+            key=lambda item: (
+                str(item["record"].get("finalized_at", "") or ""),
+                str(item["record"].get("created_at", "") or item["record"].get("aangemaakt_op", "") or ""),
+                str(item["version_id"]),
+            )
+        )
+        keeper = carriers[0]
+        effective_from = str(
+            keeper["record"].get("effectief_vanaf", "")
+            or keeper["record"].get("finalized_at", "")
+            or keeper["record"].get("created_at", "")
+            or _now_iso()
+        )
+        by_group[group_key] = normalize_kostprijsproduct_activering_record(
+            {
+                "bier_id": group_key[0],
+                "jaar": group_key[1],
+                "product_id": group_key[2],
+                "product_type": str(keeper.get("product_type", "") or ""),
+                "kostprijsversie_id": str(keeper["version_id"]),
+                "effectief_vanaf": effective_from,
+                "created_at": effective_from,
+                "updated_at": effective_from,
+            }
+        )
+
+    cleaned = sorted(
+        by_group.values(),
+        key=lambda item: (
+            str(item.get("bier_id", "") or ""),
+            int(item.get("jaar", 0) or 0),
+            str(item.get("product_type", "") or ""),
+            str(item.get("product_id", "") or ""),
+        ),
+    )
+
+    activation_times_by_version: dict[str, list[str]] = {}
+    for activation in cleaned:
+        version_id = str(activation.get("kostprijsversie_id", "") or "")
+        if version_id:
+            activation_times_by_version.setdefault(version_id, []).append(
+                str(activation.get("effectief_vanaf", "") or "")
+            )
+
+    for record in records:
+        version_id = str(record.get("id", "") or "")
+        times = activation_times_by_version.get(version_id, [])
+        if str(record.get("status", "") or "") != "definitief" or not times:
+            record["is_actief"] = False
+            record["effectief_vanaf"] = ""
+            continue
+        record["is_actief"] = True
+        record["effectief_vanaf"] = max(
+            [time for time in times if str(time or "").strip()],
+            default=str(
+                record.get("effectief_vanaf", "")
+                or record.get("finalized_at", "")
+                or record.get("updated_at", "")
+                or _now_iso()
+            ),
+        )
+
+    return records, cleaned
+
+
+def _normalize_and_sync_kostprijsversie_state(
+    records: list[dict[str, Any]],
+    activations: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_records = [
+        normalize_berekening_record(record)
+        for record in records
+        if isinstance(record, dict)
+    ]
+    normalized_records, _ = _cleanup_kostprijsversie_references(normalized_records)
+    normalized_records = _assign_kostprijsversie_numbers(normalized_records)
+    normalized_records, _ = _sync_bieren_with_kostprijsversies(normalized_records)
+    normalized_activations = activations
+    if normalized_activations is None:
+        normalized_activations = load_kostprijsproductactiveringen()
+    normalized_records, normalized_activations = _sync_kostprijsproductactiveringen(
+        normalized_records,
+        normalized_activations,
+    )
+    return normalized_records, normalized_activations
+
+
 def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, Any]:
     """Normaliseert een ingrediÃ«ntregel voor opslag in berekeningen."""
     source = row if isinstance(row, dict) else {}
@@ -391,7 +900,52 @@ def _snapshot_float(value: Any) -> float:
         return 0.0
 
 
-def _normalize_resultaat_snapshot_product_row(row: dict[str, Any] | None) -> dict[str, Any]:
+def _snapshot_product_resolution_maps() -> tuple[dict[str, str], dict[str, str]]:
+    basis_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in load_basisproducten()
+        if isinstance(row, dict)
+        and _normalize_verpakking_key(row.get("omschrijving"))
+        and str(row.get("id", "") or "")
+    }
+    samengesteld_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in load_samengestelde_producten()
+        if isinstance(row, dict)
+        and _normalize_verpakking_key(row.get("omschrijving"))
+        and str(row.get("id", "") or "")
+    }
+    return basis_by_name, samengesteld_by_name
+
+
+def _resolve_snapshot_product_identity(
+    verpakking: str,
+    product_type_hint: str,
+    *,
+    basis_by_name: dict[str, str],
+    samengesteld_by_name: dict[str, str],
+) -> tuple[str, str]:
+    normalized_packaging = _normalize_verpakking_key(verpakking)
+    normalized_type = str(product_type_hint or "").strip().lower()
+    if normalized_type == "basis":
+        return basis_by_name.get(normalized_packaging, ""), "basis"
+    if normalized_type == "samengesteld":
+        return samengesteld_by_name.get(normalized_packaging, ""), "samengesteld"
+
+    if normalized_packaging in basis_by_name:
+        return basis_by_name[normalized_packaging], "basis"
+    if normalized_packaging in samengesteld_by_name:
+        return samengesteld_by_name[normalized_packaging], "samengesteld"
+    return "", normalized_type
+
+
+def _normalize_resultaat_snapshot_product_row(
+    row: dict[str, Any] | None,
+    *,
+    product_type_hint: str = "",
+    basis_by_name: dict[str, str] | None = None,
+    samengesteld_by_name: dict[str, str] | None = None,
+) -> dict[str, Any]:
     source = row if isinstance(row, dict) else {}
     verpakking = str(
         source.get("verpakking", "")
@@ -399,6 +953,8 @@ def _normalize_resultaat_snapshot_product_row(row: dict[str, Any] | None) -> dic
         or source.get("omschrijving", "")
         or ""
     )
+    if basis_by_name is None or samengesteld_by_name is None:
+        basis_by_name, samengesteld_by_name = _snapshot_product_resolution_maps()
     primaire_kosten = _snapshot_float(
         source.get("primaire_kosten", source.get("variabele_kosten", 0.0))
     )
@@ -414,10 +970,22 @@ def _normalize_resultaat_snapshot_product_row(row: dict[str, Any] | None) -> dic
         "liters_per_product",
         source.get("totale_inhoud_liter", source.get("inhoud_per_eenheid_liter")),
     )
+    explicit_product_type = str(source.get("product_type", "") or "").strip().lower()
+    explicit_product_id = str(source.get("product_id", "") or "").strip()
+    resolved_product_id, resolved_product_type = _resolve_snapshot_product_identity(
+        verpakking,
+        explicit_product_type or product_type_hint,
+        basis_by_name=basis_by_name,
+        samengesteld_by_name=samengesteld_by_name,
+    )
+    product_type = explicit_product_type or resolved_product_type
+    product_id = explicit_product_id or resolved_product_id
 
     return {
         "biernaam": str(source.get("biernaam", "") or ""),
         "soort": str(source.get("soort", "") or ""),
+        "product_id": product_id,
+        "product_type": product_type,
         "verpakking": verpakking,
         "verpakkingseenheid": verpakking,
         "primaire_kosten": primaire_kosten,
@@ -443,14 +1011,26 @@ def _normalize_resultaat_snapshot_producten(
     if not isinstance(samengestelde_producten, list):
         samengestelde_producten = []
 
+    basis_by_name, samengesteld_by_name = _snapshot_product_resolution_maps()
+
     return {
         "basisproducten": [
-            _normalize_resultaat_snapshot_product_row(row)
+            _normalize_resultaat_snapshot_product_row(
+                row,
+                product_type_hint="basis",
+                basis_by_name=basis_by_name,
+                samengesteld_by_name=samengesteld_by_name,
+            )
             for row in basisproducten
             if isinstance(row, dict)
         ],
         "samengestelde_producten": [
-            _normalize_resultaat_snapshot_product_row(row)
+            _normalize_resultaat_snapshot_product_row(
+                row,
+                product_type_hint="samengesteld",
+                basis_by_name=basis_by_name,
+                samengesteld_by_name=samengesteld_by_name,
+            )
             for row in samengestelde_producten
             if isinstance(row, dict)
         ],
@@ -458,7 +1038,7 @@ def _normalize_resultaat_snapshot_producten(
 
 
 def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Normaliseert een berekeningrecord voor Nieuwe kostprijsberekening."""
+    """Normaliseert een kostprijsversie-record voor Nieuwe kostprijsberekening."""
     status = str(record.get("status", "concept") or "concept").strip().lower()
     if status not in {"concept", "definitief"}:
         status = "concept"
@@ -654,13 +1234,64 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     created_at = str(record.get("created_at", "") or "") or _now_iso()
     updated_at = str(record.get("updated_at", "") or "") or created_at
     finalized_at = str(record.get("finalized_at", "") or "")
+    if status == "definitief" and not finalized_at:
+        finalized_at = updated_at or created_at
+    jaar = int(basisgegevens.get("jaar", 0) or 0)
+    soort = "inkoop" if calculation_type == "Inkoop" else "productie"
+    kostprijs = _snapshot_float(resultaat_snapshot.get("integrale_kostprijs_per_liter"))
+    calculation_variant = str(
+        record.get("calculation_variant", "origineel") or "origineel"
+    )
+    bron_berekening_id = str(record.get("bron_berekening_id", "") or "")
+
+    primary_factuur_id = ""
+    if facturen:
+        primary_factuur_id = str((facturen[0] or {}).get("id", "") or "")
+
+    if calculation_variant == "hercalculatie":
+        bron_type = "hercalculatie"
+        bron_id = bron_berekening_id
+    elif calculation_variant == "factuur":
+        bron_type = "factuur"
+        bron_id = primary_factuur_id or str(record.get("bron_id", "") or "")
+    elif soort == "inkoop" and primary_factuur_id:
+        bron_type = "factuur"
+        bron_id = primary_factuur_id
+    else:
+        bron_type = "stam"
+        bron_id = bron_berekening_id
+
+    try:
+        versie_nummer = int(record.get("versie_nummer", 0) or 0)
+    except (TypeError, ValueError):
+        versie_nummer = 0
+
+    effectief_vanaf = str(
+        record.get("effectief_vanaf", "")
+        or record.get("effective_from", "")
+        or ""
+    )
+    is_actief = bool(record.get("is_actief", record.get("is_active", False)))
+    if status != "definitief":
+        is_actief = False
+        effectief_vanaf = ""
 
     return {
         "id": str(record.get("id", "") or uuid4()),
         "bier_id": str(record.get("bier_id", "") or ""),
+        "jaar": jaar,
+        "versie_nummer": versie_nummer,
+        "type": soort,
+        "kostprijs": kostprijs,
+        "brontype": bron_type,
+        "bron_id": bron_id,
+        "effectief_vanaf": effectief_vanaf,
+        "is_actief": is_actief,
+        "aangemaakt_op": created_at,
+        "aangepast_op": updated_at,
         "record_type": str(record.get("record_type", "kostprijsberekening") or "kostprijsberekening"),
-        "calculation_variant": str(record.get("calculation_variant", "origineel") or "origineel"),
-        "bron_berekening_id": str(record.get("bron_berekening_id", "") or ""),
+        "calculation_variant": calculation_variant,
+        "bron_berekening_id": bron_berekening_id,
         "hercalculatie_reden": str(record.get("hercalculatie_reden", "") or ""),
         "hercalculatie_notitie": str(record.get("hercalculatie_notitie", "") or ""),
         "hercalculatie_timestamp": str(record.get("hercalculatie_timestamp", "") or ""),
@@ -836,35 +1467,6 @@ def _migrate_verpakkingsonderdelen_data(
     migrated, unique_changed = _ensure_unique_verpakkingsonderdeel_ids(migrated)
     changed = changed or unique_changed
     return migrated, changed
-
-
-def load_verpakkingsonderdelen(year: int | str | None = None) -> list[dict[str, Any]]:
-    """Laadt alle verpakkingsonderdelen veilig in, optioneel gefilterd op jaar."""
-    data = _load_json_value(VERPAKKINGSONDERDELEN_FILE, [])
-    records = data if isinstance(data, list) else []
-    migrated, changed = _migrate_verpakkingsonderdelen_data(records)
-    if changed:
-        _save_json_value(VERPAKKINGSONDERDELEN_FILE, migrated, "[]")
-
-    if year is None:
-        return migrated
-
-    try:
-        year_value = int(year)
-    except (TypeError, ValueError):
-        return migrated
-
-    return [
-        onderdeel
-        for onderdeel in migrated
-        if int(onderdeel.get("jaar", 0) or 0) == year_value
-    ]
-
-
-def save_verpakkingsonderdelen(data: list[dict[str, Any]]) -> bool:
-    """Slaat alle verpakkingsonderdelen veilig op."""
-    migrated, _ = _migrate_verpakkingsonderdelen_data(data)
-    return _save_json_value(VERPAKKINGSONDERDELEN_FILE, migrated, "[]")
 
 
 def get_verpakkingsonderdelen_for_year(year: int | str) -> list[dict[str, Any]]:
@@ -1166,17 +1768,12 @@ def normalize_basisproduct_record(record: dict[str, Any]) -> dict[str, Any]:
 
 def load_basisproducten(year: int | str | None = None) -> list[dict[str, Any]]:
     """Laadt alle basisproducten veilig in."""
-    data = _load_json_value(BASISPRODUCTEN_FILE, [])
-    if not isinstance(data, list):
-        return []
-
+    data = _load_postgres_first_list("base-product-masters", BASISPRODUCTEN_FILE)
     normalized = [
         normalize_basisproduct_record(record)
         for record in data
         if isinstance(record, dict)
     ]
-    if normalized != data:
-        _save_json_value(BASISPRODUCTEN_FILE, normalized, "[]")
     if year is None:
         return normalized
     try:
@@ -1192,11 +1789,26 @@ def load_basisproducten(year: int | str | None = None) -> list[dict[str, Any]]:
 
 def save_basisproducten(data: list[dict[str, Any]]) -> bool:
     """Slaat alle basisproducten veilig op."""
-    normalized = [
-        normalize_basisproduct_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
+    valid_component_ids = {
+        str(record.get("id", "") or "")
+        for record in load_packaging_component_masters()
+        if isinstance(record, dict) and str(record.get("id", "") or "")
+    }
+    normalized: list[dict[str, Any]] = []
+    for record in data:
+        if not isinstance(record, dict):
+            continue
+        cleaned = normalize_basisproduct_record(record)
+        cleaned["onderdelen"] = [
+            row
+            for row in cleaned.get("onderdelen", [])
+            if isinstance(row, dict)
+            and str(row.get("verpakkingsonderdeel_id", "") or "") in valid_component_ids
+        ]
+        cleaned["totale_verpakkingskosten"] = bereken_basisproduct_totaal(cleaned["onderdelen"])
+        normalized.append(cleaned)
+    if _save_postgres_dataset("base-product-masters", normalized):
+        return True
     return _save_json_value(BASISPRODUCTEN_FILE, normalized, "[]")
 
 
@@ -1415,17 +2027,12 @@ def normalize_samengesteld_product_record(record: dict[str, Any]) -> dict[str, A
 
 def load_samengestelde_producten(year: int | str | None = None) -> list[dict[str, Any]]:
     """Laadt alle samengestelde producten veilig in."""
-    data = _load_json_value(SAMENGESTELDE_PRODUCTEN_FILE, [])
-    if not isinstance(data, list):
-        return []
-
+    data = _load_postgres_first_list("composite-product-masters", SAMENGESTELDE_PRODUCTEN_FILE)
     normalized = [
         normalize_samengesteld_product_record(record)
         for record in data
         if isinstance(record, dict)
     ]
-    if normalized != data:
-        _save_json_value(SAMENGESTELDE_PRODUCTEN_FILE, normalized, "[]")
     if year is None:
         return normalized
     try:
@@ -1441,11 +2048,29 @@ def load_samengestelde_producten(year: int | str | None = None) -> list[dict[str
 
 def save_samengestelde_producten(data: list[dict[str, Any]]) -> bool:
     """Slaat alle samengestelde producten veilig op."""
-    normalized = [
-        normalize_samengesteld_product_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
+    valid_basisproduct_ids = {
+        str(record.get("id", "") or "")
+        for record in load_basisproducten()
+        if isinstance(record, dict) and str(record.get("id", "") or "")
+    }
+    normalized: list[dict[str, Any]] = []
+    for record in data:
+        if not isinstance(record, dict):
+            continue
+        cleaned = normalize_samengesteld_product_record(record)
+        cleaned["basisproducten"] = [
+            row
+            for row in cleaned.get("basisproducten", [])
+            if isinstance(row, dict)
+            and str(row.get("basisproduct_id", "") or "") in valid_basisproduct_ids
+        ]
+        cleaned["totale_inhoud_liter"] = bereken_samengesteld_product_totaal_inhoud(cleaned["basisproducten"])
+        cleaned["totale_verpakkingskosten"] = bereken_samengesteld_product_totaal_verpakkingskosten(
+            cleaned["basisproducten"]
+        )
+        normalized.append(cleaned)
+    if _save_postgres_dataset("composite-product-masters", normalized):
+        return True
     return _save_json_value(SAMENGESTELDE_PRODUCTEN_FILE, normalized, "[]")
 
 
@@ -1796,20 +2421,116 @@ def _normalize_packaging_component_price_record(record: dict[str, Any]) -> dict[
     }
 
 
-def load_packaging_component_masters() -> list[dict[str, Any]]:
-    postgres_payload = _load_postgres_dataset("packaging-components")
-    data = postgres_payload if isinstance(postgres_payload, list) else []
-    if not isinstance(data, list):
-        return []
+def normalize_packaging_component_price_version_record(
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    now_iso = datetime.now(UTC).replace(microsecond=0).isoformat()
+    try:
+        jaar = int(record.get("jaar", 0) or 0)
+    except (TypeError, ValueError):
+        jaar = 0
+    try:
+        versie_nummer = int(record.get("versie_nummer", 0) or 0)
+    except (TypeError, ValueError):
+        versie_nummer = 0
 
+    created_at = str(record.get("created_at") or record.get("aangemaakt_op") or now_iso)
+    updated_at = str(record.get("updated_at") or record.get("aangepast_op") or created_at)
+    effectief_vanaf = str(record.get("effectief_vanaf") or record.get("created_at") or created_at)
+
+    return {
+        "id": str(record.get("id", "") or uuid4()),
+        "verpakkingsonderdeel_id": str(record.get("verpakkingsonderdeel_id", "") or ""),
+        "jaar": jaar,
+        "prijs_per_stuk": float(record.get("prijs_per_stuk", 0.0) or 0.0),
+        "versie_nummer": versie_nummer,
+        "effectief_vanaf": effectief_vanaf,
+        "is_actief": bool(record.get("is_actief", False)),
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
+
+
+def _assign_packaging_component_price_version_numbers(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (
+            str(row.get("verpakkingsonderdeel_id", "") or ""),
+            int(row.get("jaar", 0) or 0),
+        )
+        grouped.setdefault(key, []).append(dict(row))
+
+    numbered_rows: list[dict[str, Any]] = []
+    for grouped_rows in grouped.values():
+        grouped_rows.sort(
+            key=lambda item: (
+                str(item.get("effectief_vanaf", "") or ""),
+                str(item.get("created_at", "") or ""),
+                str(item.get("updated_at", "") or ""),
+                str(item.get("id", "") or ""),
+            )
+        )
+        for index, row in enumerate(grouped_rows, start=1):
+            numbered_rows.append({**row, "versie_nummer": index})
+
+    return numbered_rows
+
+
+def _sync_packaging_component_price_version_state(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    numbered = _assign_packaging_component_price_version_numbers(rows)
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in numbered:
+        key = (
+            str(row.get("verpakkingsonderdeel_id", "") or ""),
+            int(row.get("jaar", 0) or 0),
+        )
+        grouped.setdefault(key, []).append(dict(row))
+
+    normalized_rows: list[dict[str, Any]] = []
+    for grouped_rows in grouped.values():
+        grouped_rows.sort(
+            key=lambda item: (
+                int(item.get("versie_nummer", 0) or 0),
+                str(item.get("effectief_vanaf", "") or ""),
+                str(item.get("updated_at", "") or ""),
+            )
+        )
+        active_indices = [index for index, row in enumerate(grouped_rows) if bool(row.get("is_actief"))]
+        active_index = active_indices[-1] if active_indices else (len(grouped_rows) - 1 if grouped_rows else -1)
+        for index, row in enumerate(grouped_rows):
+            normalized_rows.append({**row, "is_actief": index == active_index})
+
+    return normalized_rows
+
+
+def _build_active_packaging_component_price_projection(
+    versions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    projection = [
+        _normalize_packaging_component_price_record(version)
+        for version in versions
+        if bool(version.get("is_actief"))
+    ]
+    return sorted(
+        projection,
+        key=lambda item: (
+            int(item.get("jaar", 0) or 0),
+            str(item.get("verpakkingsonderdeel_id", "") or ""),
+        ),
+    )
+
+
+def load_packaging_component_masters() -> list[dict[str, Any]]:
+    data = _load_postgres_first_list("packaging-components", VERPAKKINGSONDERDELEN_FILE)
     normalized = [
         _normalize_packaging_component_master_record(record)
         for record in data
         if isinstance(record, dict)
     ]
-    if normalized != data:
-        _save_postgres_dataset("packaging-components", normalized)
-
     return sorted(
         normalized,
         key=lambda item: (
@@ -1828,36 +2549,129 @@ def save_packaging_component_masters(data: list[dict[str, Any]]) -> bool:
     return _save_postgres_dataset("packaging-components", normalized)
 
 
-def load_packaging_component_prices() -> list[dict[str, Any]]:
-    postgres_payload = _load_postgres_dataset("packaging-component-prices")
+def load_packaging_component_price_versions() -> list[dict[str, Any]]:
+    postgres_payload = _load_postgres_dataset("packaging-component-price-versions")
     data = postgres_payload if isinstance(postgres_payload, list) else []
-    if not isinstance(data, list):
-        return []
+    if not data:
+        legacy_payload = _load_postgres_dataset("packaging-component-prices")
+        legacy_rows = legacy_payload if isinstance(legacy_payload, list) else []
+        data = [
+            normalize_packaging_component_price_version_record(
+                {
+                    **record,
+                    "versie_nummer": 1,
+                    "is_actief": True,
+                }
+            )
+            for record in legacy_rows
+            if isinstance(record, dict)
+        ]
 
-    normalized = [
-        _normalize_packaging_component_price_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
-    if normalized != data:
-        _save_postgres_dataset("packaging-component-prices", normalized)
-
+    normalized = _sync_packaging_component_price_version_state(
+        [
+            normalize_packaging_component_price_version_record(record)
+            for record in data
+            if isinstance(record, dict)
+        ]
+    )
     return sorted(
         normalized,
         key=lambda item: (
             int(item.get("jaar", 0) or 0),
             str(item.get("verpakkingsonderdeel_id", "") or ""),
+            int(item.get("versie_nummer", 0) or 0),
         ),
     )
 
 
+def save_packaging_component_price_versions(data: list[dict[str, Any]]) -> bool:
+    valid_component_ids = {
+        str(record.get("id", "") or "")
+        for record in load_packaging_component_masters()
+        if isinstance(record, dict) and str(record.get("id", "") or "")
+    }
+    normalized = _sync_packaging_component_price_version_state(
+        [
+            normalize_packaging_component_price_version_record(record)
+            for record in data
+            if isinstance(record, dict)
+            and str(record.get("verpakkingsonderdeel_id", "") or "") in valid_component_ids
+        ]
+    )
+    projection = _build_active_packaging_component_price_projection(normalized)
+    saved_versions = _save_postgres_dataset("packaging-component-price-versions", normalized)
+    saved_projection = _save_postgres_dataset("packaging-component-prices", projection)
+    return saved_versions and saved_projection
+
+
+def load_packaging_component_prices() -> list[dict[str, Any]]:
+    versions = load_packaging_component_price_versions()
+    return _build_active_packaging_component_price_projection(versions)
+
+
 def save_packaging_component_prices(data: list[dict[str, Any]]) -> bool:
-    normalized = [
+    now_iso = datetime.now(UTC).replace(microsecond=0).isoformat()
+    current_versions = load_packaging_component_price_versions()
+    target_rows = [
         _normalize_packaging_component_price_record(record)
         for record in data
         if isinstance(record, dict)
     ]
-    return _save_postgres_dataset("packaging-component-prices", normalized)
+    target_keys = {
+        (
+            str(row.get("verpakkingsonderdeel_id", "") or ""),
+            int(row.get("jaar", 0) or 0),
+        )
+        for row in target_rows
+    }
+    retained_versions = [
+        dict(version)
+        for version in current_versions
+        if (
+            str(version.get("verpakkingsonderdeel_id", "") or ""),
+            int(version.get("jaar", 0) or 0),
+        )
+        in target_keys
+    ]
+
+    for row in target_rows:
+        key = (
+            str(row.get("verpakkingsonderdeel_id", "") or ""),
+            int(row.get("jaar", 0) or 0),
+        )
+        versions_for_key = [
+            version
+            for version in retained_versions
+            if (
+                str(version.get("verpakkingsonderdeel_id", "") or ""),
+                int(version.get("jaar", 0) or 0),
+            )
+            == key
+        ]
+        active_version = next(
+            (version for version in reversed(versions_for_key) if bool(version.get("is_actief"))),
+            None,
+        )
+        active_price = float((active_version or {}).get("prijs_per_stuk", 0.0) or 0.0)
+        next_price = float(row.get("prijs_per_stuk", 0.0) or 0.0)
+        if active_version is not None and active_price == next_price:
+            continue
+
+        retained_versions.append(
+            normalize_packaging_component_price_version_record(
+                {
+                    "verpakkingsonderdeel_id": key[0],
+                    "jaar": key[1],
+                    "prijs_per_stuk": next_price,
+                    "effectief_vanaf": now_iso,
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                    "is_actief": True,
+                }
+            )
+        )
+
+    return save_packaging_component_price_versions(retained_versions)
 
 
 def _get_master_product_years() -> list[int]:
@@ -1895,35 +2709,6 @@ def _packaging_price_lookup_for_year(year: int | str) -> dict[str, dict[str, Any
         for row in load_packaging_component_prices()
         if int(row.get("jaar", 0) or 0) == year_value
     }
-
-
-def normalize_verpakkingsonderdeel_record(
-    record: dict[str, Any],
-    *,
-    default_year: int | None = None,
-    default_component_key: str | None = None,
-    preserve_id: str | None = None,
-) -> dict[str, Any]:
-    normalized = _normalize_packaging_component_master_record(
-        {
-            **record,
-            "id": str(preserve_id or record.get("id") or uuid4()),
-            "component_key": str(
-                record.get("component_key")
-                or default_component_key
-                or record.get("id")
-                or uuid4()
-            ),
-        }
-    )
-    if default_year is not None or record.get("jaar") is not None:
-        try:
-            normalized["jaar"] = int(record.get("jaar", default_year) or 0)
-        except (TypeError, ValueError):
-            normalized["jaar"] = int(default_year or 0)
-    if "prijs_per_stuk" in record:
-        normalized["prijs_per_stuk"] = float(record.get("prijs_per_stuk", 0.0) or 0.0)
-    return normalized
 
 
 def load_verpakkingsonderdelen(year: int | str | None = None) -> list[dict[str, Any]]:
@@ -1997,215 +2782,6 @@ def save_verpakkingsonderdelen(data: list[dict[str, Any]]) -> bool:
                 prijs_index[index_key] = len(prijs_rows) - 1
 
     return save_packaging_component_masters(masters) and save_packaging_component_prices(prijs_rows)
-
-
-def _normalize_basisproduct_onderdeel_row(row: dict[str, Any]) -> dict[str, Any]:
-    onderdeel_id = str(row.get("verpakkingsonderdeel_id", "") or "")
-    gekoppeld_onderdeel = get_verpakkingsonderdeel_by_id(onderdeel_id)
-    return {
-        "verpakkingsonderdeel_id": onderdeel_id,
-        "omschrijving": str(
-            row.get("omschrijving", "")
-            or (gekoppeld_onderdeel or {}).get("omschrijving", "")
-            or ""
-        ),
-        "hoeveelheid": float(row.get("hoeveelheid", 0.0) or 0.0),
-    }
-
-
-def normalize_basisproduct_record(record: dict[str, Any]) -> dict[str, Any]:
-    onderdelen = [
-        _normalize_basisproduct_onderdeel_row(row)
-        for row in record.get("onderdelen", [])
-        if isinstance(row, dict)
-    ]
-    return {
-        "id": str(record.get("id", "") or uuid4()),
-        "omschrijving": str(record.get("omschrijving", "") or ""),
-        "inhoud_per_eenheid_liter": float(record.get("inhoud_per_eenheid_liter", 0.0) or 0.0),
-        "onderdelen": onderdelen,
-        "totale_verpakkingskosten": float(record.get("totale_verpakkingskosten", 0.0) or 0.0),
-    }
-
-
-def load_basisproducten(year: int | str | None = None) -> list[dict[str, Any]]:
-    postgres_payload = _load_postgres_dataset("base-product-masters")
-    data = postgres_payload if isinstance(postgres_payload, list) else []
-    if not isinstance(data, list):
-        return []
-
-    normalized = [
-        normalize_basisproduct_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
-    if normalized != data:
-        _save_postgres_dataset("base-product-masters", normalized)
-    return normalized
-
-
-def save_basisproducten(data: list[dict[str, Any]]) -> bool:
-    normalized = [
-        normalize_basisproduct_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
-    return _save_postgres_dataset("base-product-masters", normalized)
-
-
-def resolve_basisproduct_for_year(
-    basisproduct: dict[str, Any],
-    year: int | str,
-) -> dict[str, Any]:
-    normalized = normalize_basisproduct_record(basisproduct)
-    prijs_lookup = _packaging_price_lookup_for_year(year)
-    resolved_rows: list[dict[str, Any]] = []
-
-    for row in normalized.get("onderdelen", []):
-        onderdeel_id = str(row.get("verpakkingsonderdeel_id", "") or "")
-        onderdeel = get_verpakkingsonderdeel_by_id(onderdeel_id)
-        prijs_row = prijs_lookup.get(onderdeel_id, {})
-        hoeveelheid = float(row.get("hoeveelheid", 0.0) or 0.0)
-        prijs_per_stuk = float(prijs_row.get("prijs_per_stuk", 0.0) or 0.0)
-        resolved_rows.append(
-            {
-                "verpakkingsonderdeel_id": onderdeel_id,
-                "omschrijving": str(
-                    (onderdeel or {}).get("omschrijving", row.get("omschrijving", "")) or ""
-                ),
-                "jaar": int(year),
-                "hoeveelheid": hoeveelheid,
-                "prijs_per_stuk": prijs_per_stuk,
-                "totale_kosten": bereken_basisproduct_regel_kosten(hoeveelheid, prijs_per_stuk),
-            }
-        )
-
-    return {
-        **normalized,
-        "jaar": int(year),
-        "onderdelen": resolved_rows,
-        "totale_verpakkingskosten": bereken_basisproduct_totaal(resolved_rows),
-    }
-
-
-def load_basisproducten_for_year(year: int | str) -> list[dict[str, Any]]:
-    return [
-        resolve_basisproduct_for_year(basisproduct, year)
-        for basisproduct in load_basisproducten()
-    ]
-
-
-def normalize_samengesteld_product_record(record: dict[str, Any]) -> dict[str, Any]:
-    basisproducten = [
-        _normalize_samengesteld_basisproduct_row(row)
-        for row in record.get("basisproducten", [])
-        if isinstance(row, dict)
-    ]
-    return {
-        "id": str(record.get("id", "") or uuid4()),
-        "omschrijving": str(record.get("omschrijving", "") or ""),
-        "basisproducten": basisproducten,
-        "totale_inhoud_liter": bereken_samengesteld_product_totaal_inhoud(basisproducten),
-        "totale_verpakkingskosten": float(record.get("totale_verpakkingskosten", 0.0) or 0.0),
-    }
-
-
-def load_samengestelde_producten(year: int | str | None = None) -> list[dict[str, Any]]:
-    postgres_payload = _load_postgres_dataset("composite-product-masters")
-    data = postgres_payload if isinstance(postgres_payload, list) else []
-    if not isinstance(data, list):
-        return []
-
-    normalized = [
-        normalize_samengesteld_product_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
-    if normalized != data:
-        _save_postgres_dataset("composite-product-masters", normalized)
-    return normalized
-
-
-def save_samengestelde_producten(data: list[dict[str, Any]]) -> bool:
-    normalized = [
-        normalize_samengesteld_product_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
-    return _save_postgres_dataset("composite-product-masters", normalized)
-
-
-def resolve_samengesteld_product_for_year(
-    samengesteld_product: dict[str, Any],
-    year: int | str,
-    *,
-    basisproducten_lookup: dict[str, dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    normalized = normalize_samengesteld_product_record(samengesteld_product)
-    if basisproducten_lookup is None:
-        basisproducten_lookup = {
-            str(item.get("id", "") or ""): item
-            for item in load_basisproducten_for_year(year)
-        }
-
-    resolved_rows: list[dict[str, Any]] = []
-    for row in normalized.get("basisproducten", []):
-        basisproduct_id = str(row.get("basisproduct_id", "") or "")
-        basisproduct = _resolve_samengesteld_bouwblok_for_year(
-            basisproduct_id,
-            year,
-            basisproducten_lookup=basisproducten_lookup,
-        )
-        aantal = float(row.get("aantal", 0.0) or 0.0)
-        inhoud_per_eenheid = float(
-            (basisproduct or {}).get("inhoud_per_eenheid_liter", 0.0) or 0.0
-        )
-        verpakkingskosten_per_eenheid = float(
-            (basisproduct or {}).get("totale_verpakkingskosten", 0.0) or 0.0
-        )
-        resolved_rows.append(
-            {
-                "basisproduct_id": basisproduct_id,
-                "omschrijving": str(
-                    (basisproduct or {}).get("omschrijving", row.get("omschrijving", "")) or ""
-                ),
-                "aantal": aantal,
-                "inhoud_per_eenheid_liter": inhoud_per_eenheid,
-                "totale_inhoud_liter": aantal * inhoud_per_eenheid,
-                "verpakkingskosten_per_eenheid": verpakkingskosten_per_eenheid,
-                "totale_verpakkingskosten": bereken_basisproduct_regel_kosten(
-                    aantal,
-                    verpakkingskosten_per_eenheid,
-                ),
-            }
-        )
-
-    return {
-        **normalized,
-        "jaar": int(year),
-        "basisproducten": resolved_rows,
-        "totale_inhoud_liter": bereken_samengesteld_product_totaal_inhoud(resolved_rows),
-        "totale_verpakkingskosten": bereken_samengesteld_product_totaal_verpakkingskosten(
-            resolved_rows
-        ),
-    }
-
-
-def load_samengestelde_producten_for_year(year: int | str) -> list[dict[str, Any]]:
-    basisproducten_lookup = {
-        str(item.get("id", "") or ""): item
-        for item in load_basisproducten_for_year(year)
-    }
-    return [
-        resolve_samengesteld_product_for_year(
-            samengesteld_product,
-            year,
-            basisproducten_lookup=basisproducten_lookup,
-        )
-        for samengesteld_product in load_samengestelde_producten()
-    ]
-
-
 def build_verpakkingsonderdelen_legacy_projection() -> list[dict[str, Any]]:
     years = _get_master_product_years()
     if not years:
@@ -2588,7 +3164,7 @@ def load_bieren() -> list[dict[str, Any]]:
     """Laadt alle bieren uit de centrale bierlijst."""
     postgres_payload = _load_postgres_dataset("bieren")
     if isinstance(postgres_payload, list):
-        data = postgres_payload
+        data = _flatten_wrapped_records(postgres_payload)
     else:
         data = _load_json_value(BIEREN_FILE, [])
     if not isinstance(data, list):
@@ -2599,9 +3175,6 @@ def load_bieren() -> list[dict[str, Any]]:
         if not isinstance(bier, dict):
             continue
         normalized_bieren.append(normalize_bier_record(bier))
-
-    if isinstance(postgres_payload, list) and normalized_bieren != data:
-        _save_postgres_dataset("bieren", normalized_bieren)
 
     return normalized_bieren
 
@@ -2645,6 +3218,71 @@ def save_bieren(data: list[dict[str, Any]]) -> bool:
     return _save_json_value(BIEREN_FILE, normalized, "[]")
 
 
+def _flatten_wrapped_records(rows: list[Any]) -> list[dict[str, Any]]:
+    flattened: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        wrapped_values = row.get("value")
+        if (
+            isinstance(wrapped_values, list)
+            and set(row.keys()).issubset({"Count", "value"})
+        ):
+            flattened.extend(_flatten_wrapped_records(wrapped_values))
+            continue
+        flattened.append(row)
+    return flattened
+
+
+def _has_meaningful_kostprijsversie_content(record: dict[str, Any]) -> bool:
+    bier_id = str(record.get("bier_id", "") or "").strip()
+    basisgegevens = record.get("basisgegevens", {}) or {}
+    biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
+    jaar = int(record.get("jaar", basisgegevens.get("jaar", 0)) or 0)
+    status = str(record.get("status", "") or "").strip().lower()
+    invoer = record.get("invoer", {}) or {}
+    ingredienten = (invoer.get("ingredienten", {}) or {}).get("regels", [])
+    inkoop = invoer.get("inkoop", {}) or {}
+    regels = inkoop.get("regels", [])
+    factuurregels = inkoop.get("factuurregels", [])
+    facturen = inkoop.get("facturen", [])
+    snapshot = record.get("resultaat_snapshot", {}) or {}
+    producten = (snapshot.get("producten", {}) or {})
+    basisproducten = producten.get("basisproducten", [])
+    samengestelde = producten.get("samengestelde_producten", [])
+
+    if bier_id or biernaam or jaar > 0:
+        return True
+    if status == "definitief":
+        return True
+    if isinstance(ingredienten, list) and len(ingredienten) > 0:
+        return True
+    if isinstance(regels, list) and len(regels) > 0:
+        return True
+    if isinstance(factuurregels, list) and len(factuurregels) > 0:
+        return True
+    if isinstance(facturen, list):
+        for factuur in facturen:
+            if not isinstance(factuur, dict):
+                continue
+            if str(factuur.get("factuurnummer", "") or "").strip():
+                return True
+            if str(factuur.get("factuurdatum", "") or "").strip():
+                return True
+            if float(factuur.get("verzendkosten", 0) or 0) > 0:
+                return True
+            if float(factuur.get("overige_kosten", 0) or 0) > 0:
+                return True
+            regels_in_factuur = factuur.get("factuurregels", [])
+            if isinstance(regels_in_factuur, list) and len(regels_in_factuur) > 0:
+                return True
+    if isinstance(basisproducten, list) and len(basisproducten) > 0:
+        return True
+    if isinstance(samengestelde, list) and len(samengestelde) > 0:
+        return True
+    return False
+
+
 def _collect_referenced_bier_ids() -> set[str]:
     """Verzamelt alle bier-id's die nog ergens functioneel worden gebruikt."""
     referenced_ids: set[str] = set()
@@ -2681,6 +3319,13 @@ def _collect_referenced_bier_ids() -> set[str]:
         if not isinstance(record, dict):
             continue
         bier_id = str(record.get("bier_id", "") or "").strip()
+        if bier_id:
+            referenced_ids.add(bier_id)
+
+    for activation in load_kostprijsproductactiveringen():
+        if not isinstance(activation, dict):
+            continue
+        bier_id = str(activation.get("bier_id", "") or "").strip()
         if bier_id:
             referenced_ids.add(bier_id)
 
@@ -2803,6 +3448,14 @@ def delete_bier_usage_everywhere(
         )
     ]
     if not save_berekeningen(berekeningen):
+        return False
+
+    kostprijsproductactiveringen = [
+        record
+        for record in load_kostprijsproductactiveringen()
+        if str(record.get("bier_id", "") or "").strip() != bier_id_value
+    ]
+    if not save_kostprijsproductactiveringen(kostprijsproductactiveringen):
         return False
 
     prijsvoorstellen = [
@@ -2937,7 +3590,7 @@ def update_bier(
     return False
 
 
-def _sync_bieren_with_berekeningen(
+def _sync_bieren_with_kostprijsversies(
     records: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], bool]:
     bieren = load_bieren()
@@ -3025,30 +3678,123 @@ def _sync_bieren_with_berekeningen(
     return records, changed
 
 
-def load_berekeningen() -> list[dict[str, Any]]:
-    """Laadt alle berekeningen voor Nieuwe kostprijsberekening."""
-    postgres_payload = _load_postgres_dataset("berekeningen")
+def _assign_kostprijsversie_numbers(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for record in records:
+        bier_id = str(record.get("bier_id", "") or "")
+        jaar = int(record.get("jaar", 0) or 0)
+        grouped.setdefault((bier_id, jaar), []).append(record)
+
+    for (_, _), group in grouped.items():
+        group.sort(
+            key=lambda item: (
+                str(item.get("aangemaakt_op", item.get("created_at", "")) or ""),
+                str(item.get("aangepast_op", item.get("updated_at", "")) or ""),
+                str(item.get("id", "") or ""),
+            )
+        )
+        for index, item in enumerate(group, start=1):
+            item["versie_nummer"] = index
+
+    return records
+
+
+def _enforce_single_active_kostprijsversie(
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for record in records:
+        bier_id = str(record.get("bier_id", "") or "")
+        jaar = int(record.get("jaar", 0) or 0)
+        grouped.setdefault((bier_id, jaar), []).append(record)
+
+    for (_, _), group in grouped.items():
+        definitive = [
+            record
+            for record in group
+            if str(record.get("status", "") or "") == "definitief"
+        ]
+        active = [
+            record
+            for record in definitive
+            if bool(record.get("is_actief", False))
+        ]
+
+        keeper: dict[str, Any] | None = None
+        if active:
+            active.sort(
+                key=lambda item: (
+                    str(item.get("effectief_vanaf", "") or ""),
+                    str(item.get("aangepast_op", item.get("updated_at", "")) or ""),
+                    str(item.get("id", "") or ""),
+                ),
+                reverse=True,
+            )
+            keeper = active[0]
+        elif definitive:
+            definitive.sort(
+                key=lambda item: (
+                    str(item.get("finalized_at", "") or ""),
+                    str(item.get("aangepast_op", item.get("updated_at", "")) or ""),
+                    str(item.get("id", "") or ""),
+                ),
+                reverse=True,
+            )
+            keeper = definitive[0]
+            keeper["is_actief"] = True
+            keeper["effectief_vanaf"] = str(
+                keeper.get("effectief_vanaf", "")
+                or keeper.get("finalized_at", "")
+                or keeper.get("updated_at", "")
+                or _now_iso()
+            )
+
+        keeper_id = str(keeper.get("id", "") or "") if keeper else ""
+        for record in group:
+            is_keeper = keeper_id and str(record.get("id", "") or "") == keeper_id
+            if str(record.get("status", "") or "") != "definitief":
+                record["is_actief"] = False
+                record["effectief_vanaf"] = ""
+                continue
+            record["is_actief"] = bool(is_keeper)
+            if is_keeper:
+                record["effectief_vanaf"] = str(
+                    record.get("effectief_vanaf", "")
+                    or record.get("finalized_at", "")
+                    or record.get("updated_at", "")
+                    or _now_iso()
+                )
+            else:
+                record["effectief_vanaf"] = ""
+
+    return records
+
+
+def load_kostprijsversies() -> list[dict[str, Any]]:
+    """Laadt alle kostprijsversies voor de kostprijswizard."""
+    postgres_payload = _load_postgres_dataset("kostprijsversies")
+    if not isinstance(postgres_payload, list):
+        postgres_payload = _load_postgres_dataset("berekeningen")
     if isinstance(postgres_payload, list):
         data = postgres_payload
     else:
-        data = _load_json_value(BEREKENINGEN_FILE, [])
+        data = _load_json_value(KOSTPRIJSVERSIES_FILE, [])
+        if not isinstance(data, list) or not data:
+            data = _load_json_value(BEREKENINGEN_FILE, [])
     if not isinstance(data, list):
         return []
 
-    normalized_records: list[dict[str, Any]] = []
-    for record in data:
-        if not isinstance(record, dict):
-            continue
-        normalized_records.append(normalize_berekening_record(record))
-
-    normalized_records, changed = _sync_bieren_with_berekeningen(normalized_records)
-    if changed:
-        if isinstance(postgres_payload, list):
-            _save_postgres_dataset("berekeningen", normalized_records)
-        else:
-            _save_json_value(BEREKENINGEN_FILE, normalized_records, "[]")
-
+    normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
+        [record for record in data if isinstance(record, dict)]
+    )
     return normalized_records
+
+
+def load_berekeningen() -> list[dict[str, Any]]:
+    """Compatibele wrapper: berekeningen lezen nu uit kostprijsversies."""
+    return load_kostprijsversies()
 
 
 def normalize_verkoopprijs_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -3362,7 +4108,7 @@ def normalize_verkoopstrategie_verpakking_record(record: dict[str, Any]) -> dict
 
 def _load_verkoopprijs_records() -> list[dict[str, Any]]:
     """Laadt alle ruwe records uit verkoopprijzen.json veilig in."""
-    data = _load_json_value(VERKOOPPRIJZEN_FILE, [])
+    data = _load_postgres_first_list("verkoopprijzen", VERKOOPPRIJZEN_FILE)
     return data if isinstance(data, list) else []
 
 
@@ -3540,9 +4286,30 @@ def ensure_complete_verkoop_records(records: list[dict[str, Any]]) -> list[dict[
     return _ensure_complete_verkoop_records(records)
 
 
+def _validate_verkoop_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    known_bieren = _known_bier_ids()
+    known_products = _known_product_refs()
+    validated: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        normalized = _normalize_any_verkoop_record(record)
+        bier_id = str(normalized.get("bier_id", "") or "")
+        if bier_id and bier_id not in known_bieren:
+            continue
+        product_id = str(normalized.get("product_id", "") or "")
+        product_type = str(normalized.get("product_type", "") or "").strip().lower()
+        if product_id and (product_id, product_type) not in known_products:
+            continue
+        validated.append(normalized)
+    return validated
+
+
 def _save_verkoop_records(records: list[dict[str, Any]]) -> bool:
     """Slaat gemengde verkooprecords veilig op."""
-    normalized = _ensure_complete_verkoop_records(records)
+    normalized = _ensure_complete_verkoop_records(_validate_verkoop_records(records))
+    if _save_postgres_dataset("verkoopprijzen", normalized):
+        return True
     return _save_json_value(VERKOOPPRIJZEN_FILE, normalized, "[]")
 
 
@@ -4150,6 +4917,7 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": str(row.get("id", "") or uuid4()),
                 "bier_id": str(row.get("bier_id", "") or ""),
+                "kostprijsversie_id": str(row.get("kostprijsversie_id", "") or ""),
                 "product_id": str(row.get("product_id", "") or ""),
                 "product_type": str(row.get("product_type", "") or ""),
                 "verpakking_label": str(row.get("verpakking_label", "") or ""),
@@ -4178,6 +4946,7 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": str(row.get("id", "") or uuid4()),
                 "bier_id": str(row.get("bier_id", "") or ""),
+                "kostprijsversie_id": str(row.get("kostprijsversie_id", "") or ""),
                 "product_id": str(row.get("product_id", "") or ""),
                 "product_type": str(row.get("product_type", "") or ""),
                 "liters": _float_value(row.get("liters")),
@@ -4209,6 +4978,22 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
     selected_kanalen = [
         str(value or "")
         for value in selected_kanalen_source
+        if str(value or "").strip()
+    ]
+    reference_channels_source = record.get("reference_channels", [])
+    if not isinstance(reference_channels_source, list):
+        reference_channels_source = []
+    reference_channels = [
+        str(value or "")
+        for value in reference_channels_source
+        if str(value or "").strip()
+    ]
+    kostprijsversie_ids_source = record.get("kostprijsversie_ids", [])
+    if not isinstance(kostprijsversie_ids_source, list):
+        kostprijsversie_ids_source = []
+    kostprijsversie_ids = [
+        str(value or "")
+        for value in kostprijsversie_ids_source
         if str(value or "").strip()
     ]
 
@@ -4249,10 +5034,14 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         "liters_basis": str(record.get("liters_basis", "een_bier") or "een_bier"),
         "kanaal": str(record.get("kanaal", "") or ""),
         "selected_kanalen": selected_kanalen,
+        "pricing_channel": str(record.get("pricing_channel", record.get("kanaal", "")) or ""),
+        "reference_channels": reference_channels,
         "pricing_method": str(record.get("pricing_method", "sell_in") or "sell_in"),
         "groothandel_marge_pct": _float_value(record.get("groothandel_marge_pct")),
+        "offer_level": str(record.get("offer_level", "samengesteld") or "samengesteld"),
         "bier_id": str(record.get("bier_id", "") or ""),
         "selected_bier_ids": selected_bier_ids,
+        "kostprijsversie_ids": kostprijsversie_ids,
         "deleted_product_refs": deleted_product_refs,
         "staffels": staffels,
         "product_rows": product_rows,
@@ -4314,6 +5103,64 @@ def _assign_missing_offertenummers(records: list[dict[str, Any]]) -> list[dict[s
     return normalized_records
 
 
+def _validate_prijsvoorstel_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    known_bieren = _known_bier_ids()
+    known_versions = _known_kostprijsversie_ids()
+    known_products = _known_product_refs()
+
+    def _valid_product_ref(product_id: str, product_type: str) -> bool:
+        product_id = str(product_id or "").strip()
+        if not product_id:
+            return True
+        return (product_id, str(product_type or "").strip().lower()) in known_products
+
+    validated: list[dict[str, Any]] = []
+    for record in records:
+        normalized = normalize_prijsvoorstel_record(record)
+        normalized["selected_bier_ids"] = [
+            bier_id
+            for bier_id in normalized.get("selected_bier_ids", [])
+            if bier_id in known_bieren
+        ]
+        normalized["kostprijsversie_ids"] = [
+            version_id
+            for version_id in normalized.get("kostprijsversie_ids", [])
+            if version_id in known_versions
+        ]
+        if str(normalized.get("bier_id", "") or "") not in known_bieren:
+            normalized["bier_id"] = ""
+
+        cleaned_product_rows: list[dict[str, Any]] = []
+        for row in normalized.get("product_rows", []):
+            bier_id = str(row.get("bier_id", "") or "")
+            version_id = str(row.get("kostprijsversie_id", "") or "")
+            if bier_id and bier_id not in known_bieren:
+                continue
+            if version_id and version_id not in known_versions:
+                continue
+            if not _valid_product_ref(row.get("product_id", ""), row.get("product_type", "")):
+                continue
+            cleaned_product_rows.append(row)
+        normalized["product_rows"] = cleaned_product_rows
+
+        cleaned_beer_rows: list[dict[str, Any]] = []
+        for row in normalized.get("beer_rows", []):
+            bier_id = str(row.get("bier_id", "") or "")
+            version_id = str(row.get("kostprijsversie_id", "") or "")
+            if bier_id and bier_id not in known_bieren:
+                continue
+            if version_id and version_id not in known_versions:
+                continue
+            if not _valid_product_ref(row.get("product_id", ""), row.get("product_type", "")):
+                continue
+            cleaned_beer_rows.append(row)
+        normalized["beer_rows"] = cleaned_beer_rows
+
+        validated.append(normalized)
+
+    return validated
+
+
 def get_next_prijsvoorstel_offertenummer() -> str:
     prefix = _prijsvoorstel_prefix()
     next_sequence = max(
@@ -4328,27 +5175,26 @@ def get_next_prijsvoorstel_offertenummer() -> str:
 
 def load_prijsvoorstellen() -> list[dict[str, Any]]:
     """Laadt alle prijsvoorstellen veilig in."""
-    data = _load_json_value(PRIJSVOORSTELLEN_FILE, [])
+    postgres_payload = _load_postgres_dataset("prijsvoorstellen")
+    if isinstance(postgres_payload, list):
+        data = postgres_payload
+    else:
+        data = _load_json_value(PRIJSVOORSTELLEN_FILE, [])
     if not isinstance(data, list):
         return []
-    normalized = [
-        normalize_prijsvoorstel_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
+    normalized = _validate_prijsvoorstel_records(
+        [record for record in data if isinstance(record, dict)]
+    )
     if any(not str(record.get("offertenummer", "") or "").strip() for record in normalized):
         normalized = _assign_missing_offertenummers(normalized)
-        _save_json_value(PRIJSVOORSTELLEN_FILE, normalized, "[]")
     return normalized
 
 
 def save_prijsvoorstellen(data: list[dict[str, Any]]) -> bool:
     """Slaat alle prijsvoorstellen veilig op."""
-    normalized = [
-        normalize_prijsvoorstel_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
+    normalized = _validate_prijsvoorstel_records(
+        [record for record in data if isinstance(record, dict)]
+    )
     normalized = _assign_missing_offertenummers(normalized)
     normalized = sorted(
         normalized,
@@ -4358,6 +5204,8 @@ def save_prijsvoorstellen(data: list[dict[str, Any]]) -> bool:
         ),
         reverse=True,
     )
+    if _save_postgres_dataset("prijsvoorstellen", normalized):
+        return True
     return _save_json_value(PRIJSVOORSTELLEN_FILE, normalized, "[]")
 
 
@@ -4578,24 +5426,46 @@ def get_verkoopprijzen_for_year(year: int | str) -> list[dict[str, Any]]:
 
 
 def save_berekeningen(data: list[dict[str, Any]]) -> bool:
-    """Slaat alle berekeningen veilig op."""
-    normalized_records = [
-        normalize_berekening_record(record)
+    """Compatibele wrapper: slaat berekeningen als kostprijsversies op."""
+    return save_kostprijsversies(data)
+
+
+def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
+    """Slaat alle kostprijsversies veilig op."""
+    cleaned_data = [
+        record
         for record in data
-        if isinstance(record, dict)
+        if isinstance(record, dict) and _has_meaningful_kostprijsversie_content(record)
     ]
-    normalized_records, _ = _sync_bieren_with_berekeningen(normalized_records)
-    if _save_postgres_dataset("berekeningen", normalized_records):
+    normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
+        cleaned_data
+    )
+    if _save_postgres_dataset("kostprijsversies", normalized_records):
+        _save_postgres_dataset("kostprijsproductactiveringen", normalized_activations)
         return True
-    return _save_json_value(BEREKENINGEN_FILE, normalized_records, "[]")
+    saved_versions = _save_json_value(KOSTPRIJSVERSIES_FILE, normalized_records, "[]")
+    saved_activations = _save_json_value(
+        KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
+        normalized_activations,
+        "[]",
+    )
+    return bool(saved_versions and saved_activations)
 
 
 def create_empty_berekening() -> dict[str, Any]:
-    """Maakt een lege berekening aan met veilige defaults."""
+    """Maakt een lege kostprijsversie aan met veilige defaults."""
     return normalize_berekening_record(
         {
             "id": str(uuid4()),
             "bier_id": "",
+            "jaar": 0,
+            "versie_nummer": 0,
+            "type": "productie",
+            "kostprijs": 0.0,
+            "brontype": "stam",
+            "bron_id": "",
+            "effectief_vanaf": "",
+            "is_actief": False,
             "record_type": "kostprijsberekening",
             "calculation_variant": "origineel",
             "bron_berekening_id": "",
@@ -4653,6 +5523,8 @@ def create_empty_berekening() -> dict[str, Any]:
             "last_completed_step": 1,
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
+            "aangemaakt_op": _now_iso(),
+            "aangepast_op": _now_iso(),
             "finalized_at": "",
         }
     )
@@ -4663,13 +5535,18 @@ def create_recalculatie_from_berekening(
     *,
     reason: str = "Hercalculatie",
 ) -> dict[str, Any]:
-    """Maakt een nieuwe concept-hercalculatie op basis van een bestaande berekening."""
+    """Maakt een nieuwe concept-hercalculatie op basis van een bestaande kostprijsversie."""
     cloned = deepcopy(source_record if isinstance(source_record, dict) else {})
     cloned["id"] = str(uuid4())
     cloned["status"] = "concept"
     cloned["record_type"] = "kostprijsberekening"
     cloned["calculation_variant"] = "hercalculatie"
     cloned["bron_berekening_id"] = str(source_record.get("id", "") or "")
+    cloned["bron_id"] = str(source_record.get("id", "") or "")
+    cloned["brontype"] = "hercalculatie"
+    cloned["versie_nummer"] = 0
+    cloned["is_actief"] = False
+    cloned["effectief_vanaf"] = ""
     cloned["hercalculatie_reden"] = str(reason or "Hercalculatie")
     cloned["hercalculatie_notitie"] = ""
     cloned["hercalculatie_timestamp"] = _now_iso()
@@ -4683,6 +5560,8 @@ def create_recalculatie_from_berekening(
     cloned["last_completed_step"] = 1
     cloned["created_at"] = _now_iso()
     cloned["updated_at"] = _now_iso()
+    cloned["aangemaakt_op"] = cloned["created_at"]
+    cloned["aangepast_op"] = cloned["updated_at"]
     return normalize_berekening_record(cloned)
 
 
@@ -4695,8 +5574,8 @@ def get_berekening_by_id(berekening_id: str) -> dict[str, Any] | None:
 
 
 def add_or_update_berekening(record: dict[str, Any]) -> dict[str, Any] | None:
-    """Voegt een berekening toe of werkt een bestaande berekening bij."""
-    records = load_berekeningen()
+    """Voegt een kostprijsversie toe of werkt een bestaande kostprijsversie bij."""
+    records = load_kostprijsversies()
     record_id = str(record.get("id", "") or uuid4())
     existing = next(
         (item for item in records if str(item.get("id", "")) == record_id),
@@ -4707,12 +5586,24 @@ def add_or_update_berekening(record: dict[str, Any]) -> dict[str, Any] | None:
             **(existing or {}),
             **record,
             "id": record_id,
+            "jaar": int(
+                (
+                    (record.get("basisgegevens", {}) if isinstance(record.get("basisgegevens", {}), dict) else {})
+                ).get("jaar", record.get("jaar", (existing or {}).get("jaar", 0)))
+                or 0
+            ),
             "created_at": (
                 str(existing.get("created_at", "") or "")
                 if isinstance(existing, dict)
                 else str(record.get("created_at", "") or _now_iso())
             ),
             "updated_at": _now_iso(),
+            "aangemaakt_op": (
+                str(existing.get("aangemaakt_op", existing.get("created_at", "")) or "")
+                if isinstance(existing, dict)
+                else str(record.get("aangemaakt_op", record.get("created_at", "") or _now_iso()) or _now_iso())
+            ),
+            "aangepast_op": _now_iso(),
         }
     )
 
@@ -4727,7 +5618,7 @@ def add_or_update_berekening(record: dict[str, Any]) -> dict[str, Any] | None:
     if not updated:
         records.append(normalized)
 
-    if save_berekeningen(records):
+    if save_kostprijsversies(records):
         return normalized
     return None
 
@@ -4744,13 +5635,312 @@ def save_berekening_as_concept(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def finalize_berekening(record: dict[str, Any]) -> dict[str, Any] | None:
-    """Rondt een berekening af als definitief record."""
+    """Rondt een kostprijsversie af als definitief record."""
     return add_or_update_berekening(
         {
             **record,
             "status": "definitief",
+            "is_actief": bool(record.get("is_actief", False)),
             "finalized_at": _now_iso(),
         }
+    )
+
+
+def activate_kostprijsversie(kostprijsversie_id: str) -> dict[str, Any] | None:
+    """Activeert de producten uit een definitieve kostprijsversie voor bier + product + jaar."""
+    records = load_kostprijsversies()
+    activations = load_kostprijsproductactiveringen()
+    target = next(
+        (
+            record
+            for record in records
+            if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+        ),
+        None,
+    )
+    if not isinstance(target, dict):
+        return None
+    if str(target.get("status", "") or "") != "definitief":
+        return None
+
+    bier_id = str(target.get("bier_id", "") or "")
+    jaar = int(target.get("jaar", 0) or 0)
+    effective_from = _now_iso()
+    normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
+        records,
+        activations,
+    )
+    target = next(
+        (
+            record
+            for record in normalized_records
+            if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+        ),
+        None,
+    )
+    if not isinstance(target, dict):
+        return None
+    target_refs = _resolve_kostprijsproduct_refs(
+        target,
+        {
+            str(row.get("id", "") or ""): row
+            for row in load_basisproducten()
+            if isinstance(row, dict) and str(row.get("id", "") or "")
+        },
+        {
+            str(row.get("id", "") or ""): row
+            for row in load_samengestelde_producten()
+            if isinstance(row, dict) and str(row.get("id", "") or "")
+        },
+        {
+            _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+            for row in load_basisproducten()
+            if isinstance(row, dict)
+            and _normalize_verpakking_key(row.get("omschrijving"))
+            and str(row.get("id", "") or "")
+        },
+        {
+            _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+            for row in load_samengestelde_producten()
+            if isinstance(row, dict)
+            and _normalize_verpakking_key(row.get("omschrijving"))
+            and str(row.get("id", "") or "")
+        },
+    )
+    if not target_refs:
+        return None
+
+    activation_map: dict[tuple[str, int, str], dict[str, Any]] = {
+        (
+            str(item.get("bier_id", "") or ""),
+            int(item.get("jaar", 0) or 0),
+            str(item.get("product_id", "") or ""),
+        ): normalize_kostprijsproduct_activering_record(item)
+        for item in normalized_activations
+    }
+
+    for ref in target_refs:
+        product_id = str(ref.get("product_id", "") or "")
+        if not product_id:
+            continue
+        group_key = (bier_id, jaar, product_id)
+        existing = activation_map.get(group_key)
+        activation_map[group_key] = normalize_kostprijsproduct_activering_record(
+            {
+                **(existing or {}),
+                "bier_id": bier_id,
+                "jaar": jaar,
+                "product_id": product_id,
+                "product_type": str(ref.get("product_type", "") or ""),
+                "kostprijsversie_id": str(kostprijsversie_id or ""),
+                "effectief_vanaf": effective_from,
+                "created_at": str((existing or {}).get("created_at", "") or effective_from),
+                "updated_at": effective_from,
+            }
+        )
+
+    final_records, final_activations = _normalize_and_sync_kostprijsversie_state(
+        normalized_records,
+        list(activation_map.values()),
+    )
+    if _save_postgres_dataset("kostprijsversies", final_records):
+        _save_postgres_dataset("kostprijsproductactiveringen", final_activations)
+    else:
+        versions_saved = _save_json_value(KOSTPRIJSVERSIES_FILE, final_records, "[]")
+        activations_saved = _save_json_value(
+            KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
+            final_activations,
+            "[]",
+        )
+        if not (versions_saved and activations_saved):
+            return None
+
+    return next(
+        (
+            record
+            for record in load_kostprijsversies()
+            if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+        ),
+        None,
+    )
+
+
+def activate_kostprijsversie_products(
+    kostprijsversie_id: str,
+    product_ids: list[str] | tuple[str, ...],
+) -> dict[str, Any] | None:
+    """Activeert geselecteerde producten uit een definitieve kostprijsversie."""
+    requested_product_ids = {
+        str(product_id or "").strip()
+        for product_id in product_ids
+        if str(product_id or "").strip()
+    }
+    if not requested_product_ids:
+        return None
+
+    records = load_kostprijsversies()
+    activations = load_kostprijsproductactiveringen()
+    target = next(
+        (
+            record
+            for record in records
+            if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+        ),
+        None,
+    )
+    if not isinstance(target, dict):
+        return None
+    if str(target.get("status", "") or "") != "definitief":
+        return None
+
+    basisproducten = [
+        row for row in load_basisproducten() if isinstance(row, dict)
+    ]
+    samengestelde_producten = [
+        row for row in load_samengestelde_producten() if isinstance(row, dict)
+    ]
+    basis_by_id = {
+        str(row.get("id", "") or ""): row
+        for row in basisproducten
+        if str(row.get("id", "") or "")
+    }
+    samengesteld_by_id = {
+        str(row.get("id", "") or ""): row
+        for row in samengestelde_producten
+        if str(row.get("id", "") or "")
+    }
+    basis_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in basisproducten
+        if _normalize_verpakking_key(row.get("omschrijving")) and str(row.get("id", "") or "")
+    }
+    samengesteld_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in samengestelde_producten
+        if _normalize_verpakking_key(row.get("omschrijving")) and str(row.get("id", "") or "")
+    }
+
+    normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
+        records,
+        activations,
+    )
+    target = next(
+        (
+            record
+            for record in normalized_records
+            if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+        ),
+        None,
+    )
+    if not isinstance(target, dict):
+        return None
+
+    target_refs = _resolve_kostprijsproduct_refs(
+        target,
+        basis_by_id,
+        samengesteld_by_id,
+        basis_by_name,
+        samengesteld_by_name,
+    )
+    target_ref_by_product_id = {
+        str(ref.get("product_id", "") or ""): ref
+        for ref in target_refs
+        if str(ref.get("product_id", "") or "")
+    }
+    valid_product_ids = requested_product_ids.intersection(target_ref_by_product_id.keys())
+    if not valid_product_ids:
+        return None
+
+    bier_id = str(target.get("bier_id", "") or "")
+    jaar = int(target.get("jaar", 0) or 0)
+    effective_from = _now_iso()
+    activation_map: dict[tuple[str, int, str], dict[str, Any]] = {
+        (
+            str(item.get("bier_id", "") or ""),
+            int(item.get("jaar", 0) or 0),
+            str(item.get("product_id", "") or ""),
+        ): normalize_kostprijsproduct_activering_record(item)
+        for item in normalized_activations
+    }
+
+    for product_id in valid_product_ids:
+        ref = target_ref_by_product_id[product_id]
+        group_key = (bier_id, jaar, product_id)
+        existing = activation_map.get(group_key)
+        activation_map[group_key] = normalize_kostprijsproduct_activering_record(
+            {
+                **(existing or {}),
+                "bier_id": bier_id,
+                "jaar": jaar,
+                "product_id": product_id,
+                "product_type": str(ref.get("product_type", "") or ""),
+                "kostprijsversie_id": str(kostprijsversie_id or ""),
+                "effectief_vanaf": effective_from,
+                "created_at": str((existing or {}).get("created_at", "") or effective_from),
+                "updated_at": effective_from,
+            }
+        )
+
+    final_records, final_activations = _normalize_and_sync_kostprijsversie_state(
+        normalized_records,
+        list(activation_map.values()),
+    )
+    if _save_postgres_dataset("kostprijsversies", final_records):
+        _save_postgres_dataset("kostprijsproductactiveringen", final_activations)
+    else:
+        versions_saved = _save_json_value(KOSTPRIJSVERSIES_FILE, final_records, "[]")
+        activations_saved = _save_json_value(
+            KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
+            final_activations,
+            "[]",
+        )
+        if not (versions_saved and activations_saved):
+            return None
+
+    return next(
+        (
+            record
+            for record in load_kostprijsversies()
+            if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+        ),
+        None,
+    )
+
+
+def get_actieve_kostprijsversie(
+    bier_id: str,
+    jaar: int | str,
+) -> dict[str, Any] | None:
+    """Geeft een representatieve actieve kostprijsversie voor bier en jaar terug."""
+    try:
+        jaar_value = int(jaar)
+    except (TypeError, ValueError):
+        return None
+
+    activations = [
+        item
+        for item in load_kostprijsproductactiveringen()
+        if str(item.get("bier_id", "") or "") == str(bier_id or "")
+        and int(item.get("jaar", 0) or 0) == jaar_value
+    ]
+    if not activations:
+        return None
+    activations.sort(
+        key=lambda item: (
+            str(item.get("effectief_vanaf", "") or ""),
+            str(item.get("updated_at", "") or ""),
+            str(item.get("id", "") or ""),
+        ),
+        reverse=True,
+    )
+    target_version_id = str(activations[0].get("kostprijsversie_id", "") or "")
+    return next(
+        (
+            record
+            for record in load_kostprijsversies()
+            if str(record.get("id", "") or "") == target_version_id
+        ),
+        None,
     )
 
 
@@ -5269,21 +6459,26 @@ def build_model_a_canonical_datasets() -> dict[str, list[dict[str, Any]]]:
     cost_calc_inputs: list[dict[str, Any]] = []
     cost_calc_results: list[dict[str, Any]] = []
     cost_calc_lines: list[dict[str, Any]] = []
-    for row in load_berekeningen():
+    for row in load_kostprijsversies():
         calc_id = str(row.get("id", "") or "")
         if not calc_id:
             continue
         basisgegevens = row.get("basisgegevens", {}) if isinstance(row.get("basisgegevens", {}), dict) else {}
-        soort_berekening = row.get("soort_berekening", {}) if isinstance(row.get("soort_berekening", {}), dict) else {}
         resultaat_snapshot = row.get("resultaat_snapshot", {}) if isinstance(row.get("resultaat_snapshot", {}), dict) else {}
         input_data = row.get("invoer", {}) if isinstance(row.get("invoer", {}), dict) else {}
         cost_calcs.append(
             {
                 "id": calc_id,
                 "beer_id": str(row.get("bier_id", "") or ""),
-                "year": int(basisgegevens.get("jaar", 0) or 0),
-                "calc_type": str(soort_berekening.get("type", "") or ""),
+                "year": int(row.get("jaar", basisgegevens.get("jaar", 0)) or 0),
+                "version_number": int(row.get("versie_nummer", 0) or 0),
+                "calc_type": str(row.get("type", "") or ""),
+                "source_type": str(row.get("brontype", "") or ""),
+                "source_id": str(row.get("bron_id", "") or ""),
                 "status": str(row.get("status", "") or ""),
+                "is_active": bool(row.get("is_actief", False)),
+                "effective_from": str(row.get("effectief_vanaf", "") or ""),
+                "unit_cost": float(row.get("kostprijs", 0.0) or 0.0),
                 "created_at": str(row.get("created_at", "") or ""),
                 "updated_at": str(row.get("updated_at", "") or ""),
                 "finalized_at": str(row.get("finalized_at", "") or ""),
@@ -5339,6 +6534,11 @@ def build_model_a_canonical_datasets() -> dict[str, list[dict[str, Any]]]:
             {
                 "id": quote_id,
                 "beer_id": str(row.get("bier_id", "") or ""),
+                "cost_version_ids": [
+                    str(value or "")
+                    for value in (row.get("kostprijsversie_ids", []) if isinstance(row.get("kostprijsversie_ids", []), list) else [])
+                    if str(value or "").strip()
+                ],
                 "year": int(row.get("jaar", 0) or 0),
                 "quote_number": str(row.get("offertenummer", "") or ""),
                 "status": str(row.get("status", "") or ""),
@@ -5370,10 +6570,12 @@ def build_model_a_canonical_datasets() -> dict[str, list[dict[str, Any]]]:
                     "quote_id": quote_id,
                     "line_type": "product",
                     "product_id": canonical_product_id,
+                    "cost_version_id": str(item.get("kostprijsversie_id", "") or ""),
                     "quantity": float(item.get("aantal", 0.0) or 0.0),
                     "liters": 0.0,
                     "discount_pct": float(item.get("korting_pct", 0.0) or 0.0),
                     "included": bool(item.get("included", True)),
+                    "kostprijsversie_id": str(item.get("kostprijsversie_id", "") or ""),
                     "cost_at_quote": float(item.get("cost_at_quote", 0.0) or 0.0),
                     "sales_price_at_quote": float(item.get("sales_price_at_quote", 0.0) or 0.0),
                     "revenue_at_quote": float(item.get("revenue_at_quote", 0.0) or 0.0),
@@ -5401,10 +6603,12 @@ def build_model_a_canonical_datasets() -> dict[str, list[dict[str, Any]]]:
                     "quote_id": quote_id,
                     "line_type": "liter",
                     "product_id": canonical_product_id,
+                    "cost_version_id": str(item.get("kostprijsversie_id", "") or ""),
                     "quantity": 0.0,
                     "liters": float(item.get("liters", 0.0) or 0.0),
                     "discount_pct": float(item.get("korting_pct", 0.0) or 0.0),
                     "included": bool(item.get("included", True)),
+                    "kostprijsversie_id": str(item.get("kostprijsversie_id", "") or ""),
                     "cost_at_quote": float(item.get("cost_at_quote", 0.0) or 0.0),
                     "sales_price_at_quote": float(item.get("sales_price_at_quote", 0.0) or 0.0),
                     "revenue_at_quote": float(item.get("revenue_at_quote", 0.0) or 0.0),
@@ -5446,5 +6650,61 @@ def build_model_a_canonical_datasets() -> dict[str, list[dict[str, Any]]]:
         "quotes": quotes,
         "quote-lines": quote_lines,
         "quote-staffels": quote_staffels,
+    }
+
+
+def run_integrity_audit() -> dict[str, list[dict[str, Any]]]:
+    known_bieren = _known_bier_ids()
+    known_versions = _known_kostprijsversie_ids()
+    known_products = _known_product_refs()
+
+    duplicate_activation_keys: set[tuple[str, int, str]] = set()
+    seen_activation_keys: set[tuple[str, int, str]] = set()
+    invalid_activations: list[dict[str, Any]] = []
+    for row in load_kostprijsproductactiveringen():
+        key = (
+            str(row.get("bier_id", "") or ""),
+            int(row.get("jaar", 0) or 0),
+            str(row.get("product_id", "") or ""),
+        )
+        if key in seen_activation_keys:
+            duplicate_activation_keys.add(key)
+        seen_activation_keys.add(key)
+        if (
+            key[0] not in known_bieren
+            or not key[2]
+            or (key[2], str(row.get("product_type", "") or "").strip().lower()) not in known_products
+            or str(row.get("kostprijsversie_id", "") or "") not in known_versions
+        ):
+            invalid_activations.append(row)
+
+    invalid_quotes: list[dict[str, Any]] = []
+    for quote in load_prijsvoorstellen():
+        if str(quote.get("bier_id", "") or "") and str(quote.get("bier_id", "") or "") not in known_bieren:
+            invalid_quotes.append({"id": quote.get("id", ""), "type": "bier"})
+        for version_id in quote.get("kostprijsversie_ids", []):
+            if str(version_id or "") not in known_versions:
+                invalid_quotes.append({"id": quote.get("id", ""), "type": "kostprijsversie", "value": version_id})
+
+    invalid_verkoop_records: list[dict[str, Any]] = []
+    for record in _load_verkoopprijs_records():
+        normalized = _normalize_any_verkoop_record(record)
+        bier_id = str(normalized.get("bier_id", "") or "")
+        product_id = str(normalized.get("product_id", "") or "")
+        product_type = str(normalized.get("product_type", "") or "").strip().lower()
+        if bier_id and bier_id not in known_bieren:
+            invalid_verkoop_records.append({"id": normalized.get("id", ""), "type": "bier"})
+            continue
+        if product_id and (product_id, product_type) not in known_products:
+            invalid_verkoop_records.append({"id": normalized.get("id", ""), "type": "product"})
+
+    return {
+        "invalid_kostprijsproductactiveringen": invalid_activations,
+        "duplicate_kostprijsproductactiveringen": [
+            {"bier_id": bier_id, "jaar": jaar, "product_id": product_id}
+            for bier_id, jaar, product_id in sorted(duplicate_activation_keys)
+        ],
+        "invalid_prijsvoorstellen": invalid_quotes,
+        "invalid_verkooprecords": invalid_verkoop_records,
     }
 

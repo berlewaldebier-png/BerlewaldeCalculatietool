@@ -1,18 +1,32 @@
 import { InkoopFacturenManager } from "@/components/InkoopFacturenManager";
 import { PageShell } from "@/components/PageShell";
-import { getBerekeningen, getNavigation } from "@/lib/api";
+import {
+  getBasisproducten,
+  getKostprijsversies,
+  getNavigation,
+  getSamengesteldeProducten
+} from "@/lib/api";
 
 export default async function InkoopfacturenPage() {
-  const [navigation, berekeningen] = await Promise.all([getNavigation(), getBerekeningen()]);
+  const [navigation, kostprijsversies, basisproducten, samengesteldeProducten] = await Promise.all([
+    getNavigation(),
+    getKostprijsversies(),
+    getBasisproducten(),
+    getSamengesteldeProducten()
+  ]);
 
   return (
     <PageShell
       title="Inkoopfacturen"
-      subtitle="Beheer facturen per definitieve inkoopberekening in de nieuwe UI."
+      subtitle="Beheer facturen als bron voor nieuwe inkoop-kostprijsversies."
       activePath="/inkoopfacturen"
       navigation={navigation}
     >
-      <InkoopFacturenManager initialRows={berekeningen} />
+      <InkoopFacturenManager
+        initialRows={kostprijsversies}
+        basisproducten={basisproducten}
+        samengesteldeProducten={samengesteldeProducten}
+      />
     </PageShell>
   );
 }
