@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from app.domain import legacy_storage, postgres_storage
+from app.domain import postgres_storage
 from utils.storage import (
     MODEL_A_DATASET_NAMES,
     build_model_a_canonical_datasets,
@@ -20,6 +20,8 @@ from utils.storage import (
     load_packaging_component_prices,
     load_packaging_component_price_versions,
     load_samengestelde_producten,
+    load_vaste_kosten_data,
+    load_vaste_kosten_rows,
     load_all_verkoop_records,
     normalize_any_verkoop_record,
     normalize_berekening_record,
@@ -33,12 +35,15 @@ from utils.storage import (
     save_verpakkingsonderdelen,
     save_prijsvoorstellen,
     save_samengestelde_producten,
+    save_vaste_kosten_data,
+    save_vaste_kosten_rows,
 )
 
 
 DATASET_DEFAULTS: dict[str, Any] = {
     "productie": {},
     "vaste-kosten": {},
+    "fixed-cost-lines": [],
     "tarieven-heffingen": [],
     "channels": [
         {"id": "horeca", "code": "horeca", "naam": "Horeca", "actief": True, "volgorde": 10, "default_marge_pct": 50, "default_factor": 3.5},
@@ -78,6 +83,7 @@ DATASET_DEFAULTS: dict[str, Any] = {
 }
 
 READ_ONLY_PROJECTION_DATASETS = {
+    "vaste-kosten",
     "verpakkingsonderdelen",
     "basisproducten",
     "samengestelde-producten",
@@ -123,6 +129,10 @@ def load_dataset(name: str) -> Any:
     if name == "channels":
         payload = postgres_storage.load_dataset(name, default_value)
         return _normalize_channels_dataset(payload)
+    if name == "vaste-kosten":
+        return load_vaste_kosten_data()
+    if name == "fixed-cost-lines":
+        return load_vaste_kosten_rows()
     if name == "packaging-components":
         return load_packaging_component_masters()
     if name == "packaging-component-prices":
@@ -168,6 +178,11 @@ def save_dataset(name: str, data: Any) -> bool:
     require_postgres()
     if name == "channels":
         return postgres_storage.save_dataset(name, _normalize_channels_dataset(data), overwrite=True)
+    if name == "vaste-kosten":
+        return save_vaste_kosten_data(data if isinstance(data, dict) else {})
+    if name == "fixed-cost-lines" and isinstance(data, list):
+        payload = [row for row in data if isinstance(row, dict)]
+        return save_vaste_kosten_rows(payload)
     if name == "packaging-components" and isinstance(data, list):
         payload = [row for row in data if isinstance(row, dict)]
         return save_packaging_component_masters(payload)
@@ -235,6 +250,8 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
             payload = canonical_payloads.get(dataset_name, DATASET_DEFAULTS[dataset_name])
         elif dataset_name == "packaging-components":
             payload = load_packaging_component_masters()
+        elif dataset_name == "fixed-cost-lines":
+            payload = load_vaste_kosten_rows()
         elif dataset_name == "packaging-component-prices":
             payload = load_packaging_component_prices()
         elif dataset_name == "packaging-component-price-versions":
@@ -252,7 +269,7 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
         elif dataset_name == "samengestelde-producten":
             payload = build_samengestelde_producten_legacy_projection()
         else:
-            payload = legacy_storage.load_dataset_from_json(dataset_name)
+            payload = DATASET_DEFAULTS.get(dataset_name, {})
         results[dataset_name] = postgres_storage.save_dataset(
             dataset_name,
             payload,
