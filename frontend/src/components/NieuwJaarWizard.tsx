@@ -18,6 +18,10 @@ type WizardStep = {
 
 type NieuwJaarWizardProps = {
   initialBerekeningen: GenericRecord[];
+  initialKostprijsproductactiveringen: GenericRecord[];
+  initialBasisproducten: GenericRecord[];
+  initialSamengesteldeProducten: GenericRecord[];
+  initialBieren: GenericRecord[];
   initialProductie: ProductieMap;
   initialVasteKosten: VasteKostenMap;
   initialTarieven: GenericRecord[];
@@ -92,6 +96,10 @@ function duplicateBerekening(row: GenericRecord, targetYear: number) {
 
 export function NieuwJaarWizard({
   initialBerekeningen,
+  initialKostprijsproductactiveringen,
+  initialBasisproducten,
+  initialSamengesteldeProducten,
+  initialBieren,
   initialProductie,
   initialVasteKosten,
   initialTarieven,
@@ -101,6 +109,11 @@ export function NieuwJaarWizard({
   const berekeningen = useMemo(
     () => initialBerekeningen.map((row) => normalizeBerekening(row)),
     [initialBerekeningen]
+  );
+
+  const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(berekeningen);
+  const [currentActivations, setCurrentActivations] = useState<GenericRecord[]>(
+    Array.isArray(initialKostprijsproductactiveringen) ? initialKostprijsproductactiveringen : []
   );
 
   const yearOptions = useMemo(() => {
@@ -119,11 +132,13 @@ export function NieuwJaarWizard({
     initialTarieven.forEach((row) => years.add(Number(row.jaar ?? 0)));
     initialVerpakkingsonderdelen.forEach((row) => years.add(Number(row.jaar ?? 0)));
     initialVerkoopprijzen.forEach((row) => years.add(Number(row.jaar ?? 0)));
-    berekeningen.forEach((row) => years.add(Number((row.basisgegevens as GenericRecord)?.jaar ?? 0)));
+    currentBerekeningen.forEach((row) =>
+      years.add(Number((row.basisgegevens as GenericRecord)?.jaar ?? 0))
+    );
 
     return Array.from(years).filter((year) => year > 0).sort((a, b) => a - b);
   }, [
-    berekeningen,
+    currentBerekeningen,
     initialProductie,
     initialTarieven,
     initialVasteKosten,
@@ -145,12 +160,12 @@ export function NieuwJaarWizard({
   const [status, setStatus] = useState("");
   const [isRunning, setIsRunning] = useState(false);
 
-  const sourceBerekeningen = berekeningen.filter(
+  const sourceBerekeningen = currentBerekeningen.filter(
     (row) =>
       Number((row.basisgegevens as GenericRecord)?.jaar ?? 0) === sourceYear &&
       String(row.status ?? "").toLowerCase() === "definitief"
   );
-  const targetBerekeningen = berekeningen.filter(
+  const targetBerekeningen = currentBerekeningen.filter(
     (row) => Number((row.basisgegevens as GenericRecord)?.jaar ?? 0) === targetYear
   );
   const targetKeys = new Set(targetBerekeningen.map((row) => sourceRecordKey(row)));
@@ -163,6 +178,282 @@ export function NieuwJaarWizard({
   }));
 
   const canRun = sourceYear > 0 && targetYear > sourceYear;
+  const [wizardRunId] = useState(() => createId());
+
+  const basisproductenById = useMemo(() => {
+    const map = new Map<string, GenericRecord>();
+    (Array.isArray(initialBasisproducten) ? initialBasisproducten : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "");
+      if (id) {
+        map.set(id, row);
+      }
+    });
+    return map;
+  }, [initialBasisproducten]);
+
+  const samengesteldeById = useMemo(() => {
+    const map = new Map<string, GenericRecord>();
+    (Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : []).forEach(
+      (row) => {
+        const id = String((row as any)?.id ?? "");
+        if (id) {
+          map.set(id, row);
+        }
+      }
+    );
+    return map;
+  }, [initialSamengesteldeProducten]);
+
+  const bierNaamById = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(initialBieren) ? initialBieren : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "");
+      const naam = String((row as any)?.naam ?? (row as any)?.biernaam ?? "");
+      if (id && naam) {
+        map.set(id, naam);
+      }
+    });
+    return map;
+  }, [initialBieren]);
+
+  function versionLabel(record: GenericRecord | undefined) {
+    if (!record) {
+      return "-";
+    }
+    const versie = Number((record as any)?.versie_nummer ?? 0) || 0;
+    const brontype = String((record as any)?.brontype ?? "");
+    const type = String((record as any)?.type ?? "");
+    const invoer = ((record as any)?.invoer ?? {}) as any;
+    const factuur = (invoer?.inkoop ?? {}) as any;
+    const factuurRef = factuur?.factuurnummer
+      ? `${String(factuur.factuurnummer)} ${String(factuur.factuurdatum ?? "")}`.trim()
+      : "";
+    const bron = brontype === "factuur" && factuurRef ? `factuur ${factuurRef}` : brontype || "-";
+    const parts = [`v${versie || 0}`, type || "-", bron].filter(Boolean);
+    return parts.join(" · ");
+  }
+
+  function extractProductRefs(record: GenericRecord) {
+    const refs = new Map<string, { product_id: string; product_type: string }>();
+
+    const snapshot = ((record as any)?.resultaat_snapshot ?? {}) as any;
+    const producten = (snapshot?.producten ?? {}) as any;
+    const basis = Array.isArray(producten?.basisproducten) ? producten.basisproducten : [];
+    const samengesteld = Array.isArray(producten?.samengestelde_producten)
+      ? producten.samengestelde_producten
+      : [];
+
+    basis.forEach((row: any) => {
+      const productId = String(row?.product_id ?? "");
+      if (productId) {
+        refs.set(productId, { product_id: productId, product_type: "basis" });
+      }
+    });
+    samengesteld.forEach((row: any) => {
+      const productId = String(row?.product_id ?? "");
+      if (productId) {
+        refs.set(productId, { product_id: productId, product_type: "samengesteld" });
+      }
+    });
+
+    const invoer = ((record as any)?.invoer ?? {}) as any;
+    const inkoop = (invoer?.inkoop ?? {}) as any;
+    const facturen = Array.isArray(inkoop?.facturen) ? inkoop.facturen : [];
+    facturen.forEach((factuur: any) => {
+      const regels = Array.isArray(factuur?.factuurregels) ? factuur.factuurregels : [];
+      regels.forEach((regel: any) => {
+        const eenheid = String(regel?.eenheid ?? "").trim();
+        if (!eenheid) {
+          return;
+        }
+        if (basisproductenById.has(eenheid)) {
+          refs.set(eenheid, { product_id: eenheid, product_type: "basis" });
+          return;
+        }
+        if (samengesteldeById.has(eenheid)) {
+          refs.set(eenheid, { product_id: eenheid, product_type: "samengesteld" });
+        }
+      });
+    });
+
+    return Array.from(refs.values());
+  }
+
+  const activationSuggestions = useMemo(() => {
+    const versionById = new Map<string, GenericRecord>();
+    currentBerekeningen.forEach((row) => {
+      const id = String((row as any)?.id ?? "");
+      if (id) {
+        versionById.set(id, row);
+      }
+    });
+
+    const activationByKey = new Map<string, GenericRecord>();
+    (Array.isArray(currentActivations) ? currentActivations : []).forEach((row) => {
+      const bierId = String((row as any)?.bier_id ?? "");
+      const jaar = Number((row as any)?.jaar ?? 0) || 0;
+      const productId = String((row as any)?.product_id ?? "");
+      if (!bierId || !productId || jaar <= 0) {
+        return;
+      }
+      activationByKey.set(`${bierId}|${jaar}|${productId}`, row);
+    });
+
+    type Candidate = {
+      bierId: string;
+      year: number;
+      productId: string;
+      productType: string;
+      versionId: string;
+      versieNummer: number;
+      updatedAt: string;
+    };
+
+    const candidateByKey = new Map<string, Candidate>();
+    const definitive = currentBerekeningen.filter(
+      (row) =>
+        Number((row.basisgegevens as GenericRecord)?.jaar ?? 0) === targetYear &&
+        String((row as any)?.status ?? "").toLowerCase() === "definitief"
+    );
+
+    definitive.forEach((record) => {
+      const bierId = String((record as any)?.bier_id ?? "");
+      if (!bierId) {
+        return;
+      }
+      const versionId = String((record as any)?.id ?? "");
+      const versieNummer = Number((record as any)?.versie_nummer ?? 0) || 0;
+      const updatedAt = String((record as any)?.updated_at ?? (record as any)?.finalized_at ?? "");
+
+      extractProductRefs(record).forEach((ref) => {
+        const productId = String(ref.product_id ?? "");
+        if (!productId) {
+          return;
+        }
+        const key = `${bierId}|${targetYear}|${productId}`;
+        const next: Candidate = {
+          bierId,
+          year: targetYear,
+          productId,
+          productType: String(ref.product_type ?? ""),
+          versionId,
+          versieNummer,
+          updatedAt
+        };
+        const current = candidateByKey.get(key);
+        if (!current) {
+          candidateByKey.set(key, next);
+          return;
+        }
+        if (next.versieNummer > current.versieNummer) {
+          candidateByKey.set(key, next);
+          return;
+        }
+        if (next.versieNummer === current.versieNummer && next.updatedAt > current.updatedAt) {
+          candidateByKey.set(key, next);
+        }
+      });
+    });
+
+    const rows = Array.from(candidateByKey.values()).map((candidate) => {
+      const activationKey = `${candidate.bierId}|${candidate.year}|${candidate.productId}`;
+      const currentActivation = activationByKey.get(activationKey);
+      const currentVersionId = String((currentActivation as any)?.kostprijsversie_id ?? "");
+      const currentVersion = currentVersionId ? versionById.get(currentVersionId) : undefined;
+      const recommendedVersion = versionById.get(candidate.versionId);
+
+      const bierNaam =
+        bierNaamById.get(candidate.bierId) ||
+        String(((recommendedVersion as any)?.basisgegevens as any)?.biernaam ?? "") ||
+        candidate.bierId;
+
+      const productLabel =
+        String((basisproductenById.get(candidate.productId) as any)?.omschrijving ?? "") ||
+        String((samengesteldeById.get(candidate.productId) as any)?.omschrijving ?? "") ||
+        candidate.productId;
+
+      return {
+        bierId: candidate.bierId,
+        bierNaam,
+        year: candidate.year,
+        productId: candidate.productId,
+        productType: candidate.productType,
+        productLabel,
+        currentVersionId,
+        currentVersionLabel: versionLabel(currentVersion),
+        recommendedVersionId: candidate.versionId,
+        recommendedVersionLabel: versionLabel(recommendedVersion),
+        needsActivation: !currentVersionId || currentVersionId !== candidate.versionId
+      };
+    });
+
+    rows.sort((a, b) => (a.bierNaam + a.productLabel).localeCompare(b.bierNaam + b.productLabel));
+    return rows;
+  }, [
+    basisproductenById,
+    bierNaamById,
+    currentActivations,
+    currentBerekeningen,
+    samengesteldeById,
+    targetYear
+  ]);
+
+  async function refreshKostprijsActiveringen() {
+    try {
+      const [berekeningenResponse, activationsResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/data/berekeningen`, { cache: "no-store" }),
+        fetch(`${API_BASE_URL}/data/dataset/kostprijsproductactiveringen`, { cache: "no-store" })
+      ]);
+      if (berekeningenResponse.ok) {
+        const rows = (await berekeningenResponse.json()) as GenericRecord[];
+        setCurrentBerekeningen(Array.isArray(rows) ? rows.map((row) => normalizeBerekening(row)) : []);
+      }
+      if (activationsResponse.ok) {
+        const rows = (await activationsResponse.json()) as GenericRecord[];
+        setCurrentActivations(Array.isArray(rows) ? rows : []);
+      }
+    } catch {
+      // keep current state; wizard surface should show errors via status when applying changes
+    }
+  }
+
+  async function applyActivationSuggestions() {
+    const pending = activationSuggestions.filter((row) => row.needsActivation);
+    if (pending.length === 0) {
+      setStatus("Alle producten hebben al een actieve kostprijsversie voor dit jaar.");
+      return;
+    }
+
+    setIsRunning(true);
+    setStatus("");
+
+    try {
+      const grouped = new Map<string, string[]>();
+      pending.forEach((row) => {
+        const list = grouped.get(row.recommendedVersionId) ?? [];
+        list.push(row.productId);
+        grouped.set(row.recommendedVersionId, list);
+      });
+
+      for (const [versionId, productIds] of grouped.entries()) {
+        const response = await fetch(`${API_BASE_URL}/data/kostprijsversies/${versionId}/activate-products`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_ids: productIds, run_id: wizardRunId })
+        });
+        if (!response.ok) {
+          throw new Error("Activeren mislukt.");
+        }
+      }
+
+      await refreshKostprijsActiveringen();
+      setStatus(`Kostprijsactiveringen bijgewerkt voor ${targetYear}.`);
+    } catch {
+      setStatus("Activeren mislukt.");
+    } finally {
+      setIsRunning(false);
+    }
+  }
 
   async function putDataset(path: string, payload: unknown) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -190,7 +481,7 @@ export function NieuwJaarWizard({
       let nextTarieven = cloneValue(initialTarieven);
       let nextVerpakkingsonderdelen = cloneValue(initialVerpakkingsonderdelen);
       let nextVerkoopprijzen = cloneValue(initialVerkoopprijzen);
-      let nextBerekeningen = cloneValue(berekeningen);
+      let nextBerekeningen = cloneValue(currentBerekeningen);
 
       if (copyProductie && initialProductie[String(sourceYear)]) {
         if (overwriteExisting || !nextProductie[String(targetYear)]) {
@@ -266,7 +557,7 @@ export function NieuwJaarWizard({
       }
 
       if (copyBerekeningen) {
-        const sourceRows = berekeningen.filter(
+        const sourceRows = currentBerekeningen.filter(
           (row) =>
             Number((row.basisgegevens as GenericRecord)?.jaar ?? 0) === sourceYear &&
             String(row.status ?? "").toLowerCase() === "definitief"
@@ -302,8 +593,9 @@ export function NieuwJaarWizard({
       await putDataset("/data/verkoopprijzen", nextVerkoopprijzen);
       await putDataset("/data/berekeningen", nextBerekeningen);
 
+      setCurrentBerekeningen(nextBerekeningen);
       setStatus(`Jaar ${targetYear} voorbereid op basis van ${sourceYear}.`);
-      setActiveStep(3);
+      setActiveStep(4);
     } catch {
       setStatus("Voorbereiden mislukt.");
     } finally {
@@ -340,6 +632,14 @@ export function NieuwJaarWizard({
       description: "Genereer de jaarset en schrijf hem direct weg",
       panelTitle: "Afronden",
       panelDescription: "Controleer de selectie en maak daarna de nieuwe jaarset aan."
+    },
+    {
+      id: "kostprijs",
+      label: "Kostprijs activeren",
+      description: "Controleer en activeer kostprijzen per product voor het nieuwe jaar",
+      panelTitle: "Kostprijs activeren",
+      panelDescription:
+        "Bekijk per bier/product welke kostprijsversie actief is en activeer aanbevolen versies voor dit jaar."
     }
   ];
   const currentStep = steps[activeStep] ?? steps[0];
@@ -569,6 +869,89 @@ export function NieuwJaarWizard({
                     disabled={!canRun || isRunning}
                   >
                     {isRunning ? "Voorbereiden..." : "Nieuw jaar voorbereiden"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeStep === 4 ? (
+            <div className="wizard-step-card wizard-step-stage-card">
+              <div className="wizard-step-header">
+                <div>
+                  <div className="wizard-step-title">
+                    Stap {activeStep + 1}: {currentStep.panelTitle}
+                  </div>
+                  <div className="wizard-step-description">
+                    {currentStep.panelDescription} Jaar: {targetYear}.
+                  </div>
+                </div>
+              </div>
+
+              <div className="dataset-editor-scroll">
+                <table className="dataset-editor-table">
+                  <thead>
+                    <tr>
+                      <th>Bier</th>
+                      <th>Product</th>
+                      <th>Huidig actief</th>
+                      <th>Aanbevolen</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activationSuggestions.length > 0 ? (
+                      activationSuggestions.map((row) => (
+                        <tr key={`${row.bierId}-${row.productId}`}>
+                          <td>{row.bierNaam}</td>
+                          <td>
+                            {row.productLabel}
+                            {row.productType ? ` (${row.productType})` : ""}
+                          </td>
+                          <td>{row.currentVersionLabel}</td>
+                          <td>{row.recommendedVersionLabel}</td>
+                          <td>{row.needsActivation ? "Niet actief" : "Actief"}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="dataset-empty" colSpan={5}>
+                          Geen definitieve berekeningen gevonden voor {targetYear}, of geen producten herkend in de snapshots.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="editor-actions">
+                <div className="editor-actions-group">
+                  {status ? <span className="editor-status">{status}</span> : null}
+                </div>
+                <div className="editor-actions-group">
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => setActiveStep(3)}
+                    disabled={isRunning}
+                  >
+                    Vorige
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={refreshKostprijsActiveringen}
+                    disabled={isRunning}
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-button"
+                    onClick={applyActivationSuggestions}
+                    disabled={isRunning}
+                  >
+                    {isRunning ? "Activeren..." : "Activeer aanbevelingen"}
                   </button>
                 </div>
               </div>

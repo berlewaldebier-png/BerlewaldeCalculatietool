@@ -1,9 +1,11 @@
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { PageShell } from "@/components/PageShell";
-import { getNavigation, getTarievenHeffingen } from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function TarievenHeffingenPage() {
-  const [navigation, rawRows] = await Promise.all([getNavigation(), getTarievenHeffingen()]);
+  const bootstrap = await getBootstrap(["tarieven-heffingen"], true);
+  const navigation = bootstrap.navigation ?? [];
+  const rawRows = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
   const rows = rawRows.map((row) => ({
     id: String(row.id ?? ""),
     jaar: Number(row.jaar ?? 0),

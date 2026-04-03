@@ -37,6 +37,11 @@ export type AuthUser = {
 
 export type GenericRecord = Record<string, unknown>;
 
+export type BootstrapResponse = {
+  navigation?: NavigationItem[];
+  datasets: Record<string, unknown>;
+};
+
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     cache: "no-store"
@@ -115,4 +120,10 @@ export function getVariabeleKosten() {
 
 export function getDataset(name: string) {
   return apiGet<GenericRecord[]>(`/data/dataset/${name}`);
+}
+
+export function getBootstrap(datasets: string[], includeNavigation = true) {
+  const encoded = encodeURIComponent(datasets.join(","));
+  const nav = includeNavigation ? "true" : "false";
+  return apiGet<BootstrapResponse>(`/meta/bootstrap?datasets=${encoded}&navigation=${nav}`);
 }

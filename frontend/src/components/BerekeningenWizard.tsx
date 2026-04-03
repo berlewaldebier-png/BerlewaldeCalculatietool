@@ -584,15 +584,37 @@ function getSelectedInkoopProductRows(
 }
 
 function sumVasteKostenByType(rows: GenericRecord[], kostensoort: "direct" | "indirect") {
-  return rows
-    .filter((row) => {
-      const normalized = String(row.kostensoort ?? "").trim().toLowerCase();
-      if (kostensoort === "indirect") {
-        return normalized.includes("indirect");
-      }
-      return normalized.includes("direct") && !normalized.includes("indirect");
-    })
-    .reduce((sum, row) => sum + Number(row.bedrag_per_jaar ?? 0), 0);
+  const directRows = rows.filter((row) => {
+    const normalized = String(row.kostensoort ?? "").trim().toLowerCase();
+    return normalized.includes("direct") && !normalized.includes("indirect");
+  });
+  const indirectRows = rows.filter((row) => String(row.kostensoort ?? "").trim().toLowerCase().includes("indirect"));
+
+  const clampPct = (value: unknown) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.min(100, Math.max(0, parsed));
+  };
+
+  const directBase = directRows.reduce((sum, row) => sum + Number(row.bedrag_per_jaar ?? 0), 0);
+  const indirectBase = indirectRows.reduce((sum, row) => sum + Number(row.bedrag_per_jaar ?? 0), 0);
+
+  const directOut = directRows.reduce((sum, row) => {
+    const amount = Number(row.bedrag_per_jaar ?? 0);
+    const pct = clampPct(row.herverdeel_pct);
+    return sum + (amount * pct) / 100;
+  }, 0);
+
+  const indirectOut = indirectRows.reduce((sum, row) => {
+    const amount = Number(row.bedrag_per_jaar ?? 0);
+    const pct = clampPct(row.herverdeel_pct);
+    return sum + (amount * pct) / 100;
+  }, 0);
+
+  const directAfter = directBase - directOut + indirectOut;
+  const indirectAfter = indirectBase - indirectOut + directOut;
+
+  return kostensoort === "indirect" ? indirectAfter : directAfter;
 }
 
 function getVasteKostenPerLiter(
@@ -868,11 +890,25 @@ export function BerekeningenWizard({
   onRowsChange,
   onFinish
 }: BerekeningenWizardProps) {
+  const productieJaren = useMemo(
+    () =>
+      Object.keys(productie ?? {})
+        .map((year) => Number(year))
+        .filter((year) => Number.isFinite(year) && year > 0)
+        .sort((a, b) => b - a),
+    [productie]
+  );
+  const defaultProductieJaar = productieJaren[0] ?? new Date().getFullYear();
+
   const initialState = useMemo(() => {
     const normalizedRows = initialRows.map((row) => normalizeBerekening(row));
 
     if (startWithNew || normalizedRows.length === 0) {
       const next = createEmptyBerekening();
+      // Default new calculations to a valid production year (keeps UI consistent with stamdata).
+      if (productieJaren.length > 0) {
+        (next.basisgegevens as GenericRecord).jaar = defaultProductieJaar;
+      }
       return {
         rows: [next, ...normalizedRows],
         selectedId: String(next.id)
@@ -887,7 +923,7 @@ export function BerekeningenWizard({
       rows: normalizedRows,
       selectedId: String(matchedRow?.id ?? normalizedRows[0]?.id ?? createEmptyBerekening().id)
     };
-  }, [initialRows, initialSelectedId, startWithNew]);
+  }, [defaultProductieJaar, initialRows, initialSelectedId, productieJaren.length, startWithNew]);
 
   const [rows, setRows] = useState<GenericRecord[]>(initialState.rows);
   const rowsRef = useRef<GenericRecord[]>(initialState.rows);
@@ -1160,33 +1196,85 @@ export function BerekeningenWizard({
     const belastingsoort = String(basis.belastingsoort ?? "Accijns");
     return (
       <div className="wizard-form-grid">
-        {[
-          ["Biernaam", "biernaam", "text"],
-          ["Jaar", "jaar", "number"],
-          ["Stijl", "stijl", "text"],
-          ["Alcoholpercentage", "alcoholpercentage", "number"],
-          ["BTW-tarief", "btw_tarief", "text"]
-        ].map(([label, key, type]) => (
-          <label key={key} className="nested-field">
-            <span>{label}</span>
-            <input
-              className="dataset-input"
-              type={type}
-              step={type === "number" ? "any" : undefined}
-              value={String(basis[key] ?? "")}
-              onChange={(event) =>
-                updateCurrent((draft) => {
-                  (draft.basisgegevens as GenericRecord)[key] =
-                    type === "number"
-                      ? event.target.value === ""
-                        ? null
-                        : Number(event.target.value)
-                      : event.target.value;
-                })
-              }
-            />
-          </label>
-        ))}
+        <label className="nested-field">
+          <span>Biernaam</span>
+          <input
+            className="dataset-input"
+            type="text"
+            value={String(basis.biernaam ?? "")}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                (draft.basisgegevens as GenericRecord).biernaam = event.target.value;
+              })
+            }
+          />
+        </label>
+
+        <label className="nested-field">
+          <span>Jaar</span>
+          <select
+            className="dataset-input"
+            value={String(basis.jaar ?? "")}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                (draft.basisgegevens as GenericRecord).jaar = Number(event.target.value);
+              })
+            }
+          >
+            <option value="" disabled>
+              Kies productiejaar...
+            </option>
+            {productieJaren.map((year) => (
+              <option key={year} value={String(year)}>
+                {year}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="nested-field">
+          <span>Stijl</span>
+          <input
+            className="dataset-input"
+            type="text"
+            value={String(basis.stijl ?? "")}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                (draft.basisgegevens as GenericRecord).stijl = event.target.value;
+              })
+            }
+          />
+        </label>
+
+        <label className="nested-field">
+          <span>Alcoholpercentage</span>
+          <input
+            className="dataset-input"
+            type="number"
+            step="any"
+            value={String(basis.alcoholpercentage ?? "")}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                (draft.basisgegevens as GenericRecord).alcoholpercentage =
+                  event.target.value === "" ? null : Number(event.target.value);
+              })
+            }
+          />
+        </label>
+
+        <label className="nested-field">
+          <span>BTW-tarief</span>
+          <input
+            className="dataset-input"
+            type="text"
+            value={String(basis.btw_tarief ?? "")}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                (draft.basisgegevens as GenericRecord).btw_tarief = event.target.value;
+              })
+            }
+          />
+        </label>
         <label className="nested-field">
           <span>Belastingsoort</span>
           <select

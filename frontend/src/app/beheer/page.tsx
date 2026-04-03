@@ -1,10 +1,11 @@
 import Link from "next/link";
 
 import { PageShell } from "@/components/PageShell";
-import { getNavigation } from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function BeheerPage() {
-  const navigation = await getNavigation();
+  const bootstrap = await getBootstrap([], true);
+  const navigation = bootstrap.navigation ?? [];
 
   return (
     <PageShell

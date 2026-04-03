@@ -39,6 +39,14 @@ def _get_postgres_storage_module():
     return postgres_storage
 
 
+def _get_kostprijs_activation_storage_module():
+    try:
+        from app.domain import kostprijs_activation_storage  # type: ignore
+    except ImportError:
+        return None
+    return kostprijs_activation_storage
+
+
 def _load_postgres_dataset(dataset_name: str) -> Any | None:
     postgres_storage = _get_postgres_storage_module()
     if postgres_storage is None or not postgres_storage.uses_postgres():
@@ -482,6 +490,20 @@ def normalize_kostprijsproduct_activering_record(
 
 
 def load_kostprijsproductactiveringen() -> list[dict[str, Any]]:
+    postgres_storage = _get_postgres_storage_module()
+    activation_storage = _get_kostprijs_activation_storage_module()
+    if (
+        postgres_storage is not None
+        and activation_storage is not None
+        and postgres_storage.uses_postgres()
+    ):
+        data = activation_storage.load_activations()
+        return [
+            normalize_kostprijsproduct_activering_record(row)
+            for row in data
+            if isinstance(row, dict)
+        ]
+
     postgres_payload = _load_postgres_dataset("kostprijsproductactiveringen")
     if isinstance(postgres_payload, list):
         data = postgres_payload
@@ -563,10 +585,28 @@ def _validate_kostprijsproductactiveringen(
     return validated
 
 
-def save_kostprijsproductactiveringen(data: list[dict[str, Any]]) -> bool:
+def save_kostprijsproductactiveringen(
+    data: list[dict[str, Any]],
+    *,
+    context: dict[str, Any] | None = None,
+) -> bool:
     normalized = _validate_kostprijsproductactiveringen(
         [row for row in data if isinstance(row, dict)]
     )
+    postgres_storage = _get_postgres_storage_module()
+    activation_storage = _get_kostprijs_activation_storage_module()
+    if (
+        postgres_storage is not None
+        and activation_storage is not None
+        and postgres_storage.uses_postgres()
+    ):
+        ctx = activation_storage.ActivationContext(
+            run_id=str((context or {}).get("run_id", "") or ""),
+            actor=str((context or {}).get("actor", "") or ""),
+            action=str((context or {}).get("action", "") or ""),
+        )
+        return bool(activation_storage.upsert_activations(normalized, context=ctx))
+
     if _save_postgres_dataset("kostprijsproductactiveringen", normalized):
         return True
     return _save_json_value(
@@ -5441,7 +5481,10 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
         cleaned_data
     )
     if _save_postgres_dataset("kostprijsversies", normalized_records):
-        _save_postgres_dataset("kostprijsproductactiveringen", normalized_activations)
+        save_kostprijsproductactiveringen(
+            normalized_activations,
+            context={"action": "sync_versions"},
+        )
         return True
     saved_versions = _save_json_value(KOSTPRIJSVERSIES_FILE, normalized_records, "[]")
     saved_activations = _save_json_value(
@@ -5646,7 +5689,11 @@ def finalize_berekening(record: dict[str, Any]) -> dict[str, Any] | None:
     )
 
 
-def activate_kostprijsversie(kostprijsversie_id: str) -> dict[str, Any] | None:
+def activate_kostprijsversie(
+    kostprijsversie_id: str,
+    *,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Activeert de producten uit een definitieve kostprijsversie voor bier + product + jaar."""
     records = load_kostprijsversies()
     activations = load_kostprijsproductactiveringen()
@@ -5744,7 +5791,10 @@ def activate_kostprijsversie(kostprijsversie_id: str) -> dict[str, Any] | None:
         list(activation_map.values()),
     )
     if _save_postgres_dataset("kostprijsversies", final_records):
-        _save_postgres_dataset("kostprijsproductactiveringen", final_activations)
+        save_kostprijsproductactiveringen(
+            final_activations,
+            context={"action": "activate_version", **(context or {})},
+        )
     else:
         versions_saved = _save_json_value(KOSTPRIJSVERSIES_FILE, final_records, "[]")
         activations_saved = _save_json_value(
@@ -5768,6 +5818,8 @@ def activate_kostprijsversie(kostprijsversie_id: str) -> dict[str, Any] | None:
 def activate_kostprijsversie_products(
     kostprijsversie_id: str,
     product_ids: list[str] | tuple[str, ...],
+    *,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Activeert geselecteerde producten uit een definitieve kostprijsversie."""
     requested_product_ids = {
@@ -5886,7 +5938,10 @@ def activate_kostprijsversie_products(
         list(activation_map.values()),
     )
     if _save_postgres_dataset("kostprijsversies", final_records):
-        _save_postgres_dataset("kostprijsproductactiveringen", final_activations)
+        save_kostprijsproductactiveringen(
+            final_activations,
+            context={"action": "activate_products", **(context or {})},
+        )
     else:
         versions_saved = _save_json_value(KOSTPRIJSVERSIES_FILE, final_records, "[]")
         activations_saved = _save_json_value(

@@ -1,19 +1,13 @@
 import { InkoopFacturenManager } from "@/components/InkoopFacturenManager";
 import { PageShell } from "@/components/PageShell";
-import {
-  getBasisproducten,
-  getKostprijsversies,
-  getNavigation,
-  getSamengesteldeProducten
-} from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function InkoopfacturenPage() {
-  const [navigation, kostprijsversies, basisproducten, samengesteldeProducten] = await Promise.all([
-    getNavigation(),
-    getKostprijsversies(),
-    getBasisproducten(),
-    getSamengesteldeProducten()
-  ]);
+  const bootstrap = await getBootstrap(["kostprijsversies", "basisproducten", "samengestelde-producten"], true);
+  const navigation = bootstrap.navigation ?? [];
+  const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
+  const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
+  const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
 
   return (
     <PageShell
