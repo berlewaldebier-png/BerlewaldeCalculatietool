@@ -1,41 +1,32 @@
 import { PageShell } from "@/components/PageShell";
 import { PrijsvoorstelWorkspace } from "@/components/PrijsvoorstelWorkspace";
-import {
-  getBasisproducten,
-  getBieren,
-  getDataset,
-  getKostprijsversies,
-  getNavigation,
-  getProductie,
-  getPrijsvoorstellen,
-  getSamengesteldeProducten,
-  getVerkoopprijzen
-} from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function PrijsvoorstelPage() {
-  const [
-    navigation,
-    voorstellen,
-    productie,
-    bieren,
-    berekeningen,
-    verkoopprijzen,
-    channels,
-    kostprijsproductactiveringen,
-    basisproducten,
-    samengesteldeProducten
-  ] = await Promise.all([
-    getNavigation(),
-    getPrijsvoorstellen(),
-    getProductie(),
-    getBieren(),
-    getKostprijsversies(),
-    getVerkoopprijzen(),
-    getDataset("channels"),
-    getDataset("kostprijsproductactiveringen"),
-    getBasisproducten(),
-    getSamengesteldeProducten()
-  ]);
+  const bootstrap = await getBootstrap(
+    [
+      "prijsvoorstellen",
+      "productie",
+      "bieren",
+      "kostprijsversies",
+      "verkoopprijzen",
+      "channels",
+      "kostprijsproductactiveringen",
+      "basisproducten",
+      "samengestelde-producten"
+    ],
+    true
+  );
+  const navigation = bootstrap.navigation ?? [];
+  const voorstellen = (bootstrap.datasets["prijsvoorstellen"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
+  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const berekeningen = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
+  const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
+  const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
+  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
+  const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
+  const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
 
   const yearOptions = Object.keys(productie)
     .map((year) => Number(year))

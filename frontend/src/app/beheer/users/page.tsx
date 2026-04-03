@@ -1,13 +1,19 @@
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
-import { getAuthStatus, getAuthUsers, getNavigation } from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function UsersPage() {
-  const [navigation, authStatus, users] = await Promise.all([
-    getNavigation(),
-    getAuthStatus(),
-    getAuthUsers()
-  ]);
+  const bootstrap = await getBootstrap(["auth-status", "auth-users"], true);
+  const navigation = bootstrap.navigation ?? [];
+  const authStatus = (bootstrap.datasets["auth-status"] as any) ?? {
+    enabled: false,
+    mode: "unknown",
+    postgres_configured: false,
+    storage_provider: "unknown",
+    user_count: 0,
+    has_admin: false
+  };
+  const users = (bootstrap.datasets["auth-users"] as any[]) ?? [];
 
   return (
     <PageShell

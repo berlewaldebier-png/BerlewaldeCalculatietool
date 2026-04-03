@@ -5,6 +5,7 @@ import hmac
 import os
 import secrets
 from datetime import datetime
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 
@@ -14,6 +15,8 @@ from app.domain import postgres_storage
 PBKDF2_ITERATIONS = 390_000
 TEMP_ADMIN_USERNAME = "admin"
 TEMP_ADMIN_PASSWORD = "admin!"
+_schema_ready = False
+_schema_lock = Lock()
 
 
 def auth_enabled() -> bool:
@@ -57,26 +60,34 @@ def verify_password(password: str, encoded_hash: str) -> bool:
 
 
 def ensure_schema() -> None:
+    global _schema_ready
     if not postgres_storage.database_url():
         return
 
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS app_users (
-                    id TEXT PRIMARY KEY,
-                    username TEXT NOT NULL UNIQUE,
-                    display_name TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    if _schema_ready:
+        return
+
+    with _schema_lock:
+        if _schema_ready:
+            return
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_users (
+                        id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL UNIQUE,
+                        display_name TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
                 )
-                """
-            )
-        conn.commit()
+            conn.commit()
+        _schema_ready = True
 
 
 def list_users() -> list[dict[str, Any]]:

@@ -1,27 +1,28 @@
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
 import { PageShell } from "@/components/PageShell";
-import {
-  getBasisproducten,
-  getBerekeningen,
-  getBieren,
-  getDataset,
-  getNavigation,
-  getSamengesteldeProducten,
-  getVerkoopprijzen
-} from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function VerkoopstrategiePage() {
-  const [navigation, verkoopprijzen, basisproducten, samengesteldeProducten, bieren, berekeningen, channels, kostprijsproductactiveringen] =
-    await Promise.all([
-      getNavigation(),
-      getVerkoopprijzen(),
-      getBasisproducten(),
-      getSamengesteldeProducten(),
-      getBieren(),
-      getBerekeningen(),
-      getDataset("channels"),
-      getDataset("kostprijsproductactiveringen")
-    ]);
+  const bootstrap = await getBootstrap(
+    [
+      "verkoopprijzen",
+      "basisproducten",
+      "samengestelde-producten",
+      "bieren",
+      "berekeningen",
+      "channels",
+      "kostprijsproductactiveringen"
+    ],
+    true
+  );
+  const navigation = bootstrap.navigation ?? [];
+  const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
+  const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
+  const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
+  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
+  const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
+  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
 
   return (
     <PageShell

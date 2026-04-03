@@ -1,19 +1,23 @@
 import { PageShell } from "@/components/PageShell";
 import { ProductenVerpakkingWorkspace } from "@/components/ProductenVerpakkingWorkspace";
-import {
-  getDataset,
-  getNavigation,
-} from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function ProductenVerpakkingPage() {
-  const [navigation, verpakkingsonderdelen, basisproducten, samengestelde, verpakkingsonderdeelPrijzen] =
-    await Promise.all([
-      getNavigation(),
-      getDataset("packaging-components"),
-      getDataset("base-product-masters"),
-      getDataset("composite-product-masters"),
-      getDataset("packaging-component-prices")
-    ]);
+  const bootstrap = await getBootstrap(
+    [
+      "packaging-components",
+      "base-product-masters",
+      "composite-product-masters",
+      "packaging-component-prices"
+    ],
+    true
+  );
+
+  const navigation = bootstrap.navigation ?? [];
+  const verpakkingsonderdelen = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
+  const basisproducten = (bootstrap.datasets["base-product-masters"] as any[]) ?? [];
+  const samengestelde = (bootstrap.datasets["composite-product-masters"] as any[]) ?? [];
+  const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
 
   return (
     <PageShell

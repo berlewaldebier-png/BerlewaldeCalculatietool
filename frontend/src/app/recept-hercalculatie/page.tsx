@@ -1,22 +1,17 @@
 import { PageShell } from "@/components/PageShell";
 import { ReceptHercalculatieManager } from "@/components/ReceptHercalculatieManager";
-import {
-  getBasisproducten,
-  getBerekeningen,
-  getDataset,
-  getNavigation,
-  getSamengesteldeProducten
-} from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function ReceptHercalculatiePage() {
-  const [navigation, berekeningen, basisproducten, samengesteldeProducten, kostprijsproductactiveringen] =
-    await Promise.all([
-      getNavigation(),
-      getBerekeningen(),
-      getBasisproducten(),
-      getSamengesteldeProducten(),
-      getDataset("kostprijsproductactiveringen")
-    ]);
+  const bootstrap = await getBootstrap(
+    ["berekeningen", "basisproducten", "samengestelde-producten", "kostprijsproductactiveringen"],
+    true
+  );
+  const navigation = bootstrap.navigation ?? [];
+  const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
+  const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
+  const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
+  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
 
   return (
     <PageShell

@@ -1,9 +1,11 @@
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { PageShell } from "@/components/PageShell";
-import { getNavigation, getProductie } from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function ProductiePage() {
-  const [navigation, productie] = await Promise.all([getNavigation(), getProductie()]);
+  const bootstrap = await getBootstrap(["productie"], true);
+  const navigation = bootstrap.navigation ?? [];
+  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const rows = Object.entries(productie)
     .sort(([left], [right]) => Number(left) - Number(right))
     .map(([jaar, rawValues]) => {

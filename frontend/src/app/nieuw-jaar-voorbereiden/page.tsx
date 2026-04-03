@@ -1,33 +1,34 @@
 import { NieuwJaarWizard } from "@/components/NieuwJaarWizard";
 import { PageShell } from "@/components/PageShell";
-import {
-  getBerekeningen,
-  getNavigation,
-  getProductie,
-  getTarievenHeffingen,
-  getVasteKosten,
-  getVerkoopprijzen,
-  getVerpakkingsonderdelen
-} from "@/lib/api";
+import { getBootstrap } from "@/lib/api";
 
 export default async function NieuwJaarVoorbereidenPage() {
-  const [
-    navigation,
-    berekeningen,
-    productie,
-    vasteKosten,
-    tarieven,
-    verpakkingsonderdelen,
-    verkoopprijzen
-  ] = await Promise.all([
-    getNavigation(),
-    getBerekeningen(),
-    getProductie(),
-    getVasteKosten(),
-    getTarievenHeffingen(),
-    getVerpakkingsonderdelen(),
-    getVerkoopprijzen()
-  ]);
+  const bootstrap = await getBootstrap(
+    [
+      "berekeningen",
+      "kostprijsproductactiveringen",
+      "basisproducten",
+      "samengestelde-producten",
+      "bieren",
+      "productie",
+      "vaste-kosten",
+      "tarieven-heffingen",
+      "verpakkingsonderdelen",
+      "verkoopprijzen"
+    ],
+    true
+  );
+  const navigation = bootstrap.navigation ?? [];
+  const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
+  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
+  const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
+  const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
+  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
+  const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
+  const tarieven = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
+  const verpakkingsonderdelen = (bootstrap.datasets["verpakkingsonderdelen"] as any[]) ?? [];
+  const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
 
   return (
     <PageShell
@@ -38,6 +39,10 @@ export default async function NieuwJaarVoorbereidenPage() {
     >
       <NieuwJaarWizard
         initialBerekeningen={berekeningen}
+        initialKostprijsproductactiveringen={kostprijsproductactiveringen}
+        initialBasisproducten={basisproducten}
+        initialSamengesteldeProducten={samengesteldeProducten}
+        initialBieren={bieren}
         initialProductie={productie}
         initialVasteKosten={vasteKosten}
         initialTarieven={tarieven}

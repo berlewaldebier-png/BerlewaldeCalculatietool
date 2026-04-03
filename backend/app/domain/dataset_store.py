@@ -3,13 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from app.domain import legacy_storage, postgres_storage
+from app.domain import fixed_costs_storage, legacy_storage, postgres_storage, production_storage
 from utils.storage import (
     MODEL_A_DATASET_NAMES,
     build_model_a_canonical_datasets,
-    build_basisproducten_legacy_projection,
-    build_samengestelde_producten_legacy_projection,
-    build_verpakkingsonderdelen_legacy_projection,
     ensure_complete_verkoop_records,
     activate_kostprijsversie,
     activate_kostprijsversie_products,
@@ -20,6 +17,7 @@ from utils.storage import (
     load_packaging_component_prices,
     load_packaging_component_price_versions,
     load_samengestelde_producten,
+    load_verpakkingsonderdelen,
     load_all_verkoop_records,
     normalize_any_verkoop_record,
     normalize_berekening_record,
@@ -120,6 +118,10 @@ def require_postgres() -> None:
 def load_dataset(name: str) -> Any:
     require_postgres()
     default_value = DATASET_DEFAULTS[name]
+    if name == "productie":
+        return production_storage.load_productie()
+    if name == "vaste-kosten":
+        return fixed_costs_storage.load_grouped_by_year()
     if name == "channels":
         payload = postgres_storage.load_dataset(name, default_value)
         return _normalize_channels_dataset(payload)
@@ -134,11 +136,12 @@ def load_dataset(name: str) -> Any:
     if name == "composite-product-masters":
         return load_samengestelde_producten()
     if name == "verpakkingsonderdelen":
-        return build_verpakkingsonderdelen_legacy_projection()
+        # Legacy projection expanded prices for every year; too heavy for interactive UIs.
+        return load_verpakkingsonderdelen()
     if name == "basisproducten":
-        return build_basisproducten_legacy_projection()
+        return load_basisproducten()
     if name == "samengestelde-producten":
-        return build_samengestelde_producten_legacy_projection()
+        return load_samengestelde_producten()
     if name in MODEL_A_DATASET_NAMES:
         return build_model_a_canonical_datasets().get(name, default_value)
     if name in {"kostprijsversies", "berekeningen"}:
@@ -166,6 +169,10 @@ def load_dataset(name: str) -> Any:
 
 def save_dataset(name: str, data: Any) -> bool:
     require_postgres()
+    if name == "productie" and isinstance(data, dict):
+        return production_storage.save_productie(data)
+    if name == "vaste-kosten" and isinstance(data, dict):
+        return fixed_costs_storage.save_grouped_by_year(data)
     if name == "channels":
         return postgres_storage.save_dataset(name, _normalize_channels_dataset(data), overwrite=True)
     if name == "packaging-components" and isinstance(data, list):
@@ -231,6 +238,18 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
         if dataset_name in READ_ONLY_PROJECTION_DATASETS:
             results[dataset_name] = True
             continue
+        if dataset_name == "productie":
+            payload = legacy_storage.load_dataset_from_json(dataset_name)
+            if not isinstance(payload, dict):
+                payload = {}
+            results[dataset_name] = production_storage.save_productie(payload)
+            continue
+        if dataset_name == "vaste-kosten":
+            payload = legacy_storage.load_dataset_from_json(dataset_name)
+            if not isinstance(payload, dict):
+                payload = {}
+            results[dataset_name] = fixed_costs_storage.save_grouped_by_year(payload)
+            continue
         if dataset_name in MODEL_A_DATASET_NAMES:
             payload = canonical_payloads.get(dataset_name, DATASET_DEFAULTS[dataset_name])
         elif dataset_name == "packaging-components":
@@ -246,11 +265,11 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
         elif dataset_name in {"kostprijsversies", "berekeningen"}:
             payload = load_kostprijsversies()
         elif dataset_name == "verpakkingsonderdelen":
-            payload = build_verpakkingsonderdelen_legacy_projection()
+            payload = load_verpakkingsonderdelen()
         elif dataset_name == "basisproducten":
-            payload = build_basisproducten_legacy_projection()
+            payload = load_basisproducten()
         elif dataset_name == "samengestelde-producten":
-            payload = build_samengestelde_producten_legacy_projection()
+            payload = load_samengestelde_producten()
         else:
             payload = legacy_storage.load_dataset_from_json(dataset_name)
         results[dataset_name] = postgres_storage.save_dataset(
@@ -264,6 +283,9 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
 def reset_all_datasets_to_defaults() -> dict[str, bool]:
     require_postgres()
     results: dict[str, bool] = {}
+    # Reset normalized tables first.
+    fixed_costs_storage.reset_defaults()
+    production_storage.reset_defaults()
     for dataset_name, default_value in DATASET_DEFAULTS.items():
         if dataset_name in READ_ONLY_PROJECTION_DATASETS:
             results[dataset_name] = True
@@ -276,14 +298,20 @@ def reset_all_datasets_to_defaults() -> dict[str, bool]:
     return results
 
 
-def activate_cost_version(version_id: str) -> dict[str, Any] | None:
+def activate_cost_version(
+    version_id: str,
+    *,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     require_postgres()
-    return activate_kostprijsversie(version_id)
+    return activate_kostprijsversie(version_id, context=context)
 
 
 def activate_cost_version_products(
     version_id: str,
     product_ids: list[str],
+    *,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     require_postgres()
-    return activate_kostprijsversie_products(version_id, product_ids)
+    return activate_kostprijsversie_products(version_id, product_ids, context=context)

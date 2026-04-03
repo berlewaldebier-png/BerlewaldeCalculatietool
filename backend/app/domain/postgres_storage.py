@@ -3,10 +3,26 @@ from __future__ import annotations
 import json
 import os
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Any, Iterator
 
 from app import config  # noqa: F401
+
+
+_request_connection: ContextVar[Any | None] = ContextVar("calculatietool_request_connection", default=None)
+_schema_ready = False
+_schema_lock = Lock()
+
+
+def set_request_connection(conn: Any) -> Any:
+    """Bind a psycopg connection to the current request context."""
+    return _request_connection.set(conn)
+
+
+def reset_request_connection(token: Any) -> None:
+    _request_connection.reset(token)
 
 
 def storage_provider() -> str:
@@ -46,6 +62,12 @@ def _require_psycopg():
 
 @contextmanager
 def connect() -> Iterator[Any]:
+    existing = _request_connection.get()
+    if existing is not None:
+        # The request middleware owns lifecycle; do not close here.
+        yield existing
+        return
+
     psycopg = _require_psycopg()
     db_url = database_url()
     if not db_url:
@@ -56,18 +78,25 @@ def connect() -> Iterator[Any]:
 
 
 def ensure_schema() -> None:
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS app_datasets (
-                    dataset_name TEXT PRIMARY KEY,
-                    payload JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    global _schema_ready
+    if _schema_ready:
+        return
+    with _schema_lock:
+        if _schema_ready:
+            return
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_datasets (
+                        dataset_name TEXT PRIMARY KEY,
+                        payload JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
                 )
-                """
-            )
-        conn.commit()
+            conn.commit()
+        _schema_ready = True
 
 
 def load_dataset(name: str, default_value: Any) -> Any:

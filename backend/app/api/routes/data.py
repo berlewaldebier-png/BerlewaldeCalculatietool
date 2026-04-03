@@ -18,7 +18,10 @@ def get_productie() -> dict:
 
 @router.put("/productie")
 def put_productie(data: dict[str, Any]) -> dict[str, bool]:
-    return {"saved": dataset_store.save_dataset("productie", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("productie", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/vaste-kosten")
@@ -28,7 +31,10 @@ def get_vaste_kosten() -> dict:
 
 @router.put("/vaste-kosten")
 def put_vaste_kosten(data: dict[str, Any]) -> dict[str, bool]:
-    return {"saved": dataset_store.save_dataset("vaste-kosten", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("vaste-kosten", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/tarieven-heffingen")
@@ -102,8 +108,12 @@ def put_kostprijsversies(data: list[dict[str, Any]]) -> dict[str, bool]:
 
 
 @router.post("/kostprijsversies/{version_id}/activate")
-def post_activate_kostprijsversie(version_id: str) -> dict[str, Any]:
-    activated = dataset_store.activate_cost_version(version_id)
+def post_activate_kostprijsversie(
+    version_id: str,
+    data: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    run_id = str(data.get("run_id", "") or "")
+    activated = dataset_store.activate_cost_version(version_id, context={"run_id": run_id})
     if activated is None:
         raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden of niet definitief")
     return {"activated": True, "record": activated}
@@ -115,11 +125,13 @@ def post_activate_kostprijsversie_products(
     data: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
     product_ids = data.get("product_ids", [])
+    run_id = str(data.get("run_id", "") or "")
     if not isinstance(product_ids, list):
         raise HTTPException(status_code=400, detail="product_ids moet een lijst zijn")
     activated = dataset_store.activate_cost_version_products(
         version_id,
         [str(product_id or "") for product_id in product_ids if str(product_id or "").strip()],
+        context={"run_id": run_id},
     )
     if activated is None:
         raise HTTPException(

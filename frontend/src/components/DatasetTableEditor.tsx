@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
@@ -8,7 +8,7 @@ import { API_BASE_URL } from "@/lib/api";
 type EditorValue = string | number | boolean | null;
 type EditorRow = Record<string, EditorValue>;
 
-type ColumnType = "text" | "number" | "checkbox";
+type ColumnType = "text" | "number" | "checkbox" | "select";
 
 type EditorColumn = {
   key: string;
@@ -16,6 +16,7 @@ type EditorColumn = {
   type?: ColumnType;
   width?: string;
   readOnly?: boolean;
+  options?: Array<{ value: string; label: string }>;
 };
 
 type SaveShape = "array" | "recordByYear" | "groupByYearList";
@@ -29,6 +30,7 @@ type DatasetTableEditorProps = {
   addRowTemplate: EditorRow;
   saveShape?: SaveShape;
   yearKey?: string;
+  onRowsChange?: (rows: EditorRow[]) => void;
 };
 
 type InternalRow = EditorRow & {
@@ -67,7 +69,8 @@ export function DatasetTableEditor({
   initialRows,
   addRowTemplate,
   saveShape = "array",
-  yearKey = "jaar"
+  yearKey = "jaar",
+  onRowsChange
 }: DatasetTableEditorProps) {
   const router = useRouter();
   const preparedRows = useMemo<InternalRow[]>(
@@ -85,10 +88,20 @@ export function DatasetTableEditor({
   const [rows, setRows] = useState<InternalRow[]>(preparedRows);
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const onRowsChangeRef = useRef<typeof onRowsChange>(onRowsChange);
   const readOnlyKeys = useMemo(
     () => new Set(columns.filter((column) => column.readOnly).map((column) => column.key)),
     [columns]
   );
+
+  useEffect(() => {
+    onRowsChangeRef.current = onRowsChange;
+  }, [onRowsChange]);
+
+  useEffect(() => {
+    // Notify after React committed the update (avoid setState during another component update).
+    onRowsChangeRef.current?.(rows.map(stripInternal));
+  }, [rows]);
 
   function updateCell(rowId: string, key: string, value: EditorValue) {
     setRows((current) =>
@@ -225,6 +238,27 @@ export function DatasetTableEditor({
                           />
                           <span>{Boolean(value) ? "Ja" : "Nee"}</span>
                         </label>
+                      </td>
+                    );
+                  }
+
+                  if (type === "select") {
+                    const options = column.options ?? [];
+                    return (
+                      <td key={column.key}>
+                        <select
+                          className={`dataset-input ${column.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                          value={value === null || value === undefined ? "" : String(value)}
+                          disabled={column.readOnly}
+                          onChange={(event) => updateCell(row._uiId, column.key, event.target.value)}
+                        >
+                          <option value="">Kies...</option>
+                          {options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                     );
                   }
