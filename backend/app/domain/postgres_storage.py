@@ -10,8 +10,7 @@ from app import config  # noqa: F401
 
 
 def storage_provider() -> str:
-    # Legacy JSON storage is deprecated; default to Postgres.
-    return os.getenv("CALCULATIETOOL_BACKEND_STORAGE_PROVIDER", "postgres").strip().lower()
+    return os.getenv("CALCULATIETOOL_BACKEND_STORAGE_PROVIDER", "json").strip().lower()
 
 
 def uses_postgres() -> bool:
@@ -112,18 +111,6 @@ def save_dataset(name: str, data: Any, overwrite: bool = True) -> bool:
                     """,
                     (name, json.dumps(data, ensure_ascii=False), now),
                 )
-        conn.commit()
-    return True
-
-
-def delete_dataset(name: str) -> bool:
-    ensure_schema()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM app_datasets WHERE dataset_name = %s",
-                (name,),
-            )
         conn.commit()
     return True
 
