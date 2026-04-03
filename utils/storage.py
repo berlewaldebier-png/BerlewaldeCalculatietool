@@ -29,6 +29,7 @@ SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX = "verpakkingsonderdeel:"
 DEFAULT_BELASTINGSOORT = "Accijns"
 DEFAULT_TARIEF_ACCIJNS = "Hoog"
 DEFAULT_BTW_TARIEF = "21%"
+FIXED_COST_LINES_DATASET = "fixed-cost-lines"
 
 
 def _get_postgres_storage_module():
@@ -53,12 +54,25 @@ def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
     return postgres_storage.save_dataset(dataset_name, data, overwrite=True)
 
 
+def _delete_postgres_dataset(dataset_name: str) -> bool:
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        return False
+    return postgres_storage.delete_dataset(dataset_name)
+
+
+def _postgres_storage_active() -> bool:
+    postgres_storage = _get_postgres_storage_module()
+    return postgres_storage is not None and postgres_storage.uses_postgres()
+
+
 def _load_postgres_first_list(dataset_name: str, fallback_path: Path) -> list[Any]:
     postgres_payload = _load_postgres_dataset(dataset_name)
     if isinstance(postgres_payload, list):
         return postgres_payload
-    fallback = _load_json_value(fallback_path, [])
-    return fallback if isinstance(fallback, list) else []
+    # Legacy JSON fallback intentionally disabled to avoid stale/dev seed data leaking into runtime.
+    # If Postgres is not active or dataset missing, return an empty list.
+    return []
 
 
 def _read_local_json_text(file_path: Path, default_content: str) -> str:
@@ -97,13 +111,8 @@ def _ensure_json_file(file_path: Path, default_content: str) -> Path:
 
 
 def _load_json_value(file_path: Path, default_value: Any) -> Any:
-    """Laadt JSON veilig in en valt terug op een standaardstructuur."""
-    default_content = "{}" if isinstance(default_value, dict) else "[]"
-    try:
-        raw_content = _read_local_json_text(file_path, default_content)
-        return _parse_json_content(raw_content, default_value)
-    except OSError:
-        return default_value
+    """Legacy JSON fallback is disabled; always return the provided default."""
+    return default_value
 
 
 def _save_json_value(file_path: Path, data: Any, default_content: str) -> bool:
@@ -185,7 +194,13 @@ def normalize_tarieven_heffingen_record(record: dict[str, Any]) -> dict[str, Any
 
 def load_tarieven_heffingen() -> list[dict[str, Any]]:
     """Laadt alle tarieven en heffingen veilig in."""
-    data = _load_json_value(TARIEVEN_HEFFINGEN_FILE, [])
+    postgres_payload = _load_postgres_dataset("tarieven-heffingen")
+    if isinstance(postgres_payload, list):
+        data = postgres_payload
+    elif _postgres_storage_active():
+        data = []
+    else:
+        data = _load_json_value(TARIEVEN_HEFFINGEN_FILE, [])
     if not isinstance(data, list):
         return []
 
@@ -205,6 +220,10 @@ def save_tarieven_heffingen(data: list[dict[str, Any]]) -> bool:
         if isinstance(record, dict)
     ]
     normalized = sorted(normalized, key=lambda item: int(item.get("jaar", 0) or 0))
+    if _save_postgres_dataset("tarieven-heffingen", normalized):
+        return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(TARIEVEN_HEFFINGEN_FILE, normalized, "[]")
 
 
@@ -417,7 +436,7 @@ def _cleanup_kostprijsversie_references(
             changed = True
             continue
 
-        record = normalize_berekening_record(source_record)
+        record = deepcopy(source_record)
         invoer = record.get("invoer", {}) if isinstance(record.get("invoer", {}), dict) else {}
         inkoop = invoer.get("inkoop", {}) if isinstance(invoer.get("inkoop", {}), dict) else {}
         original_facturen = inkoop.get("facturen", [])
@@ -485,6 +504,8 @@ def load_kostprijsproductactiveringen() -> list[dict[str, Any]]:
     postgres_payload = _load_postgres_dataset("kostprijsproductactiveringen")
     if isinstance(postgres_payload, list):
         data = postgres_payload
+    elif _postgres_storage_active():
+        data = []
     else:
         data = _load_json_value(KOSTPRIJSPRODUCTACTIVERINGEN_FILE, [])
     if not isinstance(data, list):
@@ -569,6 +590,8 @@ def save_kostprijsproductactiveringen(data: list[dict[str, Any]]) -> bool:
     )
     if _save_postgres_dataset("kostprijsproductactiveringen", normalized):
         return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(
         KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
         normalized,
@@ -667,13 +690,16 @@ def _resolve_kostprijsproduct_refs(
 def _sync_kostprijsproductactiveringen(
     records: list[dict[str, Any]],
     activations: list[dict[str, Any]],
+    *,
+    basisproducten: list[dict[str, Any]] | None = None,
+    samengestelde_producten: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    basisproducten = [
-        row for row in load_basisproducten() if isinstance(row, dict)
-    ]
-    samengestelde_producten = [
-        row for row in load_samengestelde_producten() if isinstance(row, dict)
-    ]
+    if basisproducten is None:
+        basisproducten = [row for row in load_basisproducten() if isinstance(row, dict)]
+    if samengestelde_producten is None:
+        samengestelde_producten = [
+            row for row in load_samengestelde_producten() if isinstance(row, dict)
+        ]
     basisproducten_by_id = {
         str(row.get("id", "") or ""): row for row in basisproducten if str(row.get("id", "") or "")
     }
@@ -840,21 +866,40 @@ def _sync_kostprijsproductactiveringen(
 def _normalize_and_sync_kostprijsversie_state(
     records: list[dict[str, Any]],
     activations: list[dict[str, Any]] | None = None,
+    *,
+    persist_bier_sync: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    basisproducten = [row for row in load_basisproducten() if isinstance(row, dict)]
+    samengestelde_producten = [
+        row for row in load_samengestelde_producten() if isinstance(row, dict)
+    ]
+    basis_by_name, samengesteld_by_name = _snapshot_product_resolution_maps_from_rows(
+        basisproducten,
+        samengestelde_producten,
+    )
     normalized_records = [
-        normalize_berekening_record(record)
+        normalize_berekening_record(
+            record,
+            basis_by_name=basis_by_name,
+            samengesteld_by_name=samengesteld_by_name,
+        )
         for record in records
         if isinstance(record, dict)
     ]
     normalized_records, _ = _cleanup_kostprijsversie_references(normalized_records)
     normalized_records = _assign_kostprijsversie_numbers(normalized_records)
-    normalized_records, _ = _sync_bieren_with_kostprijsversies(normalized_records)
+    normalized_records, _ = _sync_bieren_with_kostprijsversies(
+        normalized_records,
+        persist_changes=persist_bier_sync,
+    )
     normalized_activations = activations
     if normalized_activations is None:
         normalized_activations = load_kostprijsproductactiveringen()
     normalized_records, normalized_activations = _sync_kostprijsproductactiveringen(
         normalized_records,
         normalized_activations,
+        basisproducten=basisproducten,
+        samengestelde_producten=samengestelde_producten,
     )
     return normalized_records, normalized_activations
 
@@ -911,6 +956,27 @@ def _snapshot_product_resolution_maps() -> tuple[dict[str, str], dict[str, str]]
     samengesteld_by_name = {
         _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
         for row in load_samengestelde_producten()
+        if isinstance(row, dict)
+        and _normalize_verpakking_key(row.get("omschrijving"))
+        and str(row.get("id", "") or "")
+    }
+    return basis_by_name, samengesteld_by_name
+
+
+def _snapshot_product_resolution_maps_from_rows(
+    basisproducten: list[dict[str, Any]] | None,
+    samengestelde_producten: list[dict[str, Any]] | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    basis_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in (basisproducten or [])
+        if isinstance(row, dict)
+        and _normalize_verpakking_key(row.get("omschrijving"))
+        and str(row.get("id", "") or "")
+    }
+    samengesteld_by_name = {
+        _normalize_verpakking_key(row.get("omschrijving")): str(row.get("id", "") or "")
+        for row in (samengestelde_producten or [])
         if isinstance(row, dict)
         and _normalize_verpakking_key(row.get("omschrijving"))
         and str(row.get("id", "") or "")
@@ -1001,6 +1067,9 @@ def _normalize_resultaat_snapshot_product_row(
 
 def _normalize_resultaat_snapshot_producten(
     producten: dict[str, Any] | None,
+    *,
+    basis_by_name: dict[str, str] | None = None,
+    samengesteld_by_name: dict[str, str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     source = producten if isinstance(producten, dict) else {}
     basisproducten = source.get("basisproducten", [])
@@ -1011,7 +1080,8 @@ def _normalize_resultaat_snapshot_producten(
     if not isinstance(samengestelde_producten, list):
         samengestelde_producten = []
 
-    basis_by_name, samengesteld_by_name = _snapshot_product_resolution_maps()
+    if basis_by_name is None or samengesteld_by_name is None:
+        basis_by_name, samengesteld_by_name = _snapshot_product_resolution_maps()
 
     return {
         "basisproducten": [
@@ -1037,7 +1107,12 @@ def _normalize_resultaat_snapshot_producten(
     }
 
 
-def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
+def normalize_berekening_record(
+    record: dict[str, Any],
+    *,
+    basis_by_name: dict[str, str] | None = None,
+    samengesteld_by_name: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Normaliseert een kostprijsversie-record voor Nieuwe kostprijsberekening."""
     status = str(record.get("status", "concept") or "concept").strip().lower()
     if status not in {"concept", "definitief"}:
@@ -1216,7 +1291,9 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
             "directe_vaste_kosten_per_liter"
         ),
         "producten": _normalize_resultaat_snapshot_producten(
-            resultaat_snapshot.get("producten")
+            resultaat_snapshot.get("producten"),
+            basis_by_name=basis_by_name,
+            samengesteld_by_name=samengesteld_by_name,
         ),
     }
 
@@ -1809,6 +1886,8 @@ def save_basisproducten(data: list[dict[str, Any]]) -> bool:
         normalized.append(cleaned)
     if _save_postgres_dataset("base-product-masters", normalized):
         return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(BASISPRODUCTEN_FILE, normalized, "[]")
 
 
@@ -2071,6 +2150,8 @@ def save_samengestelde_producten(data: list[dict[str, Any]]) -> bool:
         normalized.append(cleaned)
     if _save_postgres_dataset("composite-product-masters", normalized):
         return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(SAMENGESTELDE_PRODUCTEN_FILE, normalized, "[]")
 
 
@@ -2814,11 +2895,20 @@ def build_samengestelde_producten_legacy_projection() -> list[dict[str, Any]]:
 
 def load_json_data() -> dict[str, Any]:
     """Laadt productiegegevens veilig in."""
+    postgres_payload = _load_postgres_dataset("productie")
+    if isinstance(postgres_payload, dict):
+        return postgres_payload
+    if _postgres_storage_active():
+        return {}
     return _load_json_value(PRODUCTIE_FILE, {})
 
 
 def save_json_data(data: dict[str, Any]) -> bool:
     """Slaat productiegegevens veilig op."""
+    if _save_postgres_dataset("productie", data):
+        return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(PRODUCTIE_FILE, data, "{}")
 
 
@@ -2902,7 +2992,11 @@ def duplicate_productie_to_year(
 
 def is_productiejaar_in_gebruik_bij_vaste_kosten(year: int | str) -> bool:
     """Controleert of een productiejaar al voorkomt in de opslag van vaste kosten."""
-    return str(year) in load_vaste_kosten_data()
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
+        return False
+    return any(int(row.get("jaar", 0) or 0) == year_value for row in load_vaste_kosten_rows())
 
 
 def get_batchgrootte_eigen_productie_l(year: int | str) -> float | None:
@@ -2918,21 +3012,194 @@ def get_batchgrootte_eigen_productie_l(year: int | str) -> float | None:
     return batchgrootte if batchgrootte > 0 else None
 
 
+def normalize_vaste_kosten_row(record: dict[str, Any]) -> dict[str, Any]:
+    """Normaliseert een vaste-kostenregel als canonieke bronrij."""
+
+    try:
+        jaar = int(record.get("jaar", 0) or 0)
+    except (TypeError, ValueError):
+        jaar = 0
+
+    try:
+        bedrag_per_jaar = float(record.get("bedrag_per_jaar", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        bedrag_per_jaar = 0.0
+
+    try:
+        herverdeling_pct = float(
+            record.get("herverdeling_pct", record.get("allocatie_pct", 0.0)) or 0.0
+        )
+    except (TypeError, ValueError):
+        herverdeling_pct = 0.0
+    herverdeling_pct = max(0.0, min(100.0, herverdeling_pct))
+
+    return {
+        "id": str(record.get("id", "") or uuid4()),
+        "jaar": jaar,
+        "omschrijving": str(record.get("omschrijving", "") or "").strip(),
+        "kostensoort": str(record.get("kostensoort", record.get("type_kosten", "")) or "").strip(),
+        "bedrag_per_jaar": bedrag_per_jaar,
+        "herverdeling_pct": herverdeling_pct,
+        "created_at": str(record.get("created_at", "") or ""),
+        "updated_at": str(record.get("updated_at", "") or ""),
+    }
+
+
+def _is_meaningful_vaste_kosten_row(record: dict[str, Any]) -> bool:
+    return (
+        int(record.get("jaar", 0) or 0) > 0
+        and (
+            str(record.get("omschrijving", "") or "").strip() != ""
+            or str(record.get("kostensoort", "") or "").strip() != ""
+            or float(record.get("bedrag_per_jaar", 0.0) or 0.0) != 0.0
+            or float(record.get("herverdeling_pct", 0.0) or 0.0) != 0.0
+        )
+    )
+
+
+def _coerce_vaste_kosten_rows(data: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+
+    if isinstance(data, dict):
+        for year_key, raw_items in data.items():
+            try:
+                jaar = int(year_key)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(raw_items, list):
+                continue
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                rows.append(normalize_vaste_kosten_row({**item, "jaar": jaar}))
+    elif isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            rows.append(normalize_vaste_kosten_row(item))
+
+    meaningful_rows = [row for row in rows if _is_meaningful_vaste_kosten_row(row)]
+    return sorted(
+        meaningful_rows,
+        key=lambda row: (
+            int(row.get("jaar", 0) or 0),
+            str(row.get("omschrijving", "") or "").lower(),
+            str(row.get("id", "") or ""),
+        ),
+    )
+
+
+def _group_vaste_kosten_rows_by_year(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        jaar = int(row.get("jaar", 0) or 0)
+        if jaar <= 0:
+            continue
+        grouped.setdefault(str(jaar), []).append(
+            {
+                "id": str(row.get("id", "") or ""),
+                "omschrijving": str(row.get("omschrijving", "") or ""),
+                "kostensoort": str(row.get("kostensoort", "") or ""),
+                "bedrag_per_jaar": float(row.get("bedrag_per_jaar", 0.0) or 0.0),
+                "herverdeling_pct": float(row.get("herverdeling_pct", 0.0) or 0.0),
+            }
+        )
+
+    for items in grouped.values():
+        items.sort(
+            key=lambda item: (
+                str(item.get("omschrijving", "") or "").lower(),
+                str(item.get("id", "") or ""),
+            )
+        )
+
+    return dict(sorted(grouped.items(), key=lambda item: int(item[0] or 0)))
+
+
+def load_vaste_kosten_rows() -> list[dict[str, Any]]:
+    """Laadt vaste kosten vanuit de canonieke rijset, met legacy migratiebron als fallback."""
+    postgres_rows = _load_postgres_dataset(FIXED_COST_LINES_DATASET)
+    if isinstance(postgres_rows, list):
+        return _coerce_vaste_kosten_rows(postgres_rows)
+
+    legacy_postgres = _load_postgres_dataset("vaste-kosten")
+    if legacy_postgres is not None:
+        return _coerce_vaste_kosten_rows(legacy_postgres)
+
+    if _postgres_storage_active():
+        return []
+    return _coerce_vaste_kosten_rows(_load_json_value(VASTE_KOSTEN_FILE, {}))
+
+
+def save_vaste_kosten_rows(rows: list[dict[str, Any]]) -> bool:
+    """Slaat vaste kosten op als canonieke rijset met productiejaar als verplichte sleutel."""
+    existing_by_id = {
+        str(row.get("id", "") or ""): row
+        for row in load_vaste_kosten_rows()
+        if isinstance(row, dict)
+    }
+    now_iso = _now_iso()
+    normalized_rows: list[dict[str, Any]] = []
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        incoming_id = str(row.get("id", "") or "")
+        existing = existing_by_id.get(incoming_id, {})
+        merged = {
+            **existing,
+            **row,
+            "created_at": str((existing or {}).get("created_at", row.get("created_at", now_iso)) or now_iso),
+            "updated_at": now_iso,
+        }
+        normalized = normalize_vaste_kosten_row(merged)
+        if not _is_meaningful_vaste_kosten_row(normalized):
+            continue
+        normalized_rows.append(normalized)
+
+    normalized_rows.sort(
+        key=lambda record: (
+            int(record.get("jaar", 0) or 0),
+            str(record.get("omschrijving", "") or "").lower(),
+            str(record.get("id", "") or ""),
+        )
+    )
+
+    if _save_postgres_dataset(FIXED_COST_LINES_DATASET, normalized_rows):
+        _delete_postgres_dataset("vaste-kosten")
+        return True
+
+    if _postgres_storage_active():
+        return False
+    return _save_json_value(
+        VASTE_KOSTEN_FILE,
+        _group_vaste_kosten_rows_by_year(normalized_rows),
+        "{}",
+    )
+
+
 def load_vaste_kosten_data() -> dict[str, Any]:
-    """Laadt alle opgeslagen vaste kosten veilig in."""
-    return _load_json_value(VASTE_KOSTEN_FILE, {})
+    """Laadt vaste kosten als jaarprojectie voor de bestaande UI."""
+    return _group_vaste_kosten_rows_by_year(load_vaste_kosten_rows())
 
 
 def save_vaste_kosten_data(data: dict[str, Any]) -> bool:
-    """Slaat alle vaste kosten veilig op."""
-    return _save_json_value(VASTE_KOSTEN_FILE, data, "{}")
+    """Slaat vaste kosten op via de canonieke rijset en bewaart de UI-jaarprojectie als alias."""
+    return save_vaste_kosten_rows(_coerce_vaste_kosten_rows(data))
 
 
 def get_vaste_kosten_record(year: int | str) -> list[dict[str, Any]]:
     """Haalt alle vaste kostenregels voor een specifiek jaar op."""
-    data = load_vaste_kosten_data()
-    record = data.get(str(year), [])
-    return record if isinstance(record, list) else []
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
+        return []
+
+    return [
+        row
+        for row in load_vaste_kosten_rows()
+        if int(row.get("jaar", 0) or 0) == year_value
+    ]
 
 
 def get_vaste_kosten_row_by_id(
@@ -2952,9 +3219,20 @@ def upsert_vaste_kosten_record(
     records: list[dict[str, Any]],
 ) -> bool:
     """Vervangt of maakt alle vaste kostenregels voor een jaar aan."""
-    data = load_vaste_kosten_data()
-    data[str(year)] = records
-    return save_vaste_kosten_data(data)
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
+        return False
+
+    other_rows = [
+        row for row in load_vaste_kosten_rows() if int(row.get("jaar", 0) or 0) != year_value
+    ]
+    replacement_rows = [
+        {**row, "jaar": year_value}
+        for row in records
+        if isinstance(row, dict)
+    ]
+    return save_vaste_kosten_rows(other_rows + replacement_rows)
 
 
 def upsert_vaste_kosten_row(
@@ -2962,46 +3240,69 @@ def upsert_vaste_kosten_row(
     record: dict[str, Any],
 ) -> bool:
     """Voegt een vaste-kostenregel toe of werkt deze bij binnen een jaar."""
-    records = get_vaste_kosten_record(year)
-    row_id = str(record.get("id", ""))
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
+        return False
+
+    rows = load_vaste_kosten_rows()
+    row_id = str(record.get("id", "") or "")
     updated = False
 
-    for index, existing_record in enumerate(records):
-        if str(existing_record.get("id", "")) != row_id:
-            continue
-        records[index] = record
-        updated = True
-        break
+    for index, existing_record in enumerate(rows):
+        if (
+            str(existing_record.get("id", "") or "") == row_id
+            and int(existing_record.get("jaar", 0) or 0) == year_value
+        ):
+            rows[index] = {**existing_record, **record, "jaar": year_value}
+            updated = True
+            break
 
     if not updated:
-        records.append(record)
+        rows.append({**record, "jaar": year_value})
 
-    return upsert_vaste_kosten_record(year, records)
+    return save_vaste_kosten_rows(rows)
 
 
 def delete_vaste_kosten_record(year: int | str) -> bool:
     """Verwijdert alle vaste kosten voor een specifiek jaar."""
-    data = load_vaste_kosten_data()
-    year_key = str(year)
-
-    if year_key not in data:
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
         return False
 
-    del data[year_key]
-    return save_vaste_kosten_data(data)
+    rows = load_vaste_kosten_rows()
+    filtered_rows = [
+        row for row in rows if int(row.get("jaar", 0) or 0) != year_value
+    ]
+
+    if len(filtered_rows) == len(rows):
+        return False
+
+    return save_vaste_kosten_rows(filtered_rows)
 
 
 def delete_vaste_kosten_row(year: int | str, row_id: str) -> bool:
     """Verwijdert een specifieke vaste-kostenregel binnen een jaar."""
-    records = get_vaste_kosten_record(year)
-    filtered_records = [
-        record for record in records if str(record.get("id", "")) != row_id
-    ]
-
-    if len(filtered_records) == len(records):
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
         return False
 
-    return upsert_vaste_kosten_record(year, filtered_records)
+    rows = load_vaste_kosten_rows()
+    filtered_records = [
+        record
+        for record in rows
+        if not (
+            int(record.get("jaar", 0) or 0) == year_value
+            and str(record.get("id", "")) == row_id
+        )
+    ]
+
+    if len(filtered_records) == len(rows):
+        return False
+
+    return save_vaste_kosten_rows(filtered_records)
 
 
 def calculate_total_vaste_kosten(records: list[dict[str, Any]]) -> float:
@@ -3009,6 +3310,47 @@ def calculate_total_vaste_kosten(records: list[dict[str, Any]]) -> float:
     return float(
         sum(float(record.get("bedrag_per_jaar", 0.0) or 0.0) for record in records)
     )
+
+
+def _normalize_vaste_kosten_type(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"indirect", "indirecte kosten"}:
+        return "indirect"
+    return "direct"
+
+
+def calculate_vaste_kosten_verdeling(records: list[dict[str, Any]]) -> dict[str, float]:
+    direct_total = 0.0
+    indirect_total = 0.0
+    redistributed_to_direct = 0.0
+    redistributed_to_indirect = 0.0
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        amount = float(record.get("bedrag_per_jaar", 0.0) or 0.0)
+        pct = max(0.0, min(100.0, float(record.get("herverdeling_pct", 0.0) or 0.0)))
+        redistributed_amount = amount * (pct / 100.0)
+        primary_amount = amount - redistributed_amount
+        primary_type = _normalize_vaste_kosten_type(record.get("kostensoort", ""))
+
+        if primary_type == "indirect":
+            indirect_total += primary_amount
+            direct_total += redistributed_amount
+            redistributed_to_direct += redistributed_amount
+        else:
+            direct_total += primary_amount
+            indirect_total += redistributed_amount
+            redistributed_to_indirect += redistributed_amount
+
+    return {
+        "direct": direct_total,
+        "indirect": indirect_total,
+        "total": direct_total + indirect_total,
+        "redistributed_to_direct": redistributed_to_direct,
+        "redistributed_to_indirect": redistributed_to_indirect,
+        "redistributed_total": redistributed_to_direct + redistributed_to_indirect,
+    }
 
 
 def calculate_vaste_kosten_per_liter(
@@ -3067,37 +3409,61 @@ def duplicate_vaste_kosten_to_year(
     overwrite: bool = False,
 ) -> int:
     """Dupliceert vaste kosten van bronjaar naar doeljaar."""
-    data = load_vaste_kosten_data()
-    source_rows = data.get(str(source_year), [])
-    if not isinstance(source_rows, list) or not source_rows:
+    try:
+        source_year_value = int(source_year)
+        target_year_value = int(target_year)
+    except (TypeError, ValueError):
         return 0
-    if str(target_year) in data and not overwrite:
+
+    all_rows = load_vaste_kosten_rows()
+    source_rows = [
+        row for row in all_rows if int(row.get("jaar", 0) or 0) == source_year_value
+    ]
+    if not source_rows:
         return 0
-    data[str(target_year)] = deepcopy(source_rows)
-    if save_vaste_kosten_data(data):
-        return len(source_rows)
+    target_exists = any(
+        int(row.get("jaar", 0) or 0) == target_year_value
+        for row in all_rows
+    )
+    if target_exists and not overwrite:
+        return 0
+
+    cloned_rows = []
+    now_iso = _now_iso()
+    for row in source_rows:
+        cloned_rows.append(
+            {
+                **deepcopy(row),
+                "id": str(uuid4()),
+                "jaar": target_year_value,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+        )
+
+    preserved_rows = [
+        row for row in all_rows if int(row.get("jaar", 0) or 0) != target_year_value
+    ]
+    if save_vaste_kosten_rows(preserved_rows + cloned_rows):
+        return len(cloned_rows)
     return 0
 
 
 def get_directe_vaste_kosten_for_year(year: int | str) -> list[dict[str, Any]]:
     """Geeft alleen directe vaste kostenregels voor een jaar terug."""
-    directe_kosten: list[dict[str, Any]] = []
-
-    for record in get_vaste_kosten_for_year(year):
-        kostensoort = str(
-            record.get("kostensoort", record.get("type_kosten", "")) or ""
-        ).strip().lower()
-        if kostensoort not in {"direct", "directe kosten"}:
-            continue
-        directe_kosten.append(record)
-
-    return directe_kosten
+    return [
+        record
+        for record in get_vaste_kosten_for_year(year)
+        if _normalize_vaste_kosten_type(record.get("kostensoort", "")) == "direct"
+    ]
 
 
 def get_vaste_kosten_per_liter_for_year(year: int | str) -> float | None:
     """Berekent vaste kosten per totale liter voor een geselecteerd jaar."""
     productiegegevens = get_productiegegevens_for_year(year)
-    totale_vaste_kosten = calculate_total_vaste_kosten(get_vaste_kosten_for_year(year))
+    totale_vaste_kosten = calculate_vaste_kosten_verdeling(
+        get_vaste_kosten_for_year(year)
+    )["total"]
 
     return calculate_vaste_kosten_per_totale_liter(
         totale_vaste_kosten=totale_vaste_kosten,
@@ -3114,9 +3480,9 @@ def bereken_directe_vaste_kosten_per_liter(year: int | str) -> float | None:
     if productie_liters is None or float(productie_liters) <= 0:
         return None
 
-    totale_directe_vaste_kosten = calculate_total_vaste_kosten(
-        get_directe_vaste_kosten_for_year(year)
-    )
+    totale_directe_vaste_kosten = calculate_vaste_kosten_verdeling(
+        get_vaste_kosten_for_year(year)
+    )["direct"]
     return float(totale_directe_vaste_kosten) / float(productie_liters)
 
 
@@ -3166,7 +3532,8 @@ def load_bieren() -> list[dict[str, Any]]:
     if isinstance(postgres_payload, list):
         data = _flatten_wrapped_records(postgres_payload)
     else:
-        data = _load_json_value(BIEREN_FILE, [])
+        # Geen JSON-fallback meer: als Postgres niet actief of dataset ontbreekt, retourneer leeg.
+        data = []
     if not isinstance(data, list):
         return []
 
@@ -3215,6 +3582,8 @@ def save_bieren(data: list[dict[str, Any]]) -> bool:
     ]
     if _save_postgres_dataset("bieren", normalized):
         return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(BIEREN_FILE, normalized, "[]")
 
 
@@ -3592,6 +3961,8 @@ def update_bier(
 
 def _sync_bieren_with_kostprijsversies(
     records: list[dict[str, Any]],
+    *,
+    persist_changes: bool = True,
 ) -> tuple[list[dict[str, Any]], bool]:
     bieren = load_bieren()
     bieren_by_id = {str(bier.get("id", "") or ""): bier for bier in bieren}
@@ -3645,18 +4016,18 @@ def _sync_bieren_with_kostprijsversies(
             existing = bier
             changed = True
         else:
-            updated_bier = normalize_bier_record(
-                {
-                    **existing,
-                    "biernaam": biernaam,
-                    "stijl": stijl,
-                    "alcoholpercentage": alcoholpercentage,
-                    "belastingsoort": belastingsoort,
-                    "tarief_accijns": tarief_accijns,
-                    "btw_tarief": btw_tarief,
-                    "updated_at": _now_iso(),
-                }
-            )
+            updated_payload = {
+                **existing,
+                "biernaam": biernaam,
+                "stijl": stijl,
+                "alcoholpercentage": alcoholpercentage,
+                "belastingsoort": belastingsoort,
+                "tarief_accijns": tarief_accijns,
+                "btw_tarief": btw_tarief,
+            }
+            if persist_changes:
+                updated_payload["updated_at"] = _now_iso()
+            updated_bier = normalize_bier_record(updated_payload)
             if updated_bier != existing:
                 for index, bier in enumerate(bieren):
                     if str(bier.get("id", "") or "") == str(updated_bier["id"]):
@@ -3672,7 +4043,7 @@ def _sync_bieren_with_kostprijsversies(
             record["bier_id"] = resolved_bier_id
             changed = True
 
-    if changed:
+    if changed and persist_changes:
         save_bieren(bieren)
 
     return records, changed
@@ -3779,6 +4150,8 @@ def load_kostprijsversies() -> list[dict[str, Any]]:
         postgres_payload = _load_postgres_dataset("berekeningen")
     if isinstance(postgres_payload, list):
         data = postgres_payload
+    elif _postgres_storage_active():
+        data = []
     else:
         data = _load_json_value(KOSTPRIJSVERSIES_FILE, [])
         if not isinstance(data, list) or not data:
@@ -3787,7 +4160,8 @@ def load_kostprijsversies() -> list[dict[str, Any]]:
         return []
 
     normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
-        [record for record in data if isinstance(record, dict)]
+        [record for record in data if isinstance(record, dict)],
+        persist_bier_sync=False,
     )
     return normalized_records
 
@@ -4310,6 +4684,8 @@ def _save_verkoop_records(records: list[dict[str, Any]]) -> bool:
     normalized = _ensure_complete_verkoop_records(_validate_verkoop_records(records))
     if _save_postgres_dataset("verkoopprijzen", normalized):
         return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(VERKOOPPRIJZEN_FILE, normalized, "[]")
 
 
@@ -5178,6 +5554,8 @@ def load_prijsvoorstellen() -> list[dict[str, Any]]:
     postgres_payload = _load_postgres_dataset("prijsvoorstellen")
     if isinstance(postgres_payload, list):
         data = postgres_payload
+    elif _postgres_storage_active():
+        data = []
     else:
         data = _load_json_value(PRIJSVOORSTELLEN_FILE, [])
     if not isinstance(data, list):
@@ -5206,6 +5584,8 @@ def save_prijsvoorstellen(data: list[dict[str, Any]]) -> bool:
     )
     if _save_postgres_dataset("prijsvoorstellen", normalized):
         return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(PRIJSVOORSTELLEN_FILE, normalized, "[]")
 
 
@@ -6068,11 +6448,20 @@ def get_integrale_kostprijs_per_liter_for_bier(
 
 def load_variabele_kosten_data() -> dict[str, Any]:
     """Laadt alle variabele kosten veilig in."""
+    postgres_payload = _load_postgres_dataset("variabele-kosten")
+    if isinstance(postgres_payload, dict):
+        return postgres_payload
+    if _postgres_storage_active():
+        return {}
     return _load_json_value(VARIABELE_KOSTEN_FILE, {})
 
 
 def save_variabele_kosten_data(data: dict[str, Any]) -> bool:
     """Slaat alle variabele kosten veilig op."""
+    if _save_postgres_dataset("variabele-kosten", data):
+        return True
+    if _postgres_storage_active():
+        return False
     return _save_json_value(VARIABELE_KOSTEN_FILE, data, "{}")
 
 
