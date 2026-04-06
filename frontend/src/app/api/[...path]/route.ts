@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const BACKEND_BASE_URL =
-  process.env.CALCULATIETOOL_BACKEND_INTERNAL_URL ?? "http://localhost:8000/api";
+  process.env.CALCULATIETOOL_BACKEND_INTERNAL_URL ?? "http://127.0.0.1:8000/api";
 
 type RouteContext = {
   params: Promise<{
@@ -62,9 +62,26 @@ async function proxy(request: NextRequest, context: RouteContext) {
       headers: outHeaders
     });
   } catch (error) {
+    const err = error as any;
     const message = error instanceof Error ? error.message : String(error);
+    const cause = err?.cause;
+    const causeMessage =
+      cause instanceof Error
+        ? cause.message
+        : typeof cause === "string"
+          ? cause
+          : cause
+            ? JSON.stringify(cause)
+            : "";
+    const details = {
+      message,
+      cause: causeMessage,
+      code: String(cause?.code ?? err?.code ?? ""),
+      address: String(cause?.address ?? ""),
+      port: String(cause?.port ?? "")
+    };
     return NextResponse.json(
-      { error: "api_proxy_failed", message },
+      { error: "api_proxy_failed", ...details },
       { status: 500 }
     );
   }
