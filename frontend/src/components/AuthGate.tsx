@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
-import { readAuthSession } from "@/lib/auth";
+import { fetchMe } from "@/lib/auth";
 
 type AuthGateProps = {
   children: ReactNode;
@@ -16,21 +16,34 @@ export function AuthGate({ children }: AuthGateProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const session = readAuthSession();
-    const authenticated = Boolean(session);
+    let cancelled = false;
 
-    setIsAuthenticated(authenticated);
-    setIsReady(true);
+    async function run() {
+      const session = await fetchMe();
+      if (cancelled) {
+        return;
+      }
 
-    if (!authenticated && pathname !== "/login") {
-      const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
-      window.location.replace(`/login${next}`);
-      return;
+      const authenticated = Boolean(session);
+      setIsAuthenticated(authenticated);
+      setIsReady(true);
+
+      if (!authenticated && pathname !== "/login") {
+        const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+        window.location.replace(`/login${next}`);
+        return;
+      }
+
+      if (authenticated && pathname === "/login") {
+        router.replace("/");
+      }
     }
 
-    if (authenticated && pathname === "/login") {
-      router.replace("/");
-    }
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
   }, [pathname, router]);
 
   if (!isReady) {
