@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { BerekeningenWizard } from "@/components/BerekeningenWizard";
 
@@ -15,6 +15,9 @@ type KostprijsBeheerWorkspaceProps = {
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
+  initialMode?: string;
+  initialFilter?: string;
+  initialFocus?: string;
 };
 
 type WorkspaceMode = "landing" | "select-existing" | "wizard-new" | "wizard-edit";
@@ -28,13 +31,27 @@ export function KostprijsBeheerWorkspace({
   bieren,
   productie,
   vasteKosten,
-  tarievenHeffingen
+  tarievenHeffingen,
+  initialMode,
+  initialFilter,
+  initialFocus
 }: KostprijsBeheerWorkspaceProps) {
   const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(berekeningen);
-  const [mode, setMode] = useState<WorkspaceMode>("landing");
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const normalizedInitialMode =
+    initialMode === "select-existing" || initialMode === "wizard-new" || initialMode === "wizard-edit"
+      ? (initialMode as WorkspaceMode)
+      : "landing";
+  const normalizedInitialFilter =
+    initialFilter === "concept" || initialFilter === "definitief" ? (initialFilter as FilterMode) : "all";
+
+  const [mode, setMode] = useState<WorkspaceMode>(normalizedInitialMode);
+  const [filterMode, setFilterMode] = useState<FilterMode>(normalizedInitialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [activeSort, setActiveSort] = useState<{
+    key: "bron";
+    direction: "asc" | "desc";
+  }>({ key: "bron", direction: "desc" });
   const [pendingActivation, setPendingActivation] = useState<null | {
     bierNaam: string;
     productNaam: string;
@@ -52,6 +69,21 @@ export function KostprijsBeheerWorkspace({
     selectedOptionId: string;
   }>(null);
   const [activationStatus, setActivationStatus] = useState("");
+
+  // Lightweight "focus" hook for deep links from the dashboard (no UI changes, only initial scroll).
+  const focusActivations = String(initialFocus ?? "") === "activations";
+  const activeCostsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!focusActivations) {
+      return;
+    }
+    // Defer to allow the landing UI to mount first.
+    const handle = window.setTimeout(() => {
+      activeCostsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+    return () => window.clearTimeout(handle);
+  }, [focusActivations]);
 
   function formatEuro(value: number | null) {
     if (value === null || !Number.isFinite(value)) {
@@ -111,6 +143,35 @@ export function KostprijsBeheerWorkspace({
       parts.push(statusLabel);
     }
     return parts.join(" · ");
+  }
+
+  function SortIcon({ direction }: { direction: "asc" | "desc" }) {
+    const rotation = direction === "asc" ? "180deg" : "0deg";
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        width="14"
+        height="14"
+        fill="none"
+        aria-hidden="true"
+        style={{ transform: `rotate(${rotation})` }}
+      >
+        <path
+          d="M6 9l6 6 6-6"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  function parseSortTimestamp(value: unknown) {
+    const text = String(value ?? "").trim();
+    if (!text) return 0;
+    const parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   const productionYears = useMemo(() => {
@@ -232,6 +293,9 @@ export function KostprijsBeheerWorkspace({
           brontype === "factuur" && factuurRef ? `factuur ${factuurRef}` : brontype || "-";
 
         const versieLabel = buildVersionLabel(versieId ? versie : undefined);
+        const versieTimestamp = parseSortTimestamp(
+          (versie as any)?.finalized_at ?? (versie as any)?.updated_at ?? effectiefVanaf
+        );
 
         const packagingLabel =
           basisById.get(productId) ?? samengesteldById.get(productId) ?? "";
@@ -374,6 +438,7 @@ export function KostprijsBeheerWorkspace({
           effectiefVanaf,
           versieId,
           versieLabel,
+          versieTimestamp,
           currentCost,
           recommendedVersionId,
           definitiveOptions: definitiveCandidates,
@@ -384,17 +449,32 @@ export function KostprijsBeheerWorkspace({
         };
       });
 
-    if (!q) {
-      return rows.sort((a, b) => (a.bierNaam + a.productNaam).localeCompare(b.bierNaam + b.productNaam));
-    }
+    const filtered = !q
+      ? rows
+      : rows.filter((row) => {
+          const hay = `${row.bierNaam} ${row.productNaam} ${row.versieLabel}`.toLowerCase();
+          return hay.includes(q);
+        });
 
-    return rows
-      .filter((row) => {
-        const hay = `${row.bierNaam} ${row.productNaam} ${row.versieLabel}`.toLowerCase();
-        return hay.includes(q);
-      })
-      .sort((a, b) => (a.bierNaam + a.productNaam).localeCompare(b.bierNaam + b.productNaam));
-  }, [basisById, berekeningenById, bierenById, currentBerekeningen, kostprijsproductactiveringen, search, samengesteldById, selectedYear]);
+    const direction = activeSort.direction === "asc" ? 1 : -1;
+    // Default (and only) sort: newest kostprijsversie (bron) first.
+    return [...filtered].sort((a, b) => {
+      const delta = (a.versieTimestamp - b.versieTimestamp) * direction;
+      if (delta !== 0) return delta;
+      return (a.bierNaam + a.productNaam).localeCompare(b.bierNaam + b.productNaam);
+    });
+  }, [
+    activeSort.direction,
+    activeSort.key,
+    basisById,
+    berekeningenById,
+    bierenById,
+    currentBerekeningen,
+    kostprijsproductactiveringen,
+    search,
+    samengesteldById,
+    selectedYear
+  ]);
 
   function InfoIcon() {
     return (
@@ -603,7 +683,7 @@ export function KostprijsBeheerWorkspace({
 
       <div style={{ marginTop: 18 }} />
 
-      <section className="module-card">
+      <section className="module-card" ref={activeCostsRef}>
         <div className="module-card-header">
           <div className="module-card-title">Actieve kostprijzen</div>
           <div className="module-card-text">
@@ -645,7 +725,21 @@ export function KostprijsBeheerWorkspace({
                 <th>Bier</th>
                 <th>Product</th>
                 <th>Actief sinds</th>
-                <th>Kostprijsversie (bron)</th>
+                <th
+                  style={{ cursor: "pointer" }}
+                  title="Sorteer op kostprijsversie (bron)"
+                  onClick={() =>
+                    setActiveSort((current) => ({
+                      key: "bron",
+                      direction: current.direction === "desc" ? "asc" : "desc"
+                    }))
+                  }
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Kostprijsversie (bron)
+                    <SortIcon direction={activeSort.direction} />
+                  </span>
+                </th>
                 <th />
                 <th />
               </tr>

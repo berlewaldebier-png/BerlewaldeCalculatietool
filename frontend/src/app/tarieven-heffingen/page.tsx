@@ -1,9 +1,9 @@
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function TarievenHeffingenPage() {
-  const bootstrap = await getBootstrap(["tarieven-heffingen"], true);
+  const bootstrap = await getBootstrap(["tarieven-heffingen"], true, "/tarieven-heffingen");
   const navigation = bootstrap.navigation ?? [];
   const rawRows = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
   const rows = rawRows.map((row) => ({

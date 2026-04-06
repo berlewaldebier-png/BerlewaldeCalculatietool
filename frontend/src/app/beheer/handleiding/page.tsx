@@ -1,9 +1,9 @@
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function HandleidingPage() {
-  const bootstrap = await getBootstrap([], true);
+  const bootstrap = await getBootstrap([], true, "/beheer/handleiding");
   const navigation = bootstrap.navigation ?? [];
 
   return (

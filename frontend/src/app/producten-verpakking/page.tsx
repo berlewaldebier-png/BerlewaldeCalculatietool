@@ -1,6 +1,6 @@
 import { PageShell } from "@/components/PageShell";
 import { ProductenVerpakkingWorkspace } from "@/components/ProductenVerpakkingWorkspace";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function ProductenVerpakkingPage() {
   const bootstrap = await getBootstrap(
@@ -10,7 +10,8 @@ export default async function ProductenVerpakkingPage() {
       "composite-product-masters",
       "packaging-component-prices"
     ],
-    true
+    true,
+    "/producten-verpakking"
   );
 
   const navigation = bootstrap.navigation ?? [];
@@ -35,3 +36,4 @@ export default async function ProductenVerpakkingPage() {
     </PageShell>
   );
 }
+

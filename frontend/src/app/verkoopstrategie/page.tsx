@@ -1,6 +1,6 @@
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function VerkoopstrategiePage() {
   const bootstrap = await getBootstrap(
@@ -13,7 +13,8 @@ export default async function VerkoopstrategiePage() {
       "channels",
       "kostprijsproductactiveringen"
     ],
-    true
+    true,
+    "/verkoopstrategie"
   );
   const navigation = bootstrap.navigation ?? [];
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];

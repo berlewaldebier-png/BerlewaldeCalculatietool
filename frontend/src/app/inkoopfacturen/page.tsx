@@ -1,9 +1,13 @@
 import { InkoopFacturenManager } from "@/components/InkoopFacturenManager";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function InkoopfacturenPage() {
-  const bootstrap = await getBootstrap(["kostprijsversies", "basisproducten", "samengestelde-producten"], true);
+  const bootstrap = await getBootstrap(
+    ["kostprijsversies", "basisproducten", "samengestelde-producten"],
+    true,
+    "/inkoopfacturen"
+  );
   const navigation = bootstrap.navigation ?? [];
   const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];

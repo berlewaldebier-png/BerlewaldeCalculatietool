@@ -1,9 +1,9 @@
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function BierenPage() {
-  const bootstrap = await getBootstrap(["bieren"], true);
+  const bootstrap = await getBootstrap(["bieren"], true, "/bieren");
   const navigation = bootstrap.navigation ?? [];
   const rawBieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
   const rows = rawBieren.map((row) => ({

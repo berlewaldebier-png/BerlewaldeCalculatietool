@@ -1,8 +1,15 @@
 import { KostprijsBeheerWorkspace } from "@/components/KostprijsBeheerWorkspace";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
-export default async function NieuweKostprijsberekeningPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function NieuweKostprijsberekeningPage({
+  searchParams
+}: {
+  searchParams?: Promise<SearchParams>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
   const bootstrap = await getBootstrap(
     [
       "kostprijsversies",
@@ -14,7 +21,8 @@ export default async function NieuweKostprijsberekeningPage() {
       "vaste-kosten",
       "tarieven-heffingen"
     ],
-    true
+    true,
+    "/nieuwe-kostprijsberekening"
   );
   const navigation = bootstrap.navigation ?? [];
   const berekeningen = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
@@ -25,6 +33,10 @@ export default async function NieuweKostprijsberekeningPage() {
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
   const tarievenHeffingen = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
+
+  const mode = typeof resolvedSearchParams.mode === "string" ? resolvedSearchParams.mode : "";
+  const filter = typeof resolvedSearchParams.filter === "string" ? resolvedSearchParams.filter : "";
+  const focus = typeof resolvedSearchParams.focus === "string" ? resolvedSearchParams.focus : "";
 
   return (
     <PageShell
@@ -42,6 +54,9 @@ export default async function NieuweKostprijsberekeningPage() {
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
+        initialMode={mode}
+        initialFilter={filter}
+        initialFocus={focus}
       />
     </PageShell>
   );

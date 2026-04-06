@@ -1,9 +1,9 @@
 import { PageShell } from "@/components/PageShell";
 import { VasteKostenClient } from "@/components/VasteKostenClient";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function VasteKostenPage() {
-  const bootstrap = await getBootstrap(["vaste-kosten", "productie"], true);
+  const bootstrap = await getBootstrap(["vaste-kosten", "productie"], true, "/vaste-kosten");
   const navigation = bootstrap.navigation ?? [];
   const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};

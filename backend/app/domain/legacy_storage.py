@@ -1,14 +1,6 @@
 from __future__ import annotations
 
-import sys
-
-from app.config import PROJECT_ROOT
-
-
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from utils import storage  # noqa: E402
+from app.utils import storage
 
 
 def load_dashboard_summary() -> dict[str, int]:

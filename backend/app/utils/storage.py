@@ -237,7 +237,7 @@ def upsert_tarieven_heffingen_row(record: dict[str, Any]) -> bool:
 
 
 def delete_tarieven_heffingen_row(row_id: str) -> bool:
-    """Verwijdert Ã©Ã©n tarievenregel op basis van id."""
+    """Verwijdert een tarievenregel op basis van id."""
     records = load_tarieven_heffingen()
     filtered = [record for record in records if str(record.get("id", "")) != row_id]
 
@@ -902,7 +902,7 @@ def _normalize_and_sync_kostprijsversie_state(
 
 
 def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, Any]:
-    """Normaliseert een ingrediÃ«ntregel voor opslag in berekeningen."""
+    """Normaliseert een ingredientregel voor opslag in berekeningen."""
     source = row if isinstance(row, dict) else {}
 
     def _float_value(key: str) -> float:
@@ -911,22 +911,11 @@ def _normalize_ingredient_row_record(row: dict[str, Any] | None) -> dict[str, An
         except (TypeError, ValueError):
             return 0.0
 
+    ingredient_value = str(source.get("ingredient", "") or source.get("ingrediënt", "") or "")
+
     return {
         "id": str(source.get("id", "") or uuid4()),
-        "ingrediÃ«nt": str(
-            source.get("ingrediÃ«nt", "")
-            or source.get("ingrediënt", "")
-            or source.get("ingrediÃƒÂ«nt", "")
-            or source.get("ingredient", "")
-            or ""
-        ),
-        "ingrediënt": str(
-            source.get("ingrediënt", "")
-            or source.get("ingrediÃ«nt", "")
-            or source.get("ingrediÃƒÂ«nt", "")
-            or source.get("ingredient", "")
-            or ""
-        ),
+        "ingredient": ingredient_value,
         "omschrijving": str(source.get("omschrijving", "") or ""),
         "hoeveelheid": _float_value("hoeveelheid"),
         "eenheid": str(source.get("eenheid", "") or ""),
@@ -958,6 +947,85 @@ def _snapshot_product_resolution_maps() -> tuple[dict[str, str], dict[str, str]]
         and str(row.get("id", "") or "")
     }
     return basis_by_name, samengesteld_by_name
+
+
+def _snapshot_known_product_ids() -> tuple[set[str], set[str]]:
+    basis_ids = {
+        str(row.get("id", "") or "")
+        for row in load_basisproducten()
+        if isinstance(row, dict) and str(row.get("id", "") or "")
+    }
+    samengesteld_ids = {
+        str(row.get("id", "") or "")
+        for row in load_samengestelde_producten()
+        if isinstance(row, dict) and str(row.get("id", "") or "")
+    }
+    return basis_ids, samengesteld_ids
+
+
+def _build_snapshot_legacy_product_id_map(
+    producten: dict[str, Any] | None,
+) -> dict[str, str]:
+    """
+    Builds a per-record legacy->canonical product_id map based on snapshot rows.
+
+    This allows us to also migrate nested references that only store an id (e.g. factuurregels.eenheid),
+    by learning the mapping from the snapshot that contains both id and label.
+    """
+    source = producten if isinstance(producten, dict) else {}
+    basis_rows = source.get("basisproducten", [])
+    samengesteld_rows = source.get("samengestelde_producten", [])
+    if not isinstance(basis_rows, list):
+        basis_rows = []
+    if not isinstance(samengesteld_rows, list):
+        samengesteld_rows = []
+
+    basis_by_name, samengesteld_by_name = _snapshot_product_resolution_maps()
+    basis_ids, samengesteld_ids = _snapshot_known_product_ids()
+
+    out: dict[str, str] = {}
+
+    def _handle_row(row: dict[str, Any], type_hint: str) -> None:
+        verpakking = str(
+            row.get("verpakking", "")
+            or row.get("verpakkingseenheid", "")
+            or row.get("omschrijving", "")
+            or ""
+        )
+        explicit_type = str(row.get("product_type", "") or "").strip().lower()
+        explicit_id = str(row.get("product_id", "") or "").strip()
+        if not explicit_id or not verpakking:
+            return
+
+        resolved_id, resolved_type = _resolve_snapshot_product_identity(
+            verpakking,
+            explicit_type or type_hint,
+            basis_by_name=basis_by_name,
+            samengesteld_by_name=samengesteld_by_name,
+        )
+        if not resolved_id:
+            return
+
+        # Only map when the explicit id is not a known canonical id.
+        if explicit_id in basis_ids or explicit_id in samengesteld_ids:
+            return
+
+        # Guard on resolved type to avoid mapping to the wrong universe.
+        if resolved_type == "basis" and resolved_id not in basis_ids:
+            return
+        if resolved_type == "samengesteld" and resolved_id not in samengesteld_ids:
+            return
+
+        out[explicit_id] = resolved_id
+
+    for row in basis_rows:
+        if isinstance(row, dict):
+            _handle_row(row, "basis")
+    for row in samengesteld_rows:
+        if isinstance(row, dict):
+            _handle_row(row, "samengesteld")
+
+    return out
 
 
 def _resolve_snapshot_product_identity(
@@ -1022,6 +1090,14 @@ def _normalize_resultaat_snapshot_product_row(
     )
     product_type = explicit_product_type or resolved_product_type
     product_id = explicit_product_id or resolved_product_id
+
+    # If an explicit id is provided but is not part of the canonical masters, prefer the resolved canonical id.
+    if explicit_product_id:
+        basis_ids, samengesteld_ids = _snapshot_known_product_ids()
+        known = explicit_product_id in basis_ids or explicit_product_id in samengesteld_ids
+        if not known and resolved_product_id:
+            product_id = resolved_product_id
+            product_type = resolved_product_type
 
     return {
         "biernaam": str(source.get("biernaam", "") or ""),
@@ -1247,6 +1323,39 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         resultaat_snapshot = {}
     if not isinstance(resultaat_snapshot, dict):
         resultaat_snapshot = {}
+
+    # Learn legacy->canonical product id mappings from the snapshot (if present),
+    # then use it to migrate nested ids that do not have labels (e.g. factuurregels.eenheid).
+    legacy_product_id_map = _build_snapshot_legacy_product_id_map(
+        resultaat_snapshot.get("producten")
+    )
+    if legacy_product_id_map:
+        def _rewrite_factuurregels(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+            if not isinstance(rows, list):
+                return []
+            out_rows: list[dict[str, Any]] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                row_id = str(row.get("eenheid", "") or "")
+                if row_id and row_id in legacy_product_id_map:
+                    row = {**row, "eenheid": legacy_product_id_map[row_id]}
+                out_rows.append(row)
+            return out_rows
+
+        inkoop["factuurregels"] = _rewrite_factuurregels(inkoop.get("factuurregels", []))
+        rewritten_facturen: list[dict[str, Any]] = []
+        for factuur in inkoop.get("facturen", []):
+            if not isinstance(factuur, dict):
+                continue
+            rewritten_facturen.append(
+                {
+                    **factuur,
+                    "factuurregels": _rewrite_factuurregels(factuur.get("factuurregels", [])),
+                }
+            )
+        inkoop["facturen"] = rewritten_facturen
+
     resultaat_snapshot = {
         "integrale_kostprijs_per_liter": resultaat_snapshot.get(
             "integrale_kostprijs_per_liter"
@@ -1512,7 +1621,7 @@ def _migrate_verpakkingsonderdelen_data(
 
 
 def get_verpakkingsonderdelen_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft verpakkingsonderdelen terug voor Ã©Ã©n geselecteerd jaar."""
+    """Geeft verpakkingsonderdelen terug voor een geselecteerd jaar."""
     return load_verpakkingsonderdelen(year)
 
 
@@ -1663,7 +1772,7 @@ def delete_verpakkingsonderdeel(
     *,
     year: int | str | None = None,
 ) -> bool:
-    """Verwijdert een verpakkingsonderdeel op basis van id, optioneel binnen Ã©Ã©n jaar."""
+    """Verwijdert een verpakkingsonderdeel op basis van id, optioneel binnen een jaar."""
     onderdelen = load_verpakkingsonderdelen()
 
     if year is None:
@@ -4385,7 +4494,7 @@ def save_verkoopprijzen(data: list[dict[str, Any]]) -> bool:
 
 
 def load_verkoopstrategien() -> list[dict[str, Any]]:
-    """Laadt alle jaargebonden verkoopstrategieÃ«n veilig in."""
+    """Laadt alle jaargebonden verkoopstrategieen veilig in."""
     return [
         normalize_verkoopstrategie_record(record)
         for record in load_all_verkoop_records()
@@ -4395,7 +4504,7 @@ def load_verkoopstrategien() -> list[dict[str, Any]]:
 
 
 def get_verkoopstrategie_for_year(year: int | str) -> dict[str, Any] | None:
-    """Geeft de verkoopstrategie terug voor Ã©Ã©n jaar."""
+    """Geeft de verkoopstrategie terug voor een jaar."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -4408,7 +4517,7 @@ def get_verkoopstrategie_for_year(year: int | str) -> dict[str, Any] | None:
 
 
 def load_verkoopstrategie_producten() -> list[dict[str, Any]]:
-    """Laadt alle verkoopstrategieÃ«n op productniveau veilig in."""
+    """Laadt alle verkoopstrategieen op productniveau veilig in."""
     return [
         normalize_verkoopstrategie_product_record(record)
         for record in load_all_verkoop_records()
@@ -4418,7 +4527,7 @@ def load_verkoopstrategie_producten() -> list[dict[str, Any]]:
 
 
 def load_verkoopstrategie_verpakkingen() -> list[dict[str, Any]]:
-    """Laadt alle verkoopstrategieÃ«n op verpakkingstype veilig in."""
+    """Laadt alle verkoopstrategieen op verpakkingstype veilig in."""
     return [
         normalize_verkoopstrategie_verpakking_record(record)
         for record in load_all_verkoop_records()
@@ -4428,7 +4537,7 @@ def load_verkoopstrategie_verpakkingen() -> list[dict[str, Any]]:
 
 
 def get_verkoopstrategie_verpakkingen_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft alle verpakkingsstrategieÃ«n voor Ã©Ã©n jaar terug."""
+    """Geeft alle verpakkingsstrategieen voor een jaar terug."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -4447,7 +4556,7 @@ def duplicate_verkoopstrategie_verpakkingen_to_year(
     *,
     overwrite: bool = False,
 ) -> int:
-    """Dupliceert verpakkingsstrategieÃ«n van bronjaar naar doeljaar."""
+    """Dupliceert verpakkingsstrategieen van bronjaar naar doeljaar."""
     try:
         source_year_value = int(source_year)
         target_year_value = int(target_year)
@@ -4492,7 +4601,7 @@ def get_verkoopstrategie_verpakking(
     *,
     product_id: str = "",
 ) -> dict[str, Any] | None:
-    """Geeft Ã©Ã©n verpakkingsstrategie terug voor een jaar en verpakkingstype."""
+    """Geeft een verpakkingsstrategie terug voor een jaar en verpakkingstype."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -4544,7 +4653,7 @@ def get_latest_verkoopstrategie_verpakking_up_to_year(
 
 
 def get_verkoopstrategie_producten_for_year(year: int | str) -> list[dict[str, Any]]:
-    """Geeft alle productstrategieÃ«n voor Ã©Ã©n jaar terug."""
+    """Geeft alle productstrategieen voor een jaar terug."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -4564,7 +4673,7 @@ def get_verkoopstrategie_product(
     *,
     only_override: bool = False,
 ) -> dict[str, Any] | None:
-    """Geeft Ã©Ã©n productstrategie terug voor jaar, bier en product."""
+    """Geeft een productstrategie terug voor jaar, bier en product."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -4743,7 +4852,7 @@ def add_or_update_verkoopstrategie(record: dict[str, Any]) -> dict[str, Any] | N
 
 
 def delete_verkoopstrategie(verkoopstrategie_id: str) -> bool:
-    """Verwijdert Ã©Ã©n verkoopstrategie-record op basis van id."""
+    """Verwijdert een verkoopstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -4825,7 +4934,7 @@ def add_or_update_verkoopstrategie_verpakking(record: dict[str, Any]) -> dict[st
 
 
 def delete_verkoopstrategie_verpakking(verkoopstrategie_id: str) -> bool:
-    """Verwijdert Ã©Ã©n verpakkingsstrategie-record op basis van id."""
+    """Verwijdert een verpakkingsstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -4899,7 +5008,7 @@ def add_or_update_verkoopstrategie_product(record: dict[str, Any]) -> dict[str, 
 
 
 def delete_verkoopstrategie_product(verkoopstrategie_id: str) -> bool:
-    """Verwijdert Ã©Ã©n productstrategie-record op basis van id."""
+    """Verwijdert een productstrategie-record op basis van id."""
     records = _load_verkoopprijs_records()
     filtered = [
         record
@@ -4930,6 +5039,9 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
     status = str(record.get("status", "concept") or "concept").strip().lower()
     if status not in {"concept", "definitief"}:
         status = "concept"
+
+    def _normalize_channel(value: Any) -> str:
+        return str(value or "").strip().lower()
 
     staffels_source = record.get("staffels", [])
     if not isinstance(staffels_source, list):
@@ -5062,6 +5174,42 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
     if status != "definitief":
         finalized_at = ""
 
+    try:
+        year_value = int(record.get("jaar", 0) or 0)
+    except (TypeError, ValueError):
+        year_value = 0
+    if year_value <= 0:
+        # Derive from linked kostprijsversies when possible; otherwise default to current year.
+        version_ids = {
+            str(row.get("kostprijsversie_id", "") or "")
+            for row in [*product_rows, *beer_rows]
+            if isinstance(row, dict) and str(row.get("kostprijsversie_id", "") or "").strip()
+        }
+        for version in load_kostprijsversies():
+            if not isinstance(version, dict):
+                continue
+            if str(version.get("id", "") or "") not in version_ids:
+                continue
+            basisgegevens = version.get("basisgegevens", {})
+            try:
+                inferred = int(version.get("jaar", (basisgegevens or {}).get("jaar", 0)) or 0)
+            except (TypeError, ValueError, AttributeError):
+                inferred = 0
+            if inferred > 0:
+                year_value = inferred
+                break
+    if year_value <= 0:
+        year_value = datetime.now().year
+
+    kanaal_value = _normalize_channel(record.get("kanaal", ""))
+    pricing_channel_value = _normalize_channel(record.get("pricing_channel", ""))
+    if not kanaal_value:
+        kanaal_value = "horeca"
+    if not pricing_channel_value:
+        pricing_channel_value = kanaal_value
+
+    verloopt_op = str(record.get("verloopt_op", "") or record.get("expires_at", "") or "").strip()
+
     return {
         "id": str(record.get("id", "") or uuid4()),
         "offertenummer": str(record.get("offertenummer", "") or ""),
@@ -5070,13 +5218,14 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         "contactpersoon": str(record.get("contactpersoon", "") or ""),
         "referentie": str(record.get("referentie", "") or ""),
         "datum_text": str(record.get("datum_text", "") or ""),
+        "verloopt_op": verloopt_op,
         "opmerking": str(record.get("opmerking", "") or ""),
-        "jaar": int(record.get("jaar", 0) or 0),
+        "jaar": year_value,
         "voorsteltype": str(record.get("voorsteltype", "") or ""),
         "liters_basis": str(record.get("liters_basis", "een_bier") or "een_bier"),
-        "kanaal": str(record.get("kanaal", "") or ""),
+        "kanaal": kanaal_value,
         "selected_kanalen": selected_kanalen,
-        "pricing_channel": str(record.get("pricing_channel", record.get("kanaal", "")) or ""),
+        "pricing_channel": pricing_channel_value,
         "reference_channels": reference_channels,
         "pricing_method": str(record.get("pricing_method", "sell_in") or "sell_in"),
         "groothandel_marge_pct": _float_value(record.get("groothandel_marge_pct")),
@@ -5252,7 +5401,7 @@ def save_prijsvoorstellen(data: list[dict[str, Any]]) -> bool:
 
 
 def get_prijsvoorstel_by_id(prijsvoorstel_id: str) -> dict[str, Any] | None:
-    """Geeft Ã©Ã©n prijsvoorstel terug op basis van id."""
+    """Geeft een prijsvoorstel terug op basis van id."""
     target_id = str(prijsvoorstel_id or "")
     for record in load_prijsvoorstellen():
         if str(record.get("id", "") or "") == target_id:
@@ -5328,7 +5477,7 @@ def finalize_prijsvoorstel(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def delete_prijsvoorstel(prijsvoorstel_id: str) -> bool:
-    """Verwijdert Ã©Ã©n prijsvoorstelrecord op basis van id."""
+    """Verwijdert een prijsvoorstelrecord op basis van id."""
     records = load_prijsvoorstellen()
     filtered = [
         record
@@ -5366,7 +5515,7 @@ def get_verkoopprijs_by_bierjaar(
     year: int | str,
     product_id: str = "",
 ) -> dict[str, Any] | None:
-    """Geeft een verkoopprijsrecord terug voor Ã©Ã©n bier, jaar en optioneel verkoopartikel."""
+    """Geeft een verkoopprijsrecord terug voor een bier, jaar en optioneel verkoopartikel."""
     try:
         year_value = int(year)
     except (TypeError, ValueError):
@@ -5438,7 +5587,7 @@ def add_or_update_verkoopprijs(record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def delete_verkoopprijs(verkoopprijs_id: str) -> bool:
-    """Verwijdert Ã©Ã©n verkoopprijsrecord op basis van id."""
+    """Verwijdert een verkoopprijsrecord op basis van id."""
     records = load_verkoopprijzen()
     filtered = [
         record
@@ -6298,8 +6447,10 @@ def _build_model_a_product_maps() -> tuple[
         name = str(basisproduct.get("omschrijving", "") or "")
         if not name:
             continue
-        product_id = _model_a_id("product", "basis", name)
         legacy_id = str(basisproduct.get("id", "") or "")
+        # We treat the master product id as the only canonical product id.
+        # This avoids "shadow" ids derived from names (uuid5), which caused duplicates across the app.
+        product_id = legacy_id or str(uuid4())
         legacy_key = _normalize_verpakking_key(basisproduct.get("key", "")) or _normalize_verpakking_key(
             f"basis|{name}"
         )
@@ -6371,8 +6522,9 @@ def _build_model_a_product_maps() -> tuple[
         name = str(samengesteld.get("omschrijving", "") or "")
         if not name:
             continue
-        product_id = _model_a_id("product", "samengesteld", name)
         legacy_id = str(samengesteld.get("id", "") or "")
+        # Same canonical-id rule as for basisproducten: use master id, never derive a new one.
+        product_id = legacy_id or str(uuid4())
         legacy_key = _normalize_verpakking_key(samengesteld.get("key", "")) or _normalize_verpakking_key(
             f"samengesteld|{name}"
         )
@@ -6562,7 +6714,13 @@ def build_model_a_canonical_datasets() -> dict[str, list[dict[str, Any]]]:
                 if not isinstance(line, dict):
                     continue
                 verpakking = str(line.get("verpakking", line.get("verpakkingseenheid", "")) or "")
-                canonical_product_id = _model_a_id("product", source_kind, verpakking) if verpakking else ""
+                # Snapshots historically stored a packaging label, not a product id.
+                # Resolve to the real product id via the master product maps (no derived ids).
+                canonical_product_id = (
+                    product_id_by_name.get(_normalize_verpakking_key(verpakking), "")
+                    if verpakking
+                    else ""
+                )
                 cost_calc_lines.append(
                     {
                         "id": _model_a_id("cost-calc-line", calc_id, source_kind, verpakking),
@@ -6764,4 +6922,115 @@ def run_integrity_audit() -> dict[str, list[dict[str, Any]]]:
         "invalid_prijsvoorstellen": invalid_quotes,
         "invalid_verkooprecords": invalid_verkoop_records,
     }
+
+
+def _build_legacy_model_a_product_id_map() -> dict[str, str]:
+    """Builds a mapping from historical Model-A derived product ids to master product ids.
+
+    Older revisions derived product ids from names via `_model_a_id("product", kind, name)`.
+    The master datasets (basisproducten / samengestelde-producten) already have stable ids.
+    This mapping allows a one-time migration of stored records that still reference the derived ids.
+    """
+    mapping: dict[str, str] = {}
+
+    for record in load_basisproducten():
+        if not isinstance(record, dict):
+            continue
+        name = str(record.get("omschrijving", "") or "")
+        master_id = str(record.get("id", "") or "")
+        if not name or not master_id:
+            continue
+        legacy_id = _model_a_id("product", "basis", name)
+        if legacy_id and legacy_id != master_id:
+            mapping[legacy_id] = master_id
+
+    for record in load_samengestelde_producten():
+        if not isinstance(record, dict):
+            continue
+        name = str(record.get("omschrijving", "") or "")
+        master_id = str(record.get("id", "") or "")
+        if not name or not master_id:
+            continue
+        legacy_id = _model_a_id("product", "samengesteld", name)
+        if legacy_id and legacy_id != master_id:
+            mapping[legacy_id] = master_id
+
+    return mapping
+
+
+def _deep_replace_product_ids(value: Any, mapping: dict[str, str]) -> Any:
+    """Recursively replaces string values that match legacy product ids."""
+    if not mapping:
+        return value
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    if isinstance(value, list):
+        return [_deep_replace_product_ids(item, mapping) for item in value]
+    if isinstance(value, dict):
+        return {key: _deep_replace_product_ids(val, mapping) for key, val in value.items()}
+    return value
+
+
+def migrate_product_ids_to_master_ids(*, dry_run: bool = False) -> dict[str, Any]:
+    """One-time migration: ensure stored records reference master Product ids only.
+
+    This updates datasets that historically stored Model-A derived product ids. After migration,
+    `product_id` values align with the master ids from basisproducten/samengestelde-producten.
+    """
+    mapping = _build_legacy_model_a_product_id_map()
+    if not mapping:
+        return {"changed": 0, "details": {"mapping": 0}}
+
+    changed_total = 0
+    details: dict[str, int] = {"mapping": len(mapping)}
+
+    def _migrate_list(dataset_name: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        nonlocal changed_total
+        migrated: list[dict[str, Any]] = []
+        changed = 0
+        for row in rows:
+            before = json.dumps(row, sort_keys=True, ensure_ascii=True)
+            after_obj = _deep_replace_product_ids(row, mapping)
+            after = json.dumps(after_obj, sort_keys=True, ensure_ascii=True)
+            if before != after:
+                changed += 1
+            migrated.append(after_obj if isinstance(after_obj, dict) else row)
+        details[dataset_name] = changed
+        changed_total += changed
+        return migrated
+
+    # 1) verkoopprijzen (includes verkoopstrategie records)
+    verkoop_rows = _load_postgres_dataset("verkoopprijzen")
+    if isinstance(verkoop_rows, list):
+        migrated = _migrate_list("verkoopprijzen", [row for row in verkoop_rows if isinstance(row, dict)])
+        if not dry_run:
+            _save_postgres_dataset("verkoopprijzen", migrated)
+
+    # 2) prijsvoorstellen
+    quote_rows = _load_postgres_dataset("prijsvoorstellen")
+    if isinstance(quote_rows, list):
+        migrated = _migrate_list("prijsvoorstellen", [row for row in quote_rows if isinstance(row, dict)])
+        if not dry_run:
+            _save_postgres_dataset("prijsvoorstellen", migrated)
+
+    # 3) kostprijsversies (incl. nested invoice lines that may contain product ids)
+    version_rows = _load_postgres_dataset("kostprijsversies")
+    if isinstance(version_rows, list):
+        migrated = _migrate_list("kostprijsversies", [row for row in version_rows if isinstance(row, dict)])
+        if not dry_run:
+            save_kostprijsversies(migrated)
+
+    # 4) kostprijsproductactiveringen live in their own table; rewrite via replace semantics.
+    activations = load_kostprijsproductactiveringen()
+    migrated_activations = _migrate_list(
+        "kostprijsproductactiveringen",
+        [row for row in activations if isinstance(row, dict)],
+    )
+    if not dry_run:
+        save_kostprijsproductactiveringen(
+            migrated_activations,
+            context={"action": "migrate_product_ids"},
+        )
+
+    return {"changed": changed_total, "details": details}
 

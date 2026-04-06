@@ -16,6 +16,9 @@ type PrijsvoorstelWorkspaceProps = {
   kostprijsproductactiveringen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
+  initialMode?: string;
+  initialFilter?: string;
+  initialFocus?: string;
 };
 
 type WorkspaceMode = "landing" | "select-existing" | "wizard-new" | "wizard-edit";
@@ -30,11 +33,21 @@ export function PrijsvoorstelWorkspace({
   channels,
   kostprijsproductactiveringen,
   basisproducten,
-  samengesteldeProducten
+  samengesteldeProducten,
+  initialMode,
+  initialFilter,
+  initialFocus
 }: PrijsvoorstelWorkspaceProps) {
   const [currentVoorstellen, setCurrentVoorstellen] = useState<GenericRecord[]>(voorstellen);
-  const [mode, setMode] = useState<WorkspaceMode>("landing");
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const normalizedInitialMode =
+    initialMode === "select-existing" || initialMode === "wizard-new" || initialMode === "wizard-edit"
+      ? (initialMode as WorkspaceMode)
+      : "landing";
+  const normalizedInitialFilter =
+    initialFilter === "concept" || initialFilter === "definitief" ? (initialFilter as FilterMode) : "all";
+
+  const [mode, setMode] = useState<WorkspaceMode>(normalizedInitialMode);
+  const [filterMode, setFilterMode] = useState<FilterMode>(normalizedInitialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const counts = useMemo(() => {
@@ -64,6 +77,29 @@ export function PrijsvoorstelWorkspace({
       return true;
     });
   }, [currentVoorstellen, filterMode]);
+
+  const focusFilteredRows = useMemo(() => {
+    if (String(initialFocus ?? "") !== "aflopend") {
+      return filteredRows;
+    }
+    const today = new Date();
+    const until = new Date(today);
+    until.setDate(until.getDate() + 14);
+    const parse = (value: unknown) => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return null;
+      // Expect YYYY-MM-DD from the date input.
+      const date = new Date(`${raw}T00:00:00`);
+      return Number.isFinite(date.getTime()) ? date : null;
+    };
+    return filteredRows.filter((row) => {
+      const status = String(row.status ?? "").trim().toLowerCase();
+      if (status !== "concept") return false;
+      const verloopt = parse((row as any).verloopt_op);
+      if (!verloopt) return false;
+      return verloopt >= today && verloopt <= until;
+    });
+  }, [filteredRows, initialFocus]);
 
   if (mode === "wizard-new") {
     return (
@@ -143,7 +179,7 @@ export function PrijsvoorstelWorkspace({
         </div>
 
         <div className="kostprijs-record-grid">
-          {filteredRows.map((row) => (
+          {focusFilteredRows.map((row) => (
             <button
               key={String(row.id ?? "")}
               type="button"
@@ -164,7 +200,7 @@ export function PrijsvoorstelWorkspace({
               </div>
             </button>
           ))}
-          {filteredRows.length === 0 ? (
+          {focusFilteredRows.length === 0 ? (
             <div className="empty-state-card">Geen prijsvoorstellen gevonden voor deze selectie.</div>
           ) : null}
         </div>

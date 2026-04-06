@@ -24,7 +24,7 @@ class AuthUser(BaseModel):
 
 class BootstrapAdminRequest(BaseModel):
     username: str = Field(min_length=3)
-    password: str = Field(min_length=10)
+    password: str = Field(min_length=1)
     display_name: str = Field(min_length=2)
 
 
@@ -44,3 +44,22 @@ class LoginResponse(BaseModel):
     username: str
     display_name: str
     role: str
+
+
+class MeResponse(BaseModel):
+    authenticated: bool
+    username: str
+    display_name: str
+    role: str
+
+
+class CreateUserRequest(BaseModel):
+    username: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+    display_name: str = Field(min_length=2)
+    role: str = Field(default="user")
+
+
+class CreateUserResponse(BaseModel):
+    created: bool
+    username: str
