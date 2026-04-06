@@ -25,6 +25,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
     headers.delete("transfer-encoding");
     headers.delete("upgrade");
     headers.delete("content-length");
+    headers.delete("expect");
 
     const method = request.method.toUpperCase();
     const bodyText = method === "GET" || method === "HEAD" ? undefined : await request.text();
