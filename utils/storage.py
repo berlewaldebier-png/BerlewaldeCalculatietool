@@ -605,7 +605,9 @@ def save_kostprijsproductactiveringen(
             actor=str((context or {}).get("actor", "") or ""),
             action=str((context or {}).get("action", "") or ""),
         )
-        return bool(activation_storage.upsert_activations(normalized, context=ctx))
+        # PUT semantics: the provided rows are the new truth.
+        # This is also important for migrations where product_id values change.
+        return bool(activation_storage.replace_activations(normalized, context=ctx))
 
     if _save_postgres_dataset("kostprijsproductactiveringen", normalized):
         return True

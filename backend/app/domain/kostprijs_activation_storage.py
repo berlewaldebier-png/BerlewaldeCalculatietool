@@ -293,6 +293,78 @@ def upsert_activations(
     return True
 
 
+def replace_activations(
+    rows: list[dict[str, Any]],
+    *,
+    context: ActivationContext | None = None,
+) -> bool:
+    """
+    Replace the full activation set.
+
+    This matches PUT semantics for the dataset: the provided rows are the new truth.
+    It also enables safe migrations where product_id values change, without primary-key conflicts.
+    """
+    ensure_schema()
+    normalized_rows = [normalize_activation_record(row) for row in rows if isinstance(row, dict)]
+
+    # Deduplicate in-memory by scope; last write wins.
+    by_key: dict[tuple[str, int, str], dict[str, Any]] = {}
+    for row in normalized_rows:
+        key = (str(row["bier_id"]), int(row["jaar"]), str(row["product_id"]))
+        by_key[key] = row
+    normalized_rows = list(by_key.values())
+
+    for row in normalized_rows:
+        if not row["bier_id"] or not row["product_id"] or int(row["jaar"]) <= 0 or not row["kostprijsversie_id"]:
+            raise ValueError(
+                "Ongeldige kostprijsproductactivering: bier_id, jaar, product_id en kostprijsversie_id zijn verplicht."
+            )
+
+    ctx = context or ActivationContext()
+    now = _now_iso()
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            # Full replace to guarantee that old/legacy ids are removed.
+            cur.execute("DELETE FROM kostprijs_product_activations")
+
+            for row in normalized_rows:
+                bier_id = str(row["bier_id"])
+                jaar = int(row["jaar"])
+                product_id = str(row["product_id"])
+
+                created_at = str(row.get("created_at", "") or "") or now
+                updated_at = str(row.get("updated_at", "") or "") or now
+                effectief_vanaf = str(row.get("effectief_vanaf", "") or "") or ""
+
+                cur.execute(
+                    """
+                    INSERT INTO kostprijs_product_activations (
+                        id, bier_id, jaar, product_id, product_type, kostprijsversie_id,
+                        effectief_vanaf, created_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        str(row["id"]),
+                        bier_id,
+                        jaar,
+                        product_id,
+                        str(row.get("product_type", "") or ""),
+                        str(row["kostprijsversie_id"]),
+                        effectief_vanaf,
+                        created_at,
+                        updated_at,
+                    ),
+                )
+
+        conn.commit()
+
+    # Event logging for replace operations is intentionally omitted; use activate endpoints for audit trails.
+    _ = ctx
+    return True
+
+
 def list_activation_events(
     *,
     jaar: int | None = None,
