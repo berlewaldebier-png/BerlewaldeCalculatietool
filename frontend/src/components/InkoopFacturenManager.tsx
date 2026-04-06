@@ -23,15 +23,6 @@ type PendingAction = {
   onConfirm: () => void;
 };
 
-type DraftMode = "new" | "edit";
-
-type PendingAction = {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  onConfirm: () => void;
-};
-
 function createId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -509,7 +500,7 @@ export function InkoopFacturenManager({
     const options = getProductUnitOptions(basisproducten, samengesteldeProducten);
     const optionMap = new Map(options.map((option) => [option.id, option]));
 
-    const totals = regels.reduce(
+    const totals = regels.reduce<{ liters: number; bedrag: number }>(
       (acc, regel) => {
         const liters = Number(regel.liters ?? 0);
         const bedrag = Number(regel.subfactuurbedrag ?? 0) + extraPerRegel;

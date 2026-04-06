@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.domain import dataset_store, postgres_storage
+from app.domain.auth_dependencies import require_user
 from app.schemas.storage import StorageStatus
 
 
-router = APIRouter(prefix="/data", tags=["data"])
+router = APIRouter(prefix="/data", tags=["data"], dependencies=[Depends(require_user)])
 
 
 @router.get("/productie")

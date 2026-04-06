@@ -337,6 +337,13 @@ a {
   color: white;
   background: linear-gradient(135deg, #69a8ff 0%, #4f78ff 100%);
   box-shadow: 0 18px 34px rgba(79, 120, 255, 0.22);
+  text-decoration: none;
+  display: block;
+}
+
+.dashboard-alert-card-warning {
+  background: linear-gradient(135deg, #f7c948 0%, #d8a409 100%);
+  box-shadow: 0 18px 34px rgba(216, 164, 9, 0.22);
 }
 
 .dashboard-alert-card::after {
@@ -458,6 +465,8 @@ a {
 .dashboard-attention-list {
   display: grid;
   gap: 0.8rem;
+  text-decoration: none;
+  color: inherit;
 }
 
 .dashboard-attention-item {

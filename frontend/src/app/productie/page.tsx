@@ -1,9 +1,9 @@
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function ProductiePage() {
-  const bootstrap = await getBootstrap(["productie"], true);
+  const bootstrap = await getBootstrap(["productie"], true, "/productie");
   const navigation = bootstrap.navigation ?? [];
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const rows = Object.entries(productie)

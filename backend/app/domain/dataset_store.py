@@ -3,8 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from app.domain import dashboard_service
 from app.domain import fixed_costs_storage, legacy_storage, postgres_storage, production_storage
-from utils.storage import (
+from app.utils.storage import (
     MODEL_A_DATASET_NAMES,
     build_model_a_canonical_datasets,
     ensure_complete_verkoop_records,
@@ -22,6 +23,7 @@ from utils.storage import (
     normalize_any_verkoop_record,
     normalize_berekening_record,
     normalize_prijsvoorstel_record,
+    migrate_product_ids_to_master_ids,
     save_berekeningen,
     save_basisproducten,
     save_kostprijsproductactiveringen,
@@ -208,17 +210,26 @@ def save_dataset(name: str, data: Any) -> bool:
             for record in data
             if isinstance(record, dict)
         ]
-        return save_berekeningen(payload)
+        saved = save_berekeningen(payload)
+        if saved:
+            dashboard_service.invalidate_dashboard_summary_cache()
+        return saved
     if name == "kostprijsproductactiveringen" and isinstance(data, list):
         payload = [record for record in data if isinstance(record, dict)]
-        return save_kostprijsproductactiveringen(payload)
+        saved = save_kostprijsproductactiveringen(payload)
+        if saved:
+            dashboard_service.invalidate_dashboard_summary_cache()
+        return saved
     if name == "prijsvoorstellen" and isinstance(data, list):
         payload = [
             normalize_prijsvoorstel_record(record)
             for record in data
             if isinstance(record, dict)
         ]
-        return save_prijsvoorstellen(payload)
+        saved = save_prijsvoorstellen(payload)
+        if saved:
+            dashboard_service.invalidate_dashboard_summary_cache()
+        return saved
     if name == "verkoopprijzen" and isinstance(data, list):
         payload = ensure_complete_verkoop_records(
             [
@@ -228,7 +239,10 @@ def save_dataset(name: str, data: Any) -> bool:
             ]
         )
         return postgres_storage.save_dataset(name, payload)
-    return postgres_storage.save_dataset(name, data)
+    saved = postgres_storage.save_dataset(name, data)
+    if saved and name in {"kostprijsversies", "berekeningen", "prijsvoorstellen"}:
+        dashboard_service.invalidate_dashboard_summary_cache()
+    return saved
 
 
 def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
@@ -277,6 +291,7 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
             payload,
             overwrite=overwrite,
         )
+    dashboard_service.invalidate_dashboard_summary_cache()
     return results
 
 
@@ -295,6 +310,7 @@ def reset_all_datasets_to_defaults() -> dict[str, bool]:
             deepcopy(default_value),
             overwrite=True,
         )
+    dashboard_service.invalidate_dashboard_summary_cache()
     return results
 
 
@@ -304,7 +320,10 @@ def activate_cost_version(
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     require_postgres()
-    return activate_kostprijsversie(version_id, context=context)
+    record = activate_kostprijsversie(version_id, context=context)
+    if record is not None:
+        dashboard_service.invalidate_dashboard_summary_cache()
+    return record
 
 
 def activate_cost_version_products(
@@ -314,4 +333,13 @@ def activate_cost_version_products(
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     require_postgres()
-    return activate_kostprijsversie_products(version_id, product_ids, context=context)
+    record = activate_kostprijsversie_products(version_id, product_ids, context=context)
+    if record is not None:
+        dashboard_service.invalidate_dashboard_summary_cache()
+    return record
+
+
+def migrate_product_ids(*, dry_run: bool = False) -> dict[str, Any]:
+    """One-time maintenance: rewrite stored product ids to match master Product ids."""
+    require_postgres()
+    return migrate_product_ids_to_master_ids(dry_run=dry_run)

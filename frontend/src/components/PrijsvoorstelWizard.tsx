@@ -413,6 +413,12 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
       }))
     : [];
 
+  const nowYear = new Date().getFullYear();
+  const rawYear = toNumber(raw.jaar, 0);
+  const jaar = rawYear > 0 ? rawYear : nowYear;
+  const kanaal = normalizeKey(raw.kanaal) || "horeca";
+  const pricingChannel = normalizeKey(raw.pricing_channel) || kanaal;
+
   return {
     ...cloneRecord(raw),
     id: String(raw.id ?? createId()),
@@ -424,17 +430,17 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
     datum_text: String(raw.datum_text ?? ""),
     verloopt_op: String(raw.verloopt_op ?? ""),
     opmerking: String(raw.opmerking ?? ""),
-    jaar: Number(raw.jaar ?? new Date().getFullYear()),
+    jaar,
     voorsteltype: String(raw.voorsteltype ?? "Op basis van producten"),
     offer_level: String(raw.offer_level ?? "samengesteld"),
     liters_basis: String(raw.liters_basis ?? "een_bier"),
-    kanaal: String(raw.kanaal ?? "horeca"),
-    pricing_channel: String(raw.pricing_channel ?? raw.kanaal ?? "horeca"),
+    kanaal,
+    pricing_channel: pricingChannel,
     selected_kanalen: Array.isArray(raw.selected_kanalen)
-      ? raw.selected_kanalen.map((value) => String(value ?? "")).filter(Boolean)
+      ? raw.selected_kanalen.map((value) => normalizeKey(value)).filter(Boolean)
       : [],
     reference_channels: Array.isArray(raw.reference_channels)
-      ? raw.reference_channels.map((value) => String(value ?? "")).filter(Boolean)
+      ? raw.reference_channels.map((value) => normalizeKey(value)).filter(Boolean)
       : [],
     pricing_method: String(raw.pricing_method ?? "sell_in"),
     groothandel_marge_pct: Number(raw.groothandel_marge_pct ?? 0),
@@ -575,29 +581,30 @@ export function PrijsvoorstelWizard({
   );
   const defaultKanaal = channelOptions[0]?.value ?? "horeca";
   const currentStep = wizardSteps[activeStepIndex] ?? wizardSteps[0];
-  const currentYear = Number(current.jaar ?? new Date().getFullYear());
+  const currentYear = (() => {
+    const parsed = toNumber(current.jaar, 0);
+    return parsed > 0 ? parsed : new Date().getFullYear();
+  })();
   const pricingMethod = String(current.pricing_method ?? "sell_in");
-  const pricingChannel = String(current.pricing_channel ?? current.kanaal ?? defaultKanaal)
-    .trim()
-    .toLowerCase();
+  const pricingChannel = normalizeKey(current.pricing_channel) || normalizeKey(current.kanaal) || defaultKanaal;
   const referenceChannelValues = Array.from(
     new Set(
       (Array.isArray(current.reference_channels) ? (current.reference_channels as string[]) : [])
-        .map((value) => String(value ?? "").trim().toLowerCase())
+        .map((value) => normalizeKey(value))
         .filter((value) => Boolean(value) && value !== pricingChannel)
     )
   );
   const legacySelectedKanaalValues = Array.from(
     new Set(
       (Array.isArray(current.selected_kanalen) ? (current.selected_kanalen as string[]) : [])
-        .map((value) => String(value ?? "").trim().toLowerCase())
+        .map((value) => normalizeKey(value))
         .filter(Boolean)
     )
   );
   const effectiveSelectedKanaalValues =
     pricingMethod === "sell_out"
       ? [pricingChannel || defaultKanaal, ...referenceChannelValues]
-      : [pricingChannel || legacySelectedKanaalValues[0] || String(current.kanaal ?? defaultKanaal)];
+      : [pricingChannel || legacySelectedKanaalValues[0] || normalizeKey(current.kanaal) || defaultKanaal];
   const currentKanaal = effectiveSelectedKanaalValues[0] ?? defaultKanaal;
   const isMultiKanaalMode = pricingMethod !== "sell_out" && effectiveSelectedKanaalValues.length > 1;
   const hasReferenceChannels = pricingMethod === "sell_out" && referenceChannelValues.length > 0;
@@ -1435,9 +1442,24 @@ export function PrijsvoorstelWizard({
       return fallback ? getSnapshotProductRowsFromBerekening(bierId, fallback) : [];
     }
 
+    const basisById = new Map<string, GenericRecord>(
+      pickLatestKnownProductRows(basisproducten, currentYear).map((row) => [
+        String(row.id ?? ""),
+        row
+      ])
+    );
+    const samengesteldById = new Map<string, GenericRecord>(
+      pickLatestKnownProductRows(samengesteldeProducten, currentYear).map((row) => [
+        String(row.id ?? ""),
+        row
+      ])
+    );
+
     const rowsByProductKey = new Map<string, ProductSnapshotRow>();
     for (const activation of activeProductActivations) {
       const productId = String(activation.product_id ?? "");
+      const activationType =
+        normalizeKey(activation.product_type) === "samengesteld" ? "samengesteld" : "basis";
       const version = getEffectiveKostprijsversieForProduct(
         bierId,
         productId,
@@ -1452,7 +1474,44 @@ export function PrijsvoorstelWizard({
         versionRows.find((row) => normalizeKey(row.verpakking) === normalizeKey(String(activation.verpakking ?? "")));
       if (matchingRow) {
         rowsByProductKey.set(matchingRow.productKey, matchingRow);
+        continue;
       }
+
+      // If the kostprijsversie snapshot / factuurregels are incomplete, fall back to the master product definitions.
+      // We do not "hide" the issue; we ensure activations remain the source of truth for visible products.
+      const source =
+        (activationType === "basis" ? basisById.get(productId) : samengesteldById.get(productId)) ??
+        basisById.get(productId) ??
+        samengesteldById.get(productId);
+      if (!source) {
+        continue;
+      }
+      const verpakking = String(source.omschrijving ?? "") || productId;
+      const litersPerProduct = firstPositiveNumber(
+        source.inhoud_per_eenheid_liter,
+        source.totale_inhoud_liter
+      );
+      const costPerLiter = toNumber(
+        (version.resultaat_snapshot as GenericRecord | undefined)?.integrale_kostprijs_per_liter,
+        0
+      );
+      const costPerPiece = litersPerProduct > 0 ? costPerLiter * litersPerProduct : 0;
+      const productKey = `${activationType}|${normalizeKey(verpakking)}`;
+      rowsByProductKey.set(productKey, {
+        bierKey: bierId,
+        biernaam:
+          normalizeText((version.basisgegevens as GenericRecord | undefined)?.biernaam) ||
+          bierNameMap.get(bierId) ||
+          bierId,
+        kostprijsversieId: String(version.id ?? ""),
+        productId,
+        productType: activationType,
+        productKey,
+        verpakking,
+        litersPerProduct,
+        costPerPiece,
+        sourcePackaging: verpakking
+      });
     }
 
     return [...rowsByProductKey.values()];
@@ -2042,7 +2101,36 @@ export function PrijsvoorstelWizard({
       return productDisplayRows.filter((row) => row.productType === "basis");
     }
     const compositeRows = productDisplayRows.filter((row) => row.productType === "samengesteld");
-    return compositeRows.length > 0 ? compositeRows : productDisplayRows;
+    if (compositeRows.length === 0) {
+      return productDisplayRows;
+    }
+
+    // When offering "samengestelde producten", we still want to show standalone basisproducten
+    // (e.g. fusten) in the main table, while keeping derived basisproducten under the derived section.
+    const compositeDefinitions = new Map(
+      pickLatestKnownProductRows(samengesteldeProducten, currentYear).map((row) => [String(row.id ?? ""), row])
+    );
+    const derivedBaseIds = new Set<string>();
+    for (const row of compositeRows) {
+      const composite = compositeDefinitions.get(row.productId);
+      const components = Array.isArray(composite?.basisproducten) ? (composite?.basisproducten as GenericRecord[]) : [];
+      for (const component of components) {
+        const basisId = String(component.basisproduct_id ?? "");
+        if (basisId && !basisId.startsWith("verpakkingsonderdeel:")) {
+          derivedBaseIds.add(basisId);
+        }
+      }
+    }
+
+    return productDisplayRows.filter((row) => {
+      if (row.productType === "samengesteld") {
+        return true;
+      }
+      if (row.productType === "basis") {
+        return !derivedBaseIds.has(row.productId);
+      }
+      return false;
+    });
   }, [offerLevel, productDisplayRows]);
 
   const offerteProductTotals = useMemo(

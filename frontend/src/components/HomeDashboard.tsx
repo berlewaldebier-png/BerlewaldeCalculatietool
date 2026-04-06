@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { clearAuthSession, readAuthSession } from "@/lib/auth";
-import type { DashboardSummary, NavigationItem } from "@/lib/api";
+import { fetchMe, logout, readAuthSession } from "@/lib/auth";
+import type { DashboardSummary, NavigationItem } from "@/lib/apiShared";
 
 type HomeDashboardProps = {
   navigation: NavigationItem[];
@@ -23,6 +23,8 @@ type AlertCard = {
   title: string;
   value: string;
   description: string;
+  href?: string;
+  tone?: "default" | "warning";
 };
 
 function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
@@ -68,26 +70,40 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
 }
 
 function buildAlertCards(summary: DashboardSummary): AlertCard[] {
+  const klaar = Number(summary.klaar_om_te_activeren ?? 0) || 0;
+  const klaarWarn = Number(summary.klaar_om_te_activeren_waarschuwing ?? 0) || 0;
+
   return [
     {
       title: "Concept berekeningen",
       value: String(summary.concept_berekeningen).padStart(2, "0"),
-      description: "Nog af te ronden kostprijsberekeningen"
+      description: "Nog af te ronden kostprijsberekeningen",
+      href: "/nieuwe-kostprijsberekening?mode=select-existing&filter=concept"
     },
     {
       title: "Definitieve berekeningen",
       value: String(summary.definitieve_berekeningen),
-      description: "Beschikbare basis voor verdere prijslogica"
+      description: "Beschikbare basis voor verdere prijslogica",
+      href: "/nieuwe-kostprijsberekening?mode=select-existing&filter=definitief"
     },
     {
       title: "Concept prijsvoorstellen",
       value: String(summary.concept_prijsvoorstellen).padStart(2, "0"),
-      description: "Voorstellen die nog aandacht nodig hebben"
+      description: "Voorstellen die nog aandacht nodig hebben",
+      href: "/prijsvoorstel?mode=select-existing&filter=concept"
     },
     {
       title: "Definitieve prijsvoorstellen",
       value: String(summary.definitieve_prijsvoorstellen),
-      description: "Afgeronde voorstellen in deze omgeving"
+      description: "Afgeronde voorstellen in deze omgeving",
+      href: "/prijsvoorstel?mode=select-existing&filter=definitief"
+    },
+    {
+      title: "Klaar om te activeren",
+      value: String(klaar).padStart(2, "0"),
+      description: "Nieuwe kostprijsversies beschikbaar",
+      href: "/nieuwe-kostprijsberekening?mode=landing&focus=activations",
+      tone: klaarWarn > 0 ? "warning" : "default"
     }
   ];
 }
@@ -98,8 +114,9 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
 
   useEffect(() => {
     const sync = () => {
-      const session = readAuthSession();
-      setCurrentUser(session?.display_name ?? "gebruiker");
+      void fetchMe().then((session) => {
+        setCurrentUser(session?.display_name ?? "gebruiker");
+      });
     };
 
     sync();
@@ -109,17 +126,6 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
 
   const navItems = useMemo(() => buildNavItems(navigation), [navigation]);
   const alertCards = useMemo(() => buildAlertCards(summary), [summary]);
-
-  const groupedNavigation = useMemo(() => {
-    return Array.from(
-      navigation.reduce((map, item) => {
-        const items = map.get(item.section) ?? [];
-        items.push(item);
-        map.set(item.section, items);
-        return map;
-      }, new Map<string, NavigationItem[]>())
-    );
-  }, [navigation]);
 
   return (
     <main className="dashboard-page">
@@ -173,8 +179,9 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                 aria-label="Uitloggen"
                 title="Uitloggen"
                 onClick={() => {
-                  clearAuthSession();
-                  router.replace("/login");
+                  void logout().finally(() => {
+                    router.replace("/login");
+                  });
                 }}
               >
                 <LogoutIcon />
@@ -195,7 +202,11 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
 
           <section className="dashboard-alerts-grid" aria-label="Overzichtskaarten">
             {alertCards.map((card) => (
-              <article key={card.title} className="dashboard-alert-card">
+              <Link
+                key={card.title}
+                href={(card.href ?? "/") as Route}
+                className={`dashboard-alert-card${card.tone === "warning" ? " dashboard-alert-card-warning" : ""}`}
+              >
                 <div className="dashboard-alert-card-icon">
                   <BellSoftIcon />
                 </div>
@@ -205,7 +216,7 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                   <span className="dashboard-alert-card-title">{card.title}</span>
                   <span className="dashboard-alert-card-text">{card.description}</span>
                 </div>
-              </article>
+              </Link>
             ))}
           </section>
 
@@ -240,60 +251,39 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
             <article className="dashboard-panel">
               <div className="dashboard-panel-header">
                 <div>
-                  <div className="dashboard-panel-title">Aandacht nodig</div>
+                  <div className="dashboard-panel-title">Aflopende offertes</div>
                   <div className="dashboard-panel-subtitle">
-                    Openstaande concepten die nog vervolg vragen
+                    Conceptoffertes die binnenkort verlopen
                   </div>
                 </div>
               </div>
 
-              <div className="dashboard-attention-list">
+              <Link
+                href={"/prijsvoorstel?mode=select-existing&filter=concept&focus=aflopend" as Route}
+                className="dashboard-attention-list"
+              >
                 <div className="dashboard-attention-item">
-                  <strong>{summary.concept_berekeningen}</strong>
-                  <span>Concept berekeningen</span>
+                  <strong>{Number(summary.aflopende_offertes ?? 0) || 0}</strong>
+                  <span>Aflopende offertes (14 dagen)</span>
                 </div>
-                <div className="dashboard-attention-item">
-                  <strong>{summary.concept_prijsvoorstellen}</strong>
-                  <span>Concept prijsvoorstellen</span>
-                </div>
-                <div className="dashboard-attention-item">
-                  <strong>{summary.definitieve_berekeningen}</strong>
-                  <span>Definitieve berekeningen beschikbaar</span>
-                </div>
-              </div>
+                {(summary.aflopende_offertes_items ?? []).slice(0, 4).map((item) => (
+                  <div className="dashboard-attention-item" key={item.id}>
+                    <strong>{item.offertenummer || "-"}</strong>
+                    <span>
+                      {item.klantnaam || "-"} | {item.verloopt_op || "-"}
+                    </span>
+                  </div>
+                ))}
+                {(summary.aflopende_offertes_items ?? []).length === 0 ? (
+                  <div className="dashboard-attention-item">
+                    <strong>-</strong>
+                    <span>Geen aflopende offertes gevonden.</span>
+                  </div>
+                ) : null}
+              </Link>
             </article>
           </section>
 
-          <section className="dashboard-modules-panel">
-            <div className="dashboard-panel-header">
-              <div>
-                <div className="dashboard-panel-title">Alle mogelijkheden</div>
-                <div className="dashboard-panel-subtitle">
-                  Complete toegang tot calculatie, verkoop, stamdata en beheer
-                </div>
-              </div>
-            </div>
-
-            <div className="dashboard-module-groups">
-              {groupedNavigation.map(([section, items]) => (
-                <div className="dashboard-module-group" key={section}>
-                  <div className="dashboard-module-group-title">{section}</div>
-                  <div className="dashboard-module-grid">
-                    {items.map((item) => (
-                      <Link
-                        href={item.href as Route}
-                        className="dashboard-module-card"
-                        key={item.key}
-                      >
-                        <div className="dashboard-module-card-title">{item.label}</div>
-                        <div className="dashboard-module-card-text">{item.description}</div>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
         </section>
       </div>
     </main>

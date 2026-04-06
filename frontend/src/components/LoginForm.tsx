@@ -17,7 +17,7 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin!");
+  const [password, setPassword] = useState("admin");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -47,8 +47,7 @@ export function LoginForm() {
       writeAuthSession({
         username: payload.username,
         display_name: payload.display_name,
-        role: payload.role,
-        logged_in_at: new Date().toISOString()
+        role: payload.role
       });
       window.location.replace(nextPath);
       router.refresh();
@@ -68,7 +67,7 @@ export function LoginForm() {
           Tijdelijke login voor de nieuwe webomgeving. Gebruik voorlopig
           <strong> admin </strong>
           met wachtwoord
-          <strong> admin!</strong>.
+          <strong> admin</strong>.
         </p>
 
         <form className="login-form" onSubmit={handleSubmit}>

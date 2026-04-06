@@ -1,9 +1,9 @@
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function DeploymentPage() {
-  const bootstrap = await getBootstrap([], true);
+  const bootstrap = await getBootstrap([], true, "/beheer/deployment");
   const navigation = bootstrap.navigation ?? [];
 
   return (

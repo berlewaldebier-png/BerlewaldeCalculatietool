@@ -1,6 +1,6 @@
 import { NieuwJaarWizard } from "@/components/NieuwJaarWizard";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function NieuwJaarVoorbereidenPage() {
   const bootstrap = await getBootstrap(
@@ -16,7 +16,8 @@ export default async function NieuwJaarVoorbereidenPage() {
       "verpakkingsonderdelen",
       "verkoopprijzen"
     ],
-    true
+    true,
+    "/nieuw-jaar-voorbereiden"
   );
   const navigation = bootstrap.navigation ?? [];
   const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];

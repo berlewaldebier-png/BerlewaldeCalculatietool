@@ -1,8 +1,15 @@
 import { PageShell } from "@/components/PageShell";
 import { PrijsvoorstelWorkspace } from "@/components/PrijsvoorstelWorkspace";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
-export default async function PrijsvoorstelPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function PrijsvoorstelPage({
+  searchParams
+}: {
+  searchParams?: Promise<SearchParams>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
   const bootstrap = await getBootstrap(
     [
       "prijsvoorstellen",
@@ -15,7 +22,8 @@ export default async function PrijsvoorstelPage() {
       "basisproducten",
       "samengestelde-producten"
     ],
-    true
+    true,
+    "/prijsvoorstel"
   );
   const navigation = bootstrap.navigation ?? [];
   const voorstellen = (bootstrap.datasets["prijsvoorstellen"] as any[]) ?? [];
@@ -27,6 +35,10 @@ export default async function PrijsvoorstelPage() {
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
   const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
+
+  const mode = typeof resolvedSearchParams.mode === "string" ? resolvedSearchParams.mode : "";
+  const filter = typeof resolvedSearchParams.filter === "string" ? resolvedSearchParams.filter : "";
+  const focus = typeof resolvedSearchParams.focus === "string" ? resolvedSearchParams.focus : "";
 
   const yearOptions = Object.keys(productie)
     .map((year) => Number(year))
@@ -50,6 +62,9 @@ export default async function PrijsvoorstelPage() {
         kostprijsproductactiveringen={kostprijsproductactiveringen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
+        initialMode={mode}
+        initialFilter={filter}
+        initialFocus={focus}
       />
     </PageShell>
   );

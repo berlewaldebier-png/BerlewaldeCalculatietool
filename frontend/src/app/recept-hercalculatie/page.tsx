@@ -1,11 +1,12 @@
 import { PageShell } from "@/components/PageShell";
 import { ReceptHercalculatieManager } from "@/components/ReceptHercalculatieManager";
-import { getBootstrap } from "@/lib/api";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function ReceptHercalculatiePage() {
   const bootstrap = await getBootstrap(
     ["berekeningen", "basisproducten", "samengestelde-producten", "kostprijsproductactiveringen"],
-    true
+    true,
+    "/recept-hercalculatie"
   );
   const navigation = bootstrap.navigation ?? [];
   const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];

@@ -1,9 +1,22 @@
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
-import { getBootstrap } from "@/lib/api";
+import { UserAdminPanel } from "@/components/UserAdminPanel";
+import { getBootstrap } from "@/lib/apiServer";
 
 export default async function UsersPage() {
-  const bootstrap = await getBootstrap(["auth-status", "auth-users"], true);
+  let bootstrap: any;
+  let users: any[] = [];
+  let usersLoadError = "";
+
+  try {
+    bootstrap = await getBootstrap(["auth-status", "auth-users"], true, "/beheer/users");
+    users = (bootstrap.datasets["auth-users"] as any[]) ?? [];
+  } catch (error) {
+    bootstrap = await getBootstrap(["auth-status"], true, "/beheer/users");
+    usersLoadError =
+      error instanceof Error ? error.message : "Gebruikers laden is niet gelukt.";
+  }
+
   const navigation = bootstrap.navigation ?? [];
   const authStatus = (bootstrap.datasets["auth-status"] as any) ?? {
     enabled: false,
@@ -13,7 +26,6 @@ export default async function UsersPage() {
     user_count: 0,
     has_admin: false
   };
-  const users = (bootstrap.datasets["auth-users"] as any[]) ?? [];
 
   return (
     <PageShell
@@ -65,7 +77,12 @@ export default async function UsersPage() {
         title="Gebruikers"
         description="Dit zijn de users die straks voor login en rollen gebruikt kunnen worden."
       >
-        {users.length === 0 ? (
+        {usersLoadError ? (
+          <div className="placeholder-block">
+            <strong>Gebruikers niet beschikbaar</strong>
+            {usersLoadError}
+          </div>
+        ) : users.length === 0 ? (
           <div className="placeholder-block">
             <strong>Nog geen users</strong>
             De auth-laag staat klaar, maar er is nog geen admin of gebruiker aangemaakt.
@@ -101,12 +118,10 @@ export default async function UsersPage() {
       </SectionCard>
 
       <SectionCard
-        title="Volgende stap"
-        description="Als we auth echt aanzetten, volgen hierna login, sessies en routebescherming in de web-UI."
+        title="Acties"
+        description="Beheer admins en users. In local kun je met admin/admin inloggen; in T gebruik je bootstrap token voor de eerste admin."
       >
-        <div className="module-card-text">
-          Voor nu blijft de applicatie open beschikbaar, zodat we eerst de UI, refactor van oude code en businesslogica verder kunnen afronden.
-        </div>
+        <UserAdminPanel hasAdmin={Boolean(authStatus.has_admin)} />
       </SectionCard>
     </PageShell>
   );

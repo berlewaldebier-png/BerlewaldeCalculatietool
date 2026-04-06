@@ -336,7 +336,7 @@ function getLegacySteps(row: GenericRecord): StepDefinition[] {
     {
       id: "input",
       label: meaningfulFacturen ? "Initiële kostprijs" : "Berekening",
-      description: type === "Inkoop" ? "Factuurinvoer en bronkosten" : "Ingrediënten en recept"
+      description: type === "Inkoop" ? "Factuurinvoer en bronkosten" : "Ingredienten en recept"
     }
   ];
 
@@ -349,7 +349,7 @@ function getLegacySteps(row: GenericRecord): StepDefinition[] {
 }
 
 function getIngredientType(row: GenericRecord) {
-  return String(row["ingrediënt"] ?? row["ingredient"] ?? row["ingrediÃ«nt"] ?? "Overig");
+  return String(row["ingredient"] ?? "Overig");
 }
 
 function getProductDisplayName(row: GenericRecord) {
@@ -1334,7 +1334,7 @@ export function BerekeningenWizard({
     return (
       <div className="wizard-choice-grid">
         {[
-          ["Eigen productie", "Gebruik ingrediënten en receptregels als basis voor de kostprijs."],
+          ["Eigen productie", "Gebruik ingredienten en receptregels als basis voor de kostprijs."],
           ["Inkoop", "Gebruik facturen, liters en bijkomende kosten als basis voor de kostprijs."]
         ].map(([option, text]) => (
           <button
@@ -1412,7 +1412,6 @@ export function BerekeningenWizard({
                                   : Number(event.target.value)
                                 : event.target.value;
                             if (key === "ingredient") {
-                              regels[index]["ingrediënt"] = nextValue;
                               regels[index]["ingredient"] = nextValue;
                             } else {
                               regels[index][key] = nextValue;
@@ -1443,7 +1442,7 @@ export function BerekeningenWizard({
               {ingredienten.length === 0 ? (
                 <tr>
                   <td className="dataset-empty" colSpan={7}>
-                    Nog geen ingrediëntregels. Voeg hieronder een regel toe.
+                    Nog geen ingredientregels. Voeg hieronder een regel toe.
                   </td>
                 </tr>
               ) : null}
@@ -1462,7 +1461,6 @@ export function BerekeningenWizard({
                 regels.push({
                   id: createId(),
                   ingredient: "Overig",
-                  "ingrediënt": "Overig",
                   omschrijving: "",
                   hoeveelheid: 0,
                   eenheid: "KG",
@@ -1472,7 +1470,7 @@ export function BerekeningenWizard({
               })
             }
           >
-            Ingrediënt toevoegen
+            Ingredient toevoegen
           </button>
         </div>
       </div>
@@ -1513,7 +1511,6 @@ export function BerekeningenWizard({
                           const regels =
                             ((((draft.invoer as GenericRecord).ingredienten as GenericRecord)
                               .regels as GenericRecord[]) ?? []);
-                          regels[index]["ingrediënt"] = event.target.value;
                           regels[index]["ingredient"] = event.target.value;
                         })
                       }
@@ -1641,7 +1638,7 @@ export function BerekeningenWizard({
               {ingredienten.length === 0 ? (
                 <tr>
                   <td className="dataset-empty" colSpan={9}>
-                    Nog geen ingrediëntregels. Voeg hieronder een regel toe.
+                    Nog geen ingredientregels. Voeg hieronder een regel toe.
                   </td>
                 </tr>
               ) : null}
@@ -1660,7 +1657,6 @@ export function BerekeningenWizard({
                 regels.push({
                   id: createId(),
                   ingredient: "Overig",
-                  "ingrediënt": "Overig",
                   omschrijving: "",
                   hoeveelheid: 0,
                   eenheid: "KG",
@@ -1670,7 +1666,7 @@ export function BerekeningenWizard({
               })
             }
           >
-            Ingrediënt toevoegen
+            Ingredient toevoegen
           </button>
         </div>
       </div>
@@ -2040,7 +2036,7 @@ export function BerekeningenWizard({
                     <th>Biernaam</th>
                     <th>Soort</th>
                     <th>Verpakkingseenheid</th>
-                    <th>{soort === "Inkoop" ? "Inkoop" : "Ingrediënten"}</th>
+                    <th>{soort === "Inkoop" ? "Inkoop" : "Ingredienten"}</th>
                     <th>Verpakkingskosten</th>
                     <th>{soort === "Inkoop" ? "Indirecte kosten" : "Directe kosten"}</th>
                     <th>Accijns</th>

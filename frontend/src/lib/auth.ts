@@ -1,44 +1,43 @@
-export const AUTH_STORAGE_KEY = "calculatietool_auth_session";
-
 export type AuthSession = {
   username: string;
   display_name: string;
   role: string;
-  logged_in_at: string;
 };
 
 export function readAuthSession(): AuthSession | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw) as AuthSession;
-  } catch {
-    window.localStorage.removeItem(AUTH_STORAGE_KEY);
-    return null;
-  }
+  // Auth is cookie-based; the server is the source of truth.
+  return null;
 }
 
-export function writeAuthSession(session: AuthSession) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-  window.dispatchEvent(new Event("calculatietool-auth-changed"));
+export function writeAuthSession(_: AuthSession) {
+  // no-op (cookie-based auth)
 }
 
 export function clearAuthSession() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  // Consumers should call /auth/logout; kept for compatibility in UI components.
   window.dispatchEvent(new Event("calculatietool-auth-changed"));
+}
+
+export async function fetchMe(): Promise<AuthSession | null> {
+  const response = await fetch("/api/auth/me", { cache: "no-store" });
+  if (!response.ok) {
+    return null;
+  }
+  const payload = (await response.json()) as any;
+  if (!payload?.authenticated) {
+    return null;
+  }
+  return {
+    username: String(payload.username ?? ""),
+    display_name: String(payload.display_name ?? ""),
+    role: String(payload.role ?? "")
+  };
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } finally {
+    window.dispatchEvent(new Event("calculatietool-auth-changed"));
+  }
 }

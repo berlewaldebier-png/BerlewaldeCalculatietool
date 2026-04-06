@@ -1,16 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode
-} from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { NavigationItem } from "@/lib/api";
+import type { NavigationItem } from "@/lib/apiShared";
 
 type PageShellProps = {
   title: string;
@@ -33,9 +26,7 @@ type WizardSidebarState = {
   onStepSelect?: (index: number) => void;
 };
 
-const WizardSidebarContext = createContext<
-  ((state: WizardSidebarState | null) => void) | null
->(null);
+const WizardSidebarContext = createContext<((state: WizardSidebarState | null) => void) | null>(null);
 
 export function usePageShellWizardSidebar(state: WizardSidebarState | null) {
   const setState = useContext(WizardSidebarContext);
@@ -53,13 +44,7 @@ export function usePageShellWizardSidebar(state: WizardSidebarState | null) {
   }, [setState, state]);
 }
 
-export function PageShell({
-  title,
-  subtitle,
-  activePath,
-  navigation,
-  children
-}: PageShellProps) {
+export function PageShell({ title, subtitle, activePath, navigation, children }: PageShellProps) {
   void activePath;
   void navigation;
 
@@ -71,7 +56,7 @@ export function PageShell({
       <div className="page-grid">
         <aside className="dashboard-sidebar page-shell-sidebar">
           <div className="brand-block page-shell-brand">
-            <span className="brand-text">BEERCRAFT.Co</span>
+            <span className="brand-text">Berlewalde bier B.V.</span>
           </div>
 
           <nav className="dashboard-sidebar-nav" aria-label="Paginanavigatie">
@@ -98,7 +83,7 @@ export function PageShell({
                   >
                     <span className="page-shell-wizard-rail">
                       <span className="page-shell-wizard-dot">
-                        {index < wizardSidebar.activeIndex ? "✓" : ""}
+                        {index < wizardSidebar.activeIndex ? "\u2713" : ""}
                       </span>
                       {index < wizardSidebar.steps.length - 1 ? (
                         <span className="page-shell-wizard-line" />
@@ -135,3 +120,4 @@ function OverviewIcon() {
     </svg>
   );
 }
+
