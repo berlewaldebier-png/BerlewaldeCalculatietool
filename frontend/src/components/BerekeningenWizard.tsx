@@ -38,6 +38,9 @@ type PendingDeleteDialog = {
 type SummaryProductRow = {
   biernaam: string;
   soort: string;
+  product_id?: string;
+  product_type?: string;
+  verpakking?: string;
   verpakkingseenheid: string;
   primaire_kosten: string | number;
   verpakkingskosten: string | number;
@@ -85,6 +88,24 @@ function createId() {
 
 function cloneRecord<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function parseOptionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  // Browser locale can produce `6,6` in `<input type="number">` (NL locale).
+  const normalized = text.replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseOptionalNumberFromInput(value: string): number | null {
+  if (!String(value ?? "").trim()) return null;
+  return parseOptionalNumber(value);
 }
 
 function syncPrimaryInkoopFactuur(row: GenericRecord) {
@@ -142,7 +163,7 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
     jaar: Number(basisgegevens.jaar ?? new Date().getFullYear()),
     biernaam: String(basisgegevens.biernaam ?? ""),
     stijl: String(basisgegevens.stijl ?? ""),
-    alcoholpercentage: Number(basisgegevens.alcoholpercentage ?? 0),
+    alcoholpercentage: parseOptionalNumber(basisgegevens.alcoholpercentage) ?? 0,
     belastingsoort: String(basisgegevens.belastingsoort ?? "Accijns"),
     tarief_accijns: String(basisgegevens.tarief_accijns ?? "Hoog"),
     btw_tarief: String(basisgegevens.btw_tarief ?? "21%")
@@ -818,7 +839,7 @@ function calculateAccijnsPerProduct(
 ) {
   const tarieven = tarievenHeffingen.find((row) => Number(row.jaar ?? 0) === year) ?? {};
   const belastingsoort = String(basisgegevens.belastingsoort ?? "").trim().toLowerCase();
-  const alcoholpercentage = Number(basisgegevens.alcoholpercentage ?? 0) / 100;
+  const alcoholpercentage = (parseOptionalNumber(basisgegevens.alcoholpercentage) ?? 0) / 100;
   const tariefAccijns = String(basisgegevens.tarief_accijns ?? "").trim().toLowerCase();
 
   if (belastingsoort === "verbruiksbelasting") {
@@ -834,6 +855,7 @@ function buildSummaryRows(
   sourceRows: (GenericRecord | SelectedInkoopProduct)[],
   biernaam: string,
   soort: string,
+  productType: "basis" | "samengesteld",
   primaireKostenPerLiter: number,
   vasteKostenPerLiter: number,
   basisgegevens: GenericRecord,
@@ -867,6 +889,9 @@ function buildSummaryRows(
     return {
       biernaam,
       soort,
+      product_id: String((sourceRow as GenericRecord).id ?? ""),
+      product_type: productType,
+      verpakking: label || "-",
       verpakkingseenheid: label || "-",
       primaire_kosten: roundValue(primaireKosten),
       verpakkingskosten: roundValue(packaging),
@@ -1010,6 +1035,7 @@ export function BerekeningenWizard({
       basisproductenVanJaar,
       biernaam,
       soort,
+      "basis",
       variabeleKostenPerLiter,
       vasteKostenPerLiter,
       basisgegevens,
@@ -1021,6 +1047,7 @@ export function BerekeningenWizard({
       samengesteldeVanJaar,
       biernaam,
       soort,
+      "samengesteld",
       variabeleKostenPerLiter,
       vasteKostenPerLiter,
       basisgegevens,
@@ -1105,6 +1132,15 @@ export function BerekeningenWizard({
     setStatusTone(null);
     setIsSaving(true);
     try {
+      const basis = (current.basisgegevens as GenericRecord) ?? {};
+      const biernaam = String(basis.biernaam ?? "").trim();
+      const alcoholpercentage = parseOptionalNumber(basis.alcoholpercentage);
+      if (biernaam && alcoholpercentage === null) {
+        setStatus("Alcoholpercentage is verplicht en moet een geldig getal zijn voordat je kunt afronden.");
+        setStatusTone("error");
+        return false;
+      }
+
       const nowIso = new Date().toISOString();
       const payload = rowsRef.current.map((row) => {
         const next = cloneRecord(row);
@@ -1276,8 +1312,9 @@ export function BerekeningenWizard({
             value={String(basis.alcoholpercentage ?? "")}
             onChange={(event) =>
               updateCurrent((draft) => {
-                (draft.basisgegevens as GenericRecord).alcoholpercentage =
-                  event.target.value === "" ? null : Number(event.target.value);
+                (draft.basisgegevens as GenericRecord).alcoholpercentage = parseOptionalNumberFromInput(
+                  event.target.value
+                );
               })
             }
           />

@@ -25,6 +25,7 @@ from app.utils.storage import (
     normalize_berekening_record,
     normalize_prijsvoorstel_record,
     migrate_product_ids_to_master_ids,
+    generate_missing_kostprijsproductactiveringen,
     save_berekeningen,
     save_basisproducten,
     save_kostprijsproductactiveringen,
@@ -487,4 +488,17 @@ def migrate_wrapped_payloads(
         if changed and not dry_run:
             postgres_storage.save_dataset(name, new_payload, overwrite=True)
 
+    return report
+
+
+def generate_missing_activations(*, dry_run: bool = False) -> dict[str, Any]:
+    """One-time maintenance: generate missing product activations from definitive cost versions.
+
+    Phase E: activations are the single source of truth for (bier, jaar, product) activeness.
+    This function is intentionally explicit (admin endpoint) and never runs on reads.
+    """
+    require_postgres()
+    report = generate_missing_kostprijsproductactiveringen(dry_run=dry_run)
+    if not dry_run:
+        dashboard_service.invalidate_dashboard_summary_cache()
     return report

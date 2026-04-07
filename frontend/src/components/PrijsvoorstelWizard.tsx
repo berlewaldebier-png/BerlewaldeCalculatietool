@@ -895,8 +895,7 @@ export function PrijsvoorstelWizard({
 
   function getSellInMarginForChannel(record: GenericRecord | null | undefined, channelCode: string) {
     const sellInMargins = (record?.sell_in_margins as GenericRecord | undefined) ?? {};
-    const kanaalmarges = (record?.kanaalmarges as GenericRecord | undefined) ?? {};
-    const directValue = sellInMargins[channelCode] ?? kanaalmarges[channelCode];
+    const directValue = sellInMargins[channelCode];
     return directValue === undefined || directValue === null || directValue === ""
       ? getChannelDefaultMargin(channelCode)
       : toNumber(directValue, getChannelDefaultMargin(channelCode));
@@ -904,15 +903,13 @@ export function PrijsvoorstelWizard({
 
   function getSellInPriceOverrideForChannel(record: GenericRecord | null | undefined, channelCode: string) {
     const sellInPrices = (record?.sell_in_prices as GenericRecord | undefined) ?? {};
-    const kanaalprijzen = (record?.kanaalprijzen as GenericRecord | undefined) ?? {};
-    const directValue = sellInPrices[channelCode] ?? kanaalprijzen[channelCode];
+    const directValue = sellInPrices[channelCode];
     return directValue === undefined || directValue === null || directValue === "" ? Number.NaN : toNumber(directValue, Number.NaN);
   }
 
   function getSellOutFactorForChannel(record: GenericRecord | null | undefined, channelCode: string) {
     const sellOutFactors = (record?.sell_out_factors as GenericRecord | undefined) ?? {};
-    const adviesfactoren = (record?.adviesfactoren as GenericRecord | undefined) ?? {};
-    const directValue = sellOutFactors[channelCode] ?? adviesfactoren[channelCode];
+    const directValue = sellOutFactors[channelCode];
     return directValue === undefined || directValue === null || directValue === ""
       ? getChannelDefaultFactor(channelCode)
       : toNumber(directValue, getChannelDefaultFactor(channelCode));
@@ -920,8 +917,7 @@ export function PrijsvoorstelWizard({
 
   function getSellOutPriceOverrideForChannel(record: GenericRecord | null | undefined, channelCode: string) {
     const sellOutPrices = (record?.sell_out_advice_prices as GenericRecord | undefined) ?? {};
-    const adviesprijzen = (record?.adviesprijzen as GenericRecord | undefined) ?? {};
-    const directValue = sellOutPrices[channelCode] ?? adviesprijzen[channelCode];
+    const directValue = sellOutPrices[channelCode];
     return directValue === undefined || directValue === null || directValue === "" ? Number.NaN : toNumber(directValue, Number.NaN);
   }
 

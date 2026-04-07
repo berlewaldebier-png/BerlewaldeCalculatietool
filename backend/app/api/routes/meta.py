@@ -167,7 +167,10 @@ def post_migrate_product_ids(
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Rewrites stored product ids so the entire app references master Product ids only."""
-    return dataset_store.migrate_product_ids(dry_run=dry_run)
+    try:
+        return dataset_store.migrate_product_ids(dry_run=dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/migrate-wrapped-payloads")
@@ -179,3 +182,20 @@ def post_migrate_wrapped_payloads(
     """Unwraps legacy `{Count,value}` payloads stored in Postgres datasets (one-time maintenance)."""
     names = [name.strip() for name in (datasets or "").split(",") if name.strip()]
     return dataset_store.migrate_wrapped_payloads(dataset_names=names or None, dry_run=dry_run)
+
+
+@router.post("/generate-missing-activations")
+def post_generate_missing_activations(
+    dry_run: bool = Query(False, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """One-time maintenance: create missing product activations from definitive cost versions.
+
+    Phase E: activations are the single source of truth for what is "active" per (bier, jaar, product).
+    This endpoint is the explicit repair/migration path for legacy/older data that predates
+    activation records (or where invalid records were cleaned up).
+    """
+    try:
+        return dataset_store.generate_missing_activations(dry_run=dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
