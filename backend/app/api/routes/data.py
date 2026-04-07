@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.domain import dataset_store, postgres_storage
-from app.domain.auth_dependencies import require_user
+from app.domain.auth_dependencies import require_admin, require_user
 from app.schemas.storage import StorageStatus
 
 
@@ -19,6 +19,7 @@ def get_productie() -> dict:
 
 @router.put("/productie")
 def put_productie(data: dict[str, Any]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     try:
         return {"saved": dataset_store.save_dataset("productie", data)}
     except ValueError as exc:
@@ -32,6 +33,7 @@ def get_vaste_kosten() -> dict:
 
 @router.put("/vaste-kosten")
 def put_vaste_kosten(data: dict[str, Any]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     try:
         return {"saved": dataset_store.save_dataset("vaste-kosten", data)}
     except ValueError as exc:
@@ -45,6 +47,7 @@ def get_tarieven_heffingen() -> list[dict]:
 
 @router.put("/tarieven-heffingen")
 def put_tarieven_heffingen(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("tarieven-heffingen", data)}
 
 
@@ -55,6 +58,7 @@ def get_verpakkingsonderdelen() -> list[dict]:
 
 @router.put("/verpakkingsonderdelen")
 def put_verpakkingsonderdelen(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("verpakkingsonderdelen", data)}
 
 
@@ -65,6 +69,7 @@ def get_basisproducten() -> list[dict]:
 
 @router.put("/basisproducten")
 def put_basisproducten(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("basisproducten", data)}
 
 
@@ -75,6 +80,7 @@ def get_samengestelde_producten() -> list[dict]:
 
 @router.put("/samengestelde-producten")
 def put_samengestelde_producten(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("samengestelde-producten", data)}
 
 
@@ -85,6 +91,7 @@ def get_bieren() -> list[dict]:
 
 @router.put("/bieren")
 def put_bieren(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("bieren", data)}
 
 
@@ -95,6 +102,7 @@ def get_berekeningen() -> list[dict]:
 
 @router.put("/berekeningen")
 def put_berekeningen(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("berekeningen", data)}
 
 
@@ -105,6 +113,7 @@ def get_kostprijsversies() -> list[dict]:
 
 @router.put("/kostprijsversies")
 def put_kostprijsversies(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("kostprijsversies", data)}
 
 
@@ -113,6 +122,7 @@ def post_activate_kostprijsversie(
     version_id: str,
     data: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
+    _: dict = Depends(require_admin)
     run_id = str(data.get("run_id", "") or "")
     activated = dataset_store.activate_cost_version(version_id, context={"run_id": run_id})
     if activated is None:
@@ -125,6 +135,7 @@ def post_activate_kostprijsversie_products(
     version_id: str,
     data: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
+    _: dict = Depends(require_admin)
     product_ids = data.get("product_ids", [])
     run_id = str(data.get("run_id", "") or "")
     if not isinstance(product_ids, list):
@@ -159,6 +170,7 @@ def get_verkoopprijzen() -> list[dict]:
 
 @router.put("/verkoopprijzen")
 def put_verkoopprijzen(data: list[dict[str, Any]]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("verkoopprijzen", data)}
 
 
@@ -169,11 +181,13 @@ def get_variabele_kosten() -> dict:
 
 @router.put("/variabele-kosten")
 def put_variabele_kosten(data: dict[str, Any]) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     return {"saved": dataset_store.save_dataset("variabele-kosten", data)}
 
 
 @router.put("/dataset/{name}")
 def put_dataset(name: str, data: Any = Body(...)) -> dict[str, bool]:
+    _: dict = Depends(require_admin)
     if name not in dataset_store.get_dataset_names():
         raise HTTPException(status_code=404, detail="Unknown dataset")
     return {"saved": dataset_store.save_dataset(name, data)}
@@ -193,6 +207,7 @@ def get_storage_status() -> StorageStatus:
 
 @router.post("/bootstrap-postgres")
 def post_bootstrap_postgres() -> dict[str, Any]:
+    _: dict = Depends(require_admin)
     if not postgres_storage.database_url():
         raise HTTPException(status_code=400, detail="PostgreSQL-configuratie ontbreekt")
     results = dataset_store.bootstrap_postgres_from_json(overwrite=True)

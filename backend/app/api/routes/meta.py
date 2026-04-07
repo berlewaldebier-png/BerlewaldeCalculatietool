@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from app.domain import dataset_store
 from app.domain import dashboard_service
 from app.domain import auth_service
-from app.domain.auth_dependencies import require_user
+from app.domain.auth_dependencies import require_admin, require_user
 from app.schemas.navigation import DashboardSummary, NavigationItem
 
 
@@ -164,6 +164,7 @@ def get_bootstrap(
 @router.post("/migrate-product-ids")
 def post_migrate_product_ids(
     dry_run: bool = Query(False, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Rewrites stored product ids so the entire app references master Product ids only."""
     return dataset_store.migrate_product_ids(dry_run=dry_run)

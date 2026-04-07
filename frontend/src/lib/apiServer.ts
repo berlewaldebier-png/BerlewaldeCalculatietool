@@ -9,13 +9,20 @@ async function resolveServerApiBaseUrl() {
     return API_BASE_URL;
   }
 
-  const headerBag = await headers();
-  const host = headerBag.get("x-forwarded-host") ?? headerBag.get("host");
-  const proto = headerBag.get("x-forwarded-proto") ?? "http";
-  if (!host) {
-    return API_BASE_URL;
-  }
-  return `${proto}://${host}${API_BASE_URL}`;
+  // Server components can't use relative URLs with Node's fetch. Previously we derived the origin from
+  // the incoming Host header, but in containerized setups that host (e.g. "hanshssnk") may not be
+  // resolvable from within the container, causing slow failures/timeouts.
+  //
+  // Use loopback to call this Next.js instance's own API routes by default. This keeps the request
+  // internal and stable regardless of external DNS/reverse proxy config.
+  const explicitOrigin = (process.env.CALCULATIETOOL_SERVER_ORIGIN ?? "").trim();
+  const port = (process.env.PORT ?? "").trim() || "3000";
+  const origin = explicitOrigin || `http://127.0.0.1:${port}`;
+
+  // Touch headers to preserve existing semantics and ensure this stays request-scoped.
+  await headers();
+
+  return `${origin}${API_BASE_URL}`;
 }
 
 async function apiGetServer<T>(path: string, nextPath: string): Promise<T> {
