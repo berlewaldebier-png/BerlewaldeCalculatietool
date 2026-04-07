@@ -168,3 +168,14 @@ def post_migrate_product_ids(
 ) -> dict[str, Any]:
     """Rewrites stored product ids so the entire app references master Product ids only."""
     return dataset_store.migrate_product_ids(dry_run=dry_run)
+
+
+@router.post("/migrate-wrapped-payloads")
+def post_migrate_wrapped_payloads(
+    datasets: str = Query("", description="Comma-separated dataset names (optional)"),
+    dry_run: bool = Query(False, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Unwraps legacy `{Count,value}` payloads stored in Postgres datasets (one-time maintenance)."""
+    names = [name.strip() for name in (datasets or "").split(",") if name.strip()]
+    return dataset_store.migrate_wrapped_payloads(dataset_names=names or None, dry_run=dry_run)

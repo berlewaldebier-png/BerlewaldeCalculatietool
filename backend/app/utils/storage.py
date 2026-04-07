@@ -51,7 +51,35 @@ def _load_postgres_dataset(dataset_name: str) -> Any | None:
     postgres_storage = _get_postgres_storage_module()
     if postgres_storage is None or not postgres_storage.uses_postgres():
         raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
-    return postgres_storage.load_dataset(dataset_name, None)
+    payload = postgres_storage.load_dataset(dataset_name, None)
+    _fail_if_wrapped_payload(dataset_name, payload)
+    return payload
+
+
+def _fail_if_wrapped_payload(dataset_name: str, payload: Any) -> None:
+    """Fail hard on legacy `{Count,value}` wrappers.
+
+    Phase C: no read-side repairs. Wrapped payloads must be migrated once, then rejected.
+    """
+
+    def is_wrapper_dict(value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        keys = set(value.keys())
+        return keys.issubset({"Count", "value"}) and isinstance(value.get("value"), list)
+
+    if is_wrapper_dict(payload):
+        raise RuntimeError(
+            f"Dataset '{dataset_name}' bevat legacy wrapper {{Count,value}}. "
+            "Voer eerst de migratie uit via /api/meta/migrate-wrapped-payloads."
+        )
+    if isinstance(payload, list):
+        for row in payload:
+            if is_wrapper_dict(row):
+                raise RuntimeError(
+                    f"Dataset '{dataset_name}' bevat legacy wrapper {{Count,value}}. "
+                    "Voer eerst de migratie uit via /api/meta/migrate-wrapped-payloads."
+                )
 
 
 def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
@@ -3299,10 +3327,7 @@ def bereken_integrale_kostprijs_samengesteld_product(
 def load_bieren() -> list[dict[str, Any]]:
     """Laadt alle bieren uit de centrale bierlijst."""
     postgres_payload = _load_postgres_dataset("bieren")
-    if isinstance(postgres_payload, list):
-        data = _flatten_wrapped_records(postgres_payload)
-    else:
-        data = []
+    data = postgres_payload if isinstance(postgres_payload, list) else []
     if not isinstance(data, list):
         return []
 
@@ -3352,20 +3377,9 @@ def save_bieren(data: list[dict[str, Any]]) -> bool:
     return _save_postgres_dataset("bieren", normalized)
 
 
-def _flatten_wrapped_records(rows: list[Any]) -> list[dict[str, Any]]:
-    flattened: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        wrapped_values = row.get("value")
-        if (
-            isinstance(wrapped_values, list)
-            and set(row.keys()).issubset({"Count", "value"})
-        ):
-            flattened.extend(_flatten_wrapped_records(wrapped_values))
-            continue
-        flattened.append(row)
-    return flattened
+#
+# NOTE: Wrapped `{Count,value}` records are no longer supported in runtime.
+# Use `/api/meta/migrate-wrapped-payloads` to migrate existing datasets once.
 
 
 def _has_meaningful_kostprijsversie_content(record: dict[str, Any]) -> bool:

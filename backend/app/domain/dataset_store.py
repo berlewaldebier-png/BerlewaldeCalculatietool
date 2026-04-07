@@ -93,13 +93,23 @@ def _reject_wrapped_payload(data: Any, *, dataset_name: str) -> None:
 
     Phase C requires fail-hard writes: no implicit unwrapping or read-side repairs.
     """
-    if not isinstance(data, dict):
+    # Top-level wrapper object.
+    if isinstance(data, dict):
+        keys = set(data.keys())
+        if keys.issubset({"Count", "value"}):
+            raise ValueError(
+                f"Ongeldig payload voor '{dataset_name}': legacy wrapper {{Count,value}} is niet toegestaan."
+            )
         return
-    keys = set(data.keys())
-    if keys.issubset({"Count", "value"}):
-        raise ValueError(
-            f"Ongeldig payload voor '{dataset_name}': legacy wrapper {{Count,value}} is niet toegestaan."
-        )
+
+    # Wrapper objects nested in list-based datasets (common legacy pattern).
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and set(row.keys()).issubset({"Count", "value"}):
+                raise ValueError(
+                    f"Ongeldig payload voor '{dataset_name}': legacy wrapper {{Count,value}} is niet toegestaan."
+                )
+        return
 
 
 def _require_type(dataset_name: str, data: Any, expected_type: type) -> None:
@@ -417,3 +427,64 @@ def migrate_product_ids(*, dry_run: bool = False) -> dict[str, Any]:
     """One-time maintenance: rewrite stored product ids to match master Product ids."""
     require_postgres()
     return migrate_product_ids_to_master_ids(dry_run=dry_run)
+
+
+def migrate_wrapped_payloads(
+    *,
+    dataset_names: list[str] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """One-time maintenance: unwrap legacy `{Count,value}` payloads stored in Postgres.
+
+    Phase C: runtime no longer supports wrapped payloads on read or write.
+    This endpoint rewrites existing datasets once, then the app fails hard if wrappers reappear.
+    """
+    require_postgres()
+
+    # Only migrate datasets we can safely write back.
+    target_names = (
+        [name for name in (dataset_names or []) if name in get_dataset_names()]
+        if dataset_names
+        else [name for name in get_dataset_names() if name not in READ_ONLY_PROJECTION_DATASETS]
+    )
+
+    def is_wrapper_dict(value: Any) -> bool:
+        return (
+            isinstance(value, dict)
+            and set(value.keys()).issubset({"Count", "value"})
+            and isinstance(value.get("value"), list)
+        )
+
+    def unwrap(value: Any) -> tuple[Any, bool]:
+        if is_wrapper_dict(value):
+            return unwrap(value.get("value", []))
+        if isinstance(value, list):
+            changed = False
+            out: list[Any] = []
+            for item in value:
+                if is_wrapper_dict(item):
+                    nested, nested_changed = unwrap(item.get("value", []))
+                    if isinstance(nested, list):
+                        out.extend(nested)
+                    else:
+                        out.append(nested)
+                    changed = True or nested_changed
+                    continue
+                nested, nested_changed = unwrap(item)
+                out.append(nested)
+                changed = changed or nested_changed
+            return out, changed
+        return value, False
+
+    report: dict[str, Any] = {"dry_run": dry_run, "datasets": {}}
+    for name in target_names:
+        payload = postgres_storage.load_dataset(name, None)
+        new_payload, changed = unwrap(payload)
+        report["datasets"][name] = {
+            "changed": bool(changed),
+            "had_wrapper": bool(changed),
+        }
+        if changed and not dry_run:
+            postgres_storage.save_dataset(name, new_payload, overwrite=True)
+
+    return report

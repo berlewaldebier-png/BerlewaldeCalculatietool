@@ -156,7 +156,7 @@ class KostprijsVersioningTests(unittest.TestCase):
 
         self.assertEqual(normalized["finalized_at"], "2026-03-29T14:30:00")
 
-    def test_load_bieren_flattens_wrapped_records(self) -> None:
+    def test_load_bieren_rejects_wrapped_records(self) -> None:
         wrapped = [
             {
                 "Count": 2,
@@ -167,10 +167,18 @@ class KostprijsVersioningTests(unittest.TestCase):
             }
         ]
 
-        with patch("utils.storage._load_postgres_dataset", return_value=wrapped):
-            loaded = storage.load_bieren()
+        class _FakePostgres:
+            @staticmethod
+            def uses_postgres() -> bool:
+                return True
 
-        self.assertEqual([row["id"] for row in loaded], ["bier-1", "bier-2"])
+            @staticmethod
+            def load_dataset(name: str, default: object) -> object:
+                return wrapped
+
+        with patch("utils.storage._get_postgres_storage_module", return_value=_FakePostgres):
+            with self.assertRaises(RuntimeError):
+                storage.load_bieren()
 
     def test_save_kostprijsversies_filters_empty_placeholder_rows(self) -> None:
         payloads: dict[str, list[dict]] = {}
@@ -195,6 +203,39 @@ class KostprijsVersioningTests(unittest.TestCase):
             {row["id"] for row in payloads["kostprijsversies"]},
             {placeholder["id"], meaningful["id"]},
         )
+
+    def test_dataset_store_rejects_wrapped_payloads_nested_in_list(self) -> None:
+        with self.assertRaises(ValueError):
+            dataset_store.validate_dataset_write(
+                "bieren",
+                [
+                    {
+                        "Count": 1,
+                        "value": [{"id": "bier-1"}],
+                    }
+                ],
+            )
+
+    def test_dataset_store_migrates_wrapped_payloads(self) -> None:
+        wrapped = [{"Count": 2, "value": [{"id": "bier-1"}, {"id": "bier-2"}]}]
+        saved: dict[str, object] = {}
+
+        def fake_load(name: str, default: object) -> object:
+            if name == "bieren":
+                return deepcopy(wrapped)
+            return None
+
+        def fake_save(name: str, payload: object, overwrite: bool = False) -> bool:
+            saved[name] = deepcopy(payload)
+            return True
+
+        with patch("backend.app.domain.dataset_store.postgres_storage.load_dataset", side_effect=fake_load), patch(
+            "backend.app.domain.dataset_store.postgres_storage.save_dataset", side_effect=fake_save
+        ), patch("backend.app.domain.dataset_store.postgres_storage.uses_postgres", return_value=True):
+            report = dataset_store.migrate_wrapped_payloads(dataset_names=["bieren"], dry_run=False)
+
+        self.assertTrue(report["datasets"]["bieren"]["changed"])
+        self.assertEqual(saved["bieren"], [{"id": "bier-1"}, {"id": "bier-2"}])
 
     def test_save_kostprijsversies_blocks_deleting_definitive_versions(self) -> None:
         existing = _sample_version("v-def", status="definitief")
