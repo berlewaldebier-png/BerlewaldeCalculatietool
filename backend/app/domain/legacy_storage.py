@@ -1,121 +1,127 @@
 from __future__ import annotations
 
-from app.utils import storage
+from app.utils import json_seed
 
 
 def load_dashboard_summary() -> dict[str, int]:
+    # Only used for legacy import flows; keep a minimal, deterministic summary.
+    berekeningen = json_seed.load_dataset("berekeningen")
+    prijsvoorstellen = json_seed.load_dataset("prijsvoorstellen")
+    concept_berekeningen = len([r for r in berekeningen if isinstance(r, dict) and str(r.get("status", "") or "") == "concept"]) if isinstance(berekeningen, list) else 0
+    definitieve_berekeningen = len([r for r in berekeningen if isinstance(r, dict) and str(r.get("status", "") or "") == "definitief"]) if isinstance(berekeningen, list) else 0
+    concept_prijsvoorstellen = len([r for r in prijsvoorstellen if isinstance(r, dict) and str(r.get("status", "") or "") == "concept"]) if isinstance(prijsvoorstellen, list) else 0
+    definitieve_prijsvoorstellen = len([r for r in prijsvoorstellen if isinstance(r, dict) and str(r.get("status", "") or "") == "definitief"]) if isinstance(prijsvoorstellen, list) else 0
     return {
-        "concept_berekeningen": len(storage.get_concept_berekeningen()),
-        "definitieve_berekeningen": len(storage.get_definitieve_berekeningen()),
-        "concept_prijsvoorstellen": len(storage.get_concept_prijsvoorstellen()),
-        "definitieve_prijsvoorstellen": len(storage.get_definitieve_prijsvoorstellen()),
+        "concept_berekeningen": concept_berekeningen,
+        "definitieve_berekeningen": definitieve_berekeningen,
+        "concept_prijsvoorstellen": concept_prijsvoorstellen,
+        "definitieve_prijsvoorstellen": definitieve_prijsvoorstellen,
     }
 
 
 def load_productie_records() -> dict:
-    return storage.load_productiegegevens()
+    value = json_seed.load_dataset("productie")
+    return value if isinstance(value, dict) else {}
 
 
 def load_vaste_kosten() -> dict:
-    return storage.load_vaste_kosten_data()
+    value = json_seed.load_dataset("vaste-kosten")
+    return value if isinstance(value, dict) else {}
 
 
 def load_tarieven_heffingen() -> list[dict]:
-    return storage.load_tarieven_heffingen()
+    value = json_seed.load_dataset("tarieven-heffingen")
+    return value if isinstance(value, list) else []
 
 
 def load_verpakkingsonderdelen() -> list[dict]:
-    return storage.load_verpakkingsonderdelen()
+    value = json_seed.load_dataset("verpakkingsonderdelen")
+    return value if isinstance(value, list) else []
 
 
 def load_basisproducten() -> list[dict]:
-    return storage.load_basisproducten()
+    value = json_seed.load_dataset("basisproducten")
+    return value if isinstance(value, list) else []
 
 
 def load_samengestelde_producten() -> list[dict]:
-    return storage.load_samengestelde_producten()
+    value = json_seed.load_dataset("samengestelde-producten")
+    return value if isinstance(value, list) else []
 
 
 def load_bieren() -> list[dict]:
-    return storage.load_bieren()
+    value = json_seed.load_dataset("bieren")
+    return value if isinstance(value, list) else []
 
 
 def load_berekeningen() -> list[dict]:
-    return storage.load_berekeningen()
+    value = json_seed.load_dataset("berekeningen")
+    return value if isinstance(value, list) else []
 
 
 def load_prijsvoorstellen() -> list[dict]:
-    return storage.load_prijsvoorstellen()
+    value = json_seed.load_dataset("prijsvoorstellen")
+    return value if isinstance(value, list) else []
 
 
 def load_verkoopprijzen() -> list[dict]:
-    return storage.load_verkoopprijzen()
+    value = json_seed.load_dataset("verkoopprijzen")
+    return value if isinstance(value, list) else []
 
 
 def load_all_verkoop_records() -> list[dict]:
-    return storage.load_all_verkoop_records()
+    value = json_seed.load_dataset("verkoopprijzen")
+    return value if isinstance(value, list) else []
 
 
 def load_variabele_kosten() -> dict:
-    return storage.load_variabele_kosten_data()
+    value = json_seed.load_dataset("variabele-kosten")
+    return value if isinstance(value, dict) else {}
 
 
 def save_productie_records(data: dict) -> bool:
-    return storage.save_productiegegevens(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_vaste_kosten(data: dict) -> bool:
-    return storage.save_vaste_kosten_data(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_tarieven_heffingen(data: list[dict]) -> bool:
-    return storage.save_tarieven_heffingen(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_verpakkingsonderdelen(data: list[dict]) -> bool:
-    return storage.save_verpakkingsonderdelen(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_basisproducten(data: list[dict]) -> bool:
-    return storage.save_basisproducten(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_samengestelde_producten(data: list[dict]) -> bool:
-    return storage.save_samengestelde_producten(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_bieren(data: list[dict]) -> bool:
-    return storage.save_bieren(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_berekeningen(data: list[dict]) -> bool:
-    return storage.save_berekeningen(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_prijsvoorstellen(data: list[dict]) -> bool:
-    return storage.save_prijsvoorstellen(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_verkoopprijzen(data: list[dict]) -> bool:
-    return storage.save_verkoopprijzen(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def save_variabele_kosten(data: dict) -> bool:
-    return storage.save_variabele_kosten_data(data)
+    raise RuntimeError("Legacy JSON write is disabled. Use PostgreSQL runtime storage.")
 
 
 def load_dataset_from_json(name: str):
-    mapping = {
-        "productie": load_productie_records,
-        "vaste-kosten": load_vaste_kosten,
-        "tarieven-heffingen": load_tarieven_heffingen,
-        "verpakkingsonderdelen": load_verpakkingsonderdelen,
-        "basisproducten": load_basisproducten,
-        "samengestelde-producten": load_samengestelde_producten,
-        "bieren": load_bieren,
-        "berekeningen": load_berekeningen,
-        "prijsvoorstellen": load_prijsvoorstellen,
-        "verkoopprijzen": load_all_verkoop_records,
-        "variabele-kosten": load_variabele_kosten,
-    }
-    return mapping[name]()
+    return json_seed.load_dataset(name)

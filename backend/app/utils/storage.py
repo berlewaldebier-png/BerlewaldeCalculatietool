@@ -50,14 +50,14 @@ def _get_kostprijs_activation_storage_module():
 def _load_postgres_dataset(dataset_name: str) -> Any | None:
     postgres_storage = _get_postgres_storage_module()
     if postgres_storage is None or not postgres_storage.uses_postgres():
-        return None
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
     return postgres_storage.load_dataset(dataset_name, None)
 
 
 def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
     postgres_storage = _get_postgres_storage_module()
     if postgres_storage is None or not postgres_storage.uses_postgres():
-        return False
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
     return postgres_storage.save_dataset(dataset_name, data, overwrite=True)
 
 
@@ -65,8 +65,8 @@ def _load_postgres_first_list(dataset_name: str, fallback_path: Path) -> list[An
     postgres_payload = _load_postgres_dataset(dataset_name)
     if isinstance(postgres_payload, list):
         return postgres_payload
-    fallback = _load_json_value(fallback_path, [])
-    return fallback if isinstance(fallback, list) else []
+    # Phase B: no disk fallback. Missing datasets resolve to empty structures.
+    return []
 
 
 def _read_local_json_text(file_path: Path, default_content: str) -> str:
@@ -95,33 +95,24 @@ def _parse_json_content(raw_content: str, default_value: Any) -> Any:
 
 
 def _ensure_json_file(file_path: Path, default_content: str) -> Path:
-    """Maakt een JSON-bestand aan met een standaardinhoud indien nodig."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not file_path.exists():
-        file_path.write_text(default_content, encoding="utf-8")
-
-    return file_path
+    raise RuntimeError(
+        "JSON opslag is verwijderd voor runtime (Phase B). "
+        "Gebruik PostgreSQL, of importeer seed data via de expliciete bootstrap tooling."
+    )
 
 
 def _load_json_value(file_path: Path, default_value: Any) -> Any:
-    """Laadt JSON veilig in en valt terug op een standaardstructuur."""
-    default_content = "{}" if isinstance(default_value, dict) else "[]"
-    try:
-        raw_content = _read_local_json_text(file_path, default_content)
-        return _parse_json_content(raw_content, default_value)
-    except OSError:
-        return default_value
+    raise RuntimeError(
+        "JSON read fallback is verwijderd voor runtime (Phase B). "
+        "Gebruik PostgreSQL of importeer seed data via de bootstrap tooling."
+    )
 
 
 def _save_json_value(file_path: Path, data: Any, default_content: str) -> bool:
-    """Slaat JSON veilig op naar schijf."""
-    try:
-        raw_content = json.dumps(data, indent=2, ensure_ascii=False)
-        _write_local_json_text(file_path, raw_content, default_content)
-        return True
-    except OSError:
-        return False
+    raise RuntimeError(
+        "JSON write fallback is verwijderd voor runtime (Phase B). "
+        "Gebruik PostgreSQL of importeer seed data via de bootstrap tooling."
+    )
 
 
 def _now_iso() -> str:
@@ -193,9 +184,9 @@ def normalize_tarieven_heffingen_record(record: dict[str, Any]) -> dict[str, Any
 
 def load_tarieven_heffingen() -> list[dict[str, Any]]:
     """Laadt alle tarieven en heffingen veilig in."""
-    data = _load_json_value(TARIEVEN_HEFFINGEN_FILE, [])
+    data = _load_postgres_dataset("tarieven-heffingen")
     if not isinstance(data, list):
-        return []
+        data = []
 
     records = [
         normalize_tarieven_heffingen_record(record)
@@ -213,7 +204,7 @@ def save_tarieven_heffingen(data: list[dict[str, Any]]) -> bool:
         if isinstance(record, dict)
     ]
     normalized = sorted(normalized, key=lambda item: int(item.get("jaar", 0) or 0))
-    return _save_json_value(TARIEVEN_HEFFINGEN_FILE, normalized, "[]")
+    return _save_postgres_dataset("tarieven-heffingen", normalized)
 
 
 def upsert_tarieven_heffingen_row(record: dict[str, Any]) -> bool:
@@ -508,7 +499,7 @@ def load_kostprijsproductactiveringen() -> list[dict[str, Any]]:
     if isinstance(postgres_payload, list):
         data = postgres_payload
     else:
-        data = _load_json_value(KOSTPRIJSPRODUCTACTIVERINGEN_FILE, [])
+        data = []
     if not isinstance(data, list):
         return []
     return [
@@ -611,11 +602,7 @@ def save_kostprijsproductactiveringen(
 
     if _save_postgres_dataset("kostprijsproductactiveringen", normalized):
         return True
-    return _save_json_value(
-        KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
-        normalized,
-        "[]",
-    )
+    return False
 
 
 def _resolve_kostprijsproduct_refs(
@@ -1958,9 +1945,7 @@ def save_basisproducten(data: list[dict[str, Any]]) -> bool:
         ]
         cleaned["totale_verpakkingskosten"] = bereken_basisproduct_totaal(cleaned["onderdelen"])
         normalized.append(cleaned)
-    if _save_postgres_dataset("base-product-masters", normalized):
-        return True
-    return _save_json_value(BASISPRODUCTEN_FILE, normalized, "[]")
+    return _save_postgres_dataset("base-product-masters", normalized)
 
 
 def bereken_basisproduct_totaal(onderdelen: list[dict[str, Any]]) -> float:
@@ -2220,9 +2205,7 @@ def save_samengestelde_producten(data: list[dict[str, Any]]) -> bool:
             cleaned["basisproducten"]
         )
         normalized.append(cleaned)
-    if _save_postgres_dataset("composite-product-masters", normalized):
-        return True
-    return _save_json_value(SAMENGESTELDE_PRODUCTEN_FILE, normalized, "[]")
+    return _save_postgres_dataset("composite-product-masters", normalized)
 
 
 def bereken_samengesteld_product_totaal_inhoud(
@@ -2964,13 +2947,14 @@ def build_samengestelde_producten_legacy_projection() -> list[dict[str, Any]]:
 
 
 def load_json_data() -> dict[str, Any]:
-    """Laadt productiegegevens veilig in."""
-    return _load_json_value(PRODUCTIE_FILE, {})
+    """Legacy name: loads production data from Postgres (JSON disk fallback removed)."""
+    payload = _load_postgres_dataset("productie")
+    return payload if isinstance(payload, dict) else {}
 
 
 def save_json_data(data: dict[str, Any]) -> bool:
-    """Slaat productiegegevens veilig op."""
-    return _save_json_value(PRODUCTIE_FILE, data, "{}")
+    """Legacy name: saves production data to Postgres (JSON disk fallback removed)."""
+    return _save_postgres_dataset("productie", data if isinstance(data, dict) else {})
 
 
 def load_productiegegevens() -> dict[str, Any]:
@@ -3070,13 +3054,14 @@ def get_batchgrootte_eigen_productie_l(year: int | str) -> float | None:
 
 
 def load_vaste_kosten_data() -> dict[str, Any]:
-    """Laadt alle opgeslagen vaste kosten veilig in."""
-    return _load_json_value(VASTE_KOSTEN_FILE, {})
+    """Laadt alle opgeslagen vaste kosten uit Postgres (JSON disk fallback removed)."""
+    payload = _load_postgres_dataset("vaste-kosten")
+    return payload if isinstance(payload, dict) else {}
 
 
 def save_vaste_kosten_data(data: dict[str, Any]) -> bool:
-    """Slaat alle vaste kosten veilig op."""
-    return _save_json_value(VASTE_KOSTEN_FILE, data, "{}")
+    """Slaat alle vaste kosten op in Postgres (JSON disk fallback removed)."""
+    return _save_postgres_dataset("vaste-kosten", data if isinstance(data, dict) else {})
 
 
 def get_vaste_kosten_record(year: int | str) -> list[dict[str, Any]]:
@@ -3317,7 +3302,7 @@ def load_bieren() -> list[dict[str, Any]]:
     if isinstance(postgres_payload, list):
         data = _flatten_wrapped_records(postgres_payload)
     else:
-        data = _load_json_value(BIEREN_FILE, [])
+        data = []
     if not isinstance(data, list):
         return []
 
@@ -3364,9 +3349,7 @@ def save_bieren(data: list[dict[str, Any]]) -> bool:
         for bier in data
         if isinstance(bier, dict)
     ]
-    if _save_postgres_dataset("bieren", normalized):
-        return True
-    return _save_json_value(BIEREN_FILE, normalized, "[]")
+    return _save_postgres_dataset("bieren", normalized)
 
 
 def _flatten_wrapped_records(rows: list[Any]) -> list[dict[str, Any]]:
@@ -3931,9 +3914,7 @@ def load_kostprijsversies() -> list[dict[str, Any]]:
     if isinstance(postgres_payload, list):
         data = postgres_payload
     else:
-        data = _load_json_value(KOSTPRIJSVERSIES_FILE, [])
-        if not isinstance(data, list) or not data:
-            data = _load_json_value(BEREKENINGEN_FILE, [])
+        data = []
     if not isinstance(data, list):
         return []
 
@@ -4459,9 +4440,7 @@ def _validate_verkoop_records(records: list[dict[str, Any]]) -> list[dict[str, A
 def _save_verkoop_records(records: list[dict[str, Any]]) -> bool:
     """Slaat gemengde verkooprecords veilig op."""
     normalized = _ensure_complete_verkoop_records(_validate_verkoop_records(records))
-    if _save_postgres_dataset("verkoopprijzen", normalized):
-        return True
-    return _save_json_value(VERKOOPPRIJZEN_FILE, normalized, "[]")
+    return _save_postgres_dataset("verkoopprijzen", normalized)
 
 
 def load_verkoopprijzen() -> list[dict[str, Any]]:
@@ -5370,7 +5349,7 @@ def load_prijsvoorstellen() -> list[dict[str, Any]]:
     if isinstance(postgres_payload, list):
         data = postgres_payload
     else:
-        data = _load_json_value(PRIJSVOORSTELLEN_FILE, [])
+        data = []
     if not isinstance(data, list):
         return []
     normalized = _validate_prijsvoorstel_records(
@@ -5395,9 +5374,7 @@ def save_prijsvoorstellen(data: list[dict[str, Any]]) -> bool:
         ),
         reverse=True,
     )
-    if _save_postgres_dataset("prijsvoorstellen", normalized):
-        return True
-    return _save_json_value(PRIJSVOORSTELLEN_FILE, normalized, "[]")
+    return _save_postgres_dataset("prijsvoorstellen", normalized)
 
 
 def get_prijsvoorstel_by_id(prijsvoorstel_id: str) -> dict[str, Any] | None:
@@ -5631,19 +5608,13 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
     normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
         cleaned_data
     )
-    if _save_postgres_dataset("kostprijsversies", normalized_records):
+    saved = _save_postgres_dataset("kostprijsversies", normalized_records)
+    if saved:
         save_kostprijsproductactiveringen(
             normalized_activations,
             context={"action": "sync_versions"},
         )
-        return True
-    saved_versions = _save_json_value(KOSTPRIJSVERSIES_FILE, normalized_records, "[]")
-    saved_activations = _save_json_value(
-        KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
-        normalized_activations,
-        "[]",
-    )
-    return bool(saved_versions and saved_activations)
+    return bool(saved)
 
 
 def create_empty_berekening() -> dict[str, Any]:
@@ -5947,14 +5918,7 @@ def activate_kostprijsversie(
             context={"action": "activate_version", **(context or {})},
         )
     else:
-        versions_saved = _save_json_value(KOSTPRIJSVERSIES_FILE, final_records, "[]")
-        activations_saved = _save_json_value(
-            KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
-            final_activations,
-            "[]",
-        )
-        if not (versions_saved and activations_saved):
-            return None
+        return None
 
     return next(
         (
@@ -6094,14 +6058,7 @@ def activate_kostprijsversie_products(
             context={"action": "activate_products", **(context or {})},
         )
     else:
-        versions_saved = _save_json_value(KOSTPRIJSVERSIES_FILE, final_records, "[]")
-        activations_saved = _save_json_value(
-            KOSTPRIJSPRODUCTACTIVERINGEN_FILE,
-            final_activations,
-            "[]",
-        )
-        if not (versions_saved and activations_saved):
-            return None
+        return None
 
     return next(
         (
@@ -6274,12 +6231,13 @@ def get_integrale_kostprijs_per_liter_for_bier(
 
 def load_variabele_kosten_data() -> dict[str, Any]:
     """Laadt alle variabele kosten veilig in."""
-    return _load_json_value(VARIABELE_KOSTEN_FILE, {})
+    payload = _load_postgres_dataset("variabele-kosten")
+    return payload if isinstance(payload, dict) else {}
 
 
 def save_variabele_kosten_data(data: dict[str, Any]) -> bool:
     """Slaat alle variabele kosten veilig op."""
-    return _save_json_value(VARIABELE_KOSTEN_FILE, data, "{}")
+    return _save_postgres_dataset("variabele-kosten", data if isinstance(data, dict) else {})
 
 
 def get_variabele_kosten_record(

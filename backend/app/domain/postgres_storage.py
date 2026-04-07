@@ -26,7 +26,8 @@ def reset_request_connection(token: Any) -> None:
 
 
 def storage_provider() -> str:
-    return os.getenv("CALCULATIETOOL_BACKEND_STORAGE_PROVIDER", "json").strip().lower()
+    # Phase B: runtime storage is Postgres-only. JSON storage is no longer supported as a runtime provider.
+    return os.getenv("CALCULATIETOOL_BACKEND_STORAGE_PROVIDER", "postgres").strip().lower()
 
 
 def uses_postgres() -> bool:

@@ -4,7 +4,8 @@ from copy import deepcopy
 from typing import Any
 
 from app.domain import dashboard_service
-from app.domain import fixed_costs_storage, legacy_storage, postgres_storage, production_storage
+from app.domain import fixed_costs_storage, postgres_storage, production_storage
+from app.utils import json_seed
 from app.utils.storage import (
     MODEL_A_DATASET_NAMES,
     build_model_a_canonical_datasets,
@@ -247,45 +248,50 @@ def save_dataset(name: str, data: Any) -> bool:
 
 def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
     results: dict[str, bool] = {}
-    canonical_payloads = build_model_a_canonical_datasets()
     for dataset_name in get_dataset_names():
         if dataset_name in READ_ONLY_PROJECTION_DATASETS:
             results[dataset_name] = True
             continue
         if dataset_name == "productie":
-            payload = legacy_storage.load_dataset_from_json(dataset_name)
+            payload = json_seed.load_dataset("productie")
             if not isinstance(payload, dict):
                 payload = {}
             results[dataset_name] = production_storage.save_productie(payload)
             continue
         if dataset_name == "vaste-kosten":
-            payload = legacy_storage.load_dataset_from_json(dataset_name)
+            payload = json_seed.load_dataset("vaste-kosten")
             if not isinstance(payload, dict):
                 payload = {}
             results[dataset_name] = fixed_costs_storage.save_grouped_by_year(payload)
             continue
-        if dataset_name in MODEL_A_DATASET_NAMES:
-            payload = canonical_payloads.get(dataset_name, DATASET_DEFAULTS[dataset_name])
-        elif dataset_name == "packaging-components":
-            payload = load_packaging_component_masters()
+        if dataset_name == "packaging-components":
+            payload = json_seed.load_dataset("verpakkingsonderdelen")
+            results[dataset_name] = save_packaging_component_masters(payload if isinstance(payload, list) else [])
+            continue
         elif dataset_name == "packaging-component-prices":
             payload = load_packaging_component_prices()
         elif dataset_name == "packaging-component-price-versions":
             payload = load_packaging_component_price_versions()
         elif dataset_name == "base-product-masters":
-            payload = load_basisproducten()
+            payload = json_seed.load_dataset("basisproducten")
+            results[dataset_name] = save_basisproducten(payload if isinstance(payload, list) else [])
+            continue
         elif dataset_name == "composite-product-masters":
-            payload = load_samengestelde_producten()
+            payload = json_seed.load_dataset("samengestelde-producten")
+            results[dataset_name] = save_samengestelde_producten(payload if isinstance(payload, list) else [])
+            continue
+        elif dataset_name == "kostprijsproductactiveringen":
+            payload = json_seed.load_dataset("kostprijsproductactiveringen")
+            results[dataset_name] = save_kostprijsproductactiveringen(payload if isinstance(payload, list) else [])
+            continue
         elif dataset_name in {"kostprijsversies", "berekeningen"}:
-            payload = load_kostprijsversies()
-        elif dataset_name == "verpakkingsonderdelen":
-            payload = load_verpakkingsonderdelen()
-        elif dataset_name == "basisproducten":
-            payload = load_basisproducten()
-        elif dataset_name == "samengestelde-producten":
-            payload = load_samengestelde_producten()
+            payload = json_seed.load_dataset("kostprijsversies") if dataset_name == "kostprijsversies" else json_seed.load_dataset("berekeningen")
         else:
-            payload = legacy_storage.load_dataset_from_json(dataset_name)
+            payload = (
+                json_seed.load_dataset(dataset_name)
+                if json_seed.has_dataset(dataset_name)
+                else deepcopy(DATASET_DEFAULTS[dataset_name])
+            )
         results[dataset_name] = postgres_storage.save_dataset(
             dataset_name,
             payload,
