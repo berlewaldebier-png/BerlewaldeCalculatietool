@@ -48,7 +48,10 @@ def get_tarieven_heffingen() -> list[dict]:
 @router.put("/tarieven-heffingen")
 def put_tarieven_heffingen(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("tarieven-heffingen", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("tarieven-heffingen", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/verpakkingsonderdelen")
@@ -59,7 +62,10 @@ def get_verpakkingsonderdelen() -> list[dict]:
 @router.put("/verpakkingsonderdelen")
 def put_verpakkingsonderdelen(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("verpakkingsonderdelen", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("verpakkingsonderdelen", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/basisproducten")
@@ -70,7 +76,10 @@ def get_basisproducten() -> list[dict]:
 @router.put("/basisproducten")
 def put_basisproducten(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("basisproducten", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("basisproducten", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/samengestelde-producten")
@@ -81,7 +90,10 @@ def get_samengestelde_producten() -> list[dict]:
 @router.put("/samengestelde-producten")
 def put_samengestelde_producten(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("samengestelde-producten", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("samengestelde-producten", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/bieren")
@@ -92,7 +104,10 @@ def get_bieren() -> list[dict]:
 @router.put("/bieren")
 def put_bieren(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("bieren", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("bieren", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/berekeningen")
@@ -103,7 +118,10 @@ def get_berekeningen() -> list[dict]:
 @router.put("/berekeningen")
 def put_berekeningen(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("berekeningen", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("berekeningen", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/kostprijsversies")
@@ -114,7 +132,10 @@ def get_kostprijsversies() -> list[dict]:
 @router.put("/kostprijsversies")
 def put_kostprijsversies(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("kostprijsversies", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("kostprijsversies", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/kostprijsversies/{version_id}/activate")
@@ -160,7 +181,10 @@ def get_prijsvoorstellen() -> list[dict]:
 
 @router.put("/prijsvoorstellen")
 def put_prijsvoorstellen(data: list[dict[str, Any]]) -> dict[str, bool]:
-    return {"saved": dataset_store.save_dataset("prijsvoorstellen", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("prijsvoorstellen", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/verkoopprijzen")
@@ -171,7 +195,10 @@ def get_verkoopprijzen() -> list[dict]:
 @router.put("/verkoopprijzen")
 def put_verkoopprijzen(data: list[dict[str, Any]]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("verkoopprijzen", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("verkoopprijzen", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/variabele-kosten")
@@ -182,7 +209,10 @@ def get_variabele_kosten() -> dict:
 @router.put("/variabele-kosten")
 def put_variabele_kosten(data: dict[str, Any]) -> dict[str, bool]:
     _: dict = Depends(require_admin)
-    return {"saved": dataset_store.save_dataset("variabele-kosten", data)}
+    try:
+        return {"saved": dataset_store.save_dataset("variabele-kosten", data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/dataset/{name}")
@@ -190,7 +220,10 @@ def put_dataset(name: str, data: Any = Body(...)) -> dict[str, bool]:
     _: dict = Depends(require_admin)
     if name not in dataset_store.get_dataset_names():
         raise HTTPException(status_code=404, detail="Unknown dataset")
-    return {"saved": dataset_store.save_dataset(name, data)}
+    try:
+        return {"saved": dataset_store.save_dataset(name, data)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/dataset/{name}")

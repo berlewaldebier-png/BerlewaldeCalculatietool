@@ -88,6 +88,71 @@ READ_ONLY_PROJECTION_DATASETS = {
 }
 
 
+def _reject_wrapped_payload(data: Any, *, dataset_name: str) -> None:
+    """Reject legacy `{Count, value}` wrappers.
+
+    Phase C requires fail-hard writes: no implicit unwrapping or read-side repairs.
+    """
+    if not isinstance(data, dict):
+        return
+    keys = set(data.keys())
+    if keys.issubset({"Count", "value"}):
+        raise ValueError(
+            f"Ongeldig payload voor '{dataset_name}': legacy wrapper {{Count,value}} is niet toegestaan."
+        )
+
+
+def _require_type(dataset_name: str, data: Any, expected_type: type) -> None:
+    if not isinstance(data, expected_type):
+        raise ValueError(f"Ongeldig payload voor '{dataset_name}': verwacht {expected_type.__name__}.")
+
+
+def validate_dataset_write(name: str, data: Any) -> None:
+    _reject_wrapped_payload(data, dataset_name=name)
+
+    dict_datasets = {"productie", "vaste-kosten", "variabele-kosten", "channels"}
+    list_datasets = {
+        "tarieven-heffingen",
+        "verpakkingsonderdelen",
+        "basisproducten",
+        "samengestelde-producten",
+        "bieren",
+        "berekeningen",
+        "kostprijsversies",
+        "kostprijsproductactiveringen",
+        "prijsvoorstellen",
+        "verkoopprijzen",
+        "packaging-components",
+        "packaging-component-prices",
+        "packaging-component-price-versions",
+        "base-product-masters",
+        "composite-product-masters",
+        "products",
+        "product-years",
+        "product-year-components",
+        "product-components",
+        "sales-strategy-years",
+        "sales-strategy-products",
+        "cost-calcs",
+        "cost-calc-inputs",
+        "cost-calc-results",
+        "cost-calc-lines",
+        "quotes",
+        "quote-lines",
+        "quote-staffels",
+        *MODEL_A_DATASET_NAMES,
+    }
+
+    if name in dict_datasets:
+        _require_type(name, data, dict)
+        return
+    if name in list_datasets:
+        _require_type(name, data, list)
+        return
+
+    raise ValueError(f"Onbekende dataset voor write: {name}")
+
+
 def _normalize_channels_dataset(data: Any) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return deepcopy(DATASET_DEFAULTS["channels"])
@@ -172,6 +237,7 @@ def load_dataset(name: str) -> Any:
 
 def save_dataset(name: str, data: Any) -> bool:
     require_postgres()
+    validate_dataset_write(name, data)
     if name == "productie" and isinstance(data, dict):
         return production_storage.save_productie(data)
     if name == "vaste-kosten" and isinstance(data, dict):
@@ -203,6 +269,7 @@ def save_dataset(name: str, data: Any) -> bool:
         payload = [row for row in data if isinstance(row, dict)]
         return save_samengestelde_producten(payload)
     if name in MODEL_A_DATASET_NAMES:
+        # Model-A canonical datasets are derived; writes should not accept arbitrary payloads.
         canonical_payload = build_model_a_canonical_datasets().get(name, DATASET_DEFAULTS[name])
         return postgres_storage.save_dataset(name, canonical_payload, overwrite=True)
     if name in {"kostprijsversies", "berekeningen"} and isinstance(data, list):
@@ -240,6 +307,7 @@ def save_dataset(name: str, data: Any) -> bool:
             ]
         )
         return postgres_storage.save_dataset(name, payload)
+    # Default path: store payload as-is after shape validation.
     saved = postgres_storage.save_dataset(name, data)
     if saved and name in {"kostprijsversies", "berekeningen", "prijsvoorstellen"}:
         dashboard_service.invalidate_dashboard_summary_cache()
