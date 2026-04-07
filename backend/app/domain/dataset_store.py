@@ -31,6 +31,7 @@ from app.utils.storage import (
     duplicate_vaste_kosten_to_year,
     duplicate_tarieven_heffingen_to_year,
     duplicate_verpakkingsonderdelen_to_year,
+    duplicate_packaging_component_prices_to_year,
     duplicate_verkoopstrategie_verpakkingen_to_year,
     save_berekeningen,
     save_basisproducten,
@@ -619,8 +620,16 @@ def prepare_new_year(
             if dry_run:
                 report["results"]["verpakkingsonderdelen"] = {"would_copy": True}
             else:
-                copied = duplicate_verpakkingsonderdelen_to_year(source_year, target_year, overwrite=overwrite_existing)
-                report["results"]["verpakkingsonderdelen"] = {"copied_rows": int(copied)}
+                legacy_copied = duplicate_verpakkingsonderdelen_to_year(
+                    source_year, target_year, overwrite=overwrite_existing
+                )
+                prices_copied = duplicate_packaging_component_prices_to_year(
+                    source_year, target_year, overwrite=overwrite_existing
+                )
+                report["results"]["verpakkingsonderdelen"] = {
+                    "copied_rows": int(legacy_copied),
+                    "copied_packaging_component_prices": int(prices_copied),
+                }
 
         if copy_verkoopstrategie:
             if dry_run:
@@ -685,6 +694,8 @@ def prepare_new_year(
                 "vaste-kosten": load_dataset("vaste-kosten"),
                 "tarieven-heffingen": load_dataset("tarieven-heffingen"),
                 "verpakkingsonderdelen": load_dataset("verpakkingsonderdelen"),
+                "packaging-components": load_dataset("packaging-components"),
+                "packaging-component-prices": load_dataset("packaging-component-prices"),
                 "verkoopprijzen": load_dataset("verkoopprijzen"),
                 "berekeningen": load_dataset("berekeningen"),
             }

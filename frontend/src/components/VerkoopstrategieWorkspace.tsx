@@ -29,7 +29,18 @@ type BeerViewRow = {
   productFactors: Record<string, number>; factorOverrides: Record<string, number | "">; activeFactors: Record<string, number>; sellOutPrices: Record<string, number>;
   isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
 };
-type Props = { endpoint: string; verkoopprijzen: GenericRecord[]; basisproducten: GenericRecord[]; samengesteldeProducten: GenericRecord[]; bieren: GenericRecord[]; berekeningen: GenericRecord[]; channels: GenericRecord[]; kostprijsproductactiveringen: GenericRecord[] };
+type Props = {
+  endpoint: string;
+  verkoopprijzen: GenericRecord[];
+  basisproducten: GenericRecord[];
+  samengesteldeProducten: GenericRecord[];
+  bieren: GenericRecord[];
+  berekeningen: GenericRecord[];
+  channels: GenericRecord[];
+  kostprijsproductactiveringen: GenericRecord[];
+  initialYear?: number;
+  lockYear?: boolean;
+};
 
 const DEFAULT_CHANNELS: ChannelRow[] = [
   { id: "horeca", code: "horeca", naam: "Horeca", actief: true, volgorde: 10, default_marge_pct: 50, default_factor: 3.5 },
@@ -120,7 +131,18 @@ const stripInternal = (row: StrategyRow) => {
   return { ...rest, kanaalmarges: sell_in_margins, sell_in_margins, sell_out_factors, adviesfactoren: sell_out_factors, sell_out_advice_prices, adviesprijzen: sell_out_advice_prices };
 };
 
-export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisproducten, samengesteldeProducten, bieren, berekeningen, channels, kostprijsproductactiveringen }: Props) {
+export function VerkoopstrategieWorkspace({
+  endpoint,
+  verkoopprijzen,
+  basisproducten,
+  samengesteldeProducten,
+  bieren,
+  berekeningen,
+  channels,
+  kostprijsproductactiveringen,
+  initialYear,
+  lockYear
+}: Props) {
   const normalizedChannels = useMemo(() => normalizeChannels(channels), [channels]);
   const activeChannels = useMemo(() => normalizedChannels.filter((channel) => channel.actief), [normalizedChannels]);
   const channelCodes = useMemo(() => normalizedChannels.map((channel) => channel.code), [normalizedChannels]);
@@ -169,13 +191,33 @@ export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisprodu
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<"kanalen" | "sell-in" | "sell-out" | "bieren">("kanalen");
-  const [selectedYear, setSelectedYear] = useState<number>(Math.max(new Date().getFullYear(), ...verkoopprijzen.map((row) => Number(row.jaar ?? 0)), ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0))).filter((year) => Number.isFinite(year))));
+  const computedDefaultYear = Math.max(
+    new Date().getFullYear(),
+    ...verkoopprijzen.map((row) => Number(row.jaar ?? 0)),
+    ...berekeningen
+      .map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
+      .filter((year) => Number.isFinite(year))
+  );
+  const resolvedInitialYear =
+    typeof initialYear === "number" && Number.isFinite(initialYear) ? initialYear : computedDefaultYear;
+  const [selectedYear, setSelectedYear] = useState<number>(resolvedInitialYear);
+  const effectiveSelectedYear = lockYear ? resolvedInitialYear : selectedYear;
   const basisById = useMemo(() => new Map(basisproducten.map((row) => [String(row.id ?? ""), row])), [basisproducten]);
   const samengesteldById = useMemo(() => new Map(samengesteldeProducten.map((row) => [String(row.id ?? ""), row])), [samengesteldeProducten]);
-  const actieveProductActiveringen = useMemo(() => (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).filter((row) => Number(row.jaar ?? 0) === selectedYear), [kostprijsproductactiveringen, selectedYear]);
+  const actieveProductActiveringen = useMemo(
+    () =>
+      (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).filter(
+        (row) => Number(row.jaar ?? 0) === effectiveSelectedYear
+      ),
+    [kostprijsproductactiveringen, effectiveSelectedYear]
+  );
 
   const productOverrideRows = useMemo<ProductViewRow[]>(() => {
-    const relevantRows = rows.filter((row) => (row.jaar === 0 || row.jaar === selectedYear) && row.record_type === "verkoopstrategie_verpakking");
+    const relevantRows = rows.filter(
+      (row) =>
+        (row.jaar === 0 || row.jaar === effectiveSelectedYear) &&
+        row.record_type === "verkoopstrategie_verpakking"
+    );
     const byProduct = new Map<string, StrategyRow>();
     relevantRows.forEach((row) => {
       const current = byProduct.get(row.product_id);
@@ -206,15 +248,22 @@ export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisprodu
         followsProductLabel: parentComposite?.label ?? ""
       };
     });
-  }, [basisProductParentMap, channelCodes, channelDefaults, productSources, rows, selectedYear]);
+  }, [basisProductParentMap, channelCodes, channelDefaults, productSources, rows, effectiveSelectedYear]);
 
   const sellRows = useMemo<BeerViewRow[]>(() => {
     const bierById = new Map(bieren.map((bier) => [String(bier.id ?? ""), bier]));
     const productById = new Map(productOverrideRows.map((row) => [row.productId, row]));
-    const beerOverrides = new Map(rows.filter((row) => row.jaar === selectedYear && row.record_type === "verkoopstrategie_product").map((row) => [`${row.bier_id}::${row.product_id}`, row]));
+    const beerOverrides = new Map(
+      rows
+        .filter((row) => row.jaar === effectiveSelectedYear && row.record_type === "verkoopstrategie_product")
+        .map((row) => [`${row.bier_id}::${row.product_id}`, row])
+    );
     const definitiveVersions = berekeningen.filter((record) => {
       const basisgegevens = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? (record.basisgegevens as GenericRecord) : {};
-      return String(record.status ?? "").toLowerCase() === "definitief" && Number(record.jaar ?? basisgegevens.jaar ?? 0) === selectedYear;
+      return (
+        String(record.status ?? "").toLowerCase() === "definitief" &&
+        Number(record.jaar ?? basisgegevens.jaar ?? 0) === effectiveSelectedYear
+      );
     });
     const versionById = new Map(definitiveVersions.map((record) => [String(record.id ?? ""), record]));
     const activationByBeerProduct = new Map<string, GenericRecord>();
@@ -309,26 +358,97 @@ export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisprodu
       });
     }
     return out.sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
-  }, [actieveProductActiveringen, basisById, bieren, berekeningen, channelCodes, channelDefaults, productOverrideRows, rows, selectedYear, samengesteldById]);
+  }, [
+    actieveProductActiveringen,
+    basisById,
+    bieren,
+    berekeningen,
+    channelCodes,
+    channelDefaults,
+    productOverrideRows,
+    rows,
+    effectiveSelectedYear,
+    samengesteldById
+  ]);
 
   function upsertProduct(productId: string, updater: (row: StrategyRow | null) => StrategyRow | null) {
     setRows((current) => {
-      const existing = current.find((row) => row.jaar === selectedYear && row.record_type === "verkoopstrategie_verpakking" && row.product_id === productId) ?? null;
+      const existing =
+        current.find(
+          (row) =>
+            row.jaar === effectiveSelectedYear &&
+            row.record_type === "verkoopstrategie_verpakking" &&
+            row.product_id === productId
+        ) ?? null;
       const source = productSources.find((item) => item.id === productId);
       const next = updater(existing ?? {
-        id: "", record_type: "verkoopstrategie_verpakking", jaar: selectedYear, bier_id: "", biernaam: "", product_id: productId, product_type: source?.type ?? "", verpakking: source?.label ?? "", strategie_type: "override", kostprijs: 0, sell_in_margins: {}, sell_out_factors: {}, sell_out_advice_prices: {}, _uiId: createUiId()
+        id: "",
+        record_type: "verkoopstrategie_verpakking",
+        jaar: effectiveSelectedYear,
+        bier_id: "",
+        biernaam: "",
+        product_id: productId,
+        product_type: source?.type ?? "",
+        verpakking: source?.label ?? "",
+        strategie_type: "override",
+        kostprijs: 0,
+        sell_in_margins: {},
+        sell_out_factors: {},
+        sell_out_advice_prices: {},
+        _uiId: createUiId()
       });
-      return [...current.filter((row) => !(row.jaar === selectedYear && row.record_type === "verkoopstrategie_verpakking" && row.product_id === productId)), ...(next ? [next] : [])];
+      return [
+        ...current.filter(
+          (row) =>
+            !(
+              row.jaar === effectiveSelectedYear &&
+              row.record_type === "verkoopstrategie_verpakking" &&
+              row.product_id === productId
+            )
+        ),
+        ...(next ? [next] : [])
+      ];
     });
   }
 
   function upsertBeer(viewRow: BeerViewRow, updater: (row: StrategyRow | null) => StrategyRow | null) {
     setRows((current) => {
-      const existing = current.find((row) => row.jaar === selectedYear && row.record_type === "verkoopstrategie_product" && row.bier_id === viewRow.bierId && row.product_id === viewRow.productId) ?? null;
+      const existing =
+        current.find(
+          (row) =>
+            row.jaar === effectiveSelectedYear &&
+            row.record_type === "verkoopstrategie_product" &&
+            row.bier_id === viewRow.bierId &&
+            row.product_id === viewRow.productId
+        ) ?? null;
       const next = updater(existing ?? {
-        id: "", record_type: "verkoopstrategie_product", jaar: selectedYear, bier_id: viewRow.bierId, biernaam: viewRow.biernaam, product_id: viewRow.productId, product_type: viewRow.productType, verpakking: viewRow.product, strategie_type: "override", kostprijs: viewRow.kostprijs, sell_in_margins: {}, sell_out_factors: {}, sell_out_advice_prices: {}, _uiId: createUiId()
+        id: "",
+        record_type: "verkoopstrategie_product",
+        jaar: effectiveSelectedYear,
+        bier_id: viewRow.bierId,
+        biernaam: viewRow.biernaam,
+        product_id: viewRow.productId,
+        product_type: viewRow.productType,
+        verpakking: viewRow.product,
+        strategie_type: "override",
+        kostprijs: viewRow.kostprijs,
+        sell_in_margins: {},
+        sell_out_factors: {},
+        sell_out_advice_prices: {},
+        _uiId: createUiId()
       });
-      return [...current.filter((row) => !(row.jaar === selectedYear && row.record_type === "verkoopstrategie_product" && row.bier_id === viewRow.bierId && row.product_id === viewRow.productId)), ...(next ? [next] : [])];
+      return [
+        ...current.filter(
+          (row) =>
+            !(
+              row.jaar === effectiveSelectedYear &&
+              row.record_type === "verkoopstrategie_product" &&
+              row.bier_id === viewRow.bierId &&
+              row.product_id === viewRow.productId
+            )
+        ),
+        ...(next ? [next] : [])
+      ];
     });
   }
 
@@ -427,8 +547,16 @@ export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisprodu
             <div className="editor-actions-group">
               <label className="nested-field">
                 <span>Jaar</span>
-                <select className="dataset-input" value={String(selectedYear)} onChange={(event) => setSelectedYear(Number(event.target.value))}>
-                  {Array.from(new Set([selectedYear, ...rows.map((row) => row.jaar), ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))]))
+                <select
+                  className="dataset-input"
+                  value={String(effectiveSelectedYear)}
+                  disabled={Boolean(lockYear)}
+                  onChange={(event) => {
+                    if (lockYear) return;
+                    setSelectedYear(Number(event.target.value));
+                  }}
+                >
+                  {Array.from(new Set([effectiveSelectedYear, ...rows.map((row) => row.jaar), ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))]))
                     .filter((year) => Number.isFinite(year) && year > 0)
                     .sort((a, b) => b - a)
                     .map((year) => <option key={year} value={year}>{year}</option>)}
@@ -488,7 +616,7 @@ export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisprodu
                     </thead>
                     <tbody>
                       {sellRows.length === 0 ? (
-                        <tr><td className="dataset-empty" colSpan={3 + activeChannels.length}>Nog geen actieve kostprijsversies gevonden voor {selectedYear}.</td></tr>
+                        <tr><td className="dataset-empty" colSpan={3 + activeChannels.length}>Nog geen actieve kostprijsversies gevonden voor {effectiveSelectedYear}.</td></tr>
                       ) : sellRows.map((row) => (
                         <tr key={row.id}>
                           <td>{row.biernaam}</td>
@@ -574,7 +702,7 @@ export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisprodu
                     </thead>
                     <tbody>
                       {sellRows.length === 0 ? (
-                        <tr><td className="dataset-empty" colSpan={2 + activeChannels.length}>Nog geen actieve kostprijsversies gevonden voor {selectedYear}.</td></tr>
+                        <tr><td className="dataset-empty" colSpan={2 + activeChannels.length}>Nog geen actieve kostprijsversies gevonden voor {effectiveSelectedYear}.</td></tr>
                       ) : sellRows.map((row) => (
                         <tr key={`${row.id}-sellout`}>
                           <td>{row.biernaam}</td>
@@ -621,7 +749,7 @@ export function VerkoopstrategieWorkspace({ endpoint, verkoopprijzen, basisprodu
                 </thead>
                 <tbody>
                   {sellRows.length === 0 ? (
-                    <tr><td className="dataset-empty" colSpan={3 + activeChannels.length * 2}>Nog geen bieren gevonden voor {selectedYear}.</td></tr>
+                    <tr><td className="dataset-empty" colSpan={3 + activeChannels.length * 2}>Nog geen bieren gevonden voor {effectiveSelectedYear}.</td></tr>
                   ) : sellRows.map((row) => (
                     <tr key={`${row.bierId}-${row.productId}`}>
                       <td>{row.biernaam}</td><td>{row.product}</td><td>{money(row.kostprijs)}</td>

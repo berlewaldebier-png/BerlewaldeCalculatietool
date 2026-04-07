@@ -68,9 +68,18 @@ function chooseDefaultYear(yearOptions: number[]) {
 type VasteKostenClientProps = {
   vasteKosten: Record<string, unknown>;
   productie: Record<string, unknown>;
+  initialSelectedYear?: number;
+  lockYear?: boolean;
+  titleSuffix?: string;
 };
 
-export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientProps) {
+export function VasteKostenClient({
+  vasteKosten,
+  productie,
+  initialSelectedYear,
+  lockYear,
+  titleSuffix
+}: VasteKostenClientProps) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement | null>(null);
   const yearOptions = useMemo(() => deriveYearOptions(productie), [productie]);
@@ -111,7 +120,11 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
     return result;
   }, [vasteKosten]);
 
-  const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
+  const resolvedInitialYear =
+    typeof initialSelectedYear === "number" && Number.isFinite(initialSelectedYear)
+      ? initialSelectedYear
+      : defaultYear;
+  const [selectedYear, setSelectedYear] = useState<number>(resolvedInitialYear);
   const [rowsByYear, setRowsByYear] = useState<Record<string, InternalRow[]>>(normalizedByYear);
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -131,9 +144,11 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
     });
   }, [rowsByYear, yearOptions]);
 
+  const effectiveSelectedYear = lockYear ? resolvedInitialYear : selectedYear;
+
   const canEdit = yearOptions.length > 0;
 
-  const selectedYearKey = String(selectedYear || "");
+  const selectedYearKey = String(effectiveSelectedYear || "");
   const selectedRows = rowsByYear[selectedYearKey] ?? [];
 
   function handleSelectYear(year: number) {
@@ -162,7 +177,7 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
   }
 
   function addRow() {
-    if (!selectedYear || !Number.isFinite(selectedYear)) return;
+    if (!effectiveSelectedYear || !Number.isFinite(effectiveSelectedYear)) return;
     setRowsByYear((current) => {
       const next = { ...current };
       next[selectedYearKey] = [
@@ -189,8 +204,8 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
   }
 
   function copyFromPreviousYear() {
-    if (!selectedYear || !Number.isFinite(selectedYear)) return;
-    const sourceKey = String(selectedYear - 1);
+    if (!effectiveSelectedYear || !Number.isFinite(effectiveSelectedYear)) return;
+    const sourceKey = String(effectiveSelectedYear - 1);
     const source = rowsByYear[sourceKey] ?? [];
     if (source.length === 0) return;
     setRowsByYear((current) => {
@@ -286,7 +301,14 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
                 </tr>
               ) : null}
               {totalsByYear.map((row) => (
-                <tr key={row.year} style={{ cursor: "pointer" }} onClick={() => handleSelectYear(row.year)}>
+                <tr
+                  key={row.year}
+                  style={{ cursor: lockYear ? "default" : "pointer" }}
+                  onClick={() => {
+                    if (lockYear) return;
+                    handleSelectYear(row.year);
+                  }}
+                >
                   <td>
                     <strong>{row.year}</strong>
                   </td>
@@ -312,7 +334,9 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
       {canEdit ? (
         <section className="module-card" ref={editorRef}>
           <div className="module-card-header">
-            <div className="module-card-title">Vaste kosten {selectedYear || ""}</div>
+            <div className="module-card-title">
+              Vaste kosten {titleSuffix ?? String(effectiveSelectedYear || "")}
+            </div>
             <div className="module-card-text">Bewerk de vaste kostenregels voor het geselecteerde jaar.</div>
           </div>
 
@@ -323,16 +347,19 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
             </div>
           </div>
 
-          {selectedYear && selectedRows.length === 0 ? (
+          {effectiveSelectedYear && selectedRows.length === 0 ? (
             <div className="editor-toolbar" style={{ paddingTop: 0 }}>
               <div className="editor-toolbar-meta">
                 <button
                   type="button"
                   className="editor-button editor-button-secondary"
                   onClick={copyFromPreviousYear}
-                  disabled={selectedYear <= 0 || (rowsByYear[String(selectedYear - 1)] ?? []).length === 0}
+                  disabled={
+                    effectiveSelectedYear <= 0 ||
+                    (rowsByYear[String(effectiveSelectedYear - 1)] ?? []).length === 0
+                  }
                 >
-                  Kosten overnemen uit jaar {selectedYear - 1}
+                  Kosten overnemen uit jaar {effectiveSelectedYear - 1}
                 </button>
               </div>
             </div>
@@ -350,10 +377,10 @@ export function VasteKostenClient({ vasteKosten, productie }: VasteKostenClientP
                 </tr>
               </thead>
               <tbody>
-                {selectedYear && selectedRows.length === 0 ? (
+                {effectiveSelectedYear && selectedRows.length === 0 ? (
                   <tr>
                     <td className="dataset-empty" colSpan={5}>
-                      Nog geen regels voor {selectedYear}. Voeg een rij toe of neem gegevens over.
+                      Nog geen regels voor {effectiveSelectedYear}. Voeg een rij toe of neem gegevens over.
                     </td>
                   </tr>
                 ) : null}

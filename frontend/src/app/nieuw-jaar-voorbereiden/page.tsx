@@ -13,7 +13,8 @@ export default async function NieuwJaarVoorbereidenPage() {
       "productie",
       "vaste-kosten",
       "tarieven-heffingen",
-      "verpakkingsonderdelen",
+      "packaging-components",
+      "packaging-component-prices",
       "verkoopprijzen"
     ],
     true,
@@ -28,7 +29,8 @@ export default async function NieuwJaarVoorbereidenPage() {
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
   const tarieven = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
-  const verpakkingsonderdelen = (bootstrap.datasets["verpakkingsonderdelen"] as any[]) ?? [];
+  const packagingComponents = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
+  const packagingComponentPrices = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
 
   return (
@@ -47,7 +49,8 @@ export default async function NieuwJaarVoorbereidenPage() {
         initialProductie={productie}
         initialVasteKosten={vasteKosten}
         initialTarieven={tarieven}
-        initialVerpakkingsonderdelen={verpakkingsonderdelen}
+        initialPackagingComponents={packagingComponents}
+        initialPackagingComponentPrices={packagingComponentPrices}
         initialVerkoopprijzen={verkoopprijzen}
       />
     </PageShell>
