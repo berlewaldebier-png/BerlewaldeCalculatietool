@@ -5606,6 +5606,38 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
     # With Postgres-first storage and explicit delete actions in the UI, dropping records on save
     # causes surprising data loss (e.g. new concept versions disappearing after Save).
     cleaned_data = [record for record in data if isinstance(record, dict)]
+
+    # Prevent implicit destructive deletes: hard delete is only allowed for concept records
+    # that are not referenced anywhere. Definitive/active versions must be deactivated instead.
+    incoming_ids = {
+        str(record.get("id", "") or "").strip()
+        for record in cleaned_data
+        if isinstance(record, dict) and str(record.get("id", "") or "").strip()
+    }
+    existing_records = load_kostprijsversies()
+    existing_by_id = {
+        str(record.get("id", "") or "").strip(): normalize_berekening_record(record)
+        for record in existing_records
+        if isinstance(record, dict) and str(record.get("id", "") or "").strip()
+    }
+    removed_ids = set(existing_by_id.keys()) - incoming_ids
+    if removed_ids:
+        referenced_ids = _collect_referenced_kostprijsversie_ids()
+        for version_id in removed_ids:
+            existing = existing_by_id.get(version_id)
+            if not existing:
+                continue
+            status = str(existing.get("status", "") or "").strip().lower()
+            if status == "definitief":
+                raise ValueError(
+                    "Je kunt geen definitieve kostprijsversie verwijderen. "
+                    "Deactiveer eerst of activeer een andere versie."
+                )
+            if version_id in referenced_ids:
+                raise ValueError(
+                    "Je kunt deze kostprijsversie niet verwijderen omdat hij nog gebruikt wordt "
+                    "(bijv. actieve productkostprijzen of prijsvoorstellen)."
+                )
     normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
         cleaned_data
     )
@@ -5616,6 +5648,40 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
             context={"action": "sync_versions"},
         )
     return bool(saved)
+
+
+def _collect_referenced_kostprijsversie_ids() -> set[str]:
+    referenced: set[str] = set()
+    for activation in load_kostprijsproductactiveringen():
+        if not isinstance(activation, dict):
+            continue
+        version_id = str(activation.get("kostprijsversie_id", "") or "").strip()
+        if version_id:
+            referenced.add(version_id)
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"kostprijsversie_id", "cost_version_id"}:
+                    child_id = str(child or "").strip()
+                    if child_id:
+                        referenced.add(child_id)
+                elif key == "kostprijsversie_ids" and isinstance(child, list):
+                    for item in child:
+                        item_id = str(item or "").strip()
+                        if item_id:
+                            referenced.add(item_id)
+                else:
+                    walk(child)
+            return
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    for voorstel in load_prijsvoorstellen():
+        walk(voorstel)
+
+    return referenced
 
 
 def create_empty_berekening() -> dict[str, Any]:

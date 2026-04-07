@@ -1158,7 +1158,14 @@ export function BerekeningenWizard({
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
-        throw new Error("Verwijderen mislukt");
+        let detail = "";
+        try {
+          const body = (await response.json()) as { detail?: string };
+          detail = typeof body?.detail === "string" ? body.detail : "";
+        } catch {
+          detail = "";
+        }
+        throw new Error(detail || "Verwijderen mislukt");
       }
       rowsRef.current = payload;
       setRows(payload);
@@ -1166,8 +1173,9 @@ export function BerekeningenWizard({
       setStatus("Berekening verwijderd.");
       setStatusTone("success");
       onBackToLanding?.();
-    } catch {
-      setStatus("Verwijderen mislukt.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setStatus(message || "Verwijderen mislukt.");
       setStatusTone("error");
     } finally {
       setIsSaving(false);

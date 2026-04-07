@@ -182,12 +182,67 @@ class KostprijsVersioningTests(unittest.TestCase):
         meaningful = _sample_version("v-meaningful")
         placeholder = storage.create_empty_berekening()
 
-        with patch("utils.storage._save_postgres_dataset", side_effect=fake_save):
+        with patch("utils.storage._save_postgres_dataset", side_effect=fake_save), patch(
+            "utils.storage._load_postgres_dataset", return_value=[]
+        ), patch("utils.storage.load_kostprijsproductactiveringen", return_value=[]), patch(
+            "utils.storage.load_prijsvoorstellen", return_value=[]
+        ):
             saved = storage.save_kostprijsversies([placeholder, meaningful])
 
         self.assertTrue(saved)
-        self.assertEqual(len(payloads["kostprijsversies"]), 1)
-        self.assertEqual(payloads["kostprijsversies"][0]["id"], meaningful["id"])
+        self.assertEqual(len(payloads["kostprijsversies"]), 2)
+        self.assertEqual(
+            {row["id"] for row in payloads["kostprijsversies"]},
+            {placeholder["id"], meaningful["id"]},
+        )
+
+    def test_save_kostprijsversies_blocks_deleting_definitive_versions(self) -> None:
+        existing = _sample_version("v-def", status="definitief")
+
+        def fake_load(name: str) -> list[dict] | None:
+            if name == "kostprijsversies":
+                return [deepcopy(existing)]
+            return []
+
+        with patch("utils.storage._load_postgres_dataset", side_effect=fake_load), patch(
+            "utils.storage.load_kostprijsproductactiveringen", return_value=[]
+        ), patch("utils.storage.load_prijsvoorstellen", return_value=[]), patch(
+            "utils.storage._save_postgres_dataset",
+            side_effect=AssertionError("Should not write when delete is blocked"),
+        ):
+            with self.assertRaises(ValueError):
+                storage.save_kostprijsversies([])
+
+    def test_save_kostprijsversies_blocks_deleting_referenced_concepts(self) -> None:
+        existing = _sample_version("v-concept", status="concept")
+
+        def fake_load(name: str) -> list[dict] | None:
+            if name == "kostprijsversies":
+                return [deepcopy(existing)]
+            return []
+
+        activations = [
+            storage.normalize_kostprijsproduct_activering_record(
+                {
+                    "id": "act-1",
+                    "bier_id": "bier-1",
+                    "jaar": 2026,
+                    "product_id": "basis-fles-33",
+                    "product_type": "basis",
+                    "kostprijsversie_id": "v-concept",
+                    "effectief_vanaf": "2026-01-01T00:00:00",
+                }
+            )
+        ]
+
+        with patch("utils.storage._load_postgres_dataset", side_effect=fake_load), patch(
+            "utils.storage.load_kostprijsproductactiveringen", return_value=deepcopy(activations)
+        ), patch("utils.storage.load_prijsvoorstellen", return_value=[]), patch(
+            "utils.storage._save_postgres_dataset",
+            side_effect=AssertionError("Should not write when delete is blocked"),
+        ):
+            with self.assertRaises(ValueError):
+                storage.save_kostprijsversies([])
 
     def test_packaging_component_price_versions_migrate_from_projection(self) -> None:
         legacy_rows = [
