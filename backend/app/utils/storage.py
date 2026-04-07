@@ -978,71 +978,6 @@ def _snapshot_known_product_ids() -> tuple[set[str], set[str]]:
     return basis_ids, samengesteld_ids
 
 
-def _build_snapshot_legacy_product_id_map(
-    producten: dict[str, Any] | None,
-) -> dict[str, str]:
-    """
-    Builds a per-record legacy->canonical product_id map based on snapshot rows.
-
-    This allows us to also migrate nested references that only store an id (e.g. factuurregels.eenheid),
-    by learning the mapping from the snapshot that contains both id and label.
-    """
-    source = producten if isinstance(producten, dict) else {}
-    basis_rows = source.get("basisproducten", [])
-    samengesteld_rows = source.get("samengestelde_producten", [])
-    if not isinstance(basis_rows, list):
-        basis_rows = []
-    if not isinstance(samengesteld_rows, list):
-        samengesteld_rows = []
-
-    basis_by_name, samengesteld_by_name = _snapshot_product_resolution_maps()
-    basis_ids, samengesteld_ids = _snapshot_known_product_ids()
-
-    out: dict[str, str] = {}
-
-    def _handle_row(row: dict[str, Any], type_hint: str) -> None:
-        verpakking = str(
-            row.get("verpakking", "")
-            or row.get("verpakkingseenheid", "")
-            or row.get("omschrijving", "")
-            or ""
-        )
-        explicit_type = str(row.get("product_type", "") or "").strip().lower()
-        explicit_id = str(row.get("product_id", "") or "").strip()
-        if not explicit_id or not verpakking:
-            return
-
-        resolved_id, resolved_type = _resolve_snapshot_product_identity(
-            verpakking,
-            explicit_type or type_hint,
-            basis_by_name=basis_by_name,
-            samengesteld_by_name=samengesteld_by_name,
-        )
-        if not resolved_id:
-            return
-
-        # Only map when the explicit id is not a known canonical id.
-        if explicit_id in basis_ids or explicit_id in samengesteld_ids:
-            return
-
-        # Guard on resolved type to avoid mapping to the wrong universe.
-        if resolved_type == "basis" and resolved_id not in basis_ids:
-            return
-        if resolved_type == "samengesteld" and resolved_id not in samengesteld_ids:
-            return
-
-        out[explicit_id] = resolved_id
-
-    for row in basis_rows:
-        if isinstance(row, dict):
-            _handle_row(row, "basis")
-    for row in samengesteld_rows:
-        if isinstance(row, dict):
-            _handle_row(row, "samengesteld")
-
-    return out
-
-
 def _resolve_snapshot_product_identity(
     verpakking: str,
     product_type_hint: str,
@@ -1339,37 +1274,9 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(resultaat_snapshot, dict):
         resultaat_snapshot = {}
 
-    # Learn legacy->canonical product id mappings from the snapshot (if present),
-    # then use it to migrate nested ids that do not have labels (e.g. factuurregels.eenheid).
-    legacy_product_id_map = _build_snapshot_legacy_product_id_map(
-        resultaat_snapshot.get("producten")
-    )
-    if legacy_product_id_map:
-        def _rewrite_factuurregels(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-            if not isinstance(rows, list):
-                return []
-            out_rows: list[dict[str, Any]] = []
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                row_id = str(row.get("eenheid", "") or "")
-                if row_id and row_id in legacy_product_id_map:
-                    row = {**row, "eenheid": legacy_product_id_map[row_id]}
-                out_rows.append(row)
-            return out_rows
-
-        inkoop["factuurregels"] = _rewrite_factuurregels(inkoop.get("factuurregels", []))
-        rewritten_facturen: list[dict[str, Any]] = []
-        for factuur in inkoop.get("facturen", []):
-            if not isinstance(factuur, dict):
-                continue
-            rewritten_facturen.append(
-                {
-                    **factuur,
-                    "factuurregels": _rewrite_factuurregels(factuur.get("factuurregels", [])),
-                }
-            )
-        inkoop["facturen"] = rewritten_facturen
+    # Phase D: no read-side legacy repairs for product ids.
+    # If older stored records still contain non-canonical product ids, run the explicit
+    # admin migration (`/api/meta/migrate-product-ids`) once and then keep runtime strict.
 
     resultaat_snapshot = {
         "integrale_kostprijs_per_liter": resultaat_snapshot.get(
