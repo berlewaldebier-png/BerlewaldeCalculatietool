@@ -5600,11 +5600,12 @@ def save_berekeningen(data: list[dict[str, Any]]) -> bool:
 
 def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
     """Slaat alle kostprijsversies veilig op."""
-    cleaned_data = [
-        record
-        for record in data
-        if isinstance(record, dict) and _has_meaningful_kostprijsversie_content(record)
-    ]
+    # Never drop "concept" records implicitly.
+    #
+    # Historically we filtered out records without "meaningful" content to keep JSON storage tidy.
+    # With Postgres-first storage and explicit delete actions in the UI, dropping records on save
+    # causes surprising data loss (e.g. new concept versions disappearing after Save).
+    cleaned_data = [record for record in data if isinstance(record, dict)]
     normalized_records, normalized_activations = _normalize_and_sync_kostprijsversie_state(
         cleaned_data
     )

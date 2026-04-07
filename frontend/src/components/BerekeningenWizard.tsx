@@ -927,15 +927,28 @@ export function BerekeningenWizard({
 
   const [rows, setRows] = useState<GenericRecord[]>(initialState.rows);
   const rowsRef = useRef<GenericRecord[]>(initialState.rows);
-  const [selectedId] = useState<string>(initialState.selectedId);
+  const [selectedId, setSelectedId] = useState<string>(initialState.selectedId);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [status, setStatus] = useState("");
   const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteDialog | null>(null);
 
+  const effectiveSelectedId = useMemo(() => {
+    if (rows.some((row) => String(row.id) === String(selectedId))) {
+      return String(selectedId);
+    }
+    return String(rows[0]?.id ?? "");
+  }, [rows, selectedId]);
+
+  useEffect(() => {
+    if (effectiveSelectedId && effectiveSelectedId !== String(selectedId)) {
+      setSelectedId(effectiveSelectedId);
+    }
+  }, [effectiveSelectedId, selectedId]);
+
   const current =
-    rows.find((row) => String(row.id) === selectedId) ?? rows[0] ?? createEmptyBerekening();
+    rows.find((row) => String(row.id) === effectiveSelectedId) ?? rows[0] ?? createEmptyBerekening();
   const isEditingExisting = !startWithNew;
   const processType = getBerekeningProcessType(current);
   const steps = buildWizardSteps(current);

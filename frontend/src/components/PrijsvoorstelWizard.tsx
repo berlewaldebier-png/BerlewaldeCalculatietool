@@ -548,7 +548,7 @@ export function PrijsvoorstelWizard({
   }, [initialRows, initialSelectedId, startWithNew]);
 
   const [rows, setRows] = useState<GenericRecord[]>(initialState.rows);
-  const [selectedId] = useState<string>(initialState.selectedId);
+  const [selectedId, setSelectedId] = useState<string>(initialState.selectedId);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [status, setStatus] = useState("");
   const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
@@ -559,8 +559,21 @@ export function PrijsvoorstelWizard({
     onConfirm: () => void;
   } | null>(null);
 
+  const effectiveSelectedId = useMemo(() => {
+    if (rows.some((row) => String(row.id) === String(selectedId))) {
+      return String(selectedId);
+    }
+    return String(rows[0]?.id ?? "");
+  }, [rows, selectedId]);
+
+  useEffect(() => {
+    if (effectiveSelectedId && effectiveSelectedId !== String(selectedId)) {
+      setSelectedId(effectiveSelectedId);
+    }
+  }, [effectiveSelectedId, selectedId]);
+
   const current =
-    rows.find((row) => String(row.id) === selectedId) ?? rows[0] ?? createEmptyPrijsvoorstel();
+    rows.find((row) => String(row.id) === effectiveSelectedId) ?? rows[0] ?? createEmptyPrijsvoorstel();
   const isEditingExisting = !startWithNew;
   const channelOptions = useMemo<ChannelOption[]>(
     () => {
