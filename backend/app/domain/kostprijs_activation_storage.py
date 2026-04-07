@@ -365,6 +365,46 @@ def replace_activations(
     return True
 
 
+def delete_activations_for_year(year: int) -> dict[str, int]:
+    """Hard delete all activation rows (and their audit events) for a given year.
+
+    This is a maintenance operation used by admin rollback tooling.
+    """
+    ensure_schema()
+    try:
+        year_value = int(year)
+    except (TypeError, ValueError):
+        year_value = 0
+    if year_value <= 0:
+        return {"activations_deleted": 0, "events_deleted": 0}
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM kostprijs_product_activations WHERE jaar = %s",
+                (year_value,),
+            )
+            activations_count = int(cur.fetchone()[0] or 0)
+            cur.execute(
+                "DELETE FROM kostprijs_product_activations WHERE jaar = %s",
+                (year_value,),
+            )
+
+            cur.execute(
+                "SELECT COUNT(*) FROM kostprijs_activation_events WHERE jaar = %s",
+                (year_value,),
+            )
+            events_count = int(cur.fetchone()[0] or 0)
+            cur.execute(
+                "DELETE FROM kostprijs_activation_events WHERE jaar = %s",
+                (year_value,),
+            )
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    return {"activations_deleted": activations_count, "events_deleted": events_count}
+
+
 def list_activation_events(
     *,
     jaar: int | None = None,

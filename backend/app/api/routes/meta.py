@@ -225,3 +225,16 @@ def post_prepare_new_year(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/rollback-year")
+def post_rollback_year(
+    year: int = Query(..., description="Jaar dat volledig verwijderd moet worden."),
+    dry_run: bool = Query(False, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Delete all data for a given year (admin-only)."""
+    try:
+        return dataset_store.rollback_year(year=int(year), dry_run=bool(dry_run))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

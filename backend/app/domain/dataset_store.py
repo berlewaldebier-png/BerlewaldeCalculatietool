@@ -5,6 +5,7 @@ from typing import Any
 
 from app.domain import dashboard_service
 from app.domain import fixed_costs_storage, postgres_storage, production_storage
+from app.domain import kostprijs_activation_storage
 from app.utils import json_seed
 from app.utils.storage import (
     MODEL_A_DATASET_NAMES,
@@ -687,6 +688,181 @@ def prepare_new_year(
                 "verkoopprijzen": load_dataset("verkoopprijzen"),
                 "berekeningen": load_dataset("berekeningen"),
             }
+
+    if not dry_run:
+        dashboard_service.invalidate_dashboard_summary_cache()
+    return report
+
+
+def rollback_year(
+    *,
+    year: int,
+    include_cost_versions: bool = True,
+    include_quotes: bool = True,
+    include_variabele_kosten: bool = True,
+    include_sales_strategy: bool = True,
+    include_packaging: bool = True,
+    include_tarieven: bool = True,
+    include_productie_and_fixed_costs: bool = True,
+    include_activations: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Delete all data for a given year, without touching other years.
+
+    This is an admin maintenance tool for dev/test environments.
+    """
+    require_postgres()
+    if year <= 0:
+        raise ValueError("Jaar moet een geldig getal zijn.")
+
+    year_value = int(year)
+
+    def _filter_list_by_year(rows: Any) -> tuple[list[dict[str, Any]], int]:
+        if not isinstance(rows, list):
+            return [], 0
+        kept: list[dict[str, Any]] = []
+        removed = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                row_year = int(row.get("jaar", 0) or 0)
+            except (TypeError, ValueError):
+                row_year = 0
+            if row_year == year_value:
+                removed += 1
+                continue
+            kept.append(row)
+        return kept, removed
+
+    def _filter_kostprijsversies(rows: Any) -> tuple[list[dict[str, Any]], int]:
+        if not isinstance(rows, list):
+            return [], 0
+        kept: list[dict[str, Any]] = []
+        removed = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            basis = row.get("basisgegevens", {})
+            if not isinstance(basis, dict):
+                basis = {}
+            try:
+                row_year = int(row.get("jaar", basis.get("jaar", 0) or 0) or 0)
+            except (TypeError, ValueError):
+                row_year = 0
+            if row_year == year_value:
+                removed += 1
+                continue
+            kept.append(row)
+        return kept, removed
+
+    def _filter_variabele_kosten(payload: Any) -> tuple[dict[str, Any], int]:
+        if not isinstance(payload, dict):
+            return {}, 0
+        key = str(year_value)
+        if key not in payload:
+            return payload, 0
+        out = dict(payload)
+        del out[key]
+        return out, 1
+
+    report: dict[str, Any] = {"dry_run": dry_run, "year": year_value, "results": {}}
+
+    with postgres_storage.transaction():
+        if include_activations:
+            if dry_run:
+                report["results"]["activations"] = {"would_delete": True}
+            else:
+                report["results"]["activations"] = kostprijs_activation_storage.delete_activations_for_year(year_value)
+
+        if include_productie_and_fixed_costs:
+            # These are normalized tables (production_years + fixed_cost_lines).
+            if dry_run:
+                report["results"]["productie"] = {"would_delete_year": year_value}
+                report["results"]["vaste_kosten"] = {"would_delete_year": year_value}
+            else:
+                production_storage.ensure_schema()
+                fixed_costs_storage.ensure_schema()
+                with postgres_storage.connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM fixed_cost_lines WHERE jaar = %s", (year_value,))
+                        deleted_fixed = int(cur.rowcount or 0)
+                        cur.execute("DELETE FROM production_years WHERE jaar = %s", (year_value,))
+                        deleted_prod = int(cur.rowcount or 0)
+                    if not postgres_storage.in_transaction():
+                        conn.commit()
+                report["results"]["vaste_kosten"] = {"deleted_rows": deleted_fixed}
+                report["results"]["productie"] = {"deleted_year": deleted_prod}
+
+                # Also clean legacy dataset payloads (if still present) without touching other years.
+                legacy_productie = postgres_storage.load_dataset("productie", None)
+                if isinstance(legacy_productie, dict) and str(year_value) in legacy_productie:
+                    legacy_out = dict(legacy_productie)
+                    del legacy_out[str(year_value)]
+                    postgres_storage.save_dataset("productie", legacy_out, overwrite=True)
+                    report["results"]["productie"]["legacy_dataset_key_removed"] = True
+                legacy_vaste = postgres_storage.load_dataset("vaste-kosten", None)
+                if isinstance(legacy_vaste, dict) and str(year_value) in legacy_vaste:
+                    legacy_out = dict(legacy_vaste)
+                    del legacy_out[str(year_value)]
+                    postgres_storage.save_dataset("vaste-kosten", legacy_out, overwrite=True)
+                    report["results"]["vaste_kosten"]["legacy_dataset_key_removed"] = True
+
+        if include_tarieven:
+            payload = postgres_storage.load_dataset("tarieven-heffingen", [])
+            kept, removed = _filter_list_by_year(payload)
+            report["results"]["tarieven-heffingen"] = {"removed": removed}
+            if removed and not dry_run:
+                postgres_storage.save_dataset("tarieven-heffingen", kept, overwrite=True)
+
+        if include_packaging:
+            payload = postgres_storage.load_dataset("verpakkingsonderdelen", [])
+            kept, removed = _filter_list_by_year(payload)
+            report["results"]["verpakkingsonderdelen"] = {"removed": removed}
+            if removed and not dry_run:
+                postgres_storage.save_dataset("verpakkingsonderdelen", kept, overwrite=True)
+
+        if include_sales_strategy:
+            payload = postgres_storage.load_dataset("verkoopprijzen", [])
+            kept, removed = _filter_list_by_year(payload)
+            report["results"]["verkoopprijzen"] = {"removed": removed}
+            if removed and not dry_run:
+                postgres_storage.save_dataset("verkoopprijzen", kept, overwrite=True)
+
+        if include_variabele_kosten:
+            payload = postgres_storage.load_dataset("variabele-kosten", {})
+            kept, removed = _filter_variabele_kosten(payload)
+            report["results"]["variabele-kosten"] = {"removed": removed}
+            if removed and not dry_run:
+                postgres_storage.save_dataset("variabele-kosten", kept, overwrite=True)
+
+        if include_quotes:
+            payload = postgres_storage.load_dataset("prijsvoorstellen", [])
+            kept, removed = _filter_list_by_year(payload)
+            report["results"]["prijsvoorstellen"] = {"removed": removed}
+            if removed and not dry_run:
+                postgres_storage.save_dataset("prijsvoorstellen", kept, overwrite=True)
+
+        if include_cost_versions:
+            payload = postgres_storage.load_dataset("kostprijsversies", None)
+            kept_versions, removed_versions = _filter_kostprijsversies(payload)
+            report["results"]["kostprijsversies"] = {"removed": removed_versions}
+            if removed_versions and not dry_run:
+                postgres_storage.save_dataset("kostprijsversies", kept_versions, overwrite=True)
+
+            legacy_payload = postgres_storage.load_dataset("berekeningen", None)
+            kept_legacy, removed_legacy = _filter_kostprijsversies(legacy_payload)
+            report["results"]["berekeningen"] = {"removed": removed_legacy}
+            if removed_legacy and not dry_run:
+                postgres_storage.save_dataset("berekeningen", kept_legacy, overwrite=True)
+
+            # Clean legacy activation dataset payload if present; canonical storage is the activations table.
+            legacy_acts = postgres_storage.load_dataset("kostprijsproductactiveringen", None)
+            if isinstance(legacy_acts, list):
+                kept_acts, removed_acts = _filter_list_by_year(legacy_acts)
+                report["results"]["kostprijsproductactiveringen_legacy"] = {"removed": removed_acts}
+                if removed_acts and not dry_run:
+                    postgres_storage.save_dataset("kostprijsproductactiveringen", kept_acts, overwrite=True)
 
     if not dry_run:
         dashboard_service.invalidate_dashboard_summary_cache()
