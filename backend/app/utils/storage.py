@@ -1741,6 +1741,125 @@ def duplicate_verpakkingsonderdelen_to_year(
     return changed_count
 
 
+def duplicate_packaging_component_prices_to_year(
+    source_year: int | str,
+    target_year: int | str,
+    *,
+    overwrite: bool = False,
+) -> int:
+    """Dupliceert de jaarprijzen (packaging-component-prices) van bronjaar naar doeljaar.
+
+    Let op: de opslaglaag voor jaarprijzen is versioned (packaging-component-price-versions).
+    We schrijven via `save_packaging_component_prices()` zodat de versie-tabellen correct blijven.
+    """
+    try:
+        source_year_value = int(source_year)
+        target_year_value = int(target_year)
+    except (TypeError, ValueError):
+        return 0
+
+    masters = [
+        record
+        for record in load_packaging_component_masters()
+        if isinstance(record, dict) and str(record.get("id", "") or "")
+    ]
+    component_ids = [str(record.get("id", "") or "") for record in masters]
+    if not component_ids:
+        return 0
+
+    rows = load_packaging_component_prices()
+    if not isinstance(rows, list):
+        rows = []
+
+    source_by_component: dict[str, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            year_value = int(row.get("jaar", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if year_value != source_year_value:
+            continue
+        component_id = str(row.get("verpakkingsonderdeel_id", "") or "").strip()
+        if not component_id:
+            continue
+        source_by_component[component_id] = float(row.get("prijs_per_stuk", 0.0) or 0.0)
+
+    target_index: dict[str, int] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        try:
+            year_value = int(row.get("jaar", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if year_value != target_year_value:
+            continue
+        component_id = str(row.get("verpakkingsonderdeel_id", "") or "").strip()
+        if component_id:
+            target_index[component_id] = index
+
+    changed = 0
+    # Copy explicit source-year prices.
+    for component_id, price in source_by_component.items():
+        if component_id in target_index:
+            if not overwrite:
+                continue
+            existing = rows[target_index[component_id]]
+            if isinstance(existing, dict):
+                rows[target_index[component_id]] = {
+                    **existing,
+                    "verpakkingsonderdeel_id": component_id,
+                    "jaar": target_year_value,
+                    "prijs_per_stuk": float(price),
+                }
+            else:
+                rows[target_index[component_id]] = {
+                    "id": str(uuid4()),
+                    "verpakkingsonderdeel_id": component_id,
+                    "jaar": target_year_value,
+                    "prijs_per_stuk": float(price),
+                }
+            changed += 1
+        else:
+            rows.append(
+                {
+                    "id": str(uuid4()),
+                    "verpakkingsonderdeel_id": component_id,
+                    "jaar": target_year_value,
+                    "prijs_per_stuk": float(price),
+                }
+            )
+            changed += 1
+
+    # Ensure the target year is complete (every master has a row).
+    existing_target_components = set(target_index.keys())
+    existing_target_components.update(
+        str(row.get("verpakkingsonderdeel_id", "") or "").strip()
+        for row in rows
+        if isinstance(row, dict) and int(row.get("jaar", 0) or 0) == target_year_value
+    )
+    for component_id in component_ids:
+        if component_id in existing_target_components:
+            continue
+        rows.append(
+            {
+                "id": str(uuid4()),
+                "verpakkingsonderdeel_id": component_id,
+                "jaar": target_year_value,
+                "prijs_per_stuk": 0.0,
+            }
+        )
+        changed += 1
+
+    if changed <= 0:
+        return 0
+
+    ok = save_packaging_component_prices([row for row in rows if isinstance(row, dict)])
+    return changed if ok else 0
+
+
 def init_basisproducten_file() -> Path:
     """Maakt het JSON-bestand voor basisproducten aan."""
     return _ensure_json_file(BASISPRODUCTEN_FILE, "[]")
