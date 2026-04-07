@@ -8,6 +8,7 @@ from app.domain import dataset_store
 from app.domain import dashboard_service
 from app.domain import auth_service
 from app.domain.auth_dependencies import require_admin, require_user
+from app.schemas.new_year import PrepareNewYearRequest
 from app.schemas.navigation import DashboardSummary, NavigationItem
 
 
@@ -197,5 +198,30 @@ def post_generate_missing_activations(
     """
     try:
         return dataset_store.generate_missing_activations(dry_run=dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/prepare-new-year")
+def post_prepare_new_year(
+    payload: PrepareNewYearRequest,
+    dry_run: bool = Query(False, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Prepare a new year set in one transaction (Phase F)."""
+    try:
+        return dataset_store.prepare_new_year(
+            source_year=int(payload.source_year),
+            target_year=int(payload.target_year),
+            copy_productie=bool(payload.copy_productie),
+            copy_vaste_kosten=bool(payload.copy_vaste_kosten),
+            copy_tarieven=bool(payload.copy_tarieven),
+            copy_verpakkingsonderdelen=bool(payload.copy_verpakkingsonderdelen),
+            copy_verkoopstrategie=bool(payload.copy_verkoopstrategie),
+            copy_berekeningen=bool(payload.copy_berekeningen),
+            overwrite_existing=bool(payload.overwrite_existing),
+            include_datasets=bool(payload.include_datasets),
+            dry_run=bool(dry_run),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

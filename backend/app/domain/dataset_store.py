@@ -26,6 +26,11 @@ from app.utils.storage import (
     normalize_prijsvoorstel_record,
     migrate_product_ids_to_master_ids,
     generate_missing_kostprijsproductactiveringen,
+    duplicate_productie_to_year,
+    duplicate_vaste_kosten_to_year,
+    duplicate_tarieven_heffingen_to_year,
+    duplicate_verpakkingsonderdelen_to_year,
+    duplicate_verkoopstrategie_verpakkingen_to_year,
     save_berekeningen,
     save_basisproducten,
     save_kostprijsproductactiveringen,
@@ -36,6 +41,10 @@ from app.utils.storage import (
     save_prijsvoorstellen,
     save_samengestelde_producten,
 )
+
+from copy import deepcopy
+from datetime import UTC, datetime
+from uuid import uuid4
 
 
 DATASET_DEFAULTS: dict[str, Any] = {
@@ -499,6 +508,186 @@ def generate_missing_activations(*, dry_run: bool = False) -> dict[str, Any]:
     """
     require_postgres()
     report = generate_missing_kostprijsproductactiveringen(dry_run=dry_run)
+    if not dry_run:
+        dashboard_service.invalidate_dashboard_summary_cache()
+    return report
+
+
+def prepare_new_year(
+    *,
+    source_year: int,
+    target_year: int,
+    copy_productie: bool = True,
+    copy_vaste_kosten: bool = True,
+    copy_tarieven: bool = True,
+    copy_verpakkingsonderdelen: bool = True,
+    copy_verkoopstrategie: bool = True,
+    copy_berekeningen: bool = True,
+    overwrite_existing: bool = False,
+    include_datasets: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Prepare a new year set in one Postgres transaction (Phase F).
+
+    This replaces the old client-side flow that did multiple independent PUTs which could
+    leave the database in a half-written state.
+    """
+    require_postgres()
+    if source_year <= 0 or target_year <= 0:
+        raise ValueError("Bronjaar en doeljaar moeten geldig zijn.")
+    if target_year <= source_year:
+        raise ValueError("Doeljaar moet hoger zijn dan bronjaar.")
+
+    now = datetime.now(UTC).isoformat()
+
+    def berekening_key(record: dict[str, Any]) -> str:
+        bier_id = str(record.get("bier_id", "") or "").strip()
+        soort = ""
+        soort_berekening = record.get("soort_berekening", {})
+        if isinstance(soort_berekening, dict):
+            soort = str(soort_berekening.get("type", "") or "").strip()
+        if not soort:
+            soort = str(record.get("type", "") or "").strip()
+        basis = record.get("basisgegevens", {})
+        if not isinstance(basis, dict):
+            basis = {}
+        if bier_id:
+            return f"{bier_id}|{soort}"
+        return "|".join(
+            [
+                str(basis.get("biernaam", "") or "").strip(),
+                str(basis.get("stijl", "") or "").strip(),
+                soort,
+            ]
+        )
+
+    def duplicate_berekening(record: dict[str, Any]) -> dict[str, Any]:
+        draft = deepcopy(record)
+        basis = draft.get("basisgegevens", {})
+        if not isinstance(basis, dict):
+            basis = {}
+        draft["id"] = str(uuid4())
+        draft["status"] = "concept"
+        draft["finalized_at"] = ""
+        draft["created_at"] = now
+        draft["updated_at"] = now
+        draft["effectief_vanaf"] = ""
+        draft["is_actief"] = False
+        draft["last_completed_step"] = 4
+        draft["basisgegevens"] = {**basis, "jaar": target_year}
+        draft["jaarovergang"] = {
+            "bron_berekening_id": str(record.get("id", "") or ""),
+            "bron_jaar": int((basis.get("jaar", 0) or 0) if isinstance(basis, dict) else 0),
+            "doel_jaar": target_year,
+            "aangemaakt_via": "nieuw_jaar_voorbereiden",
+            "created_at": now,
+        }
+        return draft
+
+    report: dict[str, Any] = {
+        "dry_run": dry_run,
+        "source_year": source_year,
+        "target_year": target_year,
+        "results": {},
+    }
+
+    with postgres_storage.transaction():
+        if copy_productie:
+            if dry_run:
+                # Best-effort signal; we don't mutate.
+                report["results"]["productie"] = {"would_copy": True}
+            else:
+                ok = duplicate_productie_to_year(source_year, target_year, overwrite=overwrite_existing)
+                report["results"]["productie"] = {"copied": bool(ok)}
+
+        if copy_vaste_kosten:
+            if dry_run:
+                report["results"]["vaste-kosten"] = {"would_copy": True}
+            else:
+                copied_rows = duplicate_vaste_kosten_to_year(source_year, target_year, overwrite=overwrite_existing)
+                report["results"]["vaste-kosten"] = {"copied_rows": int(copied_rows)}
+
+        if copy_tarieven:
+            if dry_run:
+                report["results"]["tarieven-heffingen"] = {"would_copy": True}
+            else:
+                ok = duplicate_tarieven_heffingen_to_year(source_year, target_year, overwrite=overwrite_existing)
+                report["results"]["tarieven-heffingen"] = {"copied": bool(ok)}
+
+        if copy_verpakkingsonderdelen:
+            if dry_run:
+                report["results"]["verpakkingsonderdelen"] = {"would_copy": True}
+            else:
+                copied = duplicate_verpakkingsonderdelen_to_year(source_year, target_year, overwrite=overwrite_existing)
+                report["results"]["verpakkingsonderdelen"] = {"copied_rows": int(copied)}
+
+        if copy_verkoopstrategie:
+            if dry_run:
+                report["results"]["verkoopstrategie"] = {"would_copy": True}
+            else:
+                # Copy packaging strategies first (canonical function); other strategy records are stored
+                # in the same dataset and will be handled by save_dataset normalization.
+                copied = duplicate_verkoopstrategie_verpakkingen_to_year(
+                    source_year, target_year, overwrite=overwrite_existing
+                )
+                report["results"]["verkoopstrategie"] = {"copied_rows": int(copied)}
+
+        if copy_berekeningen:
+            records = [
+                record
+                for record in load_kostprijsversies()
+                if isinstance(record, dict)
+            ]
+            source_definitive = [
+                record
+                for record in records
+                if int(((record.get("basisgegevens", {}) or {}).get("jaar", 0) or 0)) == source_year
+                and str(record.get("status", "") or "").strip().lower() == "definitief"
+            ]
+            keys_to_copy = {berekening_key(record) for record in source_definitive}
+
+            if overwrite_existing and keys_to_copy:
+                filtered: list[dict[str, Any]] = []
+                for record in records:
+                    basis = record.get("basisgegevens", {})
+                    if not isinstance(basis, dict):
+                        basis = {}
+                    is_target = int(basis.get("jaar", 0) or 0) == target_year
+                    if is_target and berekening_key(record) in keys_to_copy:
+                        continue
+                    filtered.append(record)
+                records = filtered
+
+            existing_target_keys = {
+                berekening_key(record)
+                for record in records
+                if int(((record.get("basisgegevens", {}) or {}).get("jaar", 0) or 0)) == target_year
+            }
+
+            created = 0
+            if not dry_run:
+                for record in source_definitive:
+                    key = berekening_key(record)
+                    if key in existing_target_keys:
+                        continue
+                    records.append(duplicate_berekening(record))
+                    existing_target_keys.add(key)
+                    created += 1
+                saved = save_berekeningen(records)
+                report["results"]["berekeningen"] = {"created": int(created), "saved": bool(saved)}
+            else:
+                report["results"]["berekeningen"] = {"would_create": max(0, len(keys_to_copy) - len(existing_target_keys))}
+
+        if not dry_run and include_datasets:
+            report["datasets"] = {
+                "productie": load_dataset("productie"),
+                "vaste-kosten": load_dataset("vaste-kosten"),
+                "tarieven-heffingen": load_dataset("tarieven-heffingen"),
+                "verpakkingsonderdelen": load_dataset("verpakkingsonderdelen"),
+                "verkoopprijzen": load_dataset("verkoopprijzen"),
+                "berekeningen": load_dataset("berekeningen"),
+            }
+
     if not dry_run:
         dashboard_service.invalidate_dashboard_summary_cache()
     return report

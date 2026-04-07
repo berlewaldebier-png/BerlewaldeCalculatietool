@@ -3060,9 +3060,15 @@ def duplicate_vaste_kosten_to_year(
         return 0
     if str(target_year) in data and not overwrite:
         return 0
-    data[str(target_year)] = deepcopy(source_rows)
+    # Generate new row ids for the target year to avoid cross-year id collisions in the UI.
+    copied_rows: list[dict[str, Any]] = []
+    for row in deepcopy(source_rows):
+        if not isinstance(row, dict):
+            continue
+        copied_rows.append({**row, "id": str(uuid4())})
+    data[str(target_year)] = copied_rows
     if save_vaste_kosten_data(data):
-        return len(source_rows)
+        return len(copied_rows)
     return 0
 
 

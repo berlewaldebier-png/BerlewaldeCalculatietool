@@ -455,152 +455,49 @@ export function NieuwJaarWizard({
     }
   }
 
-  async function putDataset(path: string, payload: unknown) {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      throw new Error(`Opslaan mislukt voor ${path}`);
-    }
-  }
-
   async function runGeneration() {
     if (!canRun) {
       return;
     }
 
-    setIsRunning(true);
-    setStatus("");
+      setIsRunning(true);
+      setStatus("");
 
-    try {
-      const nextProductie = cloneValue(initialProductie);
-      const nextVasteKosten = cloneValue(initialVasteKosten);
-      let nextTarieven = cloneValue(initialTarieven);
-      let nextVerpakkingsonderdelen = cloneValue(initialVerpakkingsonderdelen);
-      let nextVerkoopprijzen = cloneValue(initialVerkoopprijzen);
-      let nextBerekeningen = cloneValue(currentBerekeningen);
-
-      if (copyProductie && initialProductie[String(sourceYear)]) {
-        if (overwriteExisting || !nextProductie[String(targetYear)]) {
-          nextProductie[String(targetYear)] = cloneValue(initialProductie[String(sourceYear)]);
-        }
-      }
-
-      if (copyVasteKosten && initialVasteKosten[String(sourceYear)]) {
-        if (overwriteExisting || !nextVasteKosten[String(targetYear)]) {
-          nextVasteKosten[String(targetYear)] = cloneValue(initialVasteKosten[String(sourceYear)]).map(
-            (row) => ({
-              ...row,
-              id: createId()
-            })
-          );
-        }
-      }
-
-      if (copyTarieven) {
-        const source = initialTarieven.filter((row) => Number(row.jaar ?? 0) === sourceYear);
-        if (overwriteExisting) {
-          nextTarieven = nextTarieven.filter((row) => Number(row.jaar ?? 0) !== targetYear);
-        }
-        if (overwriteExisting || !nextTarieven.some((row) => Number(row.jaar ?? 0) === targetYear)) {
-          nextTarieven.push(
-            ...source.map((row) => ({
-              ...cloneValue(row),
-              id: createId(),
-              jaar: targetYear
-            }))
-          );
-        }
-      }
-
-      if (copyVerpakkingsonderdelen) {
-        const source = initialVerpakkingsonderdelen.filter(
-          (row) => Number(row.jaar ?? 0) === sourceYear
-        );
-        if (overwriteExisting) {
-          nextVerpakkingsonderdelen = nextVerpakkingsonderdelen.filter(
-            (row) => Number(row.jaar ?? 0) !== targetYear
-          );
-        }
-        if (
-          overwriteExisting ||
-          !nextVerpakkingsonderdelen.some((row) => Number(row.jaar ?? 0) === targetYear)
-        ) {
-          nextVerpakkingsonderdelen.push(
-            ...source.map((row) => ({
-              ...cloneValue(row),
-              id: createId(),
-              jaar: targetYear
-            }))
-          );
-        }
-      }
-
-      if (copyVerkoopstrategie) {
-        const source = initialVerkoopprijzen.filter((row) => Number(row.jaar ?? 0) === sourceYear);
-        if (overwriteExisting) {
-          nextVerkoopprijzen = nextVerkoopprijzen.filter((row) => Number(row.jaar ?? 0) !== targetYear);
-        }
-        if (overwriteExisting || !nextVerkoopprijzen.some((row) => Number(row.jaar ?? 0) === targetYear)) {
-          nextVerkoopprijzen.push(
-            ...source.map((row) => ({
-              ...cloneValue(row),
-              id: createId(),
-              jaar: targetYear,
-              bron_jaar: sourceYear
-            }))
-          );
-        }
-      }
-
-      if (copyBerekeningen) {
-        const sourceRows = currentBerekeningen.filter(
-          (row) =>
-            Number((row.basisgegevens as GenericRecord)?.jaar ?? 0) === sourceYear &&
-            String(row.status ?? "").toLowerCase() === "definitief"
-        );
-
-        if (overwriteExisting) {
-          const keysToReplace = new Set(sourceRows.map((row) => sourceRecordKey(row)));
-          nextBerekeningen = nextBerekeningen.filter((row) => {
-            const isTargetYear = Number((row.basisgegevens as GenericRecord)?.jaar ?? 0) === targetYear;
-            return !(isTargetYear && keysToReplace.has(sourceRecordKey(row)));
-          });
-        }
-
-        const existingTargetKeys = new Set(
-          nextBerekeningen
-            .filter((row) => Number((row.basisgegevens as GenericRecord)?.jaar ?? 0) === targetYear)
-            .map((row) => sourceRecordKey(row))
-        );
-
-        sourceRows.forEach((row) => {
-          const key = sourceRecordKey(row);
-          if (!existingTargetKeys.has(key)) {
-            nextBerekeningen.push(duplicateBerekening(row, targetYear));
-            existingTargetKeys.add(key);
-          }
+      try {
+        const response = await fetch(`${API_BASE_URL}/meta/prepare-new-year`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_year: sourceYear,
+            target_year: targetYear,
+            copy_productie: copyProductie,
+            copy_vaste_kosten: copyVasteKosten,
+            copy_tarieven: copyTarieven,
+            copy_verpakkingsonderdelen: copyVerpakkingsonderdelen,
+            copy_verkoopstrategie: copyVerkoopstrategie,
+            copy_berekeningen: copyBerekeningen,
+            overwrite_existing: overwriteExisting,
+            include_datasets: true
+          })
         });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || "Voorbereiden mislukt.");
+        }
+
+        const result = (await response.json()) as any;
+        const datasets = (result?.datasets ?? {}) as Record<string, unknown>;
+        const nextBerekeningen = (datasets["berekeningen"] as GenericRecord[]) ?? [];
+        setCurrentBerekeningen(Array.isArray(nextBerekeningen) ? nextBerekeningen : []);
+
+        setStatus(`Jaar ${targetYear} voorbereid op basis van ${sourceYear}.`);
+        setActiveStep(4);
+      } catch {
+        setStatus("Voorbereiden mislukt.");
+      } finally {
+        setIsRunning(false);
       }
-
-      await putDataset("/data/productie", nextProductie);
-      await putDataset("/data/vaste-kosten", nextVasteKosten);
-      await putDataset("/data/tarieven-heffingen", nextTarieven);
-      await putDataset("/data/verpakkingsonderdelen", nextVerpakkingsonderdelen);
-      await putDataset("/data/verkoopprijzen", nextVerkoopprijzen);
-      await putDataset("/data/berekeningen", nextBerekeningen);
-
-      setCurrentBerekeningen(nextBerekeningen);
-      setStatus(`Jaar ${targetYear} voorbereid op basis van ${sourceYear}.`);
-      setActiveStep(4);
-    } catch {
-      setStatus("Voorbereiden mislukt.");
-    } finally {
-      setIsRunning(false);
-    }
   }
 
   const steps: WizardStep[] = [

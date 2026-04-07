@@ -48,7 +48,8 @@ def ensure_schema() -> None:
                     "ALTER TABLE fixed_cost_lines ADD COLUMN IF NOT EXISTS herverdeel_pct DOUBLE PRECISION NOT NULL DEFAULT 0"
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS fixed_cost_lines_year_idx ON fixed_cost_lines(jaar)")
-            conn.commit()
+            if not postgres_storage.in_transaction():
+                conn.commit()
         _schema_ready = True
 
 
@@ -164,7 +165,8 @@ def save_grouped_by_year(payload: dict[str, Any]) -> bool:
                     """,
                     (line_id, jaar, omschrijving, kostensoort_code, bedrag, pct, now, now),
                 )
-        conn.commit()
+        if not postgres_storage.in_transaction():
+            conn.commit()
     return True
 
 
@@ -173,4 +175,5 @@ def reset_defaults() -> None:
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute("TRUNCATE TABLE fixed_cost_lines")
-        conn.commit()
+        if not postgres_storage.in_transaction():
+            conn.commit()

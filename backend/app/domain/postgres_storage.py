@@ -12,6 +12,7 @@ from app import config  # noqa: F401
 
 
 _request_connection: ContextVar[Any | None] = ContextVar("calculatietool_request_connection", default=None)
+_transaction_depth: ContextVar[int] = ContextVar("calculatietool_transaction_depth", default=0)
 _schema_ready = False
 _schema_lock = Lock()
 
@@ -23,6 +24,38 @@ def set_request_connection(conn: Any) -> Any:
 
 def reset_request_connection(token: Any) -> None:
     _request_connection.reset(token)
+
+
+def in_transaction() -> bool:
+    return int(_transaction_depth.get() or 0) > 0
+
+
+@contextmanager
+def transaction() -> Iterator[Any]:
+    """Open a transaction that spans multiple dataset reads/writes.
+
+    - Uses the request-bound connection when available (FastAPI middleware).
+    - Ensures save_dataset does not commit per call while inside the transaction.
+    - Commits on success, rolls back on error (outermost transaction only).
+    """
+    ensure_schema()
+    depth = int(_transaction_depth.get() or 0)
+    token = _transaction_depth.set(depth + 1)
+    try:
+        with connect() as conn:
+            try:
+                yield conn
+                if depth == 0:
+                    conn.commit()
+            except Exception:
+                if depth == 0:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                raise
+    finally:
+        _transaction_depth.reset(token)
 
 
 def storage_provider() -> str:
@@ -96,7 +129,8 @@ def ensure_schema() -> None:
                     )
                     """
                 )
-            conn.commit()
+            if not in_transaction():
+                conn.commit()
         _schema_ready = True
 
 
@@ -141,7 +175,8 @@ def save_dataset(name: str, data: Any, overwrite: bool = True) -> bool:
                     """,
                     (name, json.dumps(data, ensure_ascii=False), now),
                 )
-        conn.commit()
+        if not in_transaction():
+            conn.commit()
     return True
 
 

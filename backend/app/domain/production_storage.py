@@ -35,7 +35,8 @@ def ensure_schema() -> None:
                     )
                     """
                 )
-            conn.commit()
+            if not postgres_storage.in_transaction():
+                conn.commit()
         _schema_ready = True
 
 
@@ -146,7 +147,8 @@ def save_productie(payload: dict[str, Any]) -> bool:
                     """,
                     (jaar, inkoop, productie, batch, now, now),
                 )
-        conn.commit()
+        if not postgres_storage.in_transaction():
+            conn.commit()
     return True
 
 
@@ -155,4 +157,5 @@ def reset_defaults() -> None:
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute("TRUNCATE TABLE production_years")
-        conn.commit()
+        if not postgres_storage.in_transaction():
+            conn.commit()
