@@ -174,7 +174,7 @@ export function VerkoopstrategieWorkspace({
     return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
   }, [basisproducten, samengesteldeProducten]);
   const basisProductParentMap = useMemo(() => {
-    const parents = new Map<string, { productId: string; label: string }[]>();
+    const parents = new Map<string, { productId: string; label: string; score: number }[]>();
     samengesteldeProducten.forEach((row) => {
       const compositeId = String(row.id ?? "");
       const compositeLabel = String(row.omschrijving ?? "");
@@ -183,15 +183,28 @@ export function VerkoopstrategieWorkspace({
         const basisId = String(basisRow.basisproduct_id ?? "");
         if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) return;
         const current = parents.get(basisId) ?? [];
-        current.push({ productId: compositeId, label: compositeLabel });
+        const scoreRaw = Number((basisRow as any)?.aantal ?? 0);
+        const score = Number.isFinite(scoreRaw) ? scoreRaw : 0;
+        current.push({ productId: compositeId, label: compositeLabel, score });
         parents.set(basisId, current);
       });
     });
-    return new Map(
-      [...parents.entries()]
-        .filter(([, items]) => items.length === 1)
-        .map(([basisId, items]) => [basisId, items[0]])
-    );
+
+    // If a basisproduct is used in multiple composed products, pick the "primary" parent deterministically.
+    // We default to the highest quantity usage (e.g. 24x33cl over 12x33cl), then fall back to label/id ordering.
+    const resolved = new Map<string, { productId: string; label: string }>();
+    for (const [basisId, items] of parents.entries()) {
+      if (!items || items.length === 0) continue;
+      const sorted = [...items].sort((left, right) => {
+        const scoreDiff = Number(right.score ?? 0) - Number(left.score ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const labelDiff = String(left.label ?? "").localeCompare(String(right.label ?? ""), "nl-NL");
+        if (labelDiff !== 0) return labelDiff;
+        return String(left.productId ?? "").localeCompare(String(right.productId ?? ""));
+      });
+      resolved.set(basisId, { productId: sorted[0].productId, label: sorted[0].label });
+    }
+    return resolved;
   }, [samengesteldeProducten]);
   const [rows, setRows] = useState<StrategyRow[]>(() => verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
   const [status, setStatus] = useState("");
