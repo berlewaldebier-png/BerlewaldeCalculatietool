@@ -202,6 +202,11 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [verkoopstrategieSave, setVerkoopstrategieSave] = useState<null | (() => Promise<void>)>(null);
   const [draftPackagingPrices, setDraftPackagingPrices] = useState<Record<string, number>>({});
   const hasDraftPackaging = useMemo(() => Object.keys(draftPackagingPrices).length > 0, [draftPackagingPrices]);
+  const [draftProductieTarget, setDraftProductieTarget] = useState<ProductieYear>({
+    hoeveelheid_inkoop_l: 0,
+    hoeveelheid_productie_l: 0,
+    batchgrootte_eigen_productie_l: 0
+  });
   const [draftVasteKostenTarget, setDraftVasteKostenTarget] = useState<GenericRecord[]>([]);
   const [draftPackagingPricesTarget, setDraftPackagingPricesTarget] = useState<PackagingPriceRow[]>([]);
   const [draftVerkoopstrategieTarget, setDraftVerkoopstrategieTarget] = useState<GenericRecord[]>([]);
@@ -614,11 +619,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
   const sourceProductie = useMemo(() => getProductieForYear(sourceYear), [currentProductie, sourceYear]);
   const serverTargetProductie = useMemo(() => getProductieForYear(targetYear), [currentProductie, targetYear]);
-  const [draftProductieTarget, setDraftProductieTarget] = useState<ProductieYear>({
-    hoeveelheid_inkoop_l: 0,
-    hoeveelheid_productie_l: 0,
-    batchgrootte_eigen_productie_l: 0
-  });
 
   function copyProductieFromSource() {
     if (!sourceProductie) return;
