@@ -33,9 +33,28 @@ export default async function NieuwJaarVoorbereidenPage() {
   const packagingComponentPrices = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
 
+  const yearSet = new Set<number>();
+  Object.keys(productie ?? {}).forEach((key) => {
+    if (/^\d+$/.test(key)) yearSet.add(Number(key));
+  });
+  Object.keys(vasteKosten ?? {}).forEach((key) => {
+    if (/^\d+$/.test(key)) yearSet.add(Number(key));
+  });
+  (Array.isArray(tarieven) ? tarieven : []).forEach((row) => yearSet.add(Number((row as any)?.jaar ?? 0)));
+  (Array.isArray(packagingComponentPrices) ? packagingComponentPrices : []).forEach((row) =>
+    yearSet.add(Number((row as any)?.jaar ?? 0))
+  );
+  (Array.isArray(verkoopprijzen) ? verkoopprijzen : []).forEach((row) => yearSet.add(Number((row as any)?.jaar ?? 0)));
+  (Array.isArray(berekeningen) ? berekeningen : []).forEach((row) =>
+    yearSet.add(Number((((row as any)?.basisgegevens ?? {}) as any)?.jaar ?? 0))
+  );
+  const years = Array.from(yearSet).filter((year) => year > 0).sort((a, b) => a - b);
+  const defaultSourceYear = years[years.length - 1] ?? new Date().getFullYear();
+  const defaultTargetYear = defaultSourceYear + 1;
+
   return (
     <PageShell
-      title="Nieuw jaar voorbereiden"
+      title={`Nieuw jaar ${defaultTargetYear} voorbereiden`}
       subtitle="Maak een nieuwe jaarset aan op basis van een bestaand bronjaar."
       activePath="/nieuw-jaar-voorbereiden"
       navigation={navigation}

@@ -325,6 +325,7 @@ def bootstrap_admin(username: str, password: str, display_name: str) -> dict[str
 def auth_status() -> dict[str, Any]:
     users = list_users()
     return {
+        "environment": environment_name(),
         "enabled": auth_enabled(),
         "mode": auth_mode(),
         "postgres_configured": bool(postgres_storage.database_url()),

@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from app.domain import dataset_store
 from app.domain import dashboard_service
 from app.domain import auth_service
+from app.domain import postgres_storage
+from app.domain import kostprijs_activation_storage
 from app.domain.auth_dependencies import require_admin, require_user
-from app.schemas.new_year import PrepareNewYearRequest
+from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
 from app.schemas.navigation import DashboardSummary, NavigationItem
 
 
@@ -225,6 +227,106 @@ def post_prepare_new_year(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/dev/reset")
+def post_dev_reset(
+    mode: str = Query("all", description="Reset mode: all | year_setup"),
+    seed: bool = Query(False, description="Wanneer true: laad seed data uit /data na reset."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: clear all stored data (rows only) and optionally seed demo data.
+
+    Important: never drops tables; only truncates/overwrites contents.
+    Disabled in test/prod environments.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Dev reset is alleen toegestaan in local/dev.")
+
+    normalized_mode = str(mode or "all").strip().lower()
+    if normalized_mode not in {"all", "year_setup"}:
+        raise HTTPException(status_code=400, detail="Ongeldige mode. Gebruik all of year_setup.")
+    if normalized_mode != "all" and seed:
+        raise HTTPException(status_code=400, detail="Seed is alleen toegestaan bij mode=all.")
+
+    report: dict[str, Any] = {"reset": {}, "seed": {}}
+    with postgres_storage.transaction():
+        # Clear normalized tables first (keeps schema intact).
+        if normalized_mode == "all":
+            kostprijs_activation_storage.reset_defaults()
+            report["reset"] = dataset_store.reset_all_datasets_to_defaults()
+        else:
+            # Keep cost management data; only reset year setup datasets/tables.
+            report["reset"] = dataset_store.reset_year_setup_keep_cost_data()
+
+        if seed and normalized_mode == "all":
+            report["seed"] = dataset_store.bootstrap_postgres_from_json(overwrite=True)
+            # Keep the seeded data aligned with current invariants.
+            dataset_store.migrate_wrapped_payloads(dry_run=False)
+            dataset_store.migrate_product_ids(dry_run=False)
+            dataset_store.generate_missing_activations(dry_run=False)
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return report
+
+
+@router.get("/new-year-draft")
+def get_new_year_draft(
+    target_year: int = Query(..., description="Doeljaar waarvoor de draft opgehaald moet worden."),
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    draft = dataset_store.load_new_year_draft(owner=str(session.get("username", "") or ""), target_year=int(target_year))
+    return {"draft": draft}
+
+
+@router.put("/new-year-draft")
+def put_new_year_draft(
+    payload: UpsertNewYearDraftRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    record = dataset_store.upsert_new_year_draft(
+        owner=str(session.get("username", "") or ""),
+        source_year=int(payload.source_year),
+        target_year=int(payload.target_year),
+        payload=payload.payload.model_dump(),
+    )
+    return {"draft": record}
+
+
+@router.delete("/new-year-draft")
+def delete_new_year_draft(
+    target_year: int = Query(..., description="Doeljaar waarvoor de draft verwijderd moet worden."),
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    return dataset_store.delete_new_year_draft(owner=str(session.get("username", "") or ""), target_year=int(target_year))
+
+
+@router.post("/commit-new-year")
+def post_commit_new_year(
+    payload: CommitNewYearRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return dataset_store.commit_new_year(
+            source_year=int(payload.source_year),
+            target_year=int(payload.target_year),
+            owner=str(session.get("username", "") or ""),
+            copy_productie=bool(payload.copy_productie),
+            copy_vaste_kosten=bool(payload.copy_vaste_kosten),
+            copy_tarieven=bool(payload.copy_tarieven),
+            copy_verpakkingsonderdelen=bool(payload.copy_verpakkingsonderdelen),
+            copy_verkoopstrategie=bool(payload.copy_verkoopstrategie),
+            copy_berekeningen=bool(payload.copy_berekeningen),
+            overwrite_existing=bool(payload.overwrite_existing),
+            force=bool(payload.force),
+            payload=payload.payload.model_dump(),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        # Concurrency check failures should be explicit conflicts for the frontend.
+        if "Bronjaar is gewijzigd sinds je concept is gestart" in message:
+            raise HTTPException(status_code=409, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
 
 
 @router.post("/rollback-year")

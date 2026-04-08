@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
@@ -68,21 +68,39 @@ function chooseDefaultYear(yearOptions: number[]) {
 type VasteKostenClientProps = {
   vasteKosten: Record<string, unknown>;
   productie: Record<string, unknown>;
+  availableYears?: number[];
   initialSelectedYear?: number;
   lockYear?: boolean;
   titleSuffix?: string;
+  mode?: "server" | "draft";
+  onDraftSave?: (payload: Record<string, Array<Record<string, unknown>>>) => Promise<void> | void;
+  onDraftChange?: (payload: Record<string, Array<Record<string, unknown>>>) => void;
+  syncOnPropsChange?: boolean;
 };
 
 export function VasteKostenClient({
   vasteKosten,
   productie,
+  availableYears,
   initialSelectedYear,
   lockYear,
-  titleSuffix
+  titleSuffix,
+  mode = "server",
+  onDraftSave,
+  onDraftChange,
+  syncOnPropsChange = false
 }: VasteKostenClientProps) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement | null>(null);
-  const yearOptions = useMemo(() => deriveYearOptions(productie), [productie]);
+  const yearOptions = useMemo(() => {
+    const explicit = (Array.isArray(availableYears) ? availableYears : [])
+      .map((year) => Number(year))
+      .filter((year) => Number.isFinite(year) && year > 0);
+    if (explicit.length > 0) {
+      return [...new Set(explicit)].sort((a, b) => a - b);
+    }
+    return deriveYearOptions(productie);
+  }, [availableYears, productie]);
   const defaultYear = useMemo(() => chooseDefaultYear(yearOptions), [yearOptions]);
 
   function createUiId() {
@@ -128,6 +146,11 @@ export function VasteKostenClient({
   const [rowsByYear, setRowsByYear] = useState<Record<string, InternalRow[]>>(normalizedByYear);
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!syncOnPropsChange) return;
+    setRowsByYear(normalizedByYear);
+  }, [normalizedByYear, syncOnPropsChange]);
 
   const totalsByYear = useMemo(() => {
     const years =
@@ -239,23 +262,36 @@ export function VasteKostenClient({
     return payload;
   }
 
+  const draftPayload = useMemo(() => buildPayload(), [rowsByYear, selectedYearKey, yearOptions]);
+  useEffect(() => {
+    if (mode !== "draft") return;
+    onDraftChange?.(draftPayload);
+  }, [draftPayload, mode, onDraftChange]);
+
   async function handleSave() {
     setStatus("");
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/data/vaste-kosten`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload())
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Opslaan mislukt");
+      const payload = buildPayload();
+      if (mode === "draft") {
+        await onDraftSave?.(payload);
+        setStatus("Concept opgeslagen.");
+      } else {
+        const response = await fetch(`${API_BASE_URL}/data/vaste-kosten`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || "Opslaan mislukt");
+        }
+        setStatus("Opgeslagen.");
+        router.refresh();
       }
-      setStatus("Opgeslagen.");
-      router.refresh();
-    } catch {
-      setStatus("Opslaan mislukt.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Opslaan mislukt.";
+      setStatus(message);
     } finally {
       setIsSaving(false);
     }
@@ -449,7 +485,7 @@ export function VasteKostenClient({
             <div className="editor-actions-group">
               {status ? <span className="editor-status">{status}</span> : null}
               <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>
-                {isSaving ? "Opslaan..." : "Opslaan"}
+                {isSaving ? (mode === "draft" ? "Concept opslaan..." : "Opslaan...") : mode === "draft" ? "Concept opslaan" : "Opslaan"}
               </button>
             </div>
           </div>

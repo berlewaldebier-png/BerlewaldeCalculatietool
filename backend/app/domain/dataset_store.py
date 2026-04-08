@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 from typing import Any
 
 from app.domain import dashboard_service
@@ -88,6 +90,9 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "quotes": [],
     "quote-lines": [],
     "quote-staffels": [],
+    # Draft storage for "Nieuw jaar voorbereiden" (Phase F+).
+    # This allows saving progress without mutating the actual year datasets until commit.
+    "new-year-drafts": [],
 }
 
 READ_ONLY_PROJECTION_DATASETS = {
@@ -98,6 +103,101 @@ READ_ONLY_PROJECTION_DATASETS = {
     "berekeningen",
     *MODEL_A_DATASET_NAMES,
 }
+
+
+def _stable_json_hash(value: Any) -> str:
+    """Compute a stable hash for nested JSON-ish values.
+
+    Important: we do not want random ordering differences to trigger false positives,
+    so we serialize with sorted keys and normalized whitespace.
+    """
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _normalize_rows_for_hash(rows: list[dict[str, Any]], *, sort_keys: list[str]) -> list[dict[str, Any]]:
+    def _key(row: dict[str, Any]) -> tuple[Any, ...]:
+        return tuple(row.get(key) for key in sort_keys)
+
+    # Copy and sort to avoid mutating caller structures.
+    copied = [dict(row) for row in rows if isinstance(row, dict)]
+    copied.sort(key=_key)
+    return copied
+
+
+def _compute_source_fingerprints(*, source_year: int) -> dict[str, str]:
+    """Compute fingerprints for datasets that influence year-copy + preview calculations."""
+    if source_year <= 0:
+        raise ValueError("Bronjaar moet een geldig getal zijn.")
+
+    # Production / fixed costs are stored grouped-by-year dicts.
+    productie = load_dataset("productie")
+    vaste_kosten = load_dataset("vaste-kosten")
+
+    tarieven = load_dataset("tarieven-heffingen")
+    packaging_prices = load_dataset("packaging-component-prices")
+    verkoopprijzen = load_dataset("verkoopprijzen")
+
+    basisproducten = load_dataset("basisproducten")
+    samengestelde = load_dataset("samengestelde-producten")
+    packaging_components = load_dataset("packaging-components")
+
+    def year_dict_slice(payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return {}
+        return payload.get(str(source_year), [] if str(source_year) in payload else {})
+
+    fingerprints: dict[str, str] = {}
+    fingerprints["productie"] = _stable_json_hash({str(source_year): year_dict_slice(productie)})
+    fingerprints["vaste-kosten"] = _stable_json_hash({str(source_year): year_dict_slice(vaste_kosten)})
+
+    if isinstance(tarieven, list):
+        fingerprints["tarieven-heffingen"] = _stable_json_hash(
+            _normalize_rows_for_hash(
+                [row for row in tarieven if isinstance(row, dict) and int(row.get("jaar", 0) or 0) == source_year],
+                sort_keys=["jaar", "id", "tarief_hoog", "tarief_laag", "verbruikersbelasting"],
+            )
+        )
+    else:
+        fingerprints["tarieven-heffingen"] = _stable_json_hash([])
+
+    if isinstance(packaging_prices, list):
+        fingerprints["packaging-component-prices"] = _stable_json_hash(
+            _normalize_rows_for_hash(
+                [row for row in packaging_prices if isinstance(row, dict) and int(row.get("jaar", 0) or 0) == source_year],
+                sort_keys=["jaar", "verpakkingsonderdeel_id", "id", "prijs_per_stuk"],
+            )
+        )
+    else:
+        fingerprints["packaging-component-prices"] = _stable_json_hash([])
+
+    if isinstance(verkoopprijzen, list):
+        strategy_types = {"jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"}
+        strategy_rows = [
+            row
+            for row in verkoopprijzen
+            if isinstance(row, dict)
+            and str(row.get("record_type", "") or "") in strategy_types
+            and int(row.get("jaar", 0) or 0) in {0, source_year}
+        ]
+        fingerprints["verkoopstrategie"] = _stable_json_hash(
+            _normalize_rows_for_hash(strategy_rows, sort_keys=["record_type", "jaar", "bier_id", "product_id", "verpakking", "id"])
+        )
+    else:
+        fingerprints["verkoopstrategie"] = _stable_json_hash([])
+
+    # Master data used for packaging cost composition.
+    fingerprints["basisproducten"] = _stable_json_hash(
+        _normalize_rows_for_hash([row for row in (basisproducten if isinstance(basisproducten, list) else []) if isinstance(row, dict)], sort_keys=["jaar", "id", "omschrijving"])
+    )
+    fingerprints["samengestelde-producten"] = _stable_json_hash(
+        _normalize_rows_for_hash([row for row in (samengestelde if isinstance(samengestelde, list) else []) if isinstance(row, dict)], sort_keys=["jaar", "id", "omschrijving"])
+    )
+    fingerprints["packaging-components"] = _stable_json_hash(
+        _normalize_rows_for_hash([row for row in (packaging_components if isinstance(packaging_components, list) else []) if isinstance(row, dict)], sort_keys=["id", "omschrijving"])
+    )
+
+    return fingerprints
 
 
 def _reject_wrapped_payload(data: Any, *, dataset_name: str) -> None:
@@ -410,6 +510,66 @@ def reset_all_datasets_to_defaults() -> dict[str, bool]:
     return results
 
 
+def reset_year_setup_keep_cost_data() -> dict[str, bool]:
+    """Local/dev helper: reset year setup data while keeping cost management + invoices + recalcs.
+
+    Keeps (so those pages keep working):
+    - users (app_users) (not a dataset)
+    - kostprijsversies (includes inkoopfacturen payloads)
+    - berekeningen (includes hercalculaties)
+    - kostprijsproductactiveringen (so verkoop/kostprijs can still resolve active scope)
+    - product masters (products, packaging-components, etc.)
+
+    Resets (so first-year setup/new-year flows can be tested again):
+    - productie, vaste kosten, tarieven/heffingen
+    - packaging-component prices (yearly)
+    - verkoopstrategie / verkoopprijzen / quotes / proposals
+    - wizard drafts
+
+    Never drops tables; only overwrites dataset rows and truncates normalized year tables.
+    """
+    require_postgres()
+    results: dict[str, bool] = {}
+
+    # Reset normalized year tables.
+    fixed_costs_storage.reset_defaults()
+    production_storage.reset_defaults()
+
+    wipe_dataset_names: set[str] = {
+        "productie",
+        "vaste-kosten",
+        "tarieven-heffingen",
+        "packaging-component-prices",
+        "packaging-component-price-versions",
+        "verkoopprijzen",
+        "sales-strategy-years",
+        "sales-strategy-products",
+        "prijsvoorstellen",
+        "quotes",
+        "quote-lines",
+        "quote-staffels",
+        "new-year-drafts",
+    }
+
+    for dataset_name, default_value in DATASET_DEFAULTS.items():
+        if dataset_name in READ_ONLY_PROJECTION_DATASETS:
+            # Read-only projections will be recomputed from masters; they should never be wiped directly here.
+            results[dataset_name] = True
+            continue
+        if dataset_name in wipe_dataset_names:
+            results[dataset_name] = postgres_storage.save_dataset(
+                dataset_name,
+                deepcopy(default_value),
+                overwrite=True,
+            )
+            continue
+        # Keep everything else intact.
+        results[dataset_name] = True
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return results
+
+
 def activate_cost_version(
     version_id: str,
     *,
@@ -702,6 +862,257 @@ def prepare_new_year(
 
     if not dry_run:
         dashboard_service.invalidate_dashboard_summary_cache()
+    return report
+
+
+def load_new_year_draft(*, owner: str, target_year: int) -> dict[str, Any] | None:
+    """Load the saved wizard draft for a user+target_year, if any."""
+    require_postgres()
+    if target_year <= 0:
+        raise ValueError("Doeljaar moet een geldig getal zijn.")
+
+    payload = postgres_storage.load_dataset("new-year-drafts", deepcopy(DATASET_DEFAULTS["new-year-drafts"]))
+    if not isinstance(payload, list):
+        return None
+
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("owner", "") or "") != str(owner or ""):
+            continue
+        try:
+            row_year = int(row.get("target_year", 0) or 0)
+        except (TypeError, ValueError):
+            row_year = 0
+        if row_year == int(target_year):
+            return row
+    return None
+
+
+def upsert_new_year_draft(
+    *,
+    owner: str,
+    source_year: int,
+    target_year: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Create/update a wizard draft record.
+
+    Important: this does NOT touch any year datasets; it's purely draft storage.
+    """
+    require_postgres()
+    if source_year <= 0 or target_year <= 0:
+        raise ValueError("Bronjaar en doeljaar moeten geldig zijn.")
+    if target_year <= source_year:
+        raise ValueError("Doeljaar moet hoger zijn dan bronjaar.")
+
+    now = datetime.now(UTC).isoformat()
+    existing = postgres_storage.load_dataset("new-year-drafts", deepcopy(DATASET_DEFAULTS["new-year-drafts"]))
+    if not isinstance(existing, list):
+        existing = []
+
+    next_rows: list[dict[str, Any]] = []
+    found = None
+    for row in existing:
+        if not isinstance(row, dict):
+            continue
+        is_match = (
+            str(row.get("owner", "") or "") == str(owner or "")
+            and int(row.get("target_year", 0) or 0) == int(target_year)
+        )
+        if is_match:
+            found = row
+            continue
+        next_rows.append(row)
+
+    record = {
+        "id": str((found or {}).get("id", "") or uuid4()),
+        "owner": str(owner or ""),
+        "source_year": int(source_year),
+        "target_year": int(target_year),
+        "created_at": str((found or {}).get("created_at", "") or now),
+        "updated_at": now,
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+
+    # Compute and freeze source fingerprints only once, so we can detect mid-draft source changes.
+    if isinstance(found, dict) and isinstance(found.get("source_fingerprints"), dict):
+        record["source_fingerprints"] = found.get("source_fingerprints")
+        record["source_fingerprints_at"] = str(found.get("source_fingerprints_at", "") or "")
+    else:
+        record["source_fingerprints"] = _compute_source_fingerprints(source_year=int(source_year))
+        record["source_fingerprints_at"] = now
+
+    next_rows.append(record)
+    postgres_storage.save_dataset("new-year-drafts", next_rows, overwrite=True)
+    return record
+
+
+def delete_new_year_draft(*, owner: str, target_year: int) -> dict[str, Any]:
+    require_postgres()
+    if target_year <= 0:
+        raise ValueError("Doeljaar moet een geldig getal zijn.")
+
+    existing = postgres_storage.load_dataset("new-year-drafts", deepcopy(DATASET_DEFAULTS["new-year-drafts"]))
+    if not isinstance(existing, list):
+        existing = []
+
+    removed = 0
+    kept: list[dict[str, Any]] = []
+    for row in existing:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("owner", "") or "") == str(owner or "") and int(row.get("target_year", 0) or 0) == int(target_year):
+            removed += 1
+            continue
+        kept.append(row)
+
+    postgres_storage.save_dataset("new-year-drafts", kept, overwrite=True)
+    return {"deleted": int(removed)}
+
+
+def commit_new_year(
+    *,
+    source_year: int,
+    target_year: int,
+    owner: str,
+    copy_productie: bool = True,
+    copy_vaste_kosten: bool = True,
+    copy_tarieven: bool = True,
+    copy_verpakkingsonderdelen: bool = True,
+    copy_verkoopstrategie: bool = True,
+    copy_berekeningen: bool = False,
+    overwrite_existing: bool = False,
+    force: bool = False,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Commit the wizard draft to real datasets in one transaction.
+
+    This is the production-minded path: no partial writes per step.
+    """
+    require_postgres()
+    if source_year <= 0 or target_year <= 0:
+        raise ValueError("Bronjaar en doeljaar moeten geldig zijn.")
+    if target_year <= source_year:
+        raise ValueError("Doeljaar moet hoger zijn dan bronjaar.")
+
+    payload = payload if isinstance(payload, dict) else {}
+    draft_data = payload.get("data", {}) if isinstance(payload.get("data", {}), dict) else {}
+
+    report: dict[str, Any] = {"source_year": int(source_year), "target_year": int(target_year), "results": {}}
+
+    # Validate that the source data hasn't changed since the draft started.
+    draft_record = load_new_year_draft(owner=str(owner or ""), target_year=int(target_year))
+    if not draft_record:
+        raise ValueError("Geen concept gevonden voor dit doeljaar. Sla eerst een concept op.")
+    stored_fps = draft_record.get("source_fingerprints")
+    if not isinstance(stored_fps, dict):
+        raise ValueError("Concept mist bronjaar-fingerprints. Sla het concept opnieuw op en probeer opnieuw.")
+    current_fps = _compute_source_fingerprints(source_year=int(source_year))
+    changed = sorted([key for key, value in current_fps.items() if str(stored_fps.get(key, "")) != str(value)])
+    if changed and not force:
+        raise ValueError(
+            "Bronjaar is gewijzigd sinds je concept is gestart. "
+            f"Gewijzigde datasets: {', '.join(changed)}. "
+            "Herlaad je concept of commit met force."
+        )
+    report["results"]["source_changed"] = {"changed": changed, "force": bool(force)}
+
+    with postgres_storage.transaction():
+        seeded = prepare_new_year(
+            source_year=int(source_year),
+            target_year=int(target_year),
+            copy_productie=bool(copy_productie),
+            copy_vaste_kosten=bool(copy_vaste_kosten),
+            copy_tarieven=bool(copy_tarieven),
+            copy_verpakkingsonderdelen=bool(copy_verpakkingsonderdelen),
+            copy_verkoopstrategie=bool(copy_verkoopstrategie),
+            copy_berekeningen=bool(copy_berekeningen),
+            overwrite_existing=bool(overwrite_existing),
+            include_datasets=False,
+            dry_run=False,
+        )
+        report["results"]["seed"] = seeded.get("results", {})
+
+        # Apply target-year overrides from draft.
+        productie_target = draft_data.get("productie_target")
+        if isinstance(productie_target, dict):
+            productie_payload = load_dataset("productie")
+            if not isinstance(productie_payload, dict):
+                productie_payload = {}
+            productie_payload[str(target_year)] = productie_target
+            saved = save_dataset("productie", productie_payload)
+            report["results"]["productie_override"] = {"saved": bool(saved)}
+
+        vaste_kosten_target = draft_data.get("vaste_kosten_target")
+        if isinstance(vaste_kosten_target, list):
+            vaste_payload = load_dataset("vaste-kosten")
+            if not isinstance(vaste_payload, dict):
+                vaste_payload = {}
+            vaste_payload[str(target_year)] = [row for row in vaste_kosten_target if isinstance(row, dict)]
+            saved = save_dataset("vaste-kosten", vaste_payload)
+            report["results"]["vaste_kosten_override"] = {"saved": bool(saved), "rows": len(vaste_payload.get(str(target_year), []))}
+
+        tarieven_target = draft_data.get("tarieven_target")
+        if isinstance(tarieven_target, dict):
+            tarieven_payload = load_dataset("tarieven-heffingen")
+            if not isinstance(tarieven_payload, list):
+                tarieven_payload = []
+            sanitized = [row for row in tarieven_payload if isinstance(row, dict) and int(row.get("jaar", 0) or 0) != int(target_year)]
+            sanitized.append({**tarieven_target, "jaar": int(target_year)})
+            saved = save_dataset("tarieven-heffingen", sanitized)
+            report["results"]["tarieven_override"] = {"saved": bool(saved)}
+
+        packaging_prices_target = draft_data.get("packaging_prices_target")
+        if isinstance(packaging_prices_target, list):
+            packaging_payload = load_dataset("packaging-component-prices")
+            if not isinstance(packaging_payload, list):
+                packaging_payload = []
+            kept = [
+                row
+                for row in packaging_payload
+                if isinstance(row, dict) and int(row.get("jaar", 0) or 0) != int(target_year)
+            ]
+            kept.extend(
+                [
+                    {**row, "jaar": int(target_year)}
+                    for row in packaging_prices_target
+                    if isinstance(row, dict)
+                ]
+            )
+            saved = save_dataset("packaging-component-prices", kept)
+            report["results"]["packaging_prices_override"] = {"saved": bool(saved), "rows": len(packaging_prices_target)}
+
+        verkoopstrategie_target = draft_data.get("verkoopstrategie_target")
+        if isinstance(verkoopstrategie_target, list):
+            verkoop_payload = load_dataset("verkoopprijzen")
+            if not isinstance(verkoop_payload, list):
+                verkoop_payload = []
+            strategy_types = {
+                "jaarstrategie",
+                "verkoopstrategie_product",
+                "verkoopstrategie_verpakking",
+            }
+            kept = [
+                row
+                for row in verkoop_payload
+                if isinstance(row, dict)
+                and not (
+                    int(row.get("jaar", 0) or 0) == int(target_year)
+                    and str(row.get("record_type", "") or "") in strategy_types
+                )
+            ]
+            kept.extend([row for row in verkoopstrategie_target if isinstance(row, dict)])
+            saved = save_dataset("verkoopprijzen", kept)
+            report["results"]["verkoopstrategie_override"] = {"saved": bool(saved), "rows": len(verkoopstrategie_target)}
+
+        # Draft is no longer needed after commit.
+        try:
+            delete_new_year_draft(owner=str(owner or ""), target_year=int(target_year))
+            report["results"]["draft_deleted"] = True
+        except Exception:
+            report["results"]["draft_deleted"] = False
+
     return report
 
 

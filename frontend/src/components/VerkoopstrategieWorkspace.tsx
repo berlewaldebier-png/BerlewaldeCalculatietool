@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { API_BASE_URL } from "@/lib/api";
@@ -40,6 +40,9 @@ type Props = {
   kostprijsproductactiveringen: GenericRecord[];
   initialYear?: number;
   lockYear?: boolean;
+  exposeSave?: (saveFn: (() => Promise<void>) | null) => void;
+  mode?: "server" | "draft";
+  onDraftSave?: (rows: GenericRecord[]) => Promise<void> | void;
 };
 
 const DEFAULT_CHANNELS: ChannelRow[] = [
@@ -141,7 +144,10 @@ export function VerkoopstrategieWorkspace({
   channels,
   kostprijsproductactiveringen,
   initialYear,
-  lockYear
+  lockYear,
+  exposeSave,
+  mode = "server",
+  onDraftSave
 }: Props) {
   const normalizedChannels = useMemo(() => normalizeChannels(channels), [channels]);
   const activeChannels = useMemo(() => normalizedChannels.filter((channel) => channel.actief), [normalizedChannels]);
@@ -339,7 +345,7 @@ export function VerkoopstrategieWorkspace({
           const followProductId = productDefaults?.followsProductId ?? "";
           const productMargins = productDefaults?.activeMargins ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.margin ?? 50])) as Record<string, number>;
           const productFactors = productDefaults?.activeFactors ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.factor ?? 3])) as Record<string, number>;
-          const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? beerOverridesByLabel.get(`${bierId}::${productRow.productType || "product"}::${normalizeLabel(productRow.product)}`);
+          const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
           const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
             const value = override?.sell_in_margins?.[code];
             return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
@@ -492,20 +498,37 @@ export function VerkoopstrategieWorkspace({
     setStatus("");
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        // Preserve non-strategy records (product_pricing etc); only strategy is edited in this screen.
-        body: JSON.stringify([...verkoopPassthroughRows, ...rows.map(stripInternal)])
-      });
-      if (!response.ok) throw new Error("Opslaan mislukt");
-      setStatus("Opgeslagen.");
+      const payload = [...verkoopPassthroughRows, ...rows.map(stripInternal)];
+      if (mode === "draft") {
+        await onDraftSave?.(payload);
+        setStatus("Concept opgeslagen.");
+      } else {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          // Preserve non-strategy records (product_pricing etc); only strategy is edited in this screen.
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error("Opslaan mislukt");
+        setStatus("Opgeslagen.");
+      }
     } catch {
       setStatus("Opslaan mislukt.");
     } finally {
       setIsSaving(false);
     }
   }
+
+  useEffect(() => {
+    if (!exposeSave) {
+      return;
+    }
+
+    exposeSave(handleSave);
+    return () => {
+      exposeSave(null);
+    };
+  }, [exposeSave, endpoint, mode, onDraftSave, rows, verkoopPassthroughRows]);
 
   return (
     <section className="module-card">
