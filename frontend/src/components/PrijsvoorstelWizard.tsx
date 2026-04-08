@@ -460,7 +460,10 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
   };
 }
 
-function createEmptyPrijsvoorstel(): GenericRecord {
+function createEmptyPrijsvoorstel(defaultYear?: number): GenericRecord {
+  const fallbackYear = Number.isFinite(Number(defaultYear)) && Number(defaultYear) > 0
+    ? Number(defaultYear)
+    : new Date().getFullYear();
   return normalizePrijsvoorstel({
     id: createId(),
     offertenummer: "",
@@ -471,7 +474,7 @@ function createEmptyPrijsvoorstel(): GenericRecord {
     datum_text: "",
     verloopt_op: "",
     opmerking: "",
-    jaar: new Date().getFullYear(),
+    jaar: fallbackYear,
     voorsteltype: "Op basis van producten",
     offer_level: "samengesteld",
     liters_basis: "een_bier",
@@ -526,11 +529,19 @@ export function PrijsvoorstelWizard({
   onRowsChange,
   onFinish
 }: PrijsvoorstelWizardProps) {
+  const defaultYearOption = useMemo(() => {
+    const years = Array.isArray(yearOptions) ? yearOptions : [];
+    const first = Number(years[0] ?? 0);
+    return Number.isFinite(first) && first > 0 ? first : new Date().getFullYear();
+  }, [yearOptions]);
+
+  const emptyPrijsvoorstel = useMemo(() => createEmptyPrijsvoorstel(defaultYearOption), [defaultYearOption]);
+
   const initialState = useMemo(() => {
     const normalizedRows = initialRows.map((row) => normalizePrijsvoorstel(row));
 
     if (startWithNew || normalizedRows.length === 0) {
-      const next = createEmptyPrijsvoorstel();
+      const next = createEmptyPrijsvoorstel(defaultYearOption);
       return {
         rows: [next, ...normalizedRows],
         selectedId: String(next.id)
@@ -543,9 +554,9 @@ export function PrijsvoorstelWizard({
 
     return {
       rows: normalizedRows,
-      selectedId: String(matchedRow?.id ?? normalizedRows[0]?.id ?? createEmptyPrijsvoorstel().id)
+      selectedId: String(matchedRow?.id ?? normalizedRows[0]?.id ?? emptyPrijsvoorstel.id)
     };
-  }, [initialRows, initialSelectedId, startWithNew]);
+  }, [defaultYearOption, emptyPrijsvoorstel.id, initialRows, initialSelectedId, startWithNew]);
 
   const [rows, setRows] = useState<GenericRecord[]>(initialState.rows);
   const [selectedId, setSelectedId] = useState<string>(initialState.selectedId);
@@ -573,7 +584,7 @@ export function PrijsvoorstelWizard({
   }, [effectiveSelectedId, selectedId]);
 
   const current =
-    rows.find((row) => String(row.id) === effectiveSelectedId) ?? rows[0] ?? createEmptyPrijsvoorstel();
+    rows.find((row) => String(row.id) === effectiveSelectedId) ?? rows[0] ?? emptyPrijsvoorstel;
   const isEditingExisting = !startWithNew;
   const channelOptions = useMemo<ChannelOption[]>(
     () => {
