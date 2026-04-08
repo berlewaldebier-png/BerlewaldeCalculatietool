@@ -119,6 +119,17 @@ def ensure_schema() -> None:
     # _SCHEMA_READY already set above
 
 
+def reset_defaults() -> None:
+    """Dev/test helper: clear all activation state while keeping schema intact."""
+    ensure_schema()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE TABLE kostprijs_activation_events")
+            cur.execute("TRUNCATE TABLE kostprijs_product_activations")
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+
 def normalize_activation_record(record: dict[str, Any] | None) -> dict[str, Any]:
     src = record if isinstance(record, dict) else {}
     created_at = str(src.get("created_at", "") or "") or _now_iso()

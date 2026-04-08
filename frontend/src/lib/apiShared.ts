@@ -27,6 +27,7 @@ export type DashboardSummary = {
 };
 
 export type AuthStatus = {
+  environment?: string;
   enabled: boolean;
   mode: string;
   postgres_configured: boolean;

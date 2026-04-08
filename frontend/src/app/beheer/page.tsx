@@ -4,13 +4,16 @@ import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 
 export default async function BeheerPage() {
-  const bootstrap = await getBootstrap([], true, "/beheer");
+  const bootstrap = await getBootstrap(["auth-status"], true, "/beheer");
   const navigation = bootstrap.navigation ?? [];
+  const authStatus = (bootstrap.datasets["auth-status"] as any) ?? {};
+  const env = String(authStatus.environment ?? "").toLowerCase();
+  const showDevTools = env === "local" || env === "dev" || env === "development";
 
   return (
     <PageShell
       title="Beheer"
-      subtitle="Users, handleiding en deployment-informatie in één beheeromgeving."
+      subtitle="Users, handleiding en deployment-informatie in een beheeromgeving."
       activePath="/beheer"
       navigation={navigation}
     >
@@ -30,6 +33,13 @@ export default async function BeheerPage() {
           <div className="home-card-title">Deployment</div>
           <div className="home-card-text">Release-instructies voor de testomgeving en latere webdeployment.</div>
         </Link>
+        {showDevTools ? (
+          <Link href="/beheer/devtools" className="home-card">
+            <div className="home-card-section">Beheer</div>
+            <div className="home-card-title">Dev tools</div>
+            <div className="home-card-text">Reset en demo-seed voor localhost (alleen data, nooit tabellen).</div>
+          </Link>
+        ) : null}
       </div>
     </PageShell>
   );
