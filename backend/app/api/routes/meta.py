@@ -252,13 +252,14 @@ def post_activate_kostprijzen(
     user: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     # Admin-only: this writes new definitive kostprijsversies + activations for the target year.
-    return dataset_store.activate_kostprijzen_for_year(
-        owner=str(user.get("username", "") or ""),
-        source_year=int(payload.source_year),
-        target_year=int(payload.target_year),
-        selections=[{"bier_id": s.bier_id, "product_id": s.product_id} for s in payload.selections],
-        dry_run=bool(payload.dry_run),
-    )
+    try:
+        return dataset_store.activate_kostprijzen_for_year(
+            owner=str(user.get("username", "") or ""),
+            source_year=int(payload.source_year),
+            target_year=int(payload.target_year),
+            selections=[{"bier_id": s.bier_id, "product_id": s.product_id} for s in payload.selections],
+            dry_run=bool(payload.dry_run),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
