@@ -232,7 +232,9 @@ def _require_type(dataset_name: str, data: Any, expected_type: type) -> None:
 def validate_dataset_write(name: str, data: Any) -> None:
     _reject_wrapped_payload(data, dataset_name=name)
 
-    dict_datasets = {"productie", "vaste-kosten", "variabele-kosten", "channels"}
+    # Note: `channels` is stored and served as a list (see `_normalize_channels_dataset`),
+    # so treating it as a dict here would break seed import + writes.
+    dict_datasets = {"productie", "vaste-kosten", "variabele-kosten"}
     list_datasets = {
         "tarieven-heffingen",
         "verpakkingsonderdelen",
@@ -244,6 +246,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "kostprijsproductactiveringen",
         "prijsvoorstellen",
         "verkoopprijzen",
+        "channels",
         "packaging-components",
         "packaging-component-prices",
         "packaging-component-price-versions",
