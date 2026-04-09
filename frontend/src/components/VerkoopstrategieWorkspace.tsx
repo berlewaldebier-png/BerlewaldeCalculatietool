@@ -38,6 +38,15 @@ type Props = {
   berekeningen: GenericRecord[];
   channels: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
+  /** Wizard-only: if provided in `mode="draft"`, sell-in/sell-out is computed from these preview cost rows instead of activations/snapshots. */
+  draftKostprijsPreviewRows?: Array<{
+    bierId: string;
+    biernaam: string;
+    productId: string;
+    productType: "basis" | "samengesteld" | "";
+    productLabel: string;
+    kostprijs: number;
+  }>;
   initialYear?: number;
   lockYear?: boolean;
   exposeSave?: Dispatch<SetStateAction<(() => Promise<void>) | null>>;
@@ -169,6 +178,7 @@ export function VerkoopstrategieWorkspace({
   berekeningen,
   channels,
   kostprijsproductactiveringen,
+  draftKostprijsPreviewRows,
   initialYear,
   lockYear,
   exposeSave,
@@ -346,6 +356,95 @@ export function VerkoopstrategieWorkspace({
   }, [basisProductParentMap, channelCodes, channelYearDefaults, productSources, rows, effectiveSelectedYear]);
 
   const sellRows = useMemo<BeerViewRow[]>(() => {
+    if (mode === "draft" && Array.isArray(draftKostprijsPreviewRows) && draftKostprijsPreviewRows.length > 0) {
+      const productById = new Map(productOverrideRows.map((row) => [row.productId, row]));
+      const beerOverrides = new Map(
+        rows
+          .filter((row) => row.jaar === effectiveSelectedYear && row.record_type === "verkoopstrategie_product")
+          .map((row) => [`${row.bier_id}::${row.product_id}`, row])
+      );
+
+      const unique = new Map<string, (typeof draftKostprijsPreviewRows)[number]>();
+      draftKostprijsPreviewRows.forEach((row) => {
+        if (!row) return;
+        const bierId = String(row.bierId ?? "").trim();
+        const productId = String(row.productId ?? "").trim();
+        if (!bierId || !productId) return;
+        unique.set(`${bierId}::${productId}`, row);
+      });
+
+      const out: BeerViewRow[] = [];
+      unique.forEach((row) => {
+        const bierId = String(row.bierId ?? "");
+        const productId = String(row.productId ?? "");
+        const biernaam = String(row.biernaam ?? bierId).trim();
+        const productLabel = String(row.productLabel ?? "").trim() || productId;
+        const productDefaults = productById.get(productId);
+        const followProductId = productDefaults?.followsProductId ?? "";
+
+        const productMargins =
+          productDefaults?.activeMargins ??
+          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.margin ?? 50])) as Record<
+            string,
+            number
+          >);
+        const productFactors =
+          productDefaults?.activeFactors ??
+          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<
+            string,
+            number
+          >);
+
+        const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
+        const marginOverrides = Object.fromEntries(
+          channelCodes.map((code) => {
+            const value = override?.sell_in_margins?.[code];
+            return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
+          })
+        ) as Record<string, number | "">;
+        const factorOverrides = Object.fromEntries(
+          channelCodes.map((code) => {
+            const value = override?.sell_out_factors?.[code];
+            return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
+          })
+        ) as Record<string, number | "">;
+
+        const activeMargins = Object.fromEntries(
+          channelCodes.map((code) => [code, marginOverrides[code] === "" ? productMargins[code] : Number(marginOverrides[code])])
+        ) as Record<string, number>;
+        const activeFactors = Object.fromEntries(
+          channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])
+        ) as Record<string, number>;
+
+        const kostprijs = Number(row.kostprijs ?? 0);
+        const sellInPrices = Object.fromEntries(channelCodes.map((code) => [code, calcSellPrice(kostprijs, activeMargins[code])])) as Record<string, number>;
+        const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
+
+        out.push({
+          id: override?.id || `${bierId}:${productId}`,
+          bierId,
+          biernaam,
+          productId,
+          productType: row.productType,
+          product: productLabel,
+          kostprijs,
+          productMargins,
+          marginOverrides,
+          activeMargins,
+          sellInPrices,
+          productFactors,
+          factorOverrides,
+          activeFactors,
+          sellOutPrices,
+          isReadOnly: Boolean(productDefaults?.isReadOnly),
+          followsProductId: followProductId,
+          followsProductLabel: productDefaults?.followsProductLabel ?? ""
+        });
+      });
+
+      return out.sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
+    }
+
     const bierById = new Map(bieren.map((bier) => [String(bier.id ?? ""), bier]));
     const productById = new Map(productOverrideRows.map((row) => [row.productId, row]));
     const beerOverrides = new Map(
@@ -464,6 +563,7 @@ export function VerkoopstrategieWorkspace({
     berekeningen,
     channelCodes,
     channelYearDefaults,
+    draftKostprijsPreviewRows,
     productOverrideRows,
     rows,
     effectiveSelectedYear,

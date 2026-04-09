@@ -58,6 +58,7 @@ type PreviewRow = {
   bierId: string;
   biernaam: string;
   productId: string;
+  productType: "basis" | "samengesteld" | "";
   productLabel: string;
   sourcePrimaryCost: number;
   sourceCost: number;
@@ -1095,6 +1096,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         bierId,
         biernaam: bierNameById.get(bierId) ?? String(((record.basisgegevens ?? {}) as any)?.biernaam ?? bierId),
         productId,
+        productType: productType === "basis" || productType === "samengesteld" ? (productType as any) : "",
         productLabel: snap.productLabel,
         sourcePrimaryCost: sourcePrimary,
         sourceCost,
@@ -2009,6 +2011,14 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 berekeningen={Array.isArray(currentBerekeningen) ? currentBerekeningen : []}
                 channels={[]}
                 kostprijsproductactiveringen={Array.isArray(currentActivations) ? currentActivations : []}
+                draftKostprijsPreviewRows={previewRows.map((row) => ({
+                  bierId: row.bierId,
+                  biernaam: row.biernaam,
+                  productId: row.productId,
+                  productType: row.productType,
+                  productLabel: row.productLabel,
+                  kostprijs: row.estimatedTargetCost
+                }))}
                 initialYear={targetYear}
                 lockYear
                 exposeSave={setVerkoopstrategieSave}
