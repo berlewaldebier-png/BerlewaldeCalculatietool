@@ -567,9 +567,6 @@ export function VerkoopstrategieWorkspace({
     // `exposeSave` is often a `useState` setter from the parent wizard.
     // Passing a function directly would be treated as an updater and executed immediately.
     exposeSave(() => exposed);
-    return () => {
-      exposeSave(null);
-    };
   }, [exposeSave]);
 
   return (

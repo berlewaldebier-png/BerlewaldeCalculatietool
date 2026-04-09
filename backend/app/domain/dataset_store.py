@@ -93,6 +93,11 @@ DATASET_DEFAULTS: dict[str, Any] = {
     # Draft storage for "Nieuw jaar voorbereiden" (Phase F+).
     # This allows saving progress without mutating the actual year datasets until commit.
     "new-year-drafts": [],
+    # Scenario inkoop (primair) inputs per jaar voor kostprijs-activering.
+    # Shape: [{jaar, bier_id, product_id, scenario_primaire_kosten}]
+    "kostprijs-scenario-inkoop": [],
+    # Draft storage for "Kostprijzen activeren" wizard (Phase E+).
+    "kostprijs-activatie-drafts": [],
 }
 
 READ_ONLY_PROJECTION_DATASETS = {
@@ -241,6 +246,8 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "basisproducten",
         "samengestelde-producten",
         "bieren",
+        "kostprijs-scenario-inkoop",
+        "kostprijs-activatie-drafts",
         "berekeningen",
         "kostprijsversies",
         "kostprijsproductactiveringen",
@@ -988,6 +995,93 @@ def list_new_year_drafts() -> list[dict[str, Any]]:
     return rows
 
 
+def load_kostprijs_activatie_draft(*, owner: str, target_year: int) -> dict[str, Any] | None:
+    payload = postgres_storage.load_dataset(
+        "kostprijs-activatie-drafts",
+        deepcopy(DATASET_DEFAULTS["kostprijs-activatie-drafts"]),
+    )
+    if not isinstance(payload, list):
+        return None
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("owner", "") or "") != str(owner or ""):
+            continue
+        try:
+            row_year = int(row.get("target_year", 0) or 0)
+        except (TypeError, ValueError):
+            row_year = 0
+        if row_year == int(target_year):
+            return row
+    return None
+
+
+def upsert_kostprijs_activatie_draft(
+    *,
+    owner: str,
+    source_year: int,
+    target_year: int,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    require_postgres()
+    existing = postgres_storage.load_dataset(
+        "kostprijs-activatie-drafts",
+        deepcopy(DATASET_DEFAULTS["kostprijs-activatie-drafts"]),
+    )
+    if not isinstance(existing, list):
+        existing = []
+    now = datetime.now(UTC).isoformat()
+    payload = payload if isinstance(payload, dict) else {}
+
+    kept: list[dict[str, Any]] = []
+    previous: dict[str, Any] | None = None
+    for row in existing:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("owner", "") or "") == str(owner or "") and int(row.get("target_year", 0) or 0) == int(
+            target_year
+        ):
+            previous = row
+            continue
+        kept.append(row)
+
+    record = {
+        "id": str(previous.get("id", "") or uuid4()) if isinstance(previous, dict) else str(uuid4()),
+        "owner": str(owner or ""),
+        "source_year": int(source_year),
+        "target_year": int(target_year),
+        "payload": payload,
+        "created_at": str(previous.get("created_at", "") or now) if isinstance(previous, dict) else now,
+        "updated_at": now,
+    }
+    kept.append(record)
+    postgres_storage.save_dataset("kostprijs-activatie-drafts", kept, overwrite=True)
+    return record
+
+
+def delete_kostprijs_activatie_draft(*, owner: str, target_year: int) -> dict[str, Any]:
+    require_postgres()
+    existing = postgres_storage.load_dataset(
+        "kostprijs-activatie-drafts",
+        deepcopy(DATASET_DEFAULTS["kostprijs-activatie-drafts"]),
+    )
+    if not isinstance(existing, list):
+        existing = []
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for row in existing:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("owner", "") or "") == str(owner or "") and int(row.get("target_year", 0) or 0) == int(
+            target_year
+        ):
+            removed += 1
+            continue
+        kept.append(row)
+    postgres_storage.save_dataset("kostprijs-activatie-drafts", kept, overwrite=True)
+    return {"deleted": int(removed)}
+
+
 def delete_new_year_drafts_for_target_year(*, target_year: int) -> dict[str, Any]:
     """Delete drafts for a target year regardless of owner (admin tooling)."""
     require_postgres()
@@ -1150,6 +1244,41 @@ def commit_new_year(
             kept.extend([row for row in verkoopstrategie_target if isinstance(row, dict)])
             saved = save_dataset("verkoopprijzen", kept)
             report["results"]["verkoopstrategie_override"] = {"saved": bool(saved), "rows": len(verkoopstrategie_target)}
+
+        # Persist scenario inkoop (primair) inputs for cost activation.
+        scenario_map = draft_data.get("scenario_primary_costs")
+        if isinstance(scenario_map, dict):
+            existing = load_dataset("kostprijs-scenario-inkoop")
+            if not isinstance(existing, list):
+                existing = []
+            kept = [
+                row
+                for row in existing
+                if isinstance(row, dict) and int(row.get("jaar", 0) or 0) != int(target_year)
+            ]
+            for key, raw_value in scenario_map.items():
+                # key is "bierId::productId"
+                if not isinstance(key, str) or "::" not in key:
+                    continue
+                bier_id, product_id = key.split("::", 1)
+                bier_id = str(bier_id or "").strip()
+                product_id = str(product_id or "").strip()
+                if not bier_id or not product_id:
+                    continue
+                try:
+                    value = float(raw_value or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                kept.append(
+                    {
+                        "jaar": int(target_year),
+                        "bier_id": bier_id,
+                        "product_id": product_id,
+                        "scenario_primaire_kosten": float(value),
+                    }
+                )
+            saved = save_dataset("kostprijs-scenario-inkoop", kept)
+            report["results"]["kostprijs_scenario_inkoop"] = {"saved": bool(saved), "rows": len(kept)}
 
         # Draft is no longer needed after commit.
         try:

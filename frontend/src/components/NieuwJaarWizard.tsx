@@ -352,6 +352,11 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       vaste_kosten_target: copyVasteKosten ? sanitizeVasteKostenTarget(draftVasteKostenTarget) : undefined,
       packaging_prices_target: copyVerpakkingsonderdelen ? packagingRows : undefined,
       verkoopstrategie_target: copyVerkoopstrategie ? draftVerkoopstrategieTarget : undefined
+      ,
+      // Scenario inkoop (primair) per bier+product. We store only explicit overrides; missing entries mean "use bronjaar".
+      scenario_primary_costs: Object.fromEntries(
+        Object.entries(scenarioPrimaryCosts).filter(([, value]) => Number.isFinite(Number(value)))
+      )
     };
     for (const [key, value] of Object.entries(data)) {
       if (value === undefined) {
@@ -405,6 +410,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     // Silent save: avoid noisy status updates while still persisting user work.
     const ok = await saveDraftToServer("");
     if (!ok) return;
+    if (activeStep === 7 && nextIndex !== 7) {
+      // Avoid retaining a save callback tied to an unmounted VerkoopstrategieWorkspace.
+      setVerkoopstrategieSave(null);
+    }
     setActiveStep(nextIndex);
   }
 
@@ -444,27 +453,19 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         }));
       }
       if (Array.isArray(data?.vaste_kosten_target)) {
-        const srcKeyCounts = new Map<string, number>();
-        sourceVasteKostenRows.forEach((row) => {
-          srcKeyCounts.set(row.key, (srcKeyCounts.get(row.key) ?? 0) + 1);
-        });
         const nextUiRows: VasteKostenUiRow[] = (data.vaste_kosten_target as any[])
           .filter((row) => row && typeof row === "object")
-          .map((row) => {
-            const key = vasteKostenKey(row);
-            const remaining = srcKeyCounts.get(key) ?? 0;
-            if (remaining > 0) {
-              srcKeyCounts.set(key, remaining - 1);
-            }
-            return {
-              uiId: createUiId(),
-              omschrijving: String((row as any).omschrijving ?? ""),
-              kostensoort: String((row as any).kostensoort ?? ""),
-              bedrag_per_jaar: Number((row as any).bedrag_per_jaar ?? 0),
-              herverdeel_pct: Number((row as any).herverdeel_pct ?? 0),
-              isNew: remaining <= 0
-            };
-          });
+          .map((row) => ({
+            uiId: createUiId(),
+            omschrijving: String((row as any).omschrijving ?? ""),
+            kostensoort: String((row as any).kostensoort ?? ""),
+            bedrag_per_jaar: Number((row as any).bedrag_per_jaar ?? 0),
+            herverdeel_pct: Number((row as any).herverdeel_pct ?? 0),
+            // Rows loaded from draft are existing target-year rows (not "new" rows added in the UI).
+            // Marking these as new breaks the 1:1 matching with the bronjaar table, which then makes
+            // the target-year columns non-editable (rendered as '-').
+            isNew: false
+          }));
         setDraftVasteKostenTarget(nextUiRows);
       }
       if (Array.isArray(data?.packaging_prices_target)) {
@@ -489,6 +490,16 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       }
       if (Array.isArray(data?.verkoopstrategie_target)) {
         setDraftVerkoopstrategieTarget(data.verkoopstrategie_target as any);
+      }
+      if (data?.scenario_primary_costs && typeof data.scenario_primary_costs === "object") {
+        const raw = data.scenario_primary_costs as Record<string, unknown>;
+        const next: Record<string, number> = {};
+        Object.entries(raw).forEach(([key, value]) => {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return;
+          next[key] = parsed;
+        });
+        setScenarioPrimaryCosts(next);
       }
       if (Array.isArray(payload?.completed_step_ids)) {
         setCompletedStepIds(payload.completed_step_ids as any);

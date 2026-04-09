@@ -12,6 +12,11 @@ from app.domain import kostprijs_activation_storage
 from app.domain import seed_bundle_service
 from app.domain.auth_dependencies import require_admin, require_user
 from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
+from app.schemas.kostprijs_activation import (
+    ActivateKostprijzenRequest,
+    KostprijsActivatiePlanResponse,
+    UpsertKostprijsActivatieDraftRequest,
+)
 from app.schemas.navigation import DashboardSummary, NavigationItem
 
 
