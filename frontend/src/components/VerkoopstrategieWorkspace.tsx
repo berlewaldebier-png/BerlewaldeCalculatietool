@@ -100,6 +100,32 @@ function normalizeChannels(raw: GenericRecord[]) {
   })).filter((row) => row.code && row.naam && row.code !== "groothandel").sort((a, b) => (a.volgorde === b.volgorde ? a.naam.localeCompare(b.naam, "nl-NL") : a.volgorde - b.volgorde));
 }
 
+function buildEmptyYearStrategyRow({
+  year,
+  channelDefaults
+}: {
+  year: number;
+  channelDefaults: Record<string, { margin: number; factor: number }>;
+}): StrategyRow {
+  // This is a year-specific defaults record. It becomes the single source of truth for default margins/factors per year.
+  return {
+    id: "",
+    record_type: "jaarstrategie",
+    jaar: year,
+    bier_id: "",
+    biernaam: "",
+    product_id: "",
+    product_type: "",
+    verpakking: "",
+    strategie_type: "default",
+    kostprijs: 0,
+    sell_in_margins: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.margin ?? 50)])),
+    sell_out_factors: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.factor ?? 3)])),
+    sell_out_advice_prices: {},
+    _uiId: createUiId()
+  };
+}
+
 function normalizeStrategyRow(row: GenericRecord, channelCodes: string[]): StrategyRow {
   const marginsSrcRaw = (row.sell_in_margins ?? row.kanaalmarges ?? {}) as unknown;
   const marginsSrc =
@@ -152,7 +178,16 @@ export function VerkoopstrategieWorkspace({
   const normalizedChannels = useMemo(() => normalizeChannels(channels), [channels]);
   const activeChannels = useMemo(() => normalizedChannels.filter((channel) => channel.actief), [normalizedChannels]);
   const channelCodes = useMemo(() => normalizedChannels.map((channel) => channel.code), [normalizedChannels]);
-  const channelDefaults = useMemo(() => Object.fromEntries(normalizedChannels.map((channel) => [channel.code, { margin: channel.default_marge_pct, factor: channel.default_factor }])) as Record<string, { margin: number; factor: number }>, [normalizedChannels]);
+  const channelMasterDefaults = useMemo(
+    () =>
+      Object.fromEntries(
+        normalizedChannels.map((channel) => [
+          channel.code,
+          { margin: Number(channel.default_marge_pct ?? 50), factor: Number(channel.default_factor ?? 3) }
+        ])
+      ) as Record<string, { margin: number; factor: number }>,
+    [normalizedChannels]
+  );
   const verkoopPassthroughRows = useMemo(() => {
     return verkoopprijzen.filter((row) => !STRATEGY_RECORD_TYPES.has(String(row.record_type ?? "")));
   }, [verkoopprijzen]);
@@ -229,6 +264,39 @@ export function VerkoopstrategieWorkspace({
     typeof initialYear === "number" && Number.isFinite(initialYear) ? initialYear : computedDefaultYear;
   const [selectedYear, setSelectedYear] = useState<number>(resolvedInitialYear);
   const effectiveSelectedYear = lockYear ? resolvedInitialYear : selectedYear;
+  const yearStrategyRow = useMemo(() => {
+    return rows.find((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear) ?? null;
+  }, [rows, effectiveSelectedYear]);
+
+  // Ensure there is exactly one year-defaults record for the selected year.
+  useEffect(() => {
+    if (!Number.isFinite(effectiveSelectedYear) || effectiveSelectedYear <= 0) return;
+    if (yearStrategyRow) return;
+
+    setRows((current) => {
+      const exists = current.some((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear);
+      if (exists) return current;
+      const seeded = buildEmptyYearStrategyRow({ year: effectiveSelectedYear, channelDefaults: channelMasterDefaults });
+      return [...current, seeded];
+    });
+    // Make the behavior explicit: this is not a backend write until the user saves.
+    setStatus(`Jaarstrategie voor ${effectiveSelectedYear} ontbreekt. Defaults zijn klaar gezet; klik Opslaan om te bewaren.`);
+  }, [channelMasterDefaults, effectiveSelectedYear, yearStrategyRow]);
+
+  const channelYearDefaults = useMemo(() => {
+    const seeded = buildEmptyYearStrategyRow({ year: effectiveSelectedYear, channelDefaults: channelMasterDefaults });
+    const source = yearStrategyRow ?? seeded;
+    return Object.fromEntries(
+      channelCodes.map((code) => [
+        code,
+        {
+          margin: Number(source.sell_in_margins?.[code] ?? channelMasterDefaults[code]?.margin ?? 50),
+          factor: Number((source.sell_out_factors as any)?.[code] ?? channelMasterDefaults[code]?.factor ?? 3),
+        },
+      ])
+    ) as Record<string, { margin: number; factor: number }>;
+  }, [channelCodes, channelMasterDefaults, effectiveSelectedYear, yearStrategyRow]);
+
   const basisById = useMemo(() => new Map(basisproducten.map((row) => [String(row.id ?? ""), row])), [basisproducten]);
   const samengesteldById = useMemo(() => new Map(samengesteldeProducten.map((row) => [String(row.id ?? ""), row])), [samengesteldeProducten]);
   const actieveProductActiveringen = useMemo(
@@ -256,11 +324,11 @@ export function VerkoopstrategieWorkspace({
       const found = byProduct.get(effectiveProductId) ?? null;
       const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
         const value = found?.sell_in_margins?.[code];
-        return [code, value === undefined || value === channelDefaults[code]?.margin ? "" : Number(value)];
+        return [code, value === undefined || value === channelYearDefaults[code]?.margin ? "" : Number(value)];
       })) as Record<string, number | "">;
       const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
         const value = found?.sell_out_factors?.[code];
-        return [code, value === "" || value === undefined || Number(value) === channelDefaults[code]?.factor ? "" : Number(value)];
+        return [code, value === "" || value === undefined || Number(value) === channelYearDefaults[code]?.factor ? "" : Number(value)];
       })) as Record<string, number | "">;
       return {
         productId: product.id,
@@ -268,14 +336,14 @@ export function VerkoopstrategieWorkspace({
         product: product.label,
         marginOverrides,
         factorOverrides,
-        activeMargins: Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? channelDefaults[code]?.margin ?? 50 : Number(marginOverrides[code])])) as Record<string, number>,
-        activeFactors: Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? channelDefaults[code]?.factor ?? 3 : Number(factorOverrides[code])])) as Record<string, number>,
+        activeMargins: Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? channelYearDefaults[code]?.margin ?? 50 : Number(marginOverrides[code])])) as Record<string, number>,
+        activeFactors: Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? channelYearDefaults[code]?.factor ?? 3 : Number(factorOverrides[code])])) as Record<string, number>,
         isReadOnly: Boolean(parentComposite),
         followsProductId: parentComposite?.productId ?? "",
         followsProductLabel: parentComposite?.label ?? ""
       };
     });
-  }, [basisProductParentMap, channelCodes, channelDefaults, productSources, rows, effectiveSelectedYear]);
+  }, [basisProductParentMap, channelCodes, channelYearDefaults, productSources, rows, effectiveSelectedYear]);
 
   const sellRows = useMemo<BeerViewRow[]>(() => {
     const bierById = new Map(bieren.map((bier) => [String(bier.id ?? ""), bier]));
@@ -336,8 +404,12 @@ export function VerkoopstrategieWorkspace({
         if (!biernaam || !productRow) return;
         const productDefaults = productById.get(productId);
         const followProductId = productDefaults?.followsProductId ?? "";
-        const productMargins = productDefaults?.activeMargins ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.margin ?? 50])) as Record<string, number>;
-        const productFactors = productDefaults?.activeFactors ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.factor ?? 3])) as Record<string, number>;
+        const productMargins =
+          productDefaults?.activeMargins ??
+          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.margin ?? 50])) as Record<string, number>);
+        const productFactors =
+          productDefaults?.activeFactors ??
+          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<string, number>);
         const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
         const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
           const value = override?.sell_in_margins?.[code];
@@ -364,8 +436,8 @@ export function VerkoopstrategieWorkspace({
           const productId = productRow.productId;
           const productDefaults = productById.get(productId);
           const followProductId = productDefaults?.followsProductId ?? "";
-          const productMargins = productDefaults?.activeMargins ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.margin ?? 50])) as Record<string, number>;
-          const productFactors = productDefaults?.activeFactors ?? Object.fromEntries(channelCodes.map((code) => [code, channelDefaults[code]?.factor ?? 3])) as Record<string, number>;
+          const productMargins = productDefaults?.activeMargins ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.margin ?? 50])) as Record<string, number>;
+          const productFactors = productDefaults?.activeFactors ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<string, number>;
           const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
           const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
             const value = override?.sell_in_margins?.[code];
@@ -391,12 +463,46 @@ export function VerkoopstrategieWorkspace({
     bieren,
     berekeningen,
     channelCodes,
-    channelDefaults,
+    channelYearDefaults,
     productOverrideRows,
     rows,
     effectiveSelectedYear,
     samengesteldById
   ]);
+
+  function updateYearMargin(channel: string, value: number) {
+    setRows((current) => {
+      const next = [...current];
+      const idx = next.findIndex((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear);
+      const base = idx >= 0 ? next[idx] : buildEmptyYearStrategyRow({ year: effectiveSelectedYear, channelDefaults: channelMasterDefaults });
+      const updated: StrategyRow = {
+        ...base,
+        jaar: effectiveSelectedYear,
+        record_type: "jaarstrategie",
+        sell_in_margins: { ...base.sell_in_margins, [channel]: Number(value) }
+      };
+      if (idx >= 0) next[idx] = updated;
+      else next.push(updated);
+      return next;
+    });
+  }
+
+  function updateYearFactor(channel: string, value: number) {
+    setRows((current) => {
+      const next = [...current];
+      const idx = next.findIndex((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear);
+      const base = idx >= 0 ? next[idx] : buildEmptyYearStrategyRow({ year: effectiveSelectedYear, channelDefaults: channelMasterDefaults });
+      const updated: StrategyRow = {
+        ...base,
+        jaar: effectiveSelectedYear,
+        record_type: "jaarstrategie",
+        sell_out_factors: { ...(base.sell_out_factors as any), [channel]: Number(value) }
+      };
+      if (idx >= 0) next[idx] = updated;
+      else next.push(updated);
+      return next;
+    });
+  }
 
   function upsertProduct(productId: string, updater: (row: StrategyRow | null) => StrategyRow | null) {
     setRows((current) => {
@@ -584,21 +690,29 @@ export function VerkoopstrategieWorkspace({
       </div>
 
       {activeTab === "kanalen" ? (
-        <DatasetTableEditor
-          endpoint="/data/dataset/channels"
-          initialRows={normalizedChannels}
-          addRowTemplate={{ id: "", code: "", naam: "", actief: true, volgorde: 999, default_marge_pct: 50, default_factor: 3 }}
-          columns={[
-            { key: "naam", label: "Kanaal", width: "220px" },
-            { key: "code", label: "Code", width: "140px" },
-            { key: "default_marge_pct", label: "Default marge %", type: "number", width: "150px" },
-            { key: "default_factor", label: "Default factor", type: "number", width: "150px" },
-            { key: "actief", label: "Actief", type: "checkbox", width: "110px" },
-            { key: "volgorde", label: "Volgorde", type: "number", width: "120px" }
-          ]}
-          title="Kanalen"
-          description="Nieuwe kanalen krijgen hier meteen een standaard marge en factor mee."
-        />
+        mode === "draft" ? (
+          <div className="placeholder-block">
+            <strong>Kanalen</strong>
+            <div className="muted" style={{ marginTop: 8 }}>
+              Kanaal-masterdata (zoals actief/volgorde) beheer je buiten deze wizard. Default marges en factoren zijn per
+              jaar en worden opgeslagen in <code>jaarstrategie</code> (tab Sell-in/Sell-out).
+            </div>
+          </div>
+        ) : (
+          <DatasetTableEditor
+            endpoint="/data/dataset/channels"
+            initialRows={normalizedChannels}
+            addRowTemplate={{ id: "", code: "", naam: "", actief: true, volgorde: 999, default_marge_pct: 50, default_factor: 3 }}
+            columns={[
+              { key: "naam", label: "Kanaal", width: "220px" },
+              { key: "code", label: "Code", width: "140px" },
+              { key: "actief", label: "Actief", type: "checkbox", width: "110px" },
+              { key: "volgorde", label: "Volgorde", type: "number", width: "120px" }
+            ]}
+            title="Kanalen"
+            description="Kanaal-masterdata. Default marges en factoren zijn per jaar en worden beheerd via jaarstrategie."
+          />
+        )
       ) : (
         <>
           <div className="editor-toolbar">
@@ -634,7 +748,22 @@ export function VerkoopstrategieWorkspace({
                 <div className="data-table" style={{ marginTop: "0.75rem" }}>
                   <table>
                     <thead><tr><th>Kanaal</th><th>Default marge %</th></tr></thead>
-                    <tbody>{activeChannels.map((channel) => <tr key={channel.code}><td>{channel.naam}</td><td>{num(channel.default_marge_pct)}</td></tr>)}</tbody>
+                    <tbody>
+                      {activeChannels.map((channel) => (
+                        <tr key={channel.code}>
+                          <td>{channel.naam}</td>
+                          <td>
+                            <input
+                              className="dataset-input"
+                              type="number"
+                              step="any"
+                              value={String(channelYearDefaults[channel.code]?.margin ?? 0)}
+                              onChange={(event) => updateYearMargin(channel.code, Number(event.target.value))}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
                   </table>
                 </div>
               </details>
@@ -655,7 +784,7 @@ export function VerkoopstrategieWorkspace({
                           <td><div className="dataset-input dataset-input-readonly">{row.productType}</div></td>
                           {activeChannels.map((channel) => (
                             <td key={`${row.productId}-${channel.code}`}>
-                              <input className={`${inputClass(row.marginOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()} type="number" step="any" placeholder={String(channel.default_marge_pct)} value={row.marginOverrides[channel.code] === "" ? "" : String(row.marginOverrides[channel.code])} readOnly={row.isReadOnly} onChange={(event) => updateProductMargin(row.productId, channel.code, event.target.value === "" ? "" : Number(event.target.value))} />
+                              <input className={`${inputClass(row.marginOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()} type="number" step="any" placeholder={String(channelYearDefaults[channel.code]?.margin ?? 0)} value={row.marginOverrides[channel.code] === "" ? "" : String(row.marginOverrides[channel.code])} readOnly={row.isReadOnly} onChange={(event) => updateProductMargin(row.productId, channel.code, event.target.value === "" ? "" : Number(event.target.value))} />
                             </td>
                           ))}
                         </tr>
@@ -721,7 +850,22 @@ export function VerkoopstrategieWorkspace({
                 <div className="data-table" style={{ marginTop: "0.75rem" }}>
                   <table>
                     <thead><tr><th>Kanaal</th><th>Default factor</th></tr></thead>
-                    <tbody>{activeChannels.map((channel) => <tr key={channel.code}><td>{channel.naam}</td><td>{num(channel.default_factor)}</td></tr>)}</tbody>
+                    <tbody>
+                      {activeChannels.map((channel) => (
+                        <tr key={channel.code}>
+                          <td>{channel.naam}</td>
+                          <td>
+                            <input
+                              className="dataset-input"
+                              type="number"
+                              step="any"
+                              value={String(channelYearDefaults[channel.code]?.factor ?? 0)}
+                              onChange={(event) => updateYearFactor(channel.code, Number(event.target.value))}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
                   </table>
                 </div>
               </details>
@@ -742,7 +886,7 @@ export function VerkoopstrategieWorkspace({
                           <td><div className="dataset-input dataset-input-readonly">{row.productType}</div></td>
                           {activeChannels.map((channel) => (
                             <td key={`${row.productId}-${channel.code}-factor`}>
-                              <input className={`${inputClass(row.factorOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()} type="number" step="any" placeholder={String(channel.default_factor)} value={row.factorOverrides[channel.code] === "" ? "" : String(row.factorOverrides[channel.code])} readOnly={row.isReadOnly} onChange={(event) => updateProductFactor(row.productId, channel.code, event.target.value === "" ? "" : Number(event.target.value))} />
+                              <input className={`${inputClass(row.factorOverrides[channel.code] !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()} type="number" step="any" placeholder={String(channelYearDefaults[channel.code]?.factor ?? 0)} value={row.factorOverrides[channel.code] === "" ? "" : String(row.factorOverrides[channel.code])} readOnly={row.isReadOnly} onChange={(event) => updateProductFactor(row.productId, channel.code, event.target.value === "" ? "" : Number(event.target.value))} />
                             </td>
                           ))}
                         </tr>
