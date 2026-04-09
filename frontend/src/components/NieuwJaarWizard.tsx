@@ -1921,6 +1921,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               </div>
             </div>
           ) : null}
+          </div>
         </div>
       </div>
     </section>
