@@ -4,13 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { usePageShellHeader, usePageShellWizardSidebar } from "@/components/PageShell";
-import { VasteKostenClient } from "@/components/VasteKostenClient";
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
 import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
 type ProductieMap = Record<string, GenericRecord>;
 type VasteKostenMap = Record<string, GenericRecord[]>;
+
+type VasteKostenUiRow = {
+  uiId: string;
+  omschrijving: string;
+  kostensoort: string;
+  bedrag_per_jaar: number;
+  herverdeel_pct: number;
+  isNew: boolean;
+};
 
 type PackagingComponent = {
   id: string;
@@ -205,12 +213,117 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     hoeveelheid_productie_l: 0,
     batchgrootte_eigen_productie_l: 0
   });
-  const [draftVasteKostenTarget, setDraftVasteKostenTarget] = useState<GenericRecord[]>([]);
+  const [draftVasteKostenTarget, setDraftVasteKostenTarget] = useState<VasteKostenUiRow[]>([]);
   const [draftPackagingPricesTarget, setDraftPackagingPricesTarget] = useState<PackagingPriceRow[]>([]);
   const [draftVerkoopstrategieTarget, setDraftVerkoopstrategieTarget] = useState<GenericRecord[]>([]);
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   const [draftStatus, setDraftStatus] = useState<"" | "idle" | "loading" | "saving" | "committing">("idle");
   const [commitConflict, setCommitConflict] = useState<string>("");
+  const conceptStarted = completedStepIds.includes("init");
+
+  function createUiId() {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  function vasteKostenKey(row: { omschrijving?: unknown; kostensoort?: unknown }) {
+    return `${String(row.omschrijving ?? "").trim().toLowerCase()}||${String(row.kostensoort ?? "")
+      .trim()
+      .toLowerCase()}`;
+  }
+
+  const sourceVasteKostenRows = useMemo(() => {
+    const rawRows = ((currentVasteKosten as any)?.[String(sourceYear)] ?? []) as any[];
+    if (!Array.isArray(rawRows)) return [] as Array<{ idx: number; key: string; omschrijving: string; kostensoort: string; bedrag_per_jaar: number; herverdeel_pct: number }>;
+    return rawRows
+      .filter((row) => row && typeof row === "object")
+      .map((row, idx) => ({
+        idx,
+        key: vasteKostenKey(row),
+        omschrijving: String((row as any).omschrijving ?? ""),
+        kostensoort: String((row as any).kostensoort ?? ""),
+        bedrag_per_jaar: Number((row as any).bedrag_per_jaar ?? 0),
+        herverdeel_pct: Number((row as any).herverdeel_pct ?? 0)
+      }));
+  }, [currentVasteKosten, sourceYear]);
+
+  // Ensure the target-year draft has a 1:1 structural row for each source row (with 0 defaults),
+  // so the combined table can always show editable target columns without copying source amounts.
+  useEffect(() => {
+    if (!conceptStarted || !copyVasteKosten) return;
+
+    const requiredCounts = new Map<string, number>();
+    sourceVasteKostenRows.forEach((row) => {
+      requiredCounts.set(row.key, (requiredCounts.get(row.key) ?? 0) + 1);
+    });
+
+    setDraftVasteKostenTarget((current) => {
+      const currentCounts = new Map<string, number>();
+      current
+        .filter((row) => !row.isNew)
+        .forEach((row) => {
+          const key = vasteKostenKey(row);
+          currentCounts.set(key, (currentCounts.get(key) ?? 0) + 1);
+        });
+
+      let changed = false;
+      const next = [...current];
+      for (const [key, required] of requiredCounts.entries()) {
+        const have = currentCounts.get(key) ?? 0;
+        if (have >= required) continue;
+        const missing = required - have;
+        changed = true;
+        const exemplar = sourceVasteKostenRows.find((row) => row.key === key);
+        const exemplarOmschrijving = exemplar?.omschrijving ?? "";
+        const exemplarSoort = exemplar?.kostensoort ?? "";
+        for (let i = 0; i < missing; i += 1) {
+          next.push({
+            uiId: createUiId(),
+            omschrijving: exemplarOmschrijving,
+            kostensoort: exemplarSoort,
+            bedrag_per_jaar: 0,
+            herverdeel_pct: 0,
+            isNew: false
+          });
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [conceptStarted, copyVasteKosten, sourceVasteKostenRows]);
+
+  function updateVasteKostenRow(uiId: string, patch: Partial<VasteKostenUiRow>) {
+    setDraftVasteKostenTarget((current) =>
+      current.map((row) => (row.uiId === uiId ? { ...row, ...patch } : row))
+    );
+  }
+
+  function addVasteKostenRow() {
+    setDraftVasteKostenTarget((current) => [
+      ...current,
+      {
+        uiId: createUiId(),
+        omschrijving: "",
+        kostensoort: "",
+        bedrag_per_jaar: 0,
+        herverdeel_pct: 0,
+        isNew: true
+      }
+    ]);
+  }
+
+  function sanitizeVasteKostenTarget(rows: VasteKostenUiRow[]): GenericRecord[] {
+    return (Array.isArray(rows) ? rows : [])
+      .filter((row) => row && typeof row === "object")
+      .map((row) => ({
+        id: "",
+        omschrijving: String(row.omschrijving ?? ""),
+        kostensoort: String(row.kostensoort ?? ""),
+        bedrag_per_jaar: Number(row.bedrag_per_jaar ?? 0),
+        herverdeel_pct: Number(row.herverdeel_pct ?? 0)
+      }));
+  }
 
   function buildDraftPayload() {
     const packagingRows: PackagingPriceRow[] = packagingComponents.map((component) => ({
@@ -232,7 +345,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         tarief_laag: Number(draftTariefTarget.tarief_laag ?? 0),
         verbruikersbelasting: Number(draftTariefTarget.verbruikersbelasting ?? 0)
       },
-      vaste_kosten_target: copyVasteKosten ? draftVasteKostenTarget : undefined,
+      vaste_kosten_target: copyVasteKosten ? sanitizeVasteKostenTarget(draftVasteKostenTarget) : undefined,
       packaging_prices_target: copyVerpakkingsonderdelen ? packagingRows : undefined,
       verkoopstrategie_target: copyVerkoopstrategie ? draftVerkoopstrategieTarget : undefined
     };
@@ -311,7 +424,28 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         }));
       }
       if (Array.isArray(data?.vaste_kosten_target)) {
-        setDraftVasteKostenTarget(data.vaste_kosten_target as any);
+        const srcKeyCounts = new Map<string, number>();
+        sourceVasteKostenRows.forEach((row) => {
+          srcKeyCounts.set(row.key, (srcKeyCounts.get(row.key) ?? 0) + 1);
+        });
+        const nextUiRows: VasteKostenUiRow[] = (data.vaste_kosten_target as any[])
+          .filter((row) => row && typeof row === "object")
+          .map((row) => {
+            const key = vasteKostenKey(row);
+            const remaining = srcKeyCounts.get(key) ?? 0;
+            if (remaining > 0) {
+              srcKeyCounts.set(key, remaining - 1);
+            }
+            return {
+              uiId: createUiId(),
+              omschrijving: String((row as any).omschrijving ?? ""),
+              kostensoort: String((row as any).kostensoort ?? ""),
+              bedrag_per_jaar: Number((row as any).bedrag_per_jaar ?? 0),
+              herverdeel_pct: Number((row as any).herverdeel_pct ?? 0),
+              isNew: remaining <= 0
+            };
+          });
+        setDraftVasteKostenTarget(nextUiRows);
       }
       if (Array.isArray(data?.packaging_prices_target)) {
         setDraftPackagingPricesTarget(
@@ -428,9 +562,19 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       } else {
         setDraftTariefTarget((current) => ({ ...current, jaar: targetYear }));
       }
-      // Bewuste keuze: vaste kosten / verpakkingsprijzen nemen we niet automatisch over.
-      // De bronwaarden blijven zichtbaar (read-only), maar het doeljaar start leeg/0 zodat de gebruiker bewust invult.
-      setDraftVasteKostenTarget([]);
+      // Bewuste keuze: we nemen vaste kosten niet over, maar we zetten wel de structuur klaar (0/0) zodat je bewust kunt invullen.
+      setDraftVasteKostenTarget(
+        copyVasteKosten
+          ? sourceVasteKostenRows.map((row) => ({
+              uiId: createUiId(),
+              omschrijving: row.omschrijving,
+              kostensoort: row.kostensoort,
+              bedrag_per_jaar: 0,
+              herverdeel_pct: 0,
+              isNew: false
+            }))
+          : []
+      );
       setDraftPackagingPrices({});
       setDraftPackagingPricesTarget([]);
       setDraftVerkoopstrategieTarget([]);
@@ -442,8 +586,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       setStatus(error instanceof Error ? error.message : "Concept starten mislukt.");
     }
   }
-
-  const conceptStarted = completedStepIds.includes("init");
 
   async function saveAndClose() {
     if (isRunning) return;
@@ -708,7 +850,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   function computeFixedCostsTotalForYear(year: number) {
     const rows =
       year === targetYear
-        ? draftVasteKostenTarget
+        ? sanitizeVasteKostenTarget(draftVasteKostenTarget)
         : ((currentVasteKosten as any)?.[String(year)] as unknown);
     if (!Array.isArray(rows)) return 0;
     return rows.reduce((sum, row) => sum + Number((row as any)?.bedrag_per_jaar ?? 0), 0);
@@ -1424,55 +1566,143 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           {activeStep === 4 ? (
             <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
-                Bronjaar {sourceYear} (read-only) ter referentie. Doeljaar {targetYear} vul je bewust zelf in.
+                Links zie je de vaste kosten van bronjaar {sourceYear} (read-only). Rechts vul je de vaste kosten voor doeljaar{" "}
+                {targetYear} in.
               </div>
+
               <div className="dataset-editor-scroll" style={{ marginBottom: 14 }}>
                 <table className="dataset-editor-table">
                   <thead>
                     <tr>
-                      <th style={{ width: "360px" }}>Omschrijving</th>
+                      <th style={{ width: "320px" }}>Omschrijving</th>
                       <th style={{ width: "180px" }}>Kostensoort</th>
-                      <th style={{ width: "180px" }}>Bedrag/jaar</th>
-                      <th style={{ width: "160px" }}>Herverdelen %</th>
+                      <th style={{ width: "170px" }}>Kosten {sourceYear}</th>
+                      <th style={{ width: "150px" }}>Herverdelen %</th>
+                      <th style={{ width: "170px" }}>Kosten {targetYear}</th>
+                      <th style={{ width: "170px" }}>Herverdelen % {targetYear}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(((currentVasteKosten as any)?.[String(sourceYear)] ?? []) as any[]).map((row: any, idx: number) => (
-                      <tr key={`${String(row?.id ?? "")}-${idx}`}>
-                        <td>{String(row?.omschrijving ?? "")}</td>
-                        <td>{String(row?.kostensoort ?? "")}</td>
-                        <td>{formatEur(Number(row?.bedrag_per_jaar ?? 0))}</td>
-                        <td>{String(Number(row?.herverdeel_pct ?? 0))}</td>
+                    {(() => {
+                      const used = new Set<string>();
+                      return sourceVasteKostenRows.map((srcRow, idx) => {
+                        const draftRow = draftVasteKostenTarget.find(
+                          (row) =>
+                            !row.isNew &&
+                            !used.has(row.uiId) &&
+                            row.omschrijving === srcRow.omschrijving &&
+                            row.kostensoort === srcRow.kostensoort
+                        );
+                        if (draftRow) used.add(draftRow.uiId);
+
+                        if (!draftRow) {
+                          return (
+                            <tr key={`${srcRow.key}-${idx}`}>
+                              <td>{srcRow.omschrijving}</td>
+                              <td>{srcRow.kostensoort}</td>
+                              <td>{formatEur(srcRow.bedrag_per_jaar)}</td>
+                              <td>{String(Number(srcRow.herverdeel_pct ?? 0))}</td>
+                              <td className="muted">0</td>
+                              <td className="muted">0</td>
+                            </tr>
+                          );
+                        }
+
+                        return (
+                          <tr key={draftRow.uiId}>
+                            <td>{srcRow.omschrijving}</td>
+                            <td>{srcRow.kostensoort}</td>
+                            <td>{formatEur(srcRow.bedrag_per_jaar)}</td>
+                            <td>{String(Number(srcRow.herverdeel_pct ?? 0))}</td>
+                            <td>
+                              <input
+                                className="dataset-input"
+                                type="number"
+                                value={String(Number(draftRow.bedrag_per_jaar ?? 0))}
+                                onChange={(event) =>
+                                  updateVasteKostenRow(draftRow.uiId, { bedrag_per_jaar: Number(event.target.value) })
+                                }
+                              />
+                            </td>
+                            <td>
+                              <input
+                                className="dataset-input"
+                                type="number"
+                                value={String(Number(draftRow.herverdeel_pct ?? 0))}
+                                onChange={(event) =>
+                                  updateVasteKostenRow(draftRow.uiId, { herverdeel_pct: Number(event.target.value) })
+                                }
+                              />
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+
+                    {draftVasteKostenTarget.filter((row) => row.isNew).map((row) => (
+                      <tr key={row.uiId}>
+                        <td>
+                          <input
+                            className="dataset-input"
+                            value={row.omschrijving}
+                            onChange={(event) => updateVasteKostenRow(row.uiId, { omschrijving: event.target.value })}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            className="dataset-input"
+                            value={row.kostensoort}
+                            onChange={(event) => updateVasteKostenRow(row.uiId, { kostensoort: event.target.value })}
+                          >
+                            <option value="">(kies)</option>
+                            <option value="Directe kosten">Directe kosten</option>
+                            <option value="Indirecte kosten">Indirecte kosten</option>
+                          </select>
+                        </td>
+                        <td className="muted">0</td>
+                        <td className="muted">0</td>
+                        <td>
+                          <input
+                            className="dataset-input"
+                            type="number"
+                            value={String(Number(row.bedrag_per_jaar ?? 0))}
+                            onChange={(event) =>
+                              updateVasteKostenRow(row.uiId, { bedrag_per_jaar: Number(event.target.value) })
+                            }
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="dataset-input"
+                            type="number"
+                            value={String(Number(row.herverdeel_pct ?? 0))}
+                            onChange={(event) =>
+                              updateVasteKostenRow(row.uiId, { herverdeel_pct: Number(event.target.value) })
+                            }
+                          />
+                        </td>
                       </tr>
                     ))}
-                    {Array.isArray((currentVasteKosten as any)?.[String(sourceYear)]) &&
-                    (((currentVasteKosten as any)?.[String(sourceYear)] ?? []) as any[]).length === 0 ? (
+
+                    {sourceVasteKostenRows.length === 0 && draftVasteKostenTarget.filter((row) => row.isNew).length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="muted">
-                          Geen vaste kosten gevonden voor bronjaar {sourceYear}.
+                        <td colSpan={6} className="muted">
+                          Geen vaste kosten gevonden voor bronjaar {sourceYear}. Voeg een rij toe voor {targetYear}.
                         </td>
                       </tr>
                     ) : null}
                   </tbody>
                 </table>
               </div>
-              <VasteKostenClient
-                vasteKosten={{ ...(currentVasteKosten as any), [String(targetYear)]: draftVasteKostenTarget } as any}
-                productie={currentProductie as any}
-                availableYears={[sourceYear, targetYear]}
-                initialSelectedYear={targetYear}
-                lockYear
-                titleSuffix={String(targetYear)}
-                mode="draft"
-                syncOnPropsChange
-                onDraftChange={(payload) => {
-                  const rows = (payload as any)?.[String(targetYear)];
-                  if (Array.isArray(rows)) {
-                    setDraftVasteKostenTarget(rows as any);
-                  }
-                }}
-                onDraftSave={() => saveDraftToServer(`Vaste kosten (concept) voor ${targetYear} opgeslagen.`)}
-              />
+
+              <div className="editor-actions" style={{ marginTop: 0 }}>
+                <div className="editor-actions-group">
+                  <button type="button" className="editor-button editor-button-secondary" onClick={addVasteKostenRow}>
+                    Rij toevoegen
+                  </button>
+                </div>
+                <div className="editor-actions-group" />
+              </div>
               <div className="editor-actions wizard-footer-actions">
                 <div className="editor-actions-group">
                   <button
@@ -1486,6 +1716,14 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 </div>
                 <div className="editor-actions-group">
                   {saveAndCloseButton}
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => void saveDraftToServer(`Vaste kosten (concept) voor ${targetYear} opgeslagen.`)}
+                    disabled={isRunning}
+                  >
+                    Opslaan
+                  </button>
                   <button
                     type="button"
                     className="editor-button"
