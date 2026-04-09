@@ -204,7 +204,6 @@ def post_generate_missing_activations(
     This endpoint is the explicit repair/migration path for legacy/older data that predates
     activation records (or where invalid records were cleaned up).
     """
-    try:
     return dataset_store.generate_missing_activations(dry_run=dry_run)
 
 
