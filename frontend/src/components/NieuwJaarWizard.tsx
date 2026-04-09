@@ -252,7 +252,11 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   // Ensure the target-year draft has a 1:1 structural row for each source row (with 0 defaults),
   // so the combined table can always show editable target columns without copying source amounts.
   useEffect(() => {
-    if (!conceptStarted || !copyVasteKosten) return;
+    // Note: this is a UI-structure initializer only (0/0 defaults). It does not copy source amounts.
+    // We intentionally allow this to run when the user is on the fixed-costs step, even if the
+    // draft's `completed_step_ids` is temporarily out of sync, to avoid a non-editable UI.
+    if (!copyVasteKosten) return;
+    if (!conceptStarted && activeStep !== 4) return;
 
     const requiredCounts = new Map<string, number>();
     sourceVasteKostenRows.forEach((row) => {
@@ -291,7 +295,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       }
       return changed ? next : current;
     });
-  }, [conceptStarted, copyVasteKosten, sourceVasteKostenRows]);
+  }, [conceptStarted, activeStep, copyVasteKosten, sourceVasteKostenRows]);
 
   function updateVasteKostenRow(uiId: string, patch: Partial<VasteKostenUiRow>) {
     setDraftVasteKostenTarget((current) =>
