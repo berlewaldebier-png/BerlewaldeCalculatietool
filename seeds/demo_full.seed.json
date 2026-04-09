@@ -1,0 +1,1826 @@
+{
+  "created_at": "2026-04-09T09:09:42+00:00",
+  "datasets": {
+    "base-product-masters": [
+      {
+        "id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+        "inhoud_per_eenheid_liter": 0.33,
+        "jaar": 2025,
+        "omschrijving": "Fles 33cl",
+        "onderdelen": [
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Fles 33cl",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "6d8902b9-0443-4b25-beb9-f02944f48f7c",
+            "verpakkingsonderdeel_key": "837eff3f-4fc9-415e-869f-635aa67f34a3"
+          },
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Etiket 33cl",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "32b42fd8-966b-4d5e-b037-761af9123803",
+            "verpakkingsonderdeel_key": "68f45edc-826c-4582-b08d-1ad69bdfd8c3"
+          },
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Kroonkurk dop",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "1ed9cd93-1159-4fae-8f46-315fd5a5fc09",
+            "verpakkingsonderdeel_key": "9b7129f1-49ea-4920-bfd4-e84acdc614e4"
+          }
+        ],
+        "totale_verpakkingskosten": 0.0
+      },
+      {
+        "id": "8ae9849d-3882-571b-b5c4-8e4ec4862bd7",
+        "inhoud_per_eenheid_liter": 0.75,
+        "jaar": 2025,
+        "omschrijving": "Fles 75cl",
+        "onderdelen": [
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Etiket 75cl",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "4f7a2bd1-f153-4ac7-b83a-0dc85da2582f",
+            "verpakkingsonderdeel_key": "78534847-ae6d-4b24-88bf-469c1bae14db"
+          },
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Fles 75cl",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "aa2d7466-4751-49d3-a354-80eab074ebe5",
+            "verpakkingsonderdeel_key": "af364cf5-e7d5-4356-adc6-5c3472466f25"
+          },
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Champagne kurk",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "cb48b0de-e4da-46f1-9182-7c75d0db2bb2",
+            "verpakkingsonderdeel_key": "0be41c7a-4a83-4f22-86c1-db56b1455d20"
+          }
+        ],
+        "totale_verpakkingskosten": 0.0
+      },
+      {
+        "id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+        "inhoud_per_eenheid_liter": 20.0,
+        "jaar": 2025,
+        "omschrijving": "Fust 20L",
+        "onderdelen": [
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Fustcap",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "b0aacf3c-ece0-46bd-9e4b-9f346d558159",
+            "verpakkingsonderdeel_key": "a4bfeac2-39da-4005-ab0f-13e8df2363c7"
+          },
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Dolium fust 20L",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "6ac6c617-2cd7-45b4-ab8c-f3bd4f369e88",
+            "verpakkingsonderdeel_key": "0ef95a39-ed97-49f4-8916-234cdeea7c50"
+          },
+          {
+            "hoeveelheid": 1.0,
+            "omschrijving": "Fustlabel",
+            "prijs_per_stuk": 0.0,
+            "totale_kosten": 0.0,
+            "verpakkingsonderdeel_id": "51a3b4ba-907a-4984-a6c8-d297b56426ac",
+            "verpakkingsonderdeel_key": "2ab1a50e-5371-49cf-b152-7be62a8e2122"
+          }
+        ],
+        "totale_verpakkingskosten": 0.0
+      }
+    ],
+    "bieren": [
+      {
+        "alcoholpercentage": 6.6,
+        "belastingsoort": "Accijns",
+        "biernaam": "Berlewalde IPA",
+        "btw_tarief": "21%",
+        "created_at": "2026-04-03T21:23:15.390675",
+        "id": "64da2616-5974-43f1-a3af-06fe9373504f",
+        "stijl": "IPA",
+        "tarief_accijns": "Hoog",
+        "updated_at": "2026-04-07T23:18:14.506831"
+      },
+      {
+        "alcoholpercentage": 6.0,
+        "belastingsoort": "Accijns",
+        "biernaam": "Berlewalde Blond",
+        "btw_tarief": "21%",
+        "created_at": "2026-04-03T21:23:15.390717",
+        "id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "stijl": "Blond",
+        "tarief_accijns": "Hoog",
+        "updated_at": "2026-04-07T23:18:14.506847"
+      },
+      {
+        "alcoholpercentage": 9.0,
+        "belastingsoort": "Accijns",
+        "biernaam": "Berlewalde Triple",
+        "btw_tarief": "21%",
+        "created_at": "2026-04-07T15:10:28.768706",
+        "id": "e44f8090-662a-4724-8ee9-3af102df6b9e",
+        "stijl": "Triple",
+        "tarief_accijns": "Hoog",
+        "updated_at": "2026-04-07T23:18:14.506778"
+      }
+    ],
+    "channels": [
+      {
+        "actief": true,
+        "code": "horeca",
+        "default_factor": 2.5,
+        "default_marge_pct": 25,
+        "id": "horeca",
+        "naam": "Horeca",
+        "volgorde": 10
+      },
+      {
+        "actief": true,
+        "code": "retail",
+        "default_factor": 2.4,
+        "default_marge_pct": 20,
+        "id": "retail",
+        "naam": "Supermarkt",
+        "volgorde": 20
+      },
+      {
+        "actief": true,
+        "code": "slijterij",
+        "default_factor": 3,
+        "default_marge_pct": 20,
+        "id": "slijterij",
+        "naam": "Slijterij",
+        "volgorde": 30
+      },
+      {
+        "actief": true,
+        "code": "zakelijk",
+        "default_factor": 3.2,
+        "default_marge_pct": 20,
+        "id": "zakelijk",
+        "naam": "Speciaalzaak",
+        "volgorde": 40
+      },
+      {
+        "actief": false,
+        "code": "particulier",
+        "default_factor": 3,
+        "default_marge_pct": 50,
+        "id": "particulier",
+        "naam": "Particulier",
+        "volgorde": 50
+      }
+    ],
+    "composite-product-masters": [
+      {
+        "basisproducten": [
+          {
+            "aantal": 24.0,
+            "basisproduct_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+            "inhoud_per_eenheid_liter": 0.33,
+            "omschrijving": "Fles 33cl",
+            "totale_inhoud_liter": 7.92,
+            "totale_verpakkingskosten": 0.0,
+            "verpakkingskosten_per_eenheid": 0.0
+          }
+        ],
+        "id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+        "jaar": 2025,
+        "omschrijving": "Doos 24*33cl",
+        "totale_inhoud_liter": 7.92,
+        "totale_verpakkingskosten": 0.0
+      },
+      {
+        "basisproducten": [
+          {
+            "aantal": 6.0,
+            "basisproduct_id": "8ae9849d-3882-571b-b5c4-8e4ec4862bd7",
+            "inhoud_per_eenheid_liter": 0.75,
+            "omschrijving": "Fles 75cl",
+            "totale_inhoud_liter": 4.5,
+            "totale_verpakkingskosten": 0.0,
+            "verpakkingskosten_per_eenheid": 0.0
+          }
+        ],
+        "id": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+        "jaar": 2025,
+        "omschrijving": "Doos 6*75cl",
+        "totale_inhoud_liter": 4.5,
+        "totale_verpakkingskosten": 0.0
+      },
+      {
+        "basisproducten": [
+          {
+            "aantal": 12.0,
+            "basisproduct_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+            "inhoud_per_eenheid_liter": 0.33,
+            "omschrijving": "Fles 33cl",
+            "totale_inhoud_liter": 3.96,
+            "totale_verpakkingskosten": 0.0,
+            "verpakkingskosten_per_eenheid": 0.0
+          }
+        ],
+        "id": "e16ccad4-15ff-4085-8e77-c6c3392342c1",
+        "jaar": 2025,
+        "omschrijving": "Doos 12*33cl",
+        "totale_inhoud_liter": 3.96,
+        "totale_verpakkingskosten": 0.0
+      }
+    ],
+    "kostprijsproductactiveringen": [
+      {
+        "bier_id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "created_at": "2026-04-03T12:25:13.443Z",
+        "effectief_vanaf": "2026-04-03T12:25:13.443Z",
+        "id": "bbc0c00e-fbd2-4778-9e7c-9f1b9b86850b",
+        "jaar": 2025,
+        "kostprijsversie_id": "d0641719-c149-48d1-8f26-da94e4c2567e",
+        "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+        "product_type": "basis",
+        "updated_at": "2026-04-03T12:25:13.443Z"
+      },
+      {
+        "bier_id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "created_at": "2026-04-03T23:18:57.921Z",
+        "effectief_vanaf": "2026-04-03T23:18:57.921Z",
+        "id": "85bd75cd-94de-4183-8857-57a696742604",
+        "jaar": 2025,
+        "kostprijsversie_id": "1ac7b2db-8d49-49cb-8885-4aa818b693e6",
+        "product_id": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+        "product_type": "samengesteld",
+        "updated_at": "2026-04-03T23:18:57.921Z"
+      },
+      {
+        "bier_id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "created_at": "2026-04-03T12:25:13.443Z",
+        "effectief_vanaf": "2026-04-03T12:25:13.443Z",
+        "id": "fe856a07-322e-4285-aa73-ec7eeba7f39c",
+        "jaar": 2025,
+        "kostprijsversie_id": "d0641719-c149-48d1-8f26-da94e4c2567e",
+        "product_id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+        "product_type": "basis",
+        "updated_at": "2026-04-03T12:25:13.443Z"
+      },
+      {
+        "bier_id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "created_at": "2026-04-03T23:18:57.921Z",
+        "effectief_vanaf": "2026-04-03T23:18:57.921Z",
+        "id": "70bd0d67-1847-411a-96fb-009b51ab7e94",
+        "jaar": 2025,
+        "kostprijsversie_id": "1ac7b2db-8d49-49cb-8885-4aa818b693e6",
+        "product_id": "8ae9849d-3882-571b-b5c4-8e4ec4862bd7",
+        "product_type": "basis",
+        "updated_at": "2026-04-03T23:18:57.921Z"
+      },
+      {
+        "bier_id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "created_at": "2026-04-03T12:25:13.443Z",
+        "effectief_vanaf": "2026-04-03T12:25:13.443Z",
+        "id": "3c46f08b-2d55-4b90-a5d9-21229f31f063",
+        "jaar": 2025,
+        "kostprijsversie_id": "d0641719-c149-48d1-8f26-da94e4c2567e",
+        "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+        "product_type": "samengesteld",
+        "updated_at": "2026-04-03T12:25:13.443Z"
+      },
+      {
+        "bier_id": "64da2616-5974-43f1-a3af-06fe9373504f",
+        "created_at": "2026-04-03T10:40:59.504Z",
+        "effectief_vanaf": "2026-04-03T10:40:59.504Z",
+        "id": "12ba1bfb-dd6c-449a-a638-f3a2e6758c94",
+        "jaar": 2025,
+        "kostprijsversie_id": "9dc9bf85-832a-4beb-8f94-a11c48d856b9",
+        "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+        "product_type": "basis",
+        "updated_at": "2026-04-03T10:40:59.504Z"
+      },
+      {
+        "bier_id": "64da2616-5974-43f1-a3af-06fe9373504f",
+        "created_at": "2026-04-03T10:40:59.504Z",
+        "effectief_vanaf": "2026-04-03T10:40:59.504Z",
+        "id": "a632a926-b6d6-441f-bd76-3af64cbdc013",
+        "jaar": 2025,
+        "kostprijsversie_id": "9dc9bf85-832a-4beb-8f94-a11c48d856b9",
+        "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+        "product_type": "samengesteld",
+        "updated_at": "2026-04-03T10:40:59.504Z"
+      },
+      {
+        "bier_id": "e44f8090-662a-4724-8ee9-3af102df6b9e",
+        "created_at": "2026-04-07T14:59:28.554Z",
+        "effectief_vanaf": "2026-04-07T14:59:28.554Z",
+        "id": "e9325fa1-b614-4441-964b-d73ee1ca0261",
+        "jaar": 2025,
+        "kostprijsversie_id": "0971ff49-cde8-4ae4-b3c6-c523dbe8c7e7",
+        "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+        "product_type": "basis",
+        "updated_at": "2026-04-07T14:59:28.554Z"
+      },
+      {
+        "bier_id": "e44f8090-662a-4724-8ee9-3af102df6b9e",
+        "created_at": "2026-04-07T21:05:13.921321",
+        "effectief_vanaf": "2026-04-07T21:05:13.921321",
+        "id": "ed5e5d80-e6f6-48aa-a47e-7f708e7cd00e",
+        "jaar": 2025,
+        "kostprijsversie_id": "0971ff49-cde8-4ae4-b3c6-c523dbe8c7e7",
+        "product_id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+        "product_type": "basis",
+        "updated_at": "2026-04-07T21:05:13.921321"
+      },
+      {
+        "bier_id": "e44f8090-662a-4724-8ee9-3af102df6b9e",
+        "created_at": "2026-04-07T14:59:28.554Z",
+        "effectief_vanaf": "2026-04-07T14:59:28.554Z",
+        "id": "0bc04120-ef12-457f-8b8f-310c5dc4f9bf",
+        "jaar": 2025,
+        "kostprijsversie_id": "0971ff49-cde8-4ae4-b3c6-c523dbe8c7e7",
+        "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+        "product_type": "samengesteld",
+        "updated_at": "2026-04-07T14:59:28.554Z"
+      }
+    ],
+    "kostprijsversies": [
+      {
+        "aangemaakt_op": "2026-04-07T15:10:24.283199",
+        "aangepast_op": "2026-04-07T19:52:14.688Z",
+        "basisgegevens": {
+          "alcoholpercentage": 9.0,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde Triple",
+          "btw_tarief": "21%",
+          "jaar": 2025,
+          "stijl": "Triple",
+          "tarief_accijns": "Hoog"
+        },
+        "bier_id": "e44f8090-662a-4724-8ee9-3af102df6b9e",
+        "bier_snapshot": {
+          "alcoholpercentage": 9.0,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde Triple",
+          "btw_tarief": "21%",
+          "stijl": "Triple",
+          "tarief_accijns": "Hoog"
+        },
+        "bron_berekening_id": "",
+        "bron_id": "2d097d6a-66ee-4824-9d6f-52b9e7d2492b",
+        "brontype": "factuur",
+        "calculation_variant": "origineel",
+        "created_at": "2026-04-07T15:10:24.283199",
+        "effectief_vanaf": "2026-04-07T21:05:13.921321",
+        "finalized_at": "2026-04-07T19:52:14.688Z",
+        "hercalculatie_basis": {
+          "ingredienten_regels": []
+        },
+        "hercalculatie_notitie": "",
+        "hercalculatie_reden": "",
+        "hercalculatie_timestamp": "",
+        "id": "0971ff49-cde8-4ae4-b3c6-c523dbe8c7e7",
+        "invoer": {
+          "ingredienten": {
+            "notities": "",
+            "regels": []
+          },
+          "inkoop": {
+            "facturen": [
+              {
+                "factuurdatum": "27-03-2025",
+                "factuurnummer": "2025",
+                "factuurregels": [
+                  {
+                    "aantal": 134.0,
+                    "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                    "id": "30447687-accf-4f3d-84d7-8e200e0bb30d",
+                    "liters": 1061.28,
+                    "subfactuurbedrag": 3043.14
+                  },
+                  {
+                    "aantal": 46.0,
+                    "eenheid": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                    "id": "3279dee7-9147-4d51-8253-8d5dee8c547a",
+                    "liters": 920.0,
+                    "subfactuurbedrag": 2769.2
+                  }
+                ],
+                "id": "2d097d6a-66ee-4824-9d6f-52b9e7d2492b",
+                "overige_kosten": 100.0,
+                "verzendkosten": 260.0
+              }
+            ],
+            "factuurdatum": "27-03-2025",
+            "factuurnummer": "2025",
+            "factuurregels": [
+              {
+                "aantal": 134.0,
+                "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "id": "30447687-accf-4f3d-84d7-8e200e0bb30d",
+                "liters": 1061.28,
+                "subfactuurbedrag": 3043.14
+              },
+              {
+                "aantal": 46.0,
+                "eenheid": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                "id": "3279dee7-9147-4d51-8253-8d5dee8c547a",
+                "liters": 920.0,
+                "subfactuurbedrag": 2769.2
+              }
+            ],
+            "notities": "",
+            "overige_kosten": 100.0,
+            "regels": [],
+            "verzendkosten": 260.0
+          }
+        },
+        "is_actief": true,
+        "jaar": 2025,
+        "jaarovergang": {
+          "aangemaakt_via": "",
+          "bron_berekening_id": "",
+          "bron_jaar": 0,
+          "created_at": "",
+          "doel_jaar": 0
+        },
+        "kostprijs": 3.557434,
+        "last_completed_step": 1,
+        "record_type": "kostprijsberekening",
+        "resultaat_snapshot": {
+          "directe_vaste_kosten_per_liter": 0.442105,
+          "integrale_kostprijs_per_liter": 3.557434,
+          "producten": {
+            "basisproducten": [
+              {
+                "accijns": 0.241164,
+                "biernaam": "Berlewalde Triple",
+                "kostprijs": 1.389279,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 1.00222,
+                "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 1.00222,
+                "vaste_directe_kosten": 0.145895,
+                "vaste_kosten": 0.145895,
+                "verpakking": "Fles 33cl",
+                "verpakkingseenheid": "Fles 33cl",
+                "verpakkingskosten": 0.0
+              },
+              {
+                "accijns": 14.616,
+                "biernaam": "Berlewalde Triple",
+                "kostprijs": 87.571142,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 64.113043,
+                "product_id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 64.113043,
+                "vaste_directe_kosten": 8.842099,
+                "vaste_kosten": 8.842099,
+                "verpakking": "Fust 20L",
+                "verpakkingseenheid": "Fust 20L",
+                "verpakkingskosten": 0.0
+              }
+            ],
+            "samengestelde_producten": [
+              {
+                "accijns": 5.787936,
+                "biernaam": "Berlewalde Triple",
+                "kostprijs": 33.342691,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 24.053284,
+                "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "product_type": "samengesteld",
+                "soort": "Inkoop",
+                "variabele_kosten": 24.053284,
+                "vaste_directe_kosten": 3.501471,
+                "vaste_kosten": 3.501471,
+                "verpakking": "Doos 24*33cl",
+                "verpakkingseenheid": "Doos 24*33cl",
+                "verpakkingskosten": 0.0
+              }
+            ]
+          },
+          "variabele_kosten_per_liter": 3.115329
+        },
+        "soort_berekening": {
+          "type": "Inkoop"
+        },
+        "status": "definitief",
+        "type": "inkoop",
+        "updated_at": "2026-04-07T19:52:14.688Z",
+        "versie_nummer": 1
+      },
+      {
+        "aangemaakt_op": "2026-04-03T14:25:17.906884",
+        "aangepast_op": "2026-04-05T08:45:54.564Z",
+        "basisgegevens": {
+          "alcoholpercentage": 6.0,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde Blond",
+          "btw_tarief": "21%",
+          "jaar": 2025,
+          "stijl": "Blond",
+          "tarief_accijns": "Hoog"
+        },
+        "bier_id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "bier_snapshot": {
+          "alcoholpercentage": 6.0,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde Blond",
+          "btw_tarief": "21%",
+          "stijl": "Blond",
+          "tarief_accijns": "Hoog"
+        },
+        "bron_berekening_id": "",
+        "bron_id": "3255e6c3-c0bf-4688-a2d5-39afc274bd6c",
+        "brontype": "factuur",
+        "calculation_variant": "origineel",
+        "created_at": "2026-04-03T14:25:17.906884",
+        "effectief_vanaf": "2026-04-03T12:25:13.443Z",
+        "finalized_at": "2026-04-05T08:45:54.564Z",
+        "hercalculatie_basis": {
+          "ingredienten_regels": []
+        },
+        "hercalculatie_notitie": "",
+        "hercalculatie_reden": "",
+        "hercalculatie_timestamp": "",
+        "id": "d0641719-c149-48d1-8f26-da94e4c2567e",
+        "invoer": {
+          "ingredienten": {
+            "notities": "",
+            "regels": []
+          },
+          "inkoop": {
+            "facturen": [
+              {
+                "factuurdatum": "13-03-2025",
+                "factuurnummer": "V25-00129",
+                "factuurregels": [
+                  {
+                    "aantal": 120.0,
+                    "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                    "id": "82e3b6ba-250c-4ea7-ac48-98ddb10e9bb6",
+                    "liters": 950.4,
+                    "subfactuurbedrag": 2582.4
+                  },
+                  {
+                    "aantal": 46.0,
+                    "eenheid": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                    "id": "4cb734a4-c674-4a0b-8487-adc084234456",
+                    "liters": 920.0,
+                    "subfactuurbedrag": 2631.2
+                  }
+                ],
+                "id": "3255e6c3-c0bf-4688-a2d5-39afc274bd6c",
+                "overige_kosten": 100.0,
+                "verzendkosten": 195.0
+              }
+            ],
+            "factuurdatum": "13-03-2025",
+            "factuurnummer": "V25-00129",
+            "factuurregels": [
+              {
+                "aantal": 120.0,
+                "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "id": "82e3b6ba-250c-4ea7-ac48-98ddb10e9bb6",
+                "liters": 950.4,
+                "subfactuurbedrag": 2582.4
+              },
+              {
+                "aantal": 46.0,
+                "eenheid": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                "id": "4cb734a4-c674-4a0b-8487-adc084234456",
+                "liters": 920.0,
+                "subfactuurbedrag": 2631.2
+              }
+            ],
+            "notities": "",
+            "overige_kosten": 100.0,
+            "regels": [],
+            "verzendkosten": 195.0
+          }
+        },
+        "is_actief": true,
+        "jaar": 2025,
+        "jaarovergang": {
+          "aangemaakt_via": "",
+          "bron_berekening_id": "",
+          "bron_jaar": 0,
+          "created_at": "",
+          "doel_jaar": 0
+        },
+        "kostprijs": 3.38725,
+        "last_completed_step": 1,
+        "record_type": "kostprijsberekening",
+        "resultaat_snapshot": {
+          "directe_vaste_kosten_per_liter": 0.442105,
+          "integrale_kostprijs_per_liter": 3.38725,
+          "producten": {
+            "basisproducten": [
+              {
+                "accijns": 0.160776,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 1.254553,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 0.947882,
+                "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 0.947882,
+                "vaste_directe_kosten": 0.145895,
+                "vaste_kosten": 0.145895,
+                "verpakking": "Fles 33cl",
+                "verpakkingseenheid": "Fles 33cl",
+                "verpakkingskosten": 0.0
+              },
+              {
+                "accijns": 9.744,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 78.99262,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 60.406522,
+                "product_id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 60.406522,
+                "vaste_directe_kosten": 8.842099,
+                "vaste_kosten": 8.842099,
+                "verpakking": "Fust 20L",
+                "verpakkingseenheid": "Fust 20L",
+                "verpakkingskosten": 0.0
+              }
+            ],
+            "samengestelde_producten": [
+              {
+                "accijns": 3.858624,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 30.109262,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 22.749167,
+                "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "product_type": "samengesteld",
+                "soort": "Inkoop",
+                "variabele_kosten": 22.749167,
+                "vaste_directe_kosten": 3.501471,
+                "vaste_kosten": 3.501471,
+                "verpakking": "Doos 24*33cl",
+                "verpakkingseenheid": "Doos 24*33cl",
+                "verpakkingskosten": 0.0
+              }
+            ]
+          },
+          "variabele_kosten_per_liter": 2.945145
+        },
+        "soort_berekening": {
+          "type": "Inkoop"
+        },
+        "status": "definitief",
+        "type": "inkoop",
+        "updated_at": "2026-04-05T08:45:54.564Z",
+        "versie_nummer": 1
+      },
+      {
+        "aangemaakt_op": "2026-04-03T11:34:53.830070",
+        "aangepast_op": "2026-04-07T19:38:54.994Z",
+        "basisgegevens": {
+          "alcoholpercentage": 6.6,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde IPA",
+          "btw_tarief": "21%",
+          "jaar": 2025,
+          "stijl": "IPA",
+          "tarief_accijns": "Hoog"
+        },
+        "bier_id": "64da2616-5974-43f1-a3af-06fe9373504f",
+        "bier_snapshot": {
+          "alcoholpercentage": 6.6,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde IPA",
+          "btw_tarief": "21%",
+          "stijl": "IPA",
+          "tarief_accijns": "Hoog"
+        },
+        "bron_berekening_id": "",
+        "bron_id": "dfc2f710-dba0-46bd-be19-d1aca4d08918",
+        "brontype": "factuur",
+        "calculation_variant": "origineel",
+        "created_at": "2026-04-03T11:34:53.830070",
+        "effectief_vanaf": "2026-04-03T10:40:59.504Z",
+        "finalized_at": "2026-04-03T10:44:31.124Z",
+        "hercalculatie_basis": {
+          "ingredienten_regels": []
+        },
+        "hercalculatie_notitie": "",
+        "hercalculatie_reden": "",
+        "hercalculatie_timestamp": "",
+        "id": "9dc9bf85-832a-4beb-8f94-a11c48d856b9",
+        "invoer": {
+          "ingredienten": {
+            "notities": "",
+            "regels": []
+          },
+          "inkoop": {
+            "facturen": [
+              {
+                "factuurdatum": "14-01-2025",
+                "factuurnummer": "V24-01277",
+                "factuurregels": [
+                  {
+                    "aantal": 246.0,
+                    "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                    "id": "dae57d14-a1ca-4cce-a2e3-7f2b008d64d3",
+                    "liters": 1948.32,
+                    "subfactuurbedrag": 5787.32
+                  }
+                ],
+                "id": "dfc2f710-dba0-46bd-be19-d1aca4d08918",
+                "overige_kosten": 0.0,
+                "verzendkosten": 0.0
+              }
+            ],
+            "factuurdatum": "14-01-2025",
+            "factuurnummer": "V24-01277",
+            "factuurregels": [
+              {
+                "aantal": 246.0,
+                "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "id": "dae57d14-a1ca-4cce-a2e3-7f2b008d64d3",
+                "liters": 1948.32,
+                "subfactuurbedrag": 5787.32
+              }
+            ],
+            "notities": "",
+            "overige_kosten": 0.0,
+            "regels": [],
+            "verzendkosten": 0.0
+          }
+        },
+        "is_actief": true,
+        "jaar": 2025,
+        "jaarovergang": {
+          "aangemaakt_via": "",
+          "bron_berekening_id": "",
+          "bron_jaar": 0,
+          "created_at": "",
+          "doel_jaar": 0
+        },
+        "kostprijs": 3.41252,
+        "last_completed_step": 1,
+        "record_type": "kostprijsberekening",
+        "resultaat_snapshot": {
+          "directe_vaste_kosten_per_liter": 0.442105,
+          "integrale_kostprijs_per_liter": 3.41252,
+          "producten": {
+            "basisproducten": [
+              {
+                "accijns": 0.176854,
+                "biernaam": "Berlewalde IPA",
+                "kostprijs": 1.302985,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 0.980237,
+                "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 0.980237,
+                "vaste_directe_kosten": 0.145895,
+                "vaste_kosten": 0.145895,
+                "verpakking": "Fles 33cl",
+                "verpakkingseenheid": "Fles 33cl",
+                "verpakkingskosten": 0.0
+              }
+            ],
+            "samengestelde_producten": [
+              {
+                "accijns": 4.244486,
+                "biernaam": "Berlewalde IPA",
+                "kostprijs": 31.271649,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 23.525691,
+                "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "product_type": "samengesteld",
+                "soort": "Inkoop",
+                "variabele_kosten": 23.525691,
+                "vaste_directe_kosten": 3.501471,
+                "vaste_kosten": 3.501471,
+                "verpakking": "Doos 24*33cl",
+                "verpakkingseenheid": "Doos 24*33cl",
+                "verpakkingskosten": 0.0
+              }
+            ]
+          },
+          "variabele_kosten_per_liter": 2.970416
+        },
+        "soort_berekening": {
+          "type": "Inkoop"
+        },
+        "status": "definitief",
+        "type": "inkoop",
+        "updated_at": "2026-04-07T19:38:54.994Z",
+        "versie_nummer": 1
+      },
+      {
+        "aangemaakt_op": "2026-04-03T22:48:02.317Z",
+        "aangepast_op": "2026-04-05T08:46:49.671Z",
+        "basisgegevens": {
+          "alcoholpercentage": 6.0,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde Blond",
+          "btw_tarief": "21%",
+          "jaar": 2025,
+          "stijl": "Blond",
+          "tarief_accijns": "Hoog"
+        },
+        "bier_id": "4c17c3df-7cab-4561-b282-42b35051b506",
+        "bier_snapshot": {
+          "alcoholpercentage": 6.0,
+          "belastingsoort": "Accijns",
+          "biernaam": "Berlewalde Blond",
+          "btw_tarief": "21%",
+          "stijl": "Blond",
+          "tarief_accijns": "Hoog"
+        },
+        "bron_berekening_id": "d0641719-c149-48d1-8f26-da94e4c2567e",
+        "bron_id": "65756c8d-c7aa-4e2d-9f64-cc7d605ee940",
+        "brontype": "factuur",
+        "calculation_variant": "factuur",
+        "created_at": "2026-04-03T22:48:02.317Z",
+        "effectief_vanaf": "2026-04-03T23:18:57.921Z",
+        "finalized_at": "2026-04-05T08:46:49.671Z",
+        "hercalculatie_basis": {
+          "ingredienten_regels": []
+        },
+        "hercalculatie_notitie": "",
+        "hercalculatie_reden": "",
+        "hercalculatie_timestamp": "",
+        "id": "1ac7b2db-8d49-49cb-8885-4aa818b693e6",
+        "invoer": {
+          "ingredienten": {
+            "notities": "",
+            "regels": []
+          },
+          "inkoop": {
+            "facturen": [
+              {
+                "factuurdatum": "2025-08-07",
+                "factuurnummer": "V25-00552",
+                "factuurregels": [
+                  {
+                    "aantal": 216.0,
+                    "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                    "id": "f5e360d1-276c-413f-b987-bb0186d2a2d7",
+                    "liters": 1710.72,
+                    "subfactuurbedrag": 4648.32
+                  },
+                  {
+                    "aantal": 40.0,
+                    "eenheid": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                    "id": "2d0d48d4-7e80-408d-aeac-0e803c63b490",
+                    "liters": 800.0,
+                    "subfactuurbedrag": 2288.0
+                  },
+                  {
+                    "aantal": 214.0,
+                    "eenheid": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+                    "id": "d007156a-b8a5-4ede-9c92-30bc2d5245a2",
+                    "liters": 963.0,
+                    "subfactuurbedrag": 2826.94
+                  }
+                ],
+                "id": "65756c8d-c7aa-4e2d-9f64-cc7d605ee940",
+                "overige_kosten": 330.0,
+                "verzendkosten": 480.0
+              }
+            ],
+            "factuurdatum": "2025-08-07",
+            "factuurnummer": "V25-00552",
+            "factuurregels": [
+              {
+                "aantal": 216.0,
+                "eenheid": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "id": "f5e360d1-276c-413f-b987-bb0186d2a2d7",
+                "liters": 1710.72,
+                "subfactuurbedrag": 4648.32
+              },
+              {
+                "aantal": 40.0,
+                "eenheid": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                "id": "2d0d48d4-7e80-408d-aeac-0e803c63b490",
+                "liters": 800.0,
+                "subfactuurbedrag": 2288.0
+              },
+              {
+                "aantal": 214.0,
+                "eenheid": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+                "id": "d007156a-b8a5-4ede-9c92-30bc2d5245a2",
+                "liters": 963.0,
+                "subfactuurbedrag": 2826.94
+              }
+            ],
+            "notities": "",
+            "overige_kosten": 330.0,
+            "regels": [],
+            "verzendkosten": 480.0
+          }
+        },
+        "is_actief": true,
+        "jaar": 2025,
+        "jaarovergang": {
+          "aangemaakt_via": "",
+          "bron_berekening_id": "",
+          "bron_jaar": 0,
+          "created_at": "",
+          "doel_jaar": 0
+        },
+        "kostprijs": 3.485891,
+        "last_completed_step": 1,
+        "record_type": "kostprijsberekening",
+        "resultaat_snapshot": {
+          "directe_vaste_kosten_per_liter": 0.442105,
+          "integrale_kostprijs_per_liter": 3.485891,
+          "producten": {
+            "basisproducten": [
+              {
+                "accijns": 0.160776,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 1.255421,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 0.94875,
+                "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 0.94875,
+                "vaste_directe_kosten": 0.145895,
+                "vaste_kosten": 0.145895,
+                "verpakking": "Fles 33cl",
+                "verpakkingseenheid": "Fles 33cl",
+                "verpakkingskosten": 0.0
+              },
+              {
+                "accijns": 9.744,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 82.536099,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 63.95,
+                "product_id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 63.95,
+                "vaste_directe_kosten": 8.842099,
+                "vaste_kosten": 8.842099,
+                "verpakking": "Fust 20L",
+                "verpakkingseenheid": "Fust 20L",
+                "verpakkingskosten": 0.0
+              },
+              {
+                "accijns": 0.3654,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 3.108926,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 2.411947,
+                "product_id": "8ae9849d-3882-571b-b5c4-8e4ec4862bd7",
+                "product_type": "basis",
+                "soort": "Inkoop",
+                "variabele_kosten": 2.411947,
+                "vaste_directe_kosten": 0.331579,
+                "vaste_kosten": 0.331579,
+                "verpakking": "Fles 75cl",
+                "verpakkingseenheid": "Fles 75cl",
+                "verpakkingskosten": 0.0
+              }
+            ],
+            "samengestelde_producten": [
+              {
+                "accijns": 3.858624,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 30.130095,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 22.77,
+                "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+                "product_type": "samengesteld",
+                "soort": "Inkoop",
+                "variabele_kosten": 22.77,
+                "vaste_directe_kosten": 3.501471,
+                "vaste_kosten": 3.501471,
+                "verpakking": "Doos 24*33cl",
+                "verpakkingseenheid": "Doos 24*33cl",
+                "verpakkingskosten": 0.0
+              },
+              {
+                "accijns": 2.1924,
+                "biernaam": "Berlewalde Blond",
+                "kostprijs": 18.653554,
+                "liters_per_product": 0.0,
+                "primaire_kosten": 14.471682,
+                "product_id": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+                "product_type": "samengesteld",
+                "soort": "Inkoop",
+                "variabele_kosten": 14.471682,
+                "vaste_directe_kosten": 1.989472,
+                "vaste_kosten": 1.989472,
+                "verpakking": "Doos 6*75cl",
+                "verpakkingseenheid": "Doos 6*75cl",
+                "verpakkingskosten": 0.0
+              }
+            ]
+          },
+          "variabele_kosten_per_liter": 3.043786
+        },
+        "soort_berekening": {
+          "type": "Inkoop"
+        },
+        "status": "definitief",
+        "type": "inkoop",
+        "updated_at": "2026-04-05T08:46:49.671Z",
+        "versie_nummer": 2
+      }
+    ],
+    "packaging-component-price-versions": [
+      {
+        "created_at": "2026-04-03T10:12:56+00:00",
+        "effectief_vanaf": "2026-04-03T10:12:56+00:00",
+        "id": "4fd532b5-7011-4cf7-97a3-295547f87ada",
+        "is_actief": false,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.0,
+        "updated_at": "2026-04-03T10:12:56+00:00",
+        "verpakkingsonderdeel_id": "1ed9cd93-1159-4fae-8f46-315fd5a5fc09",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:13:09+00:00",
+        "effectief_vanaf": "2026-04-03T10:13:09+00:00",
+        "id": "4c12f9c7-43e7-4d5c-812e-851b4fff9e62",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.05,
+        "updated_at": "2026-04-03T10:13:09+00:00",
+        "verpakkingsonderdeel_id": "1ed9cd93-1159-4fae-8f46-315fd5a5fc09",
+        "versie_nummer": 2
+      },
+      {
+        "created_at": "2026-04-03T10:12:56+00:00",
+        "effectief_vanaf": "2026-04-03T10:12:56+00:00",
+        "id": "f99ff4b7-515d-4aba-8bb8-e24d21abe6dc",
+        "is_actief": false,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.0,
+        "updated_at": "2026-04-03T10:12:56+00:00",
+        "verpakkingsonderdeel_id": "32b42fd8-966b-4d5e-b037-761af9123803",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:13:09+00:00",
+        "effectief_vanaf": "2026-04-03T10:13:09+00:00",
+        "id": "c0f43185-a4d8-4be7-90f0-c46d95e31f5d",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.06,
+        "updated_at": "2026-04-03T10:13:09+00:00",
+        "verpakkingsonderdeel_id": "32b42fd8-966b-4d5e-b037-761af9123803",
+        "versie_nummer": 2
+      },
+      {
+        "created_at": "2026-04-03T10:14:54+00:00",
+        "effectief_vanaf": "2026-04-03T10:14:54+00:00",
+        "id": "f7108d2d-9ff8-4923-811b-5f2613018cd9",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.1,
+        "updated_at": "2026-04-03T10:14:54+00:00",
+        "verpakkingsonderdeel_id": "4f7a2bd1-f153-4ac7-b83a-0dc85da2582f",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:14:54+00:00",
+        "effectief_vanaf": "2026-04-03T10:14:54+00:00",
+        "id": "c5a064f5-3bb0-496b-8dc0-d4c72b4abd5b",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.04,
+        "updated_at": "2026-04-03T10:14:54+00:00",
+        "verpakkingsonderdeel_id": "51a3b4ba-907a-4984-a6c8-d297b56426ac",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:14:54+00:00",
+        "effectief_vanaf": "2026-04-03T10:14:54+00:00",
+        "id": "b9dffed4-4928-44b2-abd3-48013b83171e",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.25,
+        "updated_at": "2026-04-03T10:14:54+00:00",
+        "verpakkingsonderdeel_id": "64d5d970-3059-41ae-a3ae-94a9fab036d8",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:14:54+00:00",
+        "effectief_vanaf": "2026-04-03T10:14:54+00:00",
+        "id": "bef3e2e0-adc0-4721-8972-c951d6985475",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 12.5,
+        "updated_at": "2026-04-03T10:14:54+00:00",
+        "verpakkingsonderdeel_id": "6ac6c617-2cd7-45b4-ab8c-f3bd4f369e88",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:12:56+00:00",
+        "effectief_vanaf": "2026-04-03T10:12:56+00:00",
+        "id": "58175815-1c3b-4c16-9fb4-a3268ffdd3e5",
+        "is_actief": false,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.0,
+        "updated_at": "2026-04-03T10:12:56+00:00",
+        "verpakkingsonderdeel_id": "6d8902b9-0443-4b25-beb9-f02944f48f7c",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:13:09+00:00",
+        "effectief_vanaf": "2026-04-03T10:13:09+00:00",
+        "id": "c37cfb8f-f803-43e9-9d3a-3541566d69a9",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.14,
+        "updated_at": "2026-04-03T10:13:09+00:00",
+        "verpakkingsonderdeel_id": "6d8902b9-0443-4b25-beb9-f02944f48f7c",
+        "versie_nummer": 2
+      },
+      {
+        "created_at": "2026-04-03T10:12:56+00:00",
+        "effectief_vanaf": "2026-04-03T10:12:56+00:00",
+        "id": "63eb7298-cb2c-4759-a0ef-f8ca0ecf9066",
+        "is_actief": false,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.0,
+        "updated_at": "2026-04-03T10:12:56+00:00",
+        "verpakkingsonderdeel_id": "a9f713b4-f1ce-4b70-bdd7-87e830c8a09d",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:13:09+00:00",
+        "effectief_vanaf": "2026-04-03T10:13:09+00:00",
+        "id": "eb4667f4-2deb-4648-b431-f02dc4673fe9",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.14,
+        "updated_at": "2026-04-03T10:13:09+00:00",
+        "verpakkingsonderdeel_id": "a9f713b4-f1ce-4b70-bdd7-87e830c8a09d",
+        "versie_nummer": 2
+      },
+      {
+        "created_at": "2026-04-03T10:14:54+00:00",
+        "effectief_vanaf": "2026-04-03T10:14:54+00:00",
+        "id": "4f14a63f-e102-46e8-93d2-8041978ed6d8",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 2.1,
+        "updated_at": "2026-04-03T10:14:54+00:00",
+        "verpakkingsonderdeel_id": "aa2d7466-4751-49d3-a354-80eab074ebe5",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:14:54+00:00",
+        "effectief_vanaf": "2026-04-03T10:14:54+00:00",
+        "id": "d69ac07c-9927-4922-aa8b-5a864920060b",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.1,
+        "updated_at": "2026-04-03T10:14:54+00:00",
+        "verpakkingsonderdeel_id": "b0aacf3c-ece0-46bd-9e4b-9f346d558159",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-03T10:14:54+00:00",
+        "effectief_vanaf": "2026-04-03T10:14:54+00:00",
+        "id": "be28e335-8f82-4a8f-aafc-aa269cf4d4f2",
+        "is_actief": true,
+        "jaar": 2025,
+        "prijs_per_stuk": 0.05,
+        "updated_at": "2026-04-03T10:14:54+00:00",
+        "verpakkingsonderdeel_id": "cb48b0de-e4da-46f1-9182-7c75d0db2bb2",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "12591ac1-083e-44a0-8c65-4bf18c67ea4f",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.05,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "1ed9cd93-1159-4fae-8f46-315fd5a5fc09",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "56fb0a0c-8d02-432c-9a3b-7b6aecd1b854",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.06,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "32b42fd8-966b-4d5e-b037-761af9123803",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "de041226-565b-471a-b959-c7d620d15204",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.1,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "4f7a2bd1-f153-4ac7-b83a-0dc85da2582f",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "540965f7-fcaf-4153-9560-4662a74406c9",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.04,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "51a3b4ba-907a-4984-a6c8-d297b56426ac",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "06485a75-f518-480f-ae21-031ca8d1bdfb",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.25,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "64d5d970-3059-41ae-a3ae-94a9fab036d8",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "7f1fb501-c986-4a7a-95ce-7881866573b6",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 12.5,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "6ac6c617-2cd7-45b4-ab8c-f3bd4f369e88",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "144b8243-591d-4f36-8e05-1d56d49a55a2",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.14,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "6d8902b9-0443-4b25-beb9-f02944f48f7c",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "584abd79-0765-405f-a975-4a09884193dd",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.0,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "7172e3e9-5215-498e-9dac-dcc42ab07099",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "df971d6c-2c21-4e82-8f9b-f5b4329b656f",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.0,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "880b1d88-2d49-4b94-ad40-543c3d00a3e9",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "2b0cfebf-a876-4d4c-8b77-1c94758a4cae",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.14,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "a9f713b4-f1ce-4b70-bdd7-87e830c8a09d",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "1f837929-880c-41b3-9581-0ea38ddacab0",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 2.1,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "aa2d7466-4751-49d3-a354-80eab074ebe5",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "a0debe0f-a04b-4a2d-a7cf-9b9b1ee23488",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.1,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "b0aacf3c-ece0-46bd-9e4b-9f346d558159",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "f537d341-af5a-4d2f-89e2-b352dc35d29e",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.05,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "cb48b0de-e4da-46f1-9182-7c75d0db2bb2",
+        "versie_nummer": 1
+      },
+      {
+        "created_at": "2026-04-07T22:44:58+00:00",
+        "effectief_vanaf": "2026-04-07T22:44:58+00:00",
+        "id": "6303a49d-59e1-41c4-b7bc-d017a5598b8a",
+        "is_actief": true,
+        "jaar": 2026,
+        "prijs_per_stuk": 0.0,
+        "updated_at": "2026-04-07T22:44:58+00:00",
+        "verpakkingsonderdeel_id": "e52d783f-96aa-446b-be7b-75278ebd88df",
+        "versie_nummer": 1
+      }
+    ],
+    "packaging-components": [
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "74c1b93b-39f5-4d63-b553-b29e3cf3a2c4",
+        "id": "880b1d88-2d49-4b94-ad40-543c3d00a3e9",
+        "omschrijving": "Berlewalde glas 33cl"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "0be41c7a-4a83-4f22-86c1-db56b1455d20",
+        "id": "cb48b0de-e4da-46f1-9182-7c75d0db2bb2",
+        "omschrijving": "Champagne kurk"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "0ef95a39-ed97-49f4-8916-234cdeea7c50",
+        "id": "6ac6c617-2cd7-45b4-ab8c-f3bd4f369e88",
+        "omschrijving": "Dolium fust 20L"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "68f45edc-826c-4582-b08d-1ad69bdfd8c3",
+        "id": "32b42fd8-966b-4d5e-b037-761af9123803",
+        "omschrijving": "Etiket 33cl"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "78534847-ae6d-4b24-88bf-469c1bae14db",
+        "id": "4f7a2bd1-f153-4ac7-b83a-0dc85da2582f",
+        "omschrijving": "Etiket 75cl"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "837eff3f-4fc9-415e-869f-635aa67f34a3",
+        "id": "6d8902b9-0443-4b25-beb9-f02944f48f7c",
+        "omschrijving": "Fles 33cl"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "af364cf5-e7d5-4356-adc6-5c3472466f25",
+        "id": "aa2d7466-4751-49d3-a354-80eab074ebe5",
+        "omschrijving": "Fles 75cl"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "a4bfeac2-39da-4005-ab0f-13e8df2363c7",
+        "id": "b0aacf3c-ece0-46bd-9e4b-9f346d558159",
+        "omschrijving": "Fustcap"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "2ab1a50e-5371-49cf-b152-7be62a8e2122",
+        "id": "51a3b4ba-907a-4984-a6c8-d297b56426ac",
+        "omschrijving": "Fustlabel"
+      },
+      {
+        "beschikbaar_voor_samengesteld": true,
+        "component_key": "1e03fb88-0b65-4016-a445-a21c0ebd6b24",
+        "id": "7172e3e9-5215-498e-9dac-dcc42ab07099",
+        "omschrijving": "Geschenkdoos voor 4 flessen"
+      },
+      {
+        "beschikbaar_voor_samengesteld": true,
+        "component_key": "7a279553-063b-4f2d-85a0-1602957e1a2d",
+        "id": "e52d783f-96aa-446b-be7b-75278ebd88df",
+        "omschrijving": "Geschenkdoos voor 5 flessen"
+      },
+      {
+        "beschikbaar_voor_samengesteld": false,
+        "component_key": "9b7129f1-49ea-4920-bfd4-e84acdc614e4",
+        "id": "1ed9cd93-1159-4fae-8f46-315fd5a5fc09",
+        "omschrijving": "Kroonkurk dop"
+      },
+      {
+        "beschikbaar_voor_samengesteld": true,
+        "component_key": "2d96e7e2-e7e9-42c1-99f8-6c38a24e8cec",
+        "id": "a9f713b4-f1ce-4b70-bdd7-87e830c8a09d",
+        "omschrijving": "Omdoos 24*33cl"
+      },
+      {
+        "beschikbaar_voor_samengesteld": true,
+        "component_key": "91e4f920-f5d0-495f-8d25-792ebf25a1bc",
+        "id": "64d5d970-3059-41ae-a3ae-94a9fab036d8",
+        "omschrijving": "Omdoos 6*75cl"
+      }
+    ],
+    "productie": {
+      "2025": {
+        "batchgrootte_eigen_productie_l": 600.0,
+        "hoeveelheid_inkoop_l": 40000.0,
+        "hoeveelheid_productie_l": 1000.0
+      }
+    },
+    "products": [
+      {
+        "active": true,
+        "default_content_liter": 0.33,
+        "id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+        "kind": "basis",
+        "name": "Fles 33cl"
+      },
+      {
+        "active": true,
+        "default_content_liter": 0.75,
+        "id": "8ae9849d-3882-571b-b5c4-8e4ec4862bd7",
+        "kind": "basis",
+        "name": "Fles 75cl"
+      },
+      {
+        "active": true,
+        "default_content_liter": 20.0,
+        "id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+        "kind": "basis",
+        "name": "Fust 20L"
+      },
+      {
+        "active": true,
+        "default_content_liter": 7.92,
+        "id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+        "kind": "samengesteld",
+        "name": "Doos 24*33cl"
+      },
+      {
+        "active": true,
+        "default_content_liter": 4.5,
+        "id": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+        "kind": "samengesteld",
+        "name": "Doos 6*75cl"
+      },
+      {
+        "active": true,
+        "default_content_liter": 3.96,
+        "id": "e16ccad4-15ff-4085-8e77-c6c3392342c1",
+        "kind": "samengesteld",
+        "name": "Doos 12*33cl"
+      }
+    ],
+    "sales-strategy-products": [
+      {
+        "id": "936800b7-2193-5636-900f-0130ba4ddc8d",
+        "kanaalmarges": {},
+        "product_id": "e16ccad4-15ff-4085-8e77-c6c3392342c1",
+        "record_type": "verkoopstrategie_verpakking",
+        "source_record_id": "26c0e3d7-448b-4468-9ec3-95608832a4ab",
+        "strategie_type": "handmatig",
+        "year": 2025
+      },
+      {
+        "id": "170cc116-9b0f-517e-87e7-ac042ead3cf9",
+        "kanaalmarges": {
+          "horeca": 25.0,
+          "particulier": 50.0
+        },
+        "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+        "record_type": "verkoopstrategie_verpakking",
+        "source_record_id": "01c054ba-2e10-4c48-88ec-3cf4de64d284",
+        "strategie_type": "handmatig",
+        "year": 2025
+      },
+      {
+        "id": "6a59650b-105f-5d03-a33d-9a492f0de596",
+        "kanaalmarges": {
+          "particulier": 50.0
+        },
+        "product_id": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+        "record_type": "verkoopstrategie_verpakking",
+        "source_record_id": "fb68496a-56c8-4d15-bbc1-79505a2a34cd",
+        "strategie_type": "handmatig",
+        "year": 2025
+      },
+      {
+        "id": "143ae95c-b9c2-5605-9069-3a8c59af02c5",
+        "kanaalmarges": {
+          "particulier": 50.0
+        },
+        "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+        "record_type": "verkoopstrategie_verpakking",
+        "source_record_id": "23dedd1f-c0d4-449a-a136-0a1c28531e24",
+        "strategie_type": "handmatig",
+        "year": 2025
+      },
+      {
+        "id": "f7b084b6-f922-59bf-a4e9-9ac15e45673d",
+        "kanaalmarges": {
+          "horeca": 50.0,
+          "particulier": 50.0,
+          "retail": 50.0,
+          "slijterij": 50.0,
+          "zakelijk": 50.0
+        },
+        "product_id": "8ae9849d-3882-571b-b5c4-8e4ec4862bd7",
+        "record_type": "verkoopstrategie_verpakking",
+        "source_record_id": "33068448-7985-4028-bfd4-908edb07a0f4",
+        "strategie_type": "handmatig",
+        "year": 2025
+      },
+      {
+        "id": "01b6dee0-1e0f-516d-ada9-1d5a7382d716",
+        "kanaalmarges": {
+          "particulier": 50.0
+        },
+        "product_id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+        "record_type": "verkoopstrategie_verpakking",
+        "source_record_id": "b24df93d-5659-4468-a9ed-54456065212f",
+        "strategie_type": "handmatig",
+        "year": 2025
+      }
+    ],
+    "sales-strategy-years": [
+      {
+        "id": "97906e9b-10e2-513a-a567-7459f8d8fd24",
+        "kanaalmarges": {},
+        "source_record_id": "",
+        "year": 2025
+      }
+    ],
+    "tarieven-heffingen": [
+      {
+        "id": "8f8506aa-0e7a-432f-9cdd-816c7b4bf931",
+        "jaar": 2025,
+        "tarief_hoog": 8.12,
+        "tarief_laag": 7.51,
+        "verbruikersbelasting": 26.13
+      }
+    ],
+    "vaste-kosten": {
+      "2025": [
+        {
+          "bedrag_per_jaar": 2359.43,
+          "herverdeel_pct": 0.0,
+          "id": "ae8e49fe-cb98-4e25-beed-c38884a038d2",
+          "kostensoort": "Indirecte kosten",
+          "omschrijving": "Autokosten"
+        },
+        {
+          "bedrag_per_jaar": 5324.15,
+          "herverdeel_pct": 25.0,
+          "id": "3e9bf8ec-4814-4ad0-a438-ce7c009599f6",
+          "kostensoort": "Directe kosten",
+          "omschrijving": "Bedrijfsvoering"
+        },
+        {
+          "bedrag_per_jaar": 7818.58,
+          "herverdeel_pct": 0.0,
+          "id": "5bee57b3-d3c7-4091-9996-3b1145bb814b",
+          "kostensoort": "Directe kosten",
+          "omschrijving": "Brouwinstallatie kosten"
+        },
+        {
+          "bedrag_per_jaar": 1411.61,
+          "herverdeel_pct": 50.0,
+          "id": "ee5a9e29-287e-40cb-90e0-342e8a4f3539",
+          "kostensoort": "Directe kosten",
+          "omschrijving": "Gebouwkosten"
+        },
+        {
+          "bedrag_per_jaar": 592.78,
+          "herverdeel_pct": 0.0,
+          "id": "fd61e503-0d4a-461e-9515-ebd4638f5798",
+          "kostensoort": "Indirecte kosten",
+          "omschrijving": "Overig"
+        },
+        {
+          "bedrag_per_jaar": 609.36,
+          "herverdeel_pct": 0.0,
+          "id": "e095637d-1033-415b-9fc6-2b944bca8e8a",
+          "kostensoort": "Directe kosten",
+          "omschrijving": "Personeelskosten"
+        },
+        {
+          "bedrag_per_jaar": 17431.5,
+          "herverdeel_pct": 0.0,
+          "id": "4d32de17-4b1c-4202-9215-ec9cf95a74e5",
+          "kostensoort": "Directe kosten",
+          "omschrijving": "Productkosten"
+        },
+        {
+          "bedrag_per_jaar": 4374.41,
+          "herverdeel_pct": 50.0,
+          "id": "c84819e4-fbde-4952-bba1-bd8296586300",
+          "kostensoort": "Indirecte kosten",
+          "omschrijving": "Software"
+        },
+        {
+          "bedrag_per_jaar": 21015.88,
+          "herverdeel_pct": 50.0,
+          "id": "f6546ef2-e21f-4efd-8da5-a6ce2b15eda9",
+          "kostensoort": "Directe kosten",
+          "omschrijving": "Verkoopkosten"
+        }
+      ]
+    },
+    "verkoopprijzen": [
+      {
+        "adviesfactoren": {},
+        "adviesprijzen": {},
+        "bron_jaar": 2025,
+        "bron_verkoopstrategie_id": "",
+        "created_at": "2026-04-09T01:17:15.103548",
+        "id": "26c0e3d7-448b-4468-9ec3-95608832a4ab",
+        "jaar": 2025,
+        "kanaalmarges": {},
+        "kanaalprijzen": {},
+        "product_id": "e16ccad4-15ff-4085-8e77-c6c3392342c1",
+        "product_type": "samengesteld",
+        "record_type": "verkoopstrategie_verpakking",
+        "sell_in_margins": {},
+        "sell_in_prices": {},
+        "sell_out_advice_prices": {},
+        "sell_out_factors": {},
+        "strategie_type": "handmatig",
+        "updated_at": "2026-04-09T01:17:15.103548",
+        "verpakking": "Doos 12*33cl"
+      },
+      {
+        "adviesfactoren": {},
+        "adviesprijzen": {},
+        "bron_jaar": 2025,
+        "bron_verkoopstrategie_id": "",
+        "created_at": "2026-04-09T01:17:15.103576",
+        "id": "01c054ba-2e10-4c48-88ec-3cf4de64d284",
+        "jaar": 2025,
+        "kanaalmarges": {
+          "horeca": 25.0,
+          "particulier": 50.0
+        },
+        "kanaalprijzen": {},
+        "product_id": "ebd70a8a-b697-504a-bef5-c670e1ab9133",
+        "product_type": "samengesteld",
+        "record_type": "verkoopstrategie_verpakking",
+        "sell_in_margins": {
+          "horeca": 25.0,
+          "particulier": 50.0
+        },
+        "sell_in_prices": {},
+        "sell_out_advice_prices": {},
+        "sell_out_factors": {},
+        "strategie_type": "handmatig",
+        "updated_at": "2026-04-09T01:17:15.103576",
+        "verpakking": "Doos 24*33cl"
+      },
+      {
+        "adviesfactoren": {},
+        "adviesprijzen": {},
+        "bron_jaar": 2025,
+        "bron_verkoopstrategie_id": "",
+        "created_at": "2026-04-09T01:17:15.103596",
+        "id": "fb68496a-56c8-4d15-bbc1-79505a2a34cd",
+        "jaar": 2025,
+        "kanaalmarges": {
+          "particulier": 50.0
+        },
+        "kanaalprijzen": {},
+        "product_id": "281d5e14-c340-5e98-9d7a-70550cabc7cb",
+        "product_type": "samengesteld",
+        "record_type": "verkoopstrategie_verpakking",
+        "sell_in_margins": {
+          "particulier": 50.0
+        },
+        "sell_in_prices": {},
+        "sell_out_advice_prices": {},
+        "sell_out_factors": {},
+        "strategie_type": "handmatig",
+        "updated_at": "2026-04-09T01:17:15.103596",
+        "verpakking": "Doos 6*75cl"
+      },
+      {
+        "adviesfactoren": {},
+        "adviesprijzen": {},
+        "bron_jaar": 2025,
+        "bron_verkoopstrategie_id": "",
+        "created_at": "2026-04-09T01:17:15.103648",
+        "id": "23dedd1f-c0d4-449a-a136-0a1c28531e24",
+        "jaar": 2025,
+        "kanaalmarges": {
+          "particulier": 50.0
+        },
+        "kanaalprijzen": {},
+        "product_id": "17f56ea1-9847-5d85-a507-82fd951c02ca",
+        "product_type": "basis",
+        "record_type": "verkoopstrategie_verpakking",
+        "sell_in_margins": {
+          "particulier": 50.0
+        },
+        "sell_in_prices": {},
+        "sell_out_advice_prices": {},
+        "sell_out_factors": {},
+        "strategie_type": "handmatig",
+        "updated_at": "2026-04-09T01:17:15.103648",
+        "verpakking": "Fles 33cl"
+      },
+      {
+        "adviesfactoren": {},
+        "adviesprijzen": {},
+        "bron_jaar": 2025,
+        "bron_verkoopstrategie_id": "",
+        "created_at": "2026-04-09T01:17:15.103613",
+        "id": "33068448-7985-4028-bfd4-908edb07a0f4",
+        "jaar": 2025,
+        "kanaalmarges": {
+          "horeca": 50.0,
+          "particulier": 50.0,
+          "retail": 50.0,
+          "slijterij": 50.0,
+          "zakelijk": 50.0
+        },
+        "kanaalprijzen": {},
+        "product_id": "8ae9849d-3882-571b-b5c4-8e4ec4862bd7",
+        "product_type": "basis",
+        "record_type": "verkoopstrategie_verpakking",
+        "sell_in_margins": {
+          "horeca": 50.0,
+          "particulier": 50.0,
+          "retail": 50.0,
+          "slijterij": 50.0,
+          "zakelijk": 50.0
+        },
+        "sell_in_prices": {},
+        "sell_out_advice_prices": {},
+        "sell_out_factors": {},
+        "strategie_type": "handmatig",
+        "updated_at": "2026-04-09T01:17:15.103613",
+        "verpakking": "Fles 75cl"
+      },
+      {
+        "adviesfactoren": {},
+        "adviesprijzen": {},
+        "bron_jaar": 2025,
+        "bron_verkoopstrategie_id": "",
+        "created_at": "2026-04-09T01:17:15.103630",
+        "id": "b24df93d-5659-4468-a9ed-54456065212f",
+        "jaar": 2025,
+        "kanaalmarges": {
+          "particulier": 50.0
+        },
+        "kanaalprijzen": {},
+        "product_id": "6160cbc7-ffef-51c6-a985-fc776167ca61",
+        "product_type": "basis",
+        "record_type": "verkoopstrategie_verpakking",
+        "sell_in_margins": {
+          "particulier": 50.0
+        },
+        "sell_in_prices": {},
+        "sell_out_advice_prices": {},
+        "sell_out_factors": {},
+        "strategie_type": "handmatig",
+        "updated_at": "2026-04-09T01:17:15.103630",
+        "verpakking": "Fust 20L"
+      }
+    ]
+  },
+  "environment": "local",
+  "profile": "demo_full",
+  "source_year": 2025,
+  "storage_provider": "postgres",
+  "version": 1
+}

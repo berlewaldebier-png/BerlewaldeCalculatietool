@@ -71,15 +71,53 @@ def _filter_verkoopprijzen_for_foundation(rows: Any) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _filter_payload_for_year(dataset_name: str, payload: Any, *, year: int) -> Any:
+    """Filter a dataset payload down to a single year where it is safe and expected.
+
+    We only touch datasets that are year-keyed (dict of year->value) or list rows that contain a `jaar` field.
+    Master datasets (products, channels, masters, etc.) are returned unchanged.
+    """
+    if year <= 0:
+        return payload
+
+    # Dict payloads are interpreted as "year -> value".
+    if isinstance(payload, dict):
+        key = str(int(year))
+        if key in payload:
+            return {key: payload[key]}
+        # If dict isn't year-keyed, do not mutate it.
+        return payload
+
+    # List payloads: filter by row["jaar"] when present.
+    if isinstance(payload, list):
+        filtered: list[Any] = []
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            try:
+                row_year = int(row.get("jaar", 0) or 0)
+            except (TypeError, ValueError):
+                row_year = 0
+            if row_year and row_year != int(year):
+                continue
+            filtered.append(row)
+        return filtered
+
+    return payload
+
+
 def export_seed_bundle(profile: SeedProfile, *, source_year: int | None = None) -> dict[str, Any]:
     _require_local_dev()
     names = _foundation_dataset_names() if profile == "demo_foundation" else _full_dataset_names()
+    filter_year = int(source_year or 0)
 
     datasets: dict[str, Any] = {}
     for name in names:
         payload = dataset_store.load_dataset(name)
         if profile == "demo_foundation" and name == "verkoopprijzen":
             payload = _filter_verkoopprijzen_for_foundation(payload)
+        if filter_year:
+            payload = _filter_payload_for_year(name, payload, year=filter_year)
         datasets[name] = payload
 
     bundle: dict[str, Any] = {
@@ -95,6 +133,36 @@ def export_seed_bundle(profile: SeedProfile, *, source_year: int | None = None) 
     return {"ok": True, "profile": profile, "path": str(path)}
 
 
+def _import_dataset_order(profile: SeedProfile) -> list[str]:
+    """Deterministic import order to prevent dropping rows due to missing master references.
+
+    Example: `packaging-component-price-versions` validates against `packaging-components`,
+    so masters must be imported first.
+    """
+    base = [
+        "productie",
+        "vaste-kosten",
+        "tarieven-heffingen",
+        "channels",
+        "packaging-components",
+        "packaging-component-price-versions",
+        "base-product-masters",
+        "composite-product-masters",
+        "products",
+        "sales-strategy-years",
+        "sales-strategy-products",
+        "verkoopprijzen",
+    ]
+    if profile == "demo_full":
+        return [
+            *base,
+            "bieren",
+            "kostprijsversies",
+            "kostprijsproductactiveringen",
+        ]
+    return base
+
+
 def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
     _require_local_dev()
     bundle = read_seed_bundle(profile)
@@ -106,9 +174,13 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
     # Caller is expected to wrap this in a single transaction.
     report["reset"] = dataset_store.reset_all_datasets_to_defaults()
 
-    for name, payload in datasets.items():
-        if name not in dataset_store.get_dataset_names():
+    dataset_names = set(dataset_store.get_dataset_names())
+    for name in _import_dataset_order(profile):
+        if name not in datasets:
             continue
+        if name not in dataset_names:
+            continue
+        payload = datasets.get(name)
         # Writes are validated inside save_dataset.
         report["saved"][name] = bool(dataset_store.save_dataset(name, payload))
 
