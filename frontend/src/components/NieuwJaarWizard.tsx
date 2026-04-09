@@ -1016,10 +1016,30 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const wizardSidebar = useMemo(
     () => ({
       title: `Nieuw jaar ${targetYear} voorbereiden`,
-      steps: steps.map((step) => ({ id: step.id, label: step.label, description: step.description })),
+      steps: steps.map((step) => {
+        const enabled =
+          step.id === "basis" || step.id === "init"
+            ? true
+            : !conceptStarted
+              ? false
+              : step.id === "productie"
+                ? copyProductie
+                : step.id === "tarieven"
+                  ? copyTarieven
+                  : step.id === "vaste-kosten"
+                    ? copyVasteKosten
+                    : step.id === "verpakking"
+                      ? copyVerpakkingsonderdelen
+                      : step.id === "verkoopstrategie"
+                        ? copyVerkoopstrategie
+                        : true;
+        return { id: step.id, label: step.label, description: step.description, disabled: !enabled };
+      }),
       activeIndex: activeStep,
       onStepSelect: (nextIndex: number) => {
-        if (nextIndex <= 1) {
+        const nextStep = steps[nextIndex];
+        if (!nextStep) return;
+        if (nextStep.id === "basis" || nextStep.id === "init") {
           setActiveStep(nextIndex);
           return;
         }
@@ -1027,10 +1047,36 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           setStatus(`Start eerst het concept voor ${targetYear} via stap 2 (Jaarset).`);
           return;
         }
+        const enabled =
+          nextStep.id === "productie"
+            ? copyProductie
+            : nextStep.id === "tarieven"
+              ? copyTarieven
+              : nextStep.id === "vaste-kosten"
+                ? copyVasteKosten
+                : nextStep.id === "verpakking"
+                  ? copyVerpakkingsonderdelen
+                  : nextStep.id === "verkoopstrategie"
+                    ? copyVerkoopstrategie
+                    : true;
+        if (!enabled) {
+          setStatus(`Deze stap is uitgeschakeld omdat je hem in Jaarset niet hebt aangevinkt.`);
+          return;
+        }
         setActiveStep(nextIndex);
       }
     }),
-    [activeStep, conceptStarted, steps, targetYear]
+    [
+      activeStep,
+      conceptStarted,
+      copyProductie,
+      copyTarieven,
+      copyVasteKosten,
+      copyVerpakkingsonderdelen,
+      copyVerkoopstrategie,
+      steps,
+      targetYear
+    ]
   );
 
   const pageHeader = useMemo(
@@ -1043,6 +1089,17 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
   usePageShellWizardSidebar(wizardSidebar);
   usePageShellHeader(pageHeader);
+
+  const saveAndCloseButton = (
+    <button
+      type="button"
+      className="editor-button editor-button-secondary"
+      onClick={() => void saveAndClose()}
+      disabled={isRunning}
+    >
+      Opslaan en sluiten
+    </button>
+  );
 
   return (
     <section className="module-card">
@@ -1066,22 +1123,18 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           </button>
         </div>
         <div className="editor-actions-group">
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() => void saveAndClose()}
-            disabled={isRunning}
-          >
-            Opslaan en sluiten
-          </button>
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() => void deleteConcept()}
-            disabled={isRunning || !conceptStarted}
-          >
-            Verwijder concept
-          </button>
+          {conceptStarted ? (
+            <button
+              type="button"
+              className="editor-button editor-button-secondary editor-button-icon"
+              onClick={() => void deleteConcept()}
+              disabled={isRunning}
+              aria-label="Verwijder concept"
+              title="Verwijder concept"
+            >
+              <TrashIcon />
+            </button>
+          ) : null}
           <span className="pill">
             Bronjaar {sourceYear} -&gt; Doeljaar {targetYear}
           </span>
@@ -1101,8 +1154,9 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
           {status ? <div className="wizard-step-status">{status}</div> : null}
 
-          {activeStep === 0 ? (
-            <div className="wizard-form-grid">
+          <div className="wizard-step-body">
+            {activeStep === 0 ? (
+              <div className="wizard-form-grid">
               <label className="nested-field">
                 <span>Bronjaar</span>
                 <select
@@ -1134,16 +1188,17 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               <div className="editor-actions wizard-footer-actions">
                 <div className="editor-actions-group" />
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button type="button" className="editor-button" onClick={() => setActiveStep(1)}>
                     Volgende
                   </button>
                 </div>
               </div>
-            </div>
-          ) : null}
+              </div>
+            ) : null}
 
-          {activeStep === 1 ? (
-            <div>
+            {activeStep === 1 ? (
+              <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
                 Selecteer de stamdata die klaargezet moet worden voor <strong>{targetYear}</strong> op basis van bronjaar{" "}
                 <strong>{sourceYear}</strong>. Daarna vul je per onderdeel de nieuwe parameters voor {targetYear} in. Pas bij{" "}
@@ -1183,6 +1238,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button primary"
@@ -1193,8 +1249,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
               </div>
-            </div>
-          ) : null}
+              </div>
+            ) : null}
 
           {activeStep === 2 ? (
             <div>
@@ -1264,6 +1320,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
@@ -1347,6 +1404,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
@@ -1427,6 +1485,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button"
@@ -1526,6 +1585,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
@@ -1630,6 +1690,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button"
@@ -1685,6 +1746,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
@@ -1769,6 +1831,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button type="button" className="editor-button" onClick={() => setActiveStep(9)} disabled={isRunning}>
                     Volgende
                   </button>
@@ -1829,6 +1892,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </button>
                 </div>
                 <div className="editor-actions-group">
+                  {saveAndCloseButton}
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
@@ -1860,5 +1924,17 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         </div>
       </div>
     </section>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 7h16" />
+      <path d="M9 4h6" />
+      <path d="M7 7l1 12h8l1-12" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
   );
 }

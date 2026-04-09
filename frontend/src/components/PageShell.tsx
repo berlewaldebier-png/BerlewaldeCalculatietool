@@ -17,6 +17,7 @@ type WizardSidebarStep = {
   id: string;
   label: string;
   description: string;
+  disabled?: boolean;
 };
 
 type WizardSidebarState = {
@@ -104,7 +105,11 @@ export function PageShell({ title, subtitle, activePath, navigation, children }:
                       className={`page-shell-wizard-link${
                         wizardSidebar.activeIndex === index ? " active" : ""
                       }${index < wizardSidebar.activeIndex ? " completed" : ""}`}
-                      onClick={() => wizardSidebar.onStepSelect?.(index)}
+                      disabled={Boolean(step.disabled)}
+                      onClick={() => {
+                        if (step.disabled) return;
+                        wizardSidebar.onStepSelect?.(index);
+                      }}
                     >
                       <span className="page-shell-wizard-rail">
                         <span className="page-shell-wizard-dot">

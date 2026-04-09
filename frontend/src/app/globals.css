@@ -601,6 +601,11 @@ a {
   cursor: pointer;
 }
 
+.page-shell-wizard-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .page-shell-wizard-link.active {
   background: rgba(93, 131, 255, 0.07);
 }
@@ -1136,6 +1141,14 @@ a {
   background: #f7f7f2;
   border-color: var(--border);
   box-shadow: none;
+}
+
+.editor-button-icon {
+  width: 44px;
+  padding: 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .editor-button:disabled {
