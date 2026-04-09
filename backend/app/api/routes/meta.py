@@ -339,6 +339,44 @@ def delete_new_year_draft(
     return dataset_store.delete_new_year_draft(owner=str(session.get("username", "") or ""), target_year=int(target_year))
 
 
+@router.get("/yearsets")
+def get_yearsets(_: dict = Depends(require_admin)) -> dict[str, Any]:
+    """Admin overview: drafts + definitive production years."""
+    drafts = dataset_store.list_new_year_drafts()
+    years = dataset_store.load_dataset("productie")
+    production_years: list[int] = []
+    if isinstance(years, dict):
+        for key in years.keys():
+            try:
+                production_years.append(int(key))
+            except (TypeError, ValueError):
+                continue
+    production_years = sorted(set(production_years))
+    last_year = max(production_years) if production_years else 0
+    return {"drafts": drafts, "production_years": production_years, "last_year": last_year}
+
+
+@router.delete("/new-year-drafts-for-year")
+def delete_new_year_drafts_for_year(
+    target_year: int = Query(..., description="Doeljaar waarvan alle concepten verwijderd moeten worden."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    return dataset_store.delete_new_year_drafts_for_target_year(target_year=int(target_year))
+
+
+@router.post("/rollback-yearset")
+def post_rollback_yearset(
+    year: int = Query(..., description="Jaar dat teruggedraaid moet worden (alleen laatste productiejaar)."),
+    dry_run: bool = Query(False, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Rollback a committed yearset without touching cost versions/activations."""
+    try:
+        return dataset_store.rollback_yearset(year=int(year), dry_run=bool(dry_run))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/commit-new-year")
 def post_commit_new_year(
     payload: CommitNewYearRequest,

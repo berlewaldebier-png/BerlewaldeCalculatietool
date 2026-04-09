@@ -33,6 +33,11 @@ export default async function BeheerPage() {
           <div className="home-card-title">Deployment</div>
           <div className="home-card-text">Release-instructies voor de testomgeving en latere webdeployment.</div>
         </Link>
+        <Link href="/beheer/jaarsets" className="home-card">
+          <div className="home-card-section">Beheer</div>
+          <div className="home-card-title">Jaarsets</div>
+          <div className="home-card-text">Concepten en definitieve jaren beheren, inclusief rollback van het laatste jaar.</div>
+        </Link>
         {showDevTools ? (
           <Link href="/beheer/devtools" className="home-card">
             <div className="home-card-section">Beheer</div>

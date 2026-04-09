@@ -974,6 +974,48 @@ def delete_new_year_draft(*, owner: str, target_year: int) -> dict[str, Any]:
     return {"deleted": int(removed)}
 
 
+def list_new_year_drafts() -> list[dict[str, Any]]:
+    """List all stored new-year drafts (admin tooling)."""
+    require_postgres()
+    payload = postgres_storage.load_dataset("new-year-drafts", deepcopy(DATASET_DEFAULTS["new-year-drafts"]))
+    if not isinstance(payload, list):
+        return []
+    rows = [row for row in payload if isinstance(row, dict)]
+    rows.sort(
+        key=lambda row: (int(row.get("target_year", 0) or 0), str(row.get("updated_at", "") or "")),
+        reverse=True,
+    )
+    return rows
+
+
+def delete_new_year_drafts_for_target_year(*, target_year: int) -> dict[str, Any]:
+    """Delete drafts for a target year regardless of owner (admin tooling)."""
+    require_postgres()
+    if target_year <= 0:
+        raise ValueError("Doeljaar moet een geldig getal zijn.")
+
+    existing = postgres_storage.load_dataset("new-year-drafts", deepcopy(DATASET_DEFAULTS["new-year-drafts"]))
+    if not isinstance(existing, list):
+        existing = []
+
+    removed = 0
+    kept: list[dict[str, Any]] = []
+    for row in existing:
+        if not isinstance(row, dict):
+            continue
+        try:
+            row_year = int(row.get("target_year", 0) or 0)
+        except (TypeError, ValueError):
+            row_year = 0
+        if row_year == int(target_year):
+            removed += 1
+            continue
+        kept.append(row)
+
+    postgres_storage.save_dataset("new-year-drafts", kept, overwrite=True)
+    return {"deleted": int(removed)}
+
+
 def commit_new_year(
     *,
     source_year: int,
@@ -1288,6 +1330,93 @@ def rollback_year(
                 report["results"]["kostprijsproductactiveringen_legacy"] = {"removed": removed_acts}
                 if removed_acts and not dry_run:
                     postgres_storage.save_dataset("kostprijsproductactiveringen", kept_acts, overwrite=True)
+
+    if not dry_run:
+        dashboard_service.invalidate_dashboard_summary_cache()
+    return report
+
+
+def rollback_yearset(*, year: int, dry_run: bool = False) -> dict[str, Any]:
+    """Rollback a committed yearset (production data for a given year).
+
+    Guardrails:
+    - Only the latest production year can be rolled back.
+    - Does not touch cost versions, activations, quotes, etc.
+    """
+    require_postgres()
+    if year <= 0:
+        raise ValueError("Jaar moet een geldig getal zijn.")
+
+    years = production_storage.list_years()
+    if not years:
+        raise ValueError("Er zijn geen productie-jaren om terug te draaien.")
+    last_year = max(int(y) for y in years)
+    year_value = int(year)
+    if year_value != last_year:
+        raise ValueError(f"Alleen het laatste productiejaar ({last_year}) kan worden teruggedraaid.")
+
+    report: dict[str, Any] = {"dry_run": dry_run, "year": year_value, "last_year": last_year, "results": {}}
+
+    # Use the existing rollback helper for legacy + normalized production/fixed costs + tarieven + legacy packaging rows.
+    report["results"]["base"] = rollback_year(
+        year=year_value,
+        include_cost_versions=False,
+        include_quotes=False,
+        include_variabele_kosten=False,
+        include_sales_strategy=False,
+        include_packaging=True,
+        include_tarieven=True,
+        include_productie_and_fixed_costs=True,
+        include_activations=False,
+        dry_run=dry_run,
+    )
+
+    strategy_types = {"jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"}
+
+    with postgres_storage.transaction():
+        # Remove packaging price versions for the year (projection is derived).
+        versions = load_dataset("packaging-component-price-versions")
+        if isinstance(versions, list):
+            kept_versions = [
+                row
+                for row in versions
+                if isinstance(row, dict) and int(row.get("jaar", 0) or 0) != year_value
+            ]
+            removed_versions = len(
+                [
+                    row
+                    for row in versions
+                    if isinstance(row, dict) and int(row.get("jaar", 0) or 0) == year_value
+                ]
+            )
+            report["results"]["packaging-component-price-versions"] = {"removed": int(removed_versions)}
+            if removed_versions and not dry_run:
+                save_dataset("packaging-component-price-versions", kept_versions)
+
+        # Remove strategy records for the year (preserve non-strategy records if any).
+        verkoop_payload = load_dataset("verkoopprijzen")
+        if isinstance(verkoop_payload, list):
+            kept: list[dict[str, Any]] = []
+            removed = 0
+            for row in verkoop_payload:
+                if not isinstance(row, dict):
+                    continue
+                row_year = int(row.get("jaar", 0) or 0)
+                record_type = str(row.get("record_type", "") or "")
+                if row_year == year_value and record_type in strategy_types:
+                    removed += 1
+                    continue
+                kept.append(row)
+            report["results"]["verkoopprijzen"] = {"removed_strategy_rows": int(removed)}
+            if removed and not dry_run:
+                save_dataset("verkoopprijzen", kept)
+
+        # Also remove any lingering drafts for this year (optional hygiene).
+        try:
+            res = delete_new_year_drafts_for_target_year(target_year=year_value)
+            report["results"]["drafts_deleted"] = res
+        except Exception:
+            report["results"]["drafts_deleted"] = {"deleted": 0}
 
     if not dry_run:
         dashboard_service.invalidate_dashboard_summary_cache()
