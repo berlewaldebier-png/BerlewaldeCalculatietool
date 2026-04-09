@@ -156,6 +156,9 @@ def reset_defaults() -> None:
     ensure_schema()
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("TRUNCATE TABLE production_years")
+            # `fixed_cost_lines` references `production_years(jaar)` via a FK.
+            # Postgres TRUNCATE requires CASCADE (or truncating both tables in one statement),
+            # otherwise dev resets will fail with "cannot truncate a table referenced in a foreign key constraint".
+            cur.execute("TRUNCATE TABLE production_years CASCADE")
         if not postgres_storage.in_transaction():
             conn.commit()
