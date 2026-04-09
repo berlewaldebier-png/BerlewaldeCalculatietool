@@ -365,7 +365,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     };
   }
 
-  async function saveDraftToServer(message?: string) {
+  async function saveDraftToServer(message?: string): Promise<boolean> {
     setDraftStatus("saving");
     setIsRunning(true);
     setStatus("");
@@ -384,12 +384,28 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         throw new Error(text || "Concept opslaan mislukt.");
       }
       setStatus(message ?? "Concept opgeslagen.");
+      return true;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Concept opslaan mislukt.");
+      return false;
     } finally {
       setDraftStatus("idle");
       setIsRunning(false);
     }
+  }
+
+  async function navigateToStep(nextIndex: number) {
+    if (isRunning) return;
+
+    if (!conceptStarted) {
+      setActiveStep(nextIndex);
+      return;
+    }
+
+    // Silent save: avoid noisy status updates while still persisting user work.
+    const ok = await saveDraftToServer("");
+    if (!ok) return;
+    setActiveStep(nextIndex);
   }
 
   async function loadDraftFromServer() {
@@ -584,8 +600,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       setDraftVerkoopstrategieTarget([]);
 
       setCompletedStepIds(["basis", "init"]);
-      await saveDraftToServer(`Concept gestart: bronjaar ${sourceYear} -> doeljaar ${targetYear}.`);
-      setActiveStep(2);
+      const ok = await saveDraftToServer(`Concept gestart: bronjaar ${sourceYear} -> doeljaar ${targetYear}.`);
+      if (ok) setActiveStep(2);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Concept starten mislukt.");
     }
@@ -1186,7 +1202,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         const nextStep = steps[nextIndex];
         if (!nextStep) return;
         if (nextStep.id === "basis" || nextStep.id === "init") {
-          setActiveStep(nextIndex);
+          void navigateToStep(nextIndex);
           return;
         }
         if (!conceptStarted) {
@@ -1209,7 +1225,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           setStatus(`Deze stap is uitgeschakeld omdat je hem in Jaarset niet hebt aangevinkt.`);
           return;
         }
-        setActiveStep(nextIndex);
+        void navigateToStep(nextIndex);
       }
     }),
     [
@@ -1335,7 +1351,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 <div className="editor-actions-group" />
                 <div className="editor-actions-group">
                   {saveAndCloseButton}
-                  <button type="button" className="editor-button" onClick={() => setActiveStep(1)}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(1)}>
                     Volgende
                   </button>
                 </div>
@@ -1377,7 +1393,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(0)}
+                    onClick={() => void navigateToStep(0)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -1451,7 +1467,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(1)}
+                    onClick={() => void navigateToStep(1)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -1475,7 +1491,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   >
                     Opslaan
                   </button>
-                  <button type="button" className="editor-button" onClick={() => setActiveStep(3)} disabled={isRunning}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(3)} disabled={isRunning}>
                     Volgende
                   </button>
                 </div>
@@ -1535,7 +1551,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(2)}
+                    onClick={() => void navigateToStep(2)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -1559,7 +1575,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   >
                     Opslaan
                   </button>
-                  <button type="button" className="editor-button" onClick={() => setActiveStep(4)} disabled={isRunning}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(4)} disabled={isRunning}>
                     Volgende
                   </button>
                 </div>
@@ -1719,7 +1735,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(3)}
+                    onClick={() => void navigateToStep(3)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -1738,7 +1754,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button"
-                    onClick={() => setActiveStep(5)}
+                    onClick={() => void navigateToStep(5)}
                     disabled={isRunning}
                   >
                     Volgende
@@ -1819,7 +1835,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(4)}
+                    onClick={() => void navigateToStep(4)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -1843,7 +1859,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   >
                     Opslaan
                   </button>
-                  <button type="button" className="editor-button" onClick={() => setActiveStep(6)} disabled={isRunning}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(6)} disabled={isRunning}>
                     Volgende
                   </button>
                 </div>
@@ -1924,7 +1940,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(5)}
+                    onClick={() => void navigateToStep(5)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -1943,7 +1959,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button"
-                    onClick={() => setActiveStep(7)}
+                    onClick={() => void navigateToStep(7)}
                     disabled={isRunning}
                   >
                     Volgende
@@ -1988,7 +2004,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(6)}
+                    onClick={() => void navigateToStep(6)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -2009,7 +2025,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button"
-                    onClick={() => setActiveStep(8)}
+                    onClick={() => void navigateToStep(8)}
                     disabled={isRunning}
                   >
                     Volgende
@@ -2073,7 +2089,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(7)}
+                    onClick={() => void navigateToStep(7)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -2089,7 +2105,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   >
                     Opslaan
                   </button>
-                  <button type="button" className="editor-button" onClick={() => setActiveStep(9)} disabled={isRunning}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(9)} disabled={isRunning}>
                     Volgende
                   </button>
                 </div>
@@ -2142,7 +2158,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStep(8)}
+                    onClick={() => void navigateToStep(8)}
                     disabled={isRunning}
                   >
                     Vorige
