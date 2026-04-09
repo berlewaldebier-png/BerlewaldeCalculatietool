@@ -550,16 +550,25 @@ export function VerkoopstrategieWorkspace({
     }
   }
 
+  // Expose a stable save callback to parent wizards without causing render loops
+  // (i.e. avoid setting parent state on every render because `handleSave` identity changes).
+  const saveRef = useRef<null | (() => Promise<void>)>(null);
   useEffect(() => {
-    if (!exposeSave) {
-      return;
-    }
+    saveRef.current = handleSave;
+  });
 
-    exposeSave(handleSave);
+  useEffect(() => {
+    if (!exposeSave) return;
+    const exposed = async () => {
+      const fn = saveRef.current;
+      if (!fn) return;
+      await fn();
+    };
+    exposeSave(exposed);
     return () => {
       exposeSave(null);
     };
-  }, [exposeSave, endpoint, mode, onDraftSave, rows, verkoopPassthroughRows]);
+  }, [exposeSave]);
 
   return (
     <section className="module-card">
