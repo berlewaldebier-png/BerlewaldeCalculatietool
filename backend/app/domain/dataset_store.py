@@ -18,9 +18,9 @@ from app.utils.storage import (
     load_basisproducten,
     load_kostprijsproductactiveringen,
     load_kostprijsversies,
-    load_basisproducten_for_year,
-    load_samengestelde_producten_for_year,
     get_vaste_kosten_per_liter_for_year,
+    resolve_basisproduct_for_year,
+    resolve_samengesteld_product_for_year,
     load_packaging_component_masters,
     load_packaging_component_prices,
     load_packaging_component_price_versions,
@@ -1208,20 +1208,36 @@ def _compute_target_product_components(
 ) -> tuple[float, float]:
     """Returns (liters_per_product, packaging_cost) for the target year (fail-hard if missing)."""
     normalized_type = str(product_type or "").strip().lower()
-    basis_lookup = {str(row.get("id", "") or ""): row for row in load_basisproducten_for_year(target_year) if isinstance(row, dict)}
-    samengesteld_lookup = {str(row.get("id", "") or ""): row for row in load_samengestelde_producten_for_year(target_year) if isinstance(row, dict)}
+    # Products are mastered (year-independent). Only packaging prices are year-dependent.
     if normalized_type in {"basis", "basisproduct"}:
-        product = basis_lookup.get(str(product_id or ""))
-        if not isinstance(product, dict):
-            raise ValueError(f"Basisproduct niet gevonden voor product_id={product_id} in jaar {target_year}.")
-        liters = float(product.get("inhoud_per_eenheid_liter", 0.0) or 0.0)
-        packaging = float(product.get("totale_verpakkingskosten", 0.0) or 0.0)
+        master = next(
+            (
+                row
+                for row in load_basisproducten()
+                if isinstance(row, dict) and str(row.get("id", "") or "") == str(product_id or "")
+            ),
+            None,
+        )
+        if not isinstance(master, dict):
+            raise ValueError(f"Basisproduct niet gevonden voor product_id={product_id}.")
+        resolved = resolve_basisproduct_for_year(master, target_year)
+        liters = float(resolved.get("inhoud_per_eenheid_liter", 0.0) or 0.0)
+        packaging = float(resolved.get("totale_verpakkingskosten", 0.0) or 0.0)
         return (max(liters, 0.0), max(packaging, 0.0))
-    product = samengesteld_lookup.get(str(product_id or ""))
-    if not isinstance(product, dict):
-        raise ValueError(f"Samengesteld product niet gevonden voor product_id={product_id} in jaar {target_year}.")
-    liters = float(product.get("totale_inhoud_liter", 0.0) or 0.0)
-    packaging = float(product.get("totale_verpakkingskosten", 0.0) or 0.0)
+
+    master = next(
+        (
+            row
+            for row in load_samengestelde_producten()
+            if isinstance(row, dict) and str(row.get("id", "") or "") == str(product_id or "")
+        ),
+        None,
+    )
+    if not isinstance(master, dict):
+        raise ValueError(f"Samengesteld product niet gevonden voor product_id={product_id}.")
+    resolved = resolve_samengesteld_product_for_year(master, target_year)
+    liters = float(resolved.get("totale_inhoud_liter", 0.0) or 0.0)
+    packaging = float(resolved.get("totale_verpakkingskosten", 0.0) or 0.0)
     return (max(liters, 0.0), max(packaging, 0.0))
 
 
