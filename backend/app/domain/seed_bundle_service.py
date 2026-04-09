@@ -88,21 +88,40 @@ def _filter_payload_for_year(dataset_name: str, payload: Any, *, year: int) -> A
         # If dict isn't year-keyed, do not mutate it.
         return payload
 
-    # List payloads: filter by row["jaar"] when present.
+    # List payloads: filter by row["jaar"] or row["year"] when present.
     if isinstance(payload, list):
         filtered: list[Any] = []
         for row in payload:
             if not isinstance(row, dict):
                 continue
-            try:
-                row_year = int(row.get("jaar", 0) or 0)
-            except (TypeError, ValueError):
-                row_year = 0
+            row_year = 0
+            for key in ("jaar", "year"):
+                if key not in row:
+                    continue
+                try:
+                    row_year = int(row.get(key, 0) or 0)
+                except (TypeError, ValueError):
+                    row_year = 0
+                if row_year:
+                    break
             if row_year and row_year != int(year):
                 continue
             filtered.append(row)
         return filtered
 
+    return payload
+
+
+def _unwrap_legacy_wrapper(payload: Any) -> Any:
+    """Unwrap legacy {Count,value} envelopes if they appear in seed bundles.
+
+    Runtime writes reject these; seed tooling normalizes them to avoid confusing 400s.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    keys = {str(k) for k in payload.keys()}
+    if keys == {"Count", "value"} or ("Count" in keys and "value" in keys and len(keys) <= 3):
+        return payload.get("value")
     return payload
 
 
@@ -114,6 +133,7 @@ def export_seed_bundle(profile: SeedProfile, *, source_year: int | None = None) 
     datasets: dict[str, Any] = {}
     for name in names:
         payload = dataset_store.load_dataset(name)
+        payload = _unwrap_legacy_wrapper(payload)
         if profile == "demo_foundation" and name == "verkoopprijzen":
             payload = _filter_verkoopprijzen_for_foundation(payload)
         if filter_year:
@@ -180,7 +200,7 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
             continue
         if name not in dataset_names:
             continue
-        payload = datasets.get(name)
+        payload = _unwrap_legacy_wrapper(datasets.get(name))
         # Writes are validated inside save_dataset.
         report["saved"][name] = bool(dataset_store.save_dataset(name, payload))
 
