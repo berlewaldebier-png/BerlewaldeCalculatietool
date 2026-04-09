@@ -213,11 +213,14 @@ def get_kostprijs_activatie_plan(
     target_year: int,
     user: dict[str, Any] = Depends(require_user),
 ) -> KostprijsActivatiePlanResponse:
-    return dataset_store.get_kostprijs_activatie_plan(
-        owner=str(user.get("username", "") or ""),
-        source_year=int(source_year),
-        target_year=int(target_year),
-    )
+    try:
+        return dataset_store.get_kostprijs_activatie_plan(
+            owner=str(user.get("username", "") or ""),
+            source_year=int(source_year),
+            target_year=int(target_year),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/kostprijs-activatie-draft")

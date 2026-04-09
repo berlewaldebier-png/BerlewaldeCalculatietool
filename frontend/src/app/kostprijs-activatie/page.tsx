@@ -24,6 +24,7 @@ export default async function KostprijsActivatiePage(props: { searchParams: Prom
 
   const cookieHeader = (await cookies()).toString();
   let plan: any = { source_year: sourceYear, target_year: targetYear, rows: [] };
+  let error: { status: number; message: string } | null = null;
   if (sourceYear > 0 && targetYear > 0) {
     const response = await fetch(
       `${origin}/api/meta/kostprijs-activatie-plan?source_year=${encodeURIComponent(String(sourceYear))}&target_year=${encodeURIComponent(
@@ -36,9 +37,26 @@ export default async function KostprijsActivatiePage(props: { searchParams: Prom
     }
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || `API request failed (${response.status})`);
+      error = { status: response.status, message: text || `API request failed (${response.status})` };
+    } else {
+      plan = await response.json();
     }
-    plan = await response.json();
+  }
+
+  if (error) {
+    return (
+      <section className="module-card">
+        <div className="module-card-header">
+          <div className="module-card-title">Kostprijzen activeren</div>
+          <div className="module-card-text">
+            Kon plan niet laden (HTTP {error.status}). Dit is een echte backend fout, geen UI probleem.
+          </div>
+        </div>
+        <pre className="code-block" style={{ whiteSpace: "pre-wrap" }}>
+          {error.message}
+        </pre>
+      </section>
+    );
   }
 
   return <KostprijsActivatieClient initialPlan={plan} />;
