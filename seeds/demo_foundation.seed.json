@@ -582,21 +582,25 @@
                                                          "year":  2025
                                                      }
                                                  ],
-                     "sales-strategy-years":  {
-                                                  "id":  "97906e9b-10e2-513a-a567-7459f8d8fd24",
-                                                  "kanaalmarges":  {
+                     "sales-strategy-years":  [
+                                                  {
+                                                      "id":  "97906e9b-10e2-513a-a567-7459f8d8fd24",
+                                                      "kanaalmarges":  {
 
-                                                                   },
-                                                  "source_record_id":  "",
-                                                  "year":  2025
-                                              },
-                     "tarieven-heffingen":  {
-                                                "id":  "8f8506aa-0e7a-432f-9cdd-816c7b4bf931",
-                                                "jaar":  2025,
-                                                "tarief_hoog":  8.12,
-                                                "tarief_laag":  7.51,
-                                                "verbruikersbelasting":  26.13
-                                            },
+                                                                       },
+                                                      "source_record_id":  "",
+                                                      "year":  2025
+                                                  }
+                                              ],
+                     "tarieven-heffingen":  [
+                                                {
+                                                    "id":  "8f8506aa-0e7a-432f-9cdd-816c7b4bf931",
+                                                    "jaar":  2025,
+                                                    "tarief_hoog":  8.12,
+                                                    "tarief_laag":  7.51,
+                                                    "verbruikersbelasting":  26.13
+                                                }
+                                            ],
                      "vaste-kosten":  {
                                           "2025":  [
                                                        {
