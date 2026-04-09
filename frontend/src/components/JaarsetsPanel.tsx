@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { API_BASE_URL } from "@/lib/apiShared";
 
@@ -144,6 +145,13 @@ export function JaarsetsPanel() {
                       <td>{formatIso(row.updated_at)}</td>
                       <td>{Number.isFinite(activeStep) ? activeStep + 1 : "-"}</td>
                       <td style={{ textAlign: "right" }}>
+                        <Link
+                          href={`/nieuw-jaar-voorbereiden?target_year=${encodeURIComponent(String(row.target_year))}`}
+                          className="editor-button editor-button-secondary"
+                          style={{ marginRight: 10, display: "inline-block", textDecoration: "none" }}
+                        >
+                          Open concept
+                        </Link>
                         <button
                           type="button"
                           className="editor-button editor-button-secondary"
@@ -266,4 +274,3 @@ export function JaarsetsPanel() {
     </div>
   );
 }
-

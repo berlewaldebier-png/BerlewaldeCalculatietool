@@ -78,6 +78,10 @@ export type NieuwJaarWizardProps = {
   initialPackagingComponents: GenericRecord[];
   initialPackagingComponentPrices: GenericRecord[];
   initialVerkoopprijzen: GenericRecord[];
+  /** Optional: force the wizard to load/resume a specific target year draft (e.g. via /nieuw-jaar-voorbereiden?target_year=2026). */
+  initialTargetYear?: number;
+  /** Optional: force the initial source year in the wizard (rarely needed; draft load may override). */
+  initialSourceYear?: number;
 };
 
 function normalizeTariefRow(raw: GenericRecord): TariefRow {
@@ -129,7 +133,9 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     initialTarieven,
     initialPackagingComponents,
     initialPackagingComponentPrices,
-    initialVerkoopprijzen
+    initialVerkoopprijzen,
+    initialTargetYear,
+    initialSourceYear
   } = props;
 
   const [activeStep, setActiveStep] = useState(0);
@@ -167,8 +173,15 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   ]);
 
   const defaultSource = yearOptions[yearOptions.length - 1] ?? new Date().getFullYear();
-  const [sourceYear, setSourceYear] = useState(defaultSource);
-  const [targetYear, setTargetYear] = useState(defaultSource + 1);
+  const requestedSourceYear = clampInt(initialSourceYear, 0);
+  const requestedTargetYear = clampInt(initialTargetYear, 0);
+  const initialSource = requestedSourceYear > 0 ? requestedSourceYear : defaultSource;
+  const initialTarget = requestedTargetYear > 0 ? requestedTargetYear : initialSource + 1;
+
+  // Note: source/target might temporarily be "inconsistent" (e.g. when opening a draft by target_year),
+  // but `loadDraftFromServer()` will correct them from the stored draft.
+  const [sourceYear, setSourceYear] = useState(initialSource);
+  const [targetYear, setTargetYear] = useState(initialTarget);
 
   const [copyProductie, setCopyProductie] = useState(true);
   const [copyVasteKosten, setCopyVasteKosten] = useState(true);

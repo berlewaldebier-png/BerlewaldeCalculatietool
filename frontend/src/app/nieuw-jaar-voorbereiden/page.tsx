@@ -2,7 +2,13 @@ import { NieuwJaarWizard } from "@/components/NieuwJaarWizard";
 import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 
-export default async function NieuwJaarVoorbereidenPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = (await props.searchParams) ?? {};
+  const targetYearParam = Array.isArray(searchParams.target_year) ? searchParams.target_year[0] : searchParams.target_year;
+  const requestedTargetYear = Number(targetYearParam ?? 0) || 0;
+
   const bootstrap = await getBootstrap(
     [
       "berekeningen",
@@ -51,10 +57,11 @@ export default async function NieuwJaarVoorbereidenPage() {
   const years = Array.from(yearSet).filter((year) => year > 0).sort((a, b) => a - b);
   const defaultSourceYear = years[years.length - 1] ?? new Date().getFullYear();
   const defaultTargetYear = defaultSourceYear + 1;
+  const effectiveTargetYear = requestedTargetYear > 0 ? requestedTargetYear : defaultTargetYear;
 
   return (
     <PageShell
-      title={`Nieuw jaar ${defaultTargetYear} voorbereiden`}
+      title={`Nieuw jaar ${effectiveTargetYear} voorbereiden`}
       subtitle="Maak een nieuwe jaarset aan op basis van een bestaand bronjaar."
       activePath="/nieuw-jaar-voorbereiden"
       navigation={navigation}
@@ -71,6 +78,7 @@ export default async function NieuwJaarVoorbereidenPage() {
         initialPackagingComponents={packagingComponents}
         initialPackagingComponentPrices={packagingComponentPrices}
         initialVerkoopprijzen={verkoopprijzen}
+        initialTargetYear={requestedTargetYear > 0 ? requestedTargetYear : undefined}
       />
     </PageShell>
   );
