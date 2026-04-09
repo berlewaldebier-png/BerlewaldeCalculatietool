@@ -9,6 +9,7 @@ from app.domain import dashboard_service
 from app.domain import auth_service
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
+from app.domain import seed_bundle_service
 from app.domain.auth_dependencies import require_admin, require_user
 from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
 from app.schemas.navigation import DashboardSummary, NavigationItem
@@ -232,7 +233,7 @@ def post_prepare_new_year(
 @router.post("/dev/reset")
 def post_dev_reset(
     mode: str = Query("all", description="Reset mode: all | year_setup"),
-    seed: bool = Query(False, description="Wanneer true: laad seed data uit /data na reset."),
+    seed_profile: str = Query("", description="Seed profiel: demo_foundation | demo_full"),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Local-only dev helper: clear all stored data (rows only) and optionally seed demo data.
@@ -246,7 +247,11 @@ def post_dev_reset(
     normalized_mode = str(mode or "all").strip().lower()
     if normalized_mode not in {"all", "year_setup"}:
         raise HTTPException(status_code=400, detail="Ongeldige mode. Gebruik all of year_setup.")
-    if normalized_mode != "all" and seed:
+
+    normalized_profile = str(seed_profile or "").strip().lower()
+    if normalized_profile and normalized_profile not in {"demo_foundation", "demo_full"}:
+        raise HTTPException(status_code=400, detail="Ongeldig seed profiel. Gebruik demo_foundation of demo_full.")
+    if normalized_mode != "all" and normalized_profile:
         raise HTTPException(status_code=400, detail="Seed is alleen toegestaan bij mode=all.")
 
     report: dict[str, Any] = {"reset": {}, "seed": {}}
@@ -254,20 +259,53 @@ def post_dev_reset(
         # Clear normalized tables first (keeps schema intact).
         if normalized_mode == "all":
             kostprijs_activation_storage.reset_defaults()
+            if normalized_profile:
+                # Import does its own reset + maintenance inside this transaction.
+                try:
+                    report["seed"] = seed_bundle_service.import_seed_bundle(normalized_profile)  # type: ignore[arg-type]
+                except FileNotFoundError as exc:
+                    raise HTTPException(status_code=400, detail=f"Seed bestand ontbreekt voor {normalized_profile}.") from exc
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                report["reset"] = report["seed"].get("reset", {}) if isinstance(report["seed"], dict) else {}
+                dashboard_service.invalidate_dashboard_summary_cache()
+                return report
             report["reset"] = dataset_store.reset_all_datasets_to_defaults()
         else:
             # Keep cost management data; only reset year setup datasets/tables.
             report["reset"] = dataset_store.reset_year_setup_keep_cost_data()
 
-        if seed and normalized_mode == "all":
-            report["seed"] = dataset_store.bootstrap_postgres_from_json(overwrite=True)
-            # Keep the seeded data aligned with current invariants.
-            dataset_store.migrate_wrapped_payloads(dry_run=False)
-            dataset_store.migrate_product_ids(dry_run=False)
-            dataset_store.generate_missing_activations(dry_run=False)
-
     dashboard_service.invalidate_dashboard_summary_cache()
     return report
+
+
+@router.get("/dev/seed/audit")
+def get_dev_seed_audit(
+    year: int = Query(2025, description="Verwacht jaar voor demo checks (default 2025)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Dev seed audit is alleen toegestaan in local/dev.")
+    return seed_bundle_service.audit_live_data(expected_year=int(year))
+
+
+@router.post("/dev/seed/export")
+def post_dev_seed_export(
+    profile: str = Query(..., description="Seed profiel: demo_foundation | demo_full"),
+    year: int = Query(2025, description="Bronjaar label voor export (default 2025)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Dev seed export is alleen toegestaan in local/dev.")
+    normalized_profile = str(profile or "").strip().lower()
+    if normalized_profile not in {"demo_foundation", "demo_full"}:
+        raise HTTPException(status_code=400, detail="Ongeldig profiel. Gebruik demo_foundation of demo_full.")
+    try:
+        return seed_bundle_service.export_seed_bundle(normalized_profile, source_year=int(year))  # type: ignore[arg-type]
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/new-year-draft")
