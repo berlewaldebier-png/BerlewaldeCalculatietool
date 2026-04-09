@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { API_BASE_URL } from "@/lib/api";
@@ -209,6 +209,14 @@ export function VerkoopstrategieWorkspace({
   const [rows, setRows] = useState<StrategyRow[]>(() => verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const [activeTab, setActiveTab] = useState<"kanalen" | "sell-in" | "sell-out" | "bieren">("kanalen");
   const computedDefaultYear = Math.max(
     new Date().getFullYear(),
@@ -508,13 +516,17 @@ export function VerkoopstrategieWorkspace({
   }
 
   async function handleSave() {
-    setStatus("");
-    setIsSaving(true);
+    if (isMountedRef.current) {
+      setStatus("");
+      setIsSaving(true);
+    }
     try {
       const payload = [...verkoopPassthroughRows, ...rows.map(stripInternal)];
       if (mode === "draft") {
         await onDraftSave?.(payload);
-        setStatus("Concept opgeslagen.");
+        if (isMountedRef.current) {
+          setStatus("Concept opgeslagen.");
+        }
       } else {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, {
           method: "PUT",
@@ -523,12 +535,18 @@ export function VerkoopstrategieWorkspace({
           body: JSON.stringify(payload)
         });
         if (!response.ok) throw new Error("Opslaan mislukt");
-        setStatus("Opgeslagen.");
+        if (isMountedRef.current) {
+          setStatus("Opgeslagen.");
+        }
       }
     } catch {
-      setStatus("Opslaan mislukt.");
+      if (isMountedRef.current) {
+        setStatus("Opslaan mislukt.");
+      }
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   }
 

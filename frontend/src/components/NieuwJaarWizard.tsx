@@ -167,7 +167,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [copyTarieven, setCopyTarieven] = useState(true);
   const [copyVerpakkingsonderdelen, setCopyVerpakkingsonderdelen] = useState(true);
   const [copyVerkoopstrategie, setCopyVerkoopstrategie] = useState(true);
-  const [overwriteExisting, setOverwriteExisting] = useState(false);
 
   const [currentProductie, setCurrentProductie] = useState<ProductieMap>(initialProductie ?? {});
   const [currentVasteKosten, setCurrentVasteKosten] = useState<VasteKostenMap>(initialVasteKosten ?? {});
@@ -201,7 +200,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [scenarioPrimaryCosts, setScenarioPrimaryCosts] = useState<Record<string, number>>({});
   const [verkoopstrategieSave, setVerkoopstrategieSave] = useState<null | (() => Promise<void>)>(null);
   const [draftPackagingPrices, setDraftPackagingPrices] = useState<Record<string, number>>({});
-  const hasDraftPackaging = useMemo(() => Object.keys(draftPackagingPrices).length > 0, [draftPackagingPrices]);
   const [draftProductieTarget, setDraftProductieTarget] = useState<ProductieYear>({
     hoeveelheid_inkoop_l: 0,
     hoeveelheid_productie_l: 0,
@@ -214,22 +212,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [draftStatus, setDraftStatus] = useState<"" | "idle" | "loading" | "saving" | "committing">("idle");
   const [commitConflict, setCommitConflict] = useState<string>("");
 
-  function seedVasteKostenFromSource() {
-    const sourceRows = (currentVasteKosten as any)?.[String(sourceYear)];
-    if (!Array.isArray(sourceRows)) return;
-    setDraftVasteKostenTarget(
-      sourceRows
-        .filter((row: any) => row && typeof row === "object")
-        .map((row: any) => ({
-          id: "",
-          omschrijving: String(row.omschrijving ?? ""),
-          kostensoort: String(row.kostensoort ?? ""),
-          bedrag_per_jaar: Number(row.bedrag_per_jaar ?? 0),
-          herverdeel_pct: Number(row.herverdeel_pct ?? 0)
-        }))
-    );
-  }
-
   function buildDraftPayload() {
     const packagingRows: PackagingPriceRow[] = packagingComponents.map((component) => ({
       id: "",
@@ -237,24 +219,30 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       jaar: targetYear,
       prijs_per_stuk: Number(draftPackagingPrices[component.id] ?? 0)
     }));
-    return {
-      data: {
-        productie_target: {
-          hoeveelheid_inkoop_l: Number(draftProductieTarget.hoeveelheid_inkoop_l ?? 0),
-          hoeveelheid_productie_l: Number(draftProductieTarget.hoeveelheid_productie_l ?? 0),
-          batchgrootte_eigen_productie_l: Number(draftProductieTarget.batchgrootte_eigen_productie_l ?? 0)
-        },
-        tarieven_target: {
-          id: String(draftTariefTarget.id ?? ""),
-          jaar: targetYear,
-          tarief_hoog: Number(draftTariefTarget.tarief_hoog ?? 0),
-          tarief_laag: Number(draftTariefTarget.tarief_laag ?? 0),
-          verbruikersbelasting: Number(draftTariefTarget.verbruikersbelasting ?? 0)
-        },
-        vaste_kosten_target: draftVasteKostenTarget,
-        packaging_prices_target: packagingRows,
-        verkoopstrategie_target: draftVerkoopstrategieTarget
+    const data: Record<string, unknown> = {
+      productie_target: {
+        hoeveelheid_inkoop_l: Number(draftProductieTarget.hoeveelheid_inkoop_l ?? 0),
+        hoeveelheid_productie_l: Number(draftProductieTarget.hoeveelheid_productie_l ?? 0),
+        batchgrootte_eigen_productie_l: Number(draftProductieTarget.batchgrootte_eigen_productie_l ?? 0)
       },
+      tarieven_target: {
+        id: String(draftTariefTarget.id ?? ""),
+        jaar: targetYear,
+        tarief_hoog: Number(draftTariefTarget.tarief_hoog ?? 0),
+        tarief_laag: Number(draftTariefTarget.tarief_laag ?? 0),
+        verbruikersbelasting: Number(draftTariefTarget.verbruikersbelasting ?? 0)
+      },
+      vaste_kosten_target: copyVasteKosten ? draftVasteKostenTarget : undefined,
+      packaging_prices_target: copyVerpakkingsonderdelen ? packagingRows : undefined,
+      verkoopstrategie_target: copyVerkoopstrategie ? draftVerkoopstrategieTarget : undefined
+    };
+    for (const [key, value] of Object.entries(data)) {
+      if (value === undefined) {
+        delete data[key];
+      }
+    }
+    return {
+      data,
       active_step: activeStep,
       completed_step_ids: completedStepIds
     };
@@ -300,10 +288,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const payload = draft?.payload ?? {};
       const data = payload?.data ?? {};
       const source = Number(draft.source_year ?? payload?.source_year ?? sourceYear);
-      const target = Number(draft.target_year ?? payload?.target_year ?? targetYear);
-      const effectiveTarget = Number.isFinite(target) && target > 0 ? target : targetYear;
-      if (Number.isFinite(source) && source > 0 && source !== sourceYear) setSourceYear(source);
-      if (Number.isFinite(target) && target > 0 && target !== targetYear) setTargetYearWithDraft(target);
+      const effectiveSource = Number.isFinite(source) && source > 0 ? source : sourceYear;
+      const effectiveTarget = effectiveSource + 1;
+      if (effectiveSource !== sourceYear) setSourceYear(effectiveSource);
+      if (effectiveTarget !== targetYear) setTargetYearWithDraft(effectiveTarget);
 
       if (data?.productie_target && typeof data.productie_target === "object") {
         setDraftProductieTarget({
@@ -361,16 +349,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     }
   }
 
-  // Packaging-edit draft should be visible by default when you enter the packaging step.
-  useEffect(() => {
-    if (activeStep !== 5) return;
-    if (hasDraftPackaging) return;
-    copyPackagingPricesFromSource();
-  }, [activeStep, hasDraftPackaging, sourceYear, currentPackagingPrices, packagingComponents]);
+  // Let the user decide whether to copy packaging prices from the source year.
 
   const canInitialize = useMemo(() => {
     if (sourceYear <= 0 || targetYear <= 0) return false;
-    if (targetYear <= sourceYear) return false;
     return true;
   }, [sourceYear, targetYear]);
 
@@ -446,17 +428,11 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       } else {
         setDraftTariefTarget((current) => ({ ...current, jaar: targetYear }));
       }
-      if (copyVasteKosten) {
-        seedVasteKostenFromSource();
-      } else {
-        setDraftVasteKostenTarget([]);
-      }
-      if (copyVerpakkingsonderdelen) {
-        copyPackagingPricesFromSource();
-      } else {
-        setDraftPackagingPrices({});
-        setDraftPackagingPricesTarget([]);
-      }
+      // Bewuste keuze: vaste kosten / verpakkingsprijzen nemen we niet automatisch over.
+      // De bronwaarden blijven zichtbaar (read-only), maar het doeljaar start leeg/0 zodat de gebruiker bewust invult.
+      setDraftVasteKostenTarget([]);
+      setDraftPackagingPrices({});
+      setDraftPackagingPricesTarget([]);
       setDraftVerkoopstrategieTarget([]);
 
       setCompletedStepIds(["basis", "init"]);
@@ -467,34 +443,52 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     }
   }
 
-  async function rollbackTargetYear() {
-    if (!canInitialize) return;
-    const confirmText = `Weet je zeker dat je alle data van ${targetYear} wilt verwijderen? Dit raakt ${sourceYear} niet.`;
+  const conceptStarted = completedStepIds.includes("init");
+
+  async function saveAndClose() {
+    if (isRunning) return;
+    if (conceptStarted) {
+      await saveDraftToServer("Concept opgeslagen.");
+    }
+    router.push("/beheer/jaarsets");
+  }
+
+  async function deleteConcept() {
+    if (isRunning) return;
+    if (!conceptStarted) return;
+
+    const confirmText = `Weet je zeker dat je het concept voor ${targetYear} wilt verwijderen? Dit verwijdert alleen het concept (draft), niet je bestaande data.`;
     if (!confirm(confirmText)) return;
 
     setIsRunning(true);
     setStatus("");
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/meta/rollback-year?year=${encodeURIComponent(String(targetYear))}`,
-        { method: "POST" }
-      );
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Rollback mislukt.");
-      }
-      await refreshFromServer();
-      try {
-        await fetch(`${API_BASE_URL}/meta/new-year-draft?target_year=${encodeURIComponent(String(targetYear))}`, {
-          method: "DELETE"
-        });
-      } catch {
-        // Best effort: rollback of committed data is the important part.
-      }
-      setStatus(`Rollback uitgevoerd: jaar ${targetYear} is verwijderd.`);
+      await fetch(`${API_BASE_URL}/meta/new-year-draft?target_year=${encodeURIComponent(String(targetYear))}`, {
+        method: "DELETE"
+      });
+      setCompletedStepIds([]);
+      setScenarioPrimaryCosts({});
+      setDraftPackagingPrices({});
+      setDraftPackagingPricesTarget([]);
+      setDraftProductieTarget({
+        hoeveelheid_inkoop_l: 0,
+        hoeveelheid_productie_l: 0,
+        batchgrootte_eigen_productie_l: 0
+      });
+      setDraftTariefTarget({
+        id: "",
+        jaar: targetYear,
+        tarief_hoog: 0,
+        tarief_laag: 0,
+        verbruikersbelasting: 0
+      });
+      setDraftVasteKostenTarget([]);
+      setDraftVerkoopstrategieTarget([]);
+      setCommitConflict("");
+      setStatus(`Concept verwijderd voor doeljaar ${targetYear}.`);
       setActiveStep(1);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Rollback mislukt.");
+      setStatus(error instanceof Error ? error.message : "Concept verwijderen mislukt.");
     } finally {
       setIsRunning(false);
     }
@@ -502,7 +496,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
   async function commitTargetYear() {
     if (!canInitialize) return;
-    const confirmText = `Weet je zeker dat je het doeljaar ${targetYear} definitief wilt aanmaken/overschrijven? Dit schrijft alles in 1 keer weg naar de database.`;
+    const confirmText = `Weet je zeker dat je het doeljaar ${targetYear} definitief wilt aanmaken? Dit schrijft alles in 1 keer weg naar de database.`;
     if (!confirm(confirmText)) return;
 
     setDraftStatus("committing");
@@ -522,7 +516,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           copy_verpakkingsonderdelen: copyVerpakkingsonderdelen,
           copy_verkoopstrategie: copyVerkoopstrategie,
           copy_berekeningen: false,
-          overwrite_existing: overwriteExisting,
           force: false,
           payload: buildDraftPayload()
         })
@@ -567,7 +560,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           copy_verpakkingsonderdelen: copyVerpakkingsonderdelen,
           copy_verkoopstrategie: copyVerkoopstrategie,
           copy_berekeningen: false,
-          overwrite_existing: overwriteExisting,
           force: true,
           payload: buildDraftPayload()
         })
@@ -606,15 +598,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   function setTargetYearWithDraft(nextYear: number) {
     setTargetYear(nextYear);
     setDraftTariefTarget((current) => ({ ...current, jaar: nextYear }));
-    // Keep production draft aligned with the selected target year.
-    const target = getProductieForYear(nextYear);
-    setDraftProductieTarget(
-      target ?? {
-        hoeveelheid_inkoop_l: 0,
-        hoeveelheid_productie_l: 0,
-        batchgrootte_eigen_productie_l: 0
-      }
-    );
   }
 
   const sourceProductie = useMemo(() => getProductieForYear(sourceYear), [currentProductie, sourceYear]);
@@ -752,11 +735,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
     function packagingComponentPrice(year: number, componentId: string) {
       if (year === targetYear) {
-        if (hasDraftPackaging) {
-          return Number(draftPackagingPrices[componentId] ?? 0);
-        }
-        // Until the target-year packaging step is filled, treat it as "same as source" for preview.
-        return Number(priceByYearComponent.get(`${sourceYear}|${componentId}`) ?? 0);
+        return Number(draftPackagingPrices[componentId] ?? 0);
       }
       return Number(priceByYearComponent.get(`${year}|${componentId}`) ?? 0);
     }
@@ -943,7 +922,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     currentProductie,
     currentVasteKosten,
     draftPackagingPrices,
-    hasDraftPackaging,
     draftProductieTarget,
     draftVasteKostenTarget,
     initialBasisproducten,
@@ -961,7 +939,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         label: "Basisgegevens",
         description: "Kies bronjaar en doeljaar",
         panelTitle: "Jaarselectie",
-        panelDescription: "Selecteer het bronjaar en het doeljaar dat je wilt voorbereiden."
+        panelDescription: "Selecteer het bronjaar. Het doeljaar wordt automatisch ingesteld op bronjaar + 1."
       },
       {
         id: "init",
@@ -969,7 +947,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         description: "Stel concept samen voor het doeljaar",
         panelTitle: "Jaarset initialiseren",
         panelDescription:
-          "Maak een concept op basis van het bronjaar. Totdat je afrondt schrijven we nog niets definitief weg."
+          "Kies welke stamdata je wilt klaarmaken voor het doeljaar. Totdat je afrondt schrijven we nog niets definitief weg."
       },
       {
         id: "productie",
@@ -990,7 +968,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         label: "Vaste kosten",
         description: "Indirecte/directe kosten voor het doeljaar",
         panelTitle: `Vaste kosten ${targetYear}`,
-        panelDescription: "Beheer vaste kosten per regel; jaar is vastgezet op het doeljaar."
+        panelDescription: "Bekijk bronjaar (read-only) en vul vaste kosten voor het doeljaar bewust in; jaar is vastgezet op het doeljaar."
       },
       {
         id: "verpakking",
@@ -1020,7 +998,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         description: "Bekijk de impact op kostprijzen en verkoopprijzen",
         panelTitle: `Preview ${targetYear}`,
         panelDescription:
-          "Indicatieve vergelijking tussen bronjaar en doeljaar op basis van verpakkings- en vaste kosten."
+          "Indicatieve kostprijzen voor het doeljaar op basis van jouw ingevulde gegevens (en scenario inkoopprijzen)."
       },
       {
         id: "afronden",
@@ -1040,9 +1018,19 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       title: `Nieuw jaar ${targetYear} voorbereiden`,
       steps: steps.map((step) => ({ id: step.id, label: step.label, description: step.description })),
       activeIndex: activeStep,
-      onStepSelect: setActiveStep
+      onStepSelect: (nextIndex: number) => {
+        if (nextIndex <= 1) {
+          setActiveStep(nextIndex);
+          return;
+        }
+        if (!conceptStarted) {
+          setStatus(`Start eerst het concept voor ${targetYear} via stap 2 (Jaarset).`);
+          return;
+        }
+        setActiveStep(nextIndex);
+      }
     }),
-    [activeStep, steps, targetYear]
+    [activeStep, conceptStarted, steps, targetYear]
   );
 
   const pageHeader = useMemo(
@@ -1062,7 +1050,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         <div className="module-card-title">Nieuw jaar {targetYear} voorbereiden</div>
         <div className="module-card-text">
           Bouw een nieuw productiejaar op basis van een bronjaar. Je kunt tussentijds opslaan als concept; pas bij
-          afronden schrijven we alles in 1 keer definitief weg. Rollback van het doeljaar blijft altijd mogelijk.
+          afronden schrijven we alles in 1 keer definitief weg. Een concept kun je verwijderen; rollback van een definitieve jaarset doe je via Beheer.
         </div>
       </div>
 
@@ -1081,10 +1069,18 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           <button
             type="button"
             className="editor-button editor-button-secondary"
-            onClick={rollbackTargetYear}
+            onClick={() => void saveAndClose()}
             disabled={isRunning}
           >
-            Rollback {targetYear}
+            Opslaan en sluiten
+          </button>
+          <button
+            type="button"
+            className="editor-button editor-button-secondary"
+            onClick={() => void deleteConcept()}
+            disabled={isRunning || !conceptStarted}
+          >
+            Verwijder concept
           </button>
           <span className="pill">
             Bronjaar {sourceYear} -&gt; Doeljaar {targetYear}
@@ -1112,7 +1108,11 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 <select
                   className="dataset-input"
                   value={String(sourceYear)}
-                  onChange={(event) => setSourceYear(clampInt(event.target.value, defaultSource))}
+                  onChange={(event) => {
+                    const nextSource = clampInt(event.target.value, defaultSource);
+                    setSourceYear(nextSource);
+                    setTargetYearWithDraft(nextSource + 1);
+                  }}
                 >
                   {yearOptions.map((year) => (
                     <option key={year} value={year}>
@@ -1124,17 +1124,15 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               <label className="nested-field">
                 <span>Doeljaar</span>
                 <input
-                  className="dataset-input"
+                  className="dataset-input dataset-input-readonly"
                   type="number"
                   value={targetYear}
-                  onChange={(event) => setTargetYearWithDraft(clampInt(event.target.value, defaultSource + 1))}
+                  readOnly
                 />
               </label>
 
               <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <span className="muted">Doeljaar moet hoger zijn dan het bronjaar.</span>
-                </div>
+                <div className="editor-actions-group" />
                 <div className="editor-actions-group">
                   <button type="button" className="editor-button" onClick={() => setActiveStep(1)}>
                     Volgende
@@ -1147,17 +1145,20 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           {activeStep === 1 ? (
             <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
-                <strong>Jaarset</strong>: we zetten het doeljaar ({targetYear}) klaar door bronjaar ({sourceYear})
-                datasets te gebruiken als startpunt voor een concept. Totdat je afrondt schrijven we nog niets definitief weg.
+                Selecteer de stamdata die klaargezet moet worden voor <strong>{targetYear}</strong> op basis van bronjaar{" "}
+                <strong>{sourceYear}</strong>. Daarna vul je per onderdeel de nieuwe parameters voor {targetYear} in. Pas bij{" "}
+                <strong>Afronden</strong> wordt de data definitief opgeslagen en zichtbaar in de applicatie.
+                <div className="muted" style={{ marginTop: 8 }}>
+                  Niet aangevinkt: dat onderdeel wordt niet voorbereid in dit concept en de bijbehorende stap blijft uitgeschakeld.
+                </div>
               </div>
               <div className="record-card-grid">
                 {[
                   ["Productie", copyProductie, setCopyProductie],
-                  ["Vaste kosten", copyVasteKosten, setCopyVasteKosten],
+                  ["Vaste kosten (nieuw invullen)", copyVasteKosten, setCopyVasteKosten],
                   ["Tarieven en heffingen", copyTarieven, setCopyTarieven],
                   ["Verpakkingsonderdelen (jaarprijzen)", copyVerpakkingsonderdelen, setCopyVerpakkingsonderdelen],
-                  ["Verkoopstrategie", copyVerkoopstrategie, setCopyVerkoopstrategie],
-                  ["Overschrijven bestaande data", overwriteExisting, setOverwriteExisting]
+                  ["Verkoopstrategie", copyVerkoopstrategie, setCopyVerkoopstrategie]
                 ].map(([label, value, setter]) => (
                   <label key={String(label)} className="wizard-toggle-card">
                     <input
@@ -1186,7 +1187,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                     type="button"
                     className="editor-button primary"
                     onClick={initializeYear}
-                    disabled={isRunning || !canInitialize}
+                    disabled={isRunning || !canInitialize || conceptStarted}
                   >
                     Start concept {targetYear}
                   </button>
@@ -1364,6 +1365,39 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
           {activeStep === 4 ? (
             <div>
+              <div className="editor-status" style={{ marginBottom: 14 }}>
+                Bronjaar {sourceYear} (read-only) ter referentie. Doeljaar {targetYear} vul je bewust zelf in.
+              </div>
+              <div className="dataset-editor-scroll" style={{ marginBottom: 14 }}>
+                <table className="dataset-editor-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "360px" }}>Omschrijving</th>
+                      <th style={{ width: "180px" }}>Kostensoort</th>
+                      <th style={{ width: "180px" }}>Bedrag/jaar</th>
+                      <th style={{ width: "160px" }}>Herverdelen %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(((currentVasteKosten as any)?.[String(sourceYear)] ?? []) as any[]).map((row: any, idx: number) => (
+                      <tr key={`${String(row?.id ?? "")}-${idx}`}>
+                        <td>{String(row?.omschrijving ?? "")}</td>
+                        <td>{String(row?.kostensoort ?? "")}</td>
+                        <td>{formatEur(Number(row?.bedrag_per_jaar ?? 0))}</td>
+                        <td>{String(Number(row?.herverdeel_pct ?? 0))}</td>
+                      </tr>
+                    ))}
+                    {Array.isArray((currentVasteKosten as any)?.[String(sourceYear)]) &&
+                    (((currentVasteKosten as any)?.[String(sourceYear)] ?? []) as any[]).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="muted">
+                          Geen vaste kosten gevonden voor bronjaar {sourceYear}.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
               <VasteKostenClient
                 vasteKosten={{ ...(currentVasteKosten as any), [String(targetYear)]: draftVasteKostenTarget } as any}
                 productie={currentProductie as any}
@@ -1415,66 +1449,62 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 </div>
               </div>
 
-              {!hasDraftPackaging ? (
-                <div className="editor-status" style={{ marginBottom: 14 }}>
-                  Doeljaar {targetYear} wordt geladen. Als je wilt starten vanuit het bronjaar, kies dan hieronder
-                  &quot;Kopieer bronjaar {sourceYear} naar {targetYear}&quot;.
-                </div>
-              ) : null}
+              <div className="editor-status" style={{ marginBottom: 14 }}>
+                Vul de jaarprijzen voor {targetYear} in. Je kunt optioneel starten vanuit bronjaar {sourceYear} via de knop
+                hieronder. Basis- en samengestelde producten blijven hetzelfde; alleen de jaarprijzen van verpakkingsonderdelen
+                sturen de kostprijs door.
+              </div>
 
-              {hasDraftPackaging ? (
-                <div className="dataset-editor-scroll">
-                  <table className="dataset-editor-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: "320px" }}>Onderdeel</th>
-                        <th style={{ width: "180px" }}>Bronjaar {sourceYear}</th>
-                        <th style={{ width: "180px" }}>Doeljaar {targetYear}</th>
-                        <th style={{ width: "160px" }}>Delta</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {packagingRowsForTarget.map((row) => {
-                        const sourcePrice =
-                          currentPackagingPrices.find(
-                            (priceRow) =>
-                              priceRow.jaar === sourceYear &&
-                              priceRow.verpakkingsonderdeel_id === row.componentId
-                          )?.prijs_per_stuk ?? 0;
-                        const targetPrice = Number(draftPackagingPrices[row.componentId] ?? 0);
-                        const delta = targetPrice - Number(sourcePrice ?? 0);
-                        return (
-                          <tr key={row.componentId}>
-                            <td>{row.omschrijving}</td>
-                            <td>
-                              <input
-                                className="dataset-input dataset-input-readonly"
-                                type="number"
-                                value={String(Number(sourcePrice ?? 0))}
-                                readOnly
-                              />
-                            </td>
-                            <td>
-                              <input
-                                className="dataset-input"
-                                type="number"
-                                value={String(targetPrice)}
-                                onChange={(event) =>
-                                  setDraftPackagingPrices((current) => ({
-                                    ...current,
-                                    [row.componentId]: Number(event.target.value)
-                                  }))
-                                }
-                              />
-                            </td>
-                            <td>{formatEur(delta)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
+              <div className="dataset-editor-scroll">
+                <table className="dataset-editor-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "320px" }}>Onderdeel</th>
+                      <th style={{ width: "180px" }}>Bronjaar {sourceYear}</th>
+                      <th style={{ width: "180px" }}>Doeljaar {targetYear}</th>
+                      <th style={{ width: "160px" }}>Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {packagingRowsForTarget.map((row) => {
+                      const sourcePrice =
+                        currentPackagingPrices.find(
+                          (priceRow) =>
+                            priceRow.jaar === sourceYear && priceRow.verpakkingsonderdeel_id === row.componentId
+                        )?.prijs_per_stuk ?? 0;
+                      const targetPrice = Number(draftPackagingPrices[row.componentId] ?? 0);
+                      const delta = targetPrice - Number(sourcePrice ?? 0);
+                      return (
+                        <tr key={row.componentId}>
+                          <td>{row.omschrijving}</td>
+                          <td>
+                            <input
+                              className="dataset-input dataset-input-readonly"
+                              type="number"
+                              value={String(Number(sourcePrice ?? 0))}
+                              readOnly
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="dataset-input"
+                              type="number"
+                              value={String(targetPrice)}
+                              onChange={(event) =>
+                                setDraftPackagingPrices((current) => ({
+                                  ...current,
+                                  [row.componentId]: Number(event.target.value)
+                                }))
+                              }
+                            />
+                          </td>
+                          <td>{formatEur(delta)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
               <div className="editor-actions wizard-footer-actions">
                 <div className="editor-actions-group">
@@ -1500,7 +1530,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                     type="button"
                     className="editor-button editor-button-secondary"
                     onClick={savePackagingPricesTarget}
-                    disabled={isRunning || !hasDraftPackaging}
+                    disabled={isRunning || packagingComponents.length === 0}
                   >
                     Opslaan
                   </button>
@@ -1681,9 +1711,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           {activeStep === 8 ? (
             <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
-                Preview is indicatief: we nemen de actieve kostprijs uit {sourceYear} en passen verschillen in vaste
-                kosten (per liter) en verpakkingsprijzen toe. Scenario inkoopprijzen uit de vorige stap tellen mee
-                zolang je ze hier nog niet reset.
+                Hieronder zie je de indicatieve kostprijzen voor het doeljaar {targetYear}. Pas als recepten of
+                inkoopfacturen aan producten worden gekoppeld en geactiveerd, is een kostprijs definitief. We rekenen hier
+                met de gegevens die je in deze wizard hebt ingevuld; de inkoopprijzen zijn een scenario totdat ze later via
+                inkoopfacturen definitief worden.
               </div>
 
               <div className="dataset-editor-scroll">
