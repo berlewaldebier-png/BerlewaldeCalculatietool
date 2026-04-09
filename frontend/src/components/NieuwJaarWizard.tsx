@@ -1584,16 +1584,23 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   </thead>
                   <tbody>
                     {(() => {
-                      const used = new Set<string>();
+                      // Match each source row to exactly one target-draft row.
+                      // We use a normalized key + queue to make it stable even with duplicates
+                      // and to avoid "no input rendered" due to spacing/casing differences.
+                      const queues = new Map<string, VasteKostenUiRow[]>();
+                      draftVasteKostenTarget
+                        .filter((row) => !row.isNew)
+                        .forEach((row) => {
+                          const key = vasteKostenKey(row);
+                          const current = queues.get(key) ?? [];
+                          current.push(row);
+                          queues.set(key, current);
+                        });
+
                       return sourceVasteKostenRows.map((srcRow, idx) => {
-                        const draftRow = draftVasteKostenTarget.find(
-                          (row) =>
-                            !row.isNew &&
-                            !used.has(row.uiId) &&
-                            row.omschrijving === srcRow.omschrijving &&
-                            row.kostensoort === srcRow.kostensoort
-                        );
-                        if (draftRow) used.add(draftRow.uiId);
+                        const queue = queues.get(srcRow.key) ?? [];
+                        const draftRow = queue.shift();
+                        queues.set(srcRow.key, queue);
 
                         if (!draftRow) {
                           return (
@@ -1602,8 +1609,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                               <td>{srcRow.kostensoort}</td>
                               <td>{formatEur(srcRow.bedrag_per_jaar)}</td>
                               <td>{String(Number(srcRow.herverdeel_pct ?? 0))}</td>
-                              <td className="muted">0</td>
-                              <td className="muted">0</td>
+                              <td className="muted">-</td>
+                              <td className="muted">-</td>
                             </tr>
                           );
                         }
