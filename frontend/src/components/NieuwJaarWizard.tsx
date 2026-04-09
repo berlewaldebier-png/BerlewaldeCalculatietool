@@ -67,6 +67,8 @@ type PreviewRow = {
   sellIn: Record<string, number>;
 };
 
+type PricingMode = "keep_price" | "scale_cost_ratio" | "keep_margin" | "free";
+
 export type NieuwJaarWizardProps = {
   initialBerekeningen: GenericRecord[];
   initialKostprijsproductactiveringen: GenericRecord[];
@@ -115,6 +117,12 @@ function clampInt(value: unknown, fallback: number) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.trunc(parsed);
+}
+
+function clampNumber(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed;
 }
 
 function formatEur(value: number) {
@@ -220,6 +228,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   );
 
   const [scenarioPrimaryCosts, setScenarioPrimaryCosts] = useState<Record<string, number>>({});
+  const [pricingMode, setPricingMode] = useState<PricingMode>("scale_cost_ratio");
   const [verkoopstrategieSave, setVerkoopstrategieSave] = useState<null | (() => Promise<void>)>(null);
   const [draftPackagingPrices, setDraftPackagingPrices] = useState<Record<string, number>>({});
   const [draftProductieTarget, setDraftProductieTarget] = useState<ProductieYear>({
@@ -234,6 +243,28 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [draftStatus, setDraftStatus] = useState<"" | "idle" | "loading" | "saving" | "committing">("idle");
   const [commitConflict, setCommitConflict] = useState<string>("");
   const conceptStarted = completedStepIds.includes("init");
+
+  const STRATEGY_RECORD_TYPES = useMemo(() => new Set(["jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"]), []);
+
+  const wizardVerkoopprijzen = useMemo(() => {
+    // In wizard draft mode we keep strategy edits local (draftVerkoopstrategieTarget) but still need passthrough records
+    // (product_pricing etc) so VerkoopstrategieWorkspace can preserve the dataset shape on save.
+    const passthrough = (Array.isArray(currentVerkoopprijzen) ? currentVerkoopprijzen : []).filter(
+      (row) => !STRATEGY_RECORD_TYPES.has(String((row as any)?.record_type ?? ""))
+    );
+    const otherStrategy = (Array.isArray(currentVerkoopprijzen) ? currentVerkoopprijzen : []).filter((row) => {
+      const rt = String((row as any)?.record_type ?? "");
+      const jaar = Number((row as any)?.jaar ?? 0);
+      if (!STRATEGY_RECORD_TYPES.has(rt)) return false;
+      if (jaar === targetYear && Array.isArray(draftVerkoopstrategieTarget) && draftVerkoopstrategieTarget.length > 0) {
+        // We'll replace targetYear strategy with the draft.
+        return false;
+      }
+      return true;
+    });
+    const draft = Array.isArray(draftVerkoopstrategieTarget) ? draftVerkoopstrategieTarget : [];
+    return [...passthrough, ...otherStrategy, ...draft];
+  }, [STRATEGY_RECORD_TYPES, currentVerkoopprijzen, draftVerkoopstrategieTarget, targetYear]);
 
   function createUiId() {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -914,6 +945,216 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     return computeFixedCostsTotalForYear(year) / liters;
   }
 
+  function computeSellInPrice(cost: number, marginPct: number) {
+    const margin = clampNumber(marginPct, 0);
+    if (margin >= 100) return cost;
+    return cost / Math.max(0.0001, 1 - margin / 100);
+  }
+
+  function computeMarginFromSellIn(cost: number, sellIn: number) {
+    const c = clampNumber(cost, 0);
+    const p = clampNumber(sellIn, 0);
+    if (!Number.isFinite(c) || !Number.isFinite(p) || p <= 0) return 0;
+    const margin = (1 - c / p) * 100;
+    if (!Number.isFinite(margin)) return 0;
+    return Math.min(99.9, Math.max(0, margin));
+  }
+
+  const basisParentForStrategy = useMemo(() => {
+    const compositeDefs = (Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : [])
+      .filter((row) => typeof row === "object" && row !== null)
+      .map((row) => row as any);
+
+    const basisParentMap = new Map<string, { productId: string; label: string; score: number }[]>();
+    compositeDefs.forEach((row) => {
+      const compositeId = String(row.id ?? "");
+      const compositeLabel = String(row.omschrijving ?? "");
+      const basisRows = Array.isArray(row.basisproducten) ? row.basisproducten : [];
+      basisRows.forEach((basisRow: any) => {
+        const basisId = String(basisRow.basisproduct_id ?? "");
+        if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) return;
+        const current = basisParentMap.get(basisId) ?? [];
+        const scoreRaw = Number(basisRow.aantal ?? 0);
+        const score = Number.isFinite(scoreRaw) ? scoreRaw : 0;
+        current.push({ productId: compositeId, label: compositeLabel, score });
+        basisParentMap.set(basisId, current);
+      });
+    });
+
+    const resolved = new Map<string, { productId: string; label: string }>();
+    for (const [basisId, items] of basisParentMap.entries()) {
+      if (!items || items.length === 0) continue;
+      const sorted = [...items].sort((left, right) => {
+        const scoreDiff = Number(right.score ?? 0) - Number(left.score ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const labelDiff = String(left.label ?? "").localeCompare(String(right.label ?? ""), "nl-NL");
+        if (labelDiff !== 0) return labelDiff;
+        return String(left.productId ?? "").localeCompare(String(right.productId ?? ""));
+      });
+      resolved.set(basisId, { productId: sorted[0].productId, label: sorted[0].label });
+    }
+    return resolved;
+  }, [initialSamengesteldeProducten]);
+
+  function followProductIdForStrategy(productId: string, productType: string) {
+    if (productType !== "basis") return "";
+    return basisParentForStrategy.get(productId)?.productId ?? "";
+  }
+
+  function getStrategyRowsForYear(year: number) {
+    const rows = Array.isArray(currentVerkoopprijzen) ? currentVerkoopprijzen : [];
+    return rows.filter((row) => STRATEGY_RECORD_TYPES.has(String((row as any)?.record_type ?? "")) && Number((row as any)?.jaar ?? 0) === year) as any[];
+  }
+
+  function readMarginFromStrategyRow(row: any, channel: string): number | null {
+    const margins = row?.sell_in_margins ?? row?.kanaalmarges ?? {};
+    if (!margins || typeof margins !== "object") return null;
+    const raw = (margins as any)[channel];
+    if (raw === "" || raw === null || raw === undefined) return null;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return null;
+    return parsed;
+  }
+
+  function readSellInPriceFromStrategyRow(row: any, channel: string): number | null {
+    const prices = row?.sell_in_prices ?? row?.kanaalprijzen ?? {};
+    if (!prices || typeof prices !== "object") return null;
+    const raw = (prices as any)[channel];
+    if (raw === "" || raw === null || raw === undefined) return null;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return null;
+    return parsed;
+  }
+
+  function effectiveSourceMargin(bierId: string, productId: string, productType: string, channel: string, defaultMargin: number) {
+    const followId = followProductIdForStrategy(productId, productType);
+    const keyProductId = followId || productId;
+    const rows = getStrategyRowsForYear(sourceYear);
+    const beerRow =
+      rows.find((row) => String(row.record_type ?? "") === "verkoopstrategie_product" && String(row.bier_id ?? "") === bierId && String(row.product_id ?? "") === keyProductId) ??
+      null;
+    const beerMargin = readMarginFromStrategyRow(beerRow, channel);
+    if (beerMargin !== null) return beerMargin;
+    const packRow =
+      rows.find((row) => String(row.record_type ?? "") === "verkoopstrategie_verpakking" && String(row.product_id ?? "") === keyProductId) ?? null;
+    const packMargin = readMarginFromStrategyRow(packRow, channel);
+    if (packMargin !== null) return packMargin;
+    const yearRow = rows.find((row) => String(row.record_type ?? "") === "jaarstrategie") ?? null;
+    const yearMargin = readMarginFromStrategyRow(yearRow, channel);
+    if (yearMargin !== null) return yearMargin;
+    return defaultMargin;
+  }
+
+  function explicitSourceSellInPrice(bierId: string, productId: string, productType: string, channel: string): number | null {
+    const followId = followProductIdForStrategy(productId, productType);
+    const keyProductId = followId || productId;
+    const rows = getStrategyRowsForYear(sourceYear);
+    const beerRow =
+      rows.find((row) => String(row.record_type ?? "") === "verkoopstrategie_product" && String(row.bier_id ?? "") === bierId && String(row.product_id ?? "") === keyProductId) ??
+      null;
+    return readSellInPriceFromStrategyRow(beerRow, channel);
+  }
+
+  async function applyPricingScenario() {
+    if (!conceptStarted) return;
+    if (pricingMode === "free") {
+      setStatus("Vrij invullen: geen automatische aanpassing toegepast.");
+      return;
+    }
+
+    const channels = [
+      { code: "horeca", label: "Horeca", defaultMargin: 50 },
+      { code: "retail", label: "Supermarkt", defaultMargin: 30 },
+      { code: "slijterij", label: "Slijterij", defaultMargin: 40 },
+      { code: "zakelijk", label: "Speciaalzaak", defaultMargin: 45 }
+    ] as const;
+
+    setIsRunning(true);
+    setStatus("");
+    try {
+      const nextRows = [...(Array.isArray(draftVerkoopstrategieTarget) ? (draftVerkoopstrategieTarget as any[]) : [])];
+
+      const upsertBeerOverride = (bierId: string, biernaam: string, productId: string, productType: string, productLabel: string) => {
+        const existingIndex = nextRows.findIndex(
+          (row) =>
+            String(row.record_type ?? "") === "verkoopstrategie_product" &&
+            Number(row.jaar ?? 0) === targetYear &&
+            String(row.bier_id ?? "") === bierId &&
+            String(row.product_id ?? "") === productId
+        );
+        const base =
+          existingIndex >= 0
+            ? { ...(nextRows[existingIndex] as any) }
+            : {
+                id: "",
+                record_type: "verkoopstrategie_product",
+                jaar: targetYear,
+                bron_jaar: sourceYear,
+                bier_id: bierId,
+                biernaam,
+                product_id: productId,
+                product_type: productType,
+                verpakking: productLabel,
+                strategie_type: "override",
+                sell_in_margins: {},
+                sell_out_factors: {},
+                sell_out_advice_prices: {}
+              };
+        if (!base.sell_in_margins || typeof base.sell_in_margins !== "object") base.sell_in_margins = {};
+        if (existingIndex >= 0) nextRows[existingIndex] = base;
+        else nextRows.push(base);
+        return base as any;
+      };
+
+      previewRows.forEach((row) => {
+        const bierId = row.bierId;
+        const biernaam = row.biernaam;
+        const productId = row.productId;
+        const productType = row.productType;
+        const followId = followProductIdForStrategy(productId, productType);
+        const keyProductId = followId || productId;
+        const sourceCost = clampNumber(row.sourceCost, 0);
+        const targetCost = clampNumber(row.estimatedTargetCost, 0);
+
+        channels.forEach((channel) => {
+          const marginSource = effectiveSourceMargin(bierId, productId, productType, channel.code, channel.defaultMargin);
+          const explicitSellIn = explicitSourceSellInPrice(bierId, productId, productType, channel.code);
+          const sellInSource =
+            explicitSellIn !== null ? explicitSellIn : computeSellInPrice(sourceCost, marginSource);
+
+          let marginTarget = marginSource;
+          if (pricingMode === "keep_price") {
+            marginTarget = computeMarginFromSellIn(targetCost, sellInSource);
+          } else if (pricingMode === "scale_cost_ratio") {
+            const scaled =
+              sourceCost > 0 ? sellInSource * (targetCost / Math.max(0.0001, sourceCost)) : sellInSource;
+            marginTarget = computeMarginFromSellIn(targetCost, scaled);
+          } else if (pricingMode === "keep_margin") {
+            marginTarget = marginSource;
+          }
+
+          const overrideRow = upsertBeerOverride(bierId, biernaam, keyProductId, productType, row.productLabel);
+          overrideRow.sell_in_margins[channel.code] = Math.round(clampNumber(marginTarget, 0) * 100) / 100;
+        });
+      });
+
+      setDraftVerkoopstrategieTarget(nextRows);
+      setCompletedStepIds((current) => (current.includes("verkoopstrategie") ? current : [...current, "verkoopstrategie"]));
+      await saveDraftToServer(`Prijsstrategie toegepast voor ${targetYear}.`);
+      setStatus(
+        pricingMode === "scale_cost_ratio"
+          ? "Toegepast: verkoopprijs stijgt mee (2B)."
+          : pricingMode === "keep_margin"
+            ? "Toegepast: marge% blijft gelijk (2A)."
+            : "Toegepast: verkoopprijs blijft gelijk (1)."
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Toepassen mislukt.");
+    } finally {
+      setIsRunning(false);
+    }
+  }
+
   const previewRows = useMemo<PreviewRow[]>(() => {
     // Preview is intentionally "indicative": we adjust source-year cost by deltas we can derive
     // from the yearset (fixed costs per liter + packaging component prices).
@@ -1055,11 +1296,106 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     }
 
     const channels = [
-      { code: "horeca", naam: "Horeca", margin: 50 },
-      { code: "retail", naam: "Supermarkt", margin: 30 },
-      { code: "slijterij", naam: "Slijterij", margin: 40 },
-      { code: "zakelijk", naam: "Speciaalzaak", margin: 45 }
-    ];
+      { code: "horeca", naam: "Horeca", defaultMargin: 50 },
+      { code: "retail", naam: "Supermarkt", defaultMargin: 30 },
+      { code: "slijterij", naam: "Slijterij", defaultMargin: 40 },
+      { code: "zakelijk", naam: "Speciaalzaak", defaultMargin: 45 }
+    ] as const;
+
+    // Map basisproducten -> "primary" composed product so basis rows can follow their composite strategy defaults.
+    const compositeById = new Map<string, any>();
+    compositeDefs.forEach((row) => {
+      const id = String(row.id ?? "");
+      if (id) compositeById.set(id, row);
+    });
+    const basisParentMap = new Map<string, { productId: string; label: string; score: number }[]>();
+    compositeDefs.forEach((row) => {
+      const compositeId = String(row.id ?? "");
+      const compositeLabel = String(row.omschrijving ?? "");
+      const basisRows = Array.isArray(row.basisproducten) ? row.basisproducten : [];
+      basisRows.forEach((basisRow: any) => {
+        const basisId = String(basisRow.basisproduct_id ?? "");
+        if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) return;
+        const current = basisParentMap.get(basisId) ?? [];
+        const scoreRaw = Number(basisRow.aantal ?? 0);
+        const score = Number.isFinite(scoreRaw) ? scoreRaw : 0;
+        current.push({ productId: compositeId, label: compositeLabel, score });
+        basisParentMap.set(basisId, current);
+      });
+    });
+    const resolvedBasisParent = new Map<string, { productId: string; label: string }>();
+    for (const [basisId, items] of basisParentMap.entries()) {
+      if (!items || items.length === 0) continue;
+      const sorted = [...items].sort((left, right) => {
+        const scoreDiff = Number(right.score ?? 0) - Number(left.score ?? 0);
+        if (scoreDiff !== 0) return scoreDiff;
+        const labelDiff = String(left.label ?? "").localeCompare(String(right.label ?? ""), "nl-NL");
+        if (labelDiff !== 0) return labelDiff;
+        return String(left.productId ?? "").localeCompare(String(right.productId ?? ""));
+      });
+      resolvedBasisParent.set(basisId, { productId: sorted[0].productId, label: sorted[0].label });
+    }
+
+    const STRATEGY_TYPES = new Set(["jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"]);
+    const verkoopStrategyRows = (Array.isArray(draftVerkoopstrategieTarget) && draftVerkoopstrategieTarget.length > 0
+      ? draftVerkoopstrategieTarget
+      : currentVerkoopprijzen
+    )
+      .filter((row) => row && typeof row === "object" && STRATEGY_TYPES.has(String((row as any).record_type ?? "")))
+      .map((row) => row as any);
+
+    function followProductIdFor(productId: string, productType: string) {
+      if (productType !== "basis") return "";
+      return resolvedBasisParent.get(productId)?.productId ?? "";
+    }
+
+    function getYearStrategyRow(year: number) {
+      return verkoopStrategyRows.find((row) => String(row.record_type ?? "") === "jaarstrategie" && Number(row.jaar ?? 0) === year) ?? null;
+    }
+
+    function getPackagingStrategyRow(year: number, productId: string) {
+      return verkoopStrategyRows.find(
+        (row) =>
+          String(row.record_type ?? "") === "verkoopstrategie_verpakking" &&
+          Number(row.jaar ?? 0) === year &&
+          String(row.product_id ?? "") === productId
+      ) ?? null;
+    }
+
+    function getBeerStrategyRow(year: number, bierId: string, productId: string) {
+      return verkoopStrategyRows.find(
+        (row) =>
+          String(row.record_type ?? "") === "verkoopstrategie_product" &&
+          Number(row.jaar ?? 0) === year &&
+          String(row.bier_id ?? "") === bierId &&
+          String(row.product_id ?? "") === productId
+      ) ?? null;
+    }
+
+    function marginFromStrategy(row: any, code: string): number | null {
+      const margins = row?.sell_in_margins ?? row?.kanaalmarges ?? {};
+      if (!margins || typeof margins !== "object") return null;
+      const raw = (margins as any)[code];
+      if (raw === "" || raw === null || raw === undefined) return null;
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed)) return null;
+      return parsed;
+    }
+
+    function effectiveMargin(year: number, bierId: string, productId: string, productType: string, code: string, defaultMargin: number) {
+      const followId = followProductIdFor(productId, productType);
+      const keyProductId = followId || productId;
+      const beerRow = getBeerStrategyRow(year, bierId, keyProductId);
+      const beerMargin = marginFromStrategy(beerRow, code);
+      if (beerMargin !== null) return beerMargin;
+      const packRow = getPackagingStrategyRow(year, keyProductId);
+      const packMargin = marginFromStrategy(packRow, code);
+      if (packMargin !== null) return packMargin;
+      const yearRow = getYearStrategyRow(year);
+      const yearMargin = marginFromStrategy(yearRow, code);
+      if (yearMargin !== null) return yearMargin;
+      return defaultMargin;
+    }
 
     const out: PreviewRow[] = [];
 
@@ -1089,7 +1425,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
       const estimatedTargetCost = scenarioBaseCost + packagingDelta + fixedDelta;
       const sellIn = Object.fromEntries(
-        channels.map((channel) => [channel.code, calcSellInPrice(estimatedTargetCost, channel.margin)])
+        channels.map((channel) => {
+          const margin = effectiveMargin(targetYear, bierId, productId, productType, channel.code, channel.defaultMargin);
+          return [channel.code, calcSellInPrice(estimatedTargetCost, margin)];
+        })
       ) as Record<string, number>;
 
       out.push({
@@ -1114,6 +1453,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     currentPackagingPrices,
     currentProductie,
     currentVasteKosten,
+    currentVerkoopprijzen,
+    draftVerkoopstrategieTarget,
     draftPackagingPrices,
     draftProductieTarget,
     draftVasteKostenTarget,
@@ -2002,9 +2343,77 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
           {activeStep === 7 ? (
             <div>
+              <div className="placeholder-block" style={{ marginBottom: 14 }}>
+                <strong>Prijsstrategie (wizard)</strong>
+                <div className="muted" style={{ marginTop: 8 }}>
+                  Kies hoe we van bronjaar {sourceYear} naar doeljaar {targetYear} bewegen. Dit zet concept-overrides
+                  klaar in verkoopstrategie op bier+product niveau. Je kunt daarna nog vrij bijstellen.
+                </div>
+                <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      checked={pricingMode === "keep_price"}
+                      onChange={() => setPricingMode("keep_price")}
+                      disabled={isRunning}
+                    />
+                    <span>1. Verkoopprijs blijft gelijk (marge past aan)</span>
+                  </label>
+                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      checked={pricingMode === "scale_cost_ratio"}
+                      onChange={() => setPricingMode("scale_cost_ratio")}
+                      disabled={isRunning}
+                    />
+                    <span>2B. Verkoopprijs stijgt mee met kostprijs (default)</span>
+                  </label>
+                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      checked={pricingMode === "keep_margin"}
+                      onChange={() => setPricingMode("keep_margin")}
+                      disabled={isRunning}
+                    />
+                    <span>2A. Marge% blijft gelijk</span>
+                  </label>
+                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input
+                      type="radio"
+                      name="pricingMode"
+                      checked={pricingMode === "free"}
+                      onChange={() => setPricingMode("free")}
+                      disabled={isRunning}
+                    />
+                    <span>3. Vrij invullen</span>
+                  </label>
+                </div>
+                <div className="editor-actions" style={{ marginTop: 12 }}>
+                  <div className="editor-actions-group" />
+                  <div className="editor-actions-group">
+                    <button
+                      type="button"
+                      className="editor-button editor-button-secondary"
+                      onClick={() => void applyPricingScenario()}
+                      disabled={isRunning || !conceptStarted}
+                    >
+                      Toepassen
+                    </button>
+                  </div>
+                </div>
+                {pricingMode === "scale_cost_ratio" || pricingMode === "keep_margin" ? (
+                  <div className="muted" style={{ marginTop: 10 }}>
+                    Let op: als je geen expliciete sell-in prijzen hebt opgeslagen (alleen marges), dan zijn 2A en 2B
+                    in deze tool wiskundig vrijwel gelijk. 2B wordt pas onderscheidend als er echte bronprijzen bestaan.
+                  </div>
+                ) : null}
+              </div>
               <VerkoopstrategieWorkspace
                 endpoint="/data/verkoopprijzen"
-                verkoopprijzen={currentVerkoopprijzen}
+                verkoopprijzen={wizardVerkoopprijzen}
                 basisproducten={Array.isArray(initialBasisproducten) ? initialBasisproducten : []}
                 samengesteldeProducten={Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : []}
                 bieren={Array.isArray(initialBieren) ? initialBieren : []}

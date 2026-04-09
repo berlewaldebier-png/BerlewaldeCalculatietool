@@ -256,6 +256,15 @@ export function VerkoopstrategieWorkspace({
   const [isSaving, setIsSaving] = useState(false);
   const isMountedRef = useRef(true);
 
+  // In draft mode (wizard), the source rows may be replaced by the parent component when:
+  // - a saved concept is loaded from the server
+  // - a pricing scenario is applied programmatically
+  // To keep the embedded workspace consistent, we sync local state from props only in draft mode.
+  useEffect(() => {
+    if (mode !== "draft") return;
+    setRows(verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
+  }, [mode, verkoopStrategyRows, channelCodes]);
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
