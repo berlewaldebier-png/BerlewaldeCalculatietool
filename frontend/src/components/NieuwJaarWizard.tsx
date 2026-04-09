@@ -2081,6 +2081,14 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 </div>
                 <div className="editor-actions-group">
                   {saveAndCloseButton}
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => void saveDraftToServer("Concept opgeslagen.")}
+                    disabled={isRunning || !conceptStarted}
+                  >
+                    Opslaan
+                  </button>
                   <button type="button" className="editor-button" onClick={() => setActiveStep(9)} disabled={isRunning}>
                     Volgende
                   </button>
@@ -2145,10 +2153,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => saveDraftToServer()}
+                    onClick={() => void saveDraftToServer("Concept opgeslagen.")}
                     disabled={isRunning}
                   >
-                    Concept opslaan
+                    Opslaan
                   </button>
                   <button
                     type="button"
@@ -2157,14 +2165,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                     disabled={isRunning}
                   >
                     Afronden
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => router.push("/")}
-                    disabled={isRunning}
-                  >
-                    Naar overzicht
                   </button>
                 </div>
               </div>

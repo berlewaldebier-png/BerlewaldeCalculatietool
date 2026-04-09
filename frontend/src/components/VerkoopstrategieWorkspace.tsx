@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { API_BASE_URL } from "@/lib/api";
@@ -40,7 +40,7 @@ type Props = {
   kostprijsproductactiveringen: GenericRecord[];
   initialYear?: number;
   lockYear?: boolean;
-  exposeSave?: (saveFn: (() => Promise<void>) | null) => void;
+  exposeSave?: Dispatch<SetStateAction<(() => Promise<void>) | null>>;
   mode?: "server" | "draft";
   onDraftSave?: (rows: GenericRecord[]) => Promise<void> | void;
 };
@@ -564,7 +564,9 @@ export function VerkoopstrategieWorkspace({
       if (!fn) return;
       await fn();
     };
-    exposeSave(exposed);
+    // `exposeSave` is often a `useState` setter from the parent wizard.
+    // Passing a function directly would be treated as an updater and executed immediately.
+    exposeSave(() => exposed);
     return () => {
       exposeSave(null);
     };
