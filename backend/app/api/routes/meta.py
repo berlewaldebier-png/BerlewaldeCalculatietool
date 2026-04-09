@@ -205,7 +205,61 @@ def post_generate_missing_activations(
     activation records (or where invalid records were cleaned up).
     """
     try:
-        return dataset_store.generate_missing_activations(dry_run=dry_run)
+    return dataset_store.generate_missing_activations(dry_run=dry_run)
+
+
+@router.get("/kostprijs-activatie-plan", response_model=KostprijsActivatiePlanResponse)
+def get_kostprijs_activatie_plan(
+    source_year: int,
+    target_year: int,
+    user: dict[str, Any] = Depends(require_user),
+) -> KostprijsActivatiePlanResponse:
+    return dataset_store.get_kostprijs_activatie_plan(
+        owner=str(user.get("username", "") or ""),
+        source_year=int(source_year),
+        target_year=int(target_year),
+    )
+
+
+@router.put("/kostprijs-activatie-draft")
+def put_kostprijs_activatie_draft(
+    payload: UpsertKostprijsActivatieDraftRequest,
+    user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    return {
+        "draft": dataset_store.upsert_kostprijs_activatie_draft(
+            owner=str(user.get("username", "") or ""),
+            source_year=int(payload.source_year),
+            target_year=int(payload.target_year),
+            payload=payload.payload,
+        )
+    }
+
+
+@router.delete("/kostprijs-activatie-draft")
+def delete_kostprijs_activatie_draft(
+    target_year: int,
+    user: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    return dataset_store.delete_kostprijs_activatie_draft(
+        owner=str(user.get("username", "") or ""),
+        target_year=int(target_year),
+    )
+
+
+@router.post("/activate-kostprijzen")
+def post_activate_kostprijzen(
+    payload: ActivateKostprijzenRequest,
+    user: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    # Admin-only: this writes new definitive kostprijsversies + activations for the target year.
+    return dataset_store.activate_kostprijzen_for_year(
+        owner=str(user.get("username", "") or ""),
+        source_year=int(payload.source_year),
+        target_year=int(payload.target_year),
+        selections=[{"bier_id": s.bier_id, "product_id": s.product_id} for s in payload.selections],
+        dry_run=bool(payload.dry_run),
+    )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

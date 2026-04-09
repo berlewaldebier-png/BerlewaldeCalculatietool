@@ -25,7 +25,7 @@ async function resolveServerApiBaseUrl() {
   return `${origin}${API_BASE_URL}`;
 }
 
-async function apiGetServer<T>(path: string, nextPath: string): Promise<T> {
+export async function apiGetServer<T>(path: string, nextPath: string): Promise<T> {
   const cookieJar = await cookies();
   const cookieHeader = cookieJar.toString();
   const baseUrl = await resolveServerApiBaseUrl();

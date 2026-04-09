@@ -18,6 +18,9 @@ from app.utils.storage import (
     load_basisproducten,
     load_kostprijsproductactiveringen,
     load_kostprijsversies,
+    load_basisproducten_for_year,
+    load_samengestelde_producten_for_year,
+    get_vaste_kosten_per_liter_for_year,
     load_packaging_component_masters,
     load_packaging_component_prices,
     load_packaging_component_price_versions,
@@ -1080,6 +1083,389 @@ def delete_kostprijs_activatie_draft(*, owner: str, target_year: int) -> dict[st
         kept.append(row)
     postgres_storage.save_dataset("kostprijs-activatie-drafts", kept, overwrite=True)
     return {"deleted": int(removed)}
+
+
+def _latest_activations_for_year(year: int) -> list[dict[str, Any]]:
+    rows = [
+        row
+        for row in load_kostprijsproductactiveringen()
+        if isinstance(row, dict) and int(row.get("jaar", 0) or 0) == int(year)
+    ]
+    latest_by_key: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        bier_id = str(row.get("bier_id", "") or "").strip()
+        product_id = str(row.get("product_id", "") or "").strip()
+        if not bier_id or not product_id:
+            continue
+        key = f"{bier_id}::{product_id}"
+        current = latest_by_key.get(key)
+        if current is None:
+            latest_by_key[key] = row
+            continue
+        # Prefer newest effective_from / updated_at.
+        candidate_key = (
+            str(row.get("effectief_vanaf", "") or ""),
+            str(row.get("updated_at", "") or ""),
+            str(row.get("id", "") or ""),
+        )
+        current_key = (
+            str(current.get("effectief_vanaf", "") or ""),
+            str(current.get("updated_at", "") or ""),
+            str(current.get("id", "") or ""),
+        )
+        if candidate_key > current_key:
+            latest_by_key[key] = row
+    return list(latest_by_key.values())
+
+
+def _find_snapshot_product_row(version: dict[str, Any], product_id: str) -> dict[str, Any] | None:
+    snapshot = version.get("resultaat_snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    producten = snapshot.get("producten")
+    if not isinstance(producten, dict):
+        return None
+    for group_key in ("basisproducten", "samengestelde_producten"):
+        group = producten.get(group_key, [])
+        if not isinstance(group, list):
+            continue
+        for row in group:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("product_id", "") or "").strip() == str(product_id or "").strip():
+                return row
+    return None
+
+
+def _load_scenario_primary_costs_for_year(target_year: int) -> dict[str, float]:
+    payload = load_dataset("kostprijs-scenario-inkoop")
+    if not isinstance(payload, list):
+        return {}
+    out: dict[str, float] = {}
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        try:
+            jaar = int(row.get("jaar", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if jaar != int(target_year):
+            continue
+        bier_id = str(row.get("bier_id", "") or "").strip()
+        product_id = str(row.get("product_id", "") or "").strip()
+        if not bier_id or not product_id:
+            continue
+        try:
+            value = float(row.get("scenario_primaire_kosten", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        out[f"{bier_id}::{product_id}"] = float(value)
+    return out
+
+
+def _upsert_scenario_primary_costs_for_year(*, target_year: int, overrides: dict[str, Any]) -> int:
+    if not isinstance(overrides, dict):
+        return 0
+    existing = load_dataset("kostprijs-scenario-inkoop")
+    if not isinstance(existing, list):
+        existing = []
+    kept = [
+        row
+        for row in existing
+        if isinstance(row, dict) and int(row.get("jaar", 0) or 0) != int(target_year)
+    ]
+    created = 0
+    for key, raw_value in overrides.items():
+        if not isinstance(key, str) or "::" not in key:
+            continue
+        bier_id, product_id = key.split("::", 1)
+        bier_id = str(bier_id or "").strip()
+        product_id = str(product_id or "").strip()
+        if not bier_id or not product_id:
+            continue
+        try:
+            value = float(raw_value or 0.0)
+        except (TypeError, ValueError):
+            continue
+        kept.append(
+            {
+                "jaar": int(target_year),
+                "bier_id": bier_id,
+                "product_id": product_id,
+                "scenario_primaire_kosten": float(value),
+            }
+        )
+        created += 1
+    save_dataset("kostprijs-scenario-inkoop", kept)
+    return created
+
+
+def _compute_target_product_components(
+    *,
+    product_type: str,
+    product_id: str,
+    target_year: int,
+) -> tuple[float, float]:
+    """Returns (liters_per_product, packaging_cost) for the target year (fail-hard if missing)."""
+    normalized_type = str(product_type or "").strip().lower()
+    basis_lookup = {str(row.get("id", "") or ""): row for row in load_basisproducten_for_year(target_year) if isinstance(row, dict)}
+    samengesteld_lookup = {str(row.get("id", "") or ""): row for row in load_samengestelde_producten_for_year(target_year) if isinstance(row, dict)}
+    if normalized_type in {"basis", "basisproduct"}:
+        product = basis_lookup.get(str(product_id or ""))
+        if not isinstance(product, dict):
+            raise ValueError(f"Basisproduct niet gevonden voor product_id={product_id} in jaar {target_year}.")
+        liters = float(product.get("inhoud_per_eenheid_liter", 0.0) or 0.0)
+        packaging = float(product.get("totale_verpakkingskosten", 0.0) or 0.0)
+        return (max(liters, 0.0), max(packaging, 0.0))
+    product = samengesteld_lookup.get(str(product_id or ""))
+    if not isinstance(product, dict):
+        raise ValueError(f"Samengesteld product niet gevonden voor product_id={product_id} in jaar {target_year}.")
+    liters = float(product.get("totale_inhoud_liter", 0.0) or 0.0)
+    packaging = float(product.get("totale_verpakkingskosten", 0.0) or 0.0)
+    return (max(liters, 0.0), max(packaging, 0.0))
+
+
+def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: int) -> dict[str, Any]:
+    require_postgres()
+    if source_year <= 0 or target_year <= 0:
+        raise ValueError("Bronjaar en doeljaar moeten geldig zijn.")
+
+    versions = [row for row in load_kostprijsversies() if isinstance(row, dict)]
+    version_by_id = {str(row.get("id", "") or ""): row for row in versions}
+    activations = _latest_activations_for_year(source_year)
+
+    scenario_by_key = _load_scenario_primary_costs_for_year(target_year)
+    draft = load_kostprijs_activatie_draft(owner=str(owner or ""), target_year=int(target_year))
+    draft_payload = (draft or {}).get("payload") if isinstance(draft, dict) else {}
+    draft_overrides = (draft_payload or {}).get("scenario_primary_costs") if isinstance(draft_payload, dict) else {}
+    if not isinstance(draft_overrides, dict):
+        draft_overrides = {}
+
+    vaste_kosten_per_liter = float(get_vaste_kosten_per_liter_for_year(target_year) or 0.0)
+
+    rows: list[dict[str, Any]] = []
+    for activation in activations:
+        bier_id = str(activation.get("bier_id", "") or "").strip()
+        product_id = str(activation.get("product_id", "") or "").strip()
+        product_type = str(activation.get("product_type", "") or "").strip()
+        version_id = str(activation.get("kostprijsversie_id", "") or "").strip()
+        if not bier_id or not product_id or not version_id:
+            continue
+        version = version_by_id.get(version_id)
+        if not isinstance(version, dict):
+            continue
+        basis = version.get("basisgegevens", {}) if isinstance(version.get("basisgegevens", {}), dict) else {}
+        biernaam = str(basis.get("biernaam", "") or "").strip()
+        snapshot_row = _find_snapshot_product_row(version, product_id)
+        if not isinstance(snapshot_row, dict):
+            continue
+        source_cost = float(snapshot_row.get("kostprijs", 0.0) or 0.0)
+        source_primary = float(snapshot_row.get("primaire_kosten", 0.0) or 0.0)
+        source_accijns = float(snapshot_row.get("accijns", 0.0) or 0.0)
+
+        key = f"{bier_id}::{product_id}"
+        scenario_primary = scenario_by_key.get(key, source_primary)
+        if key in draft_overrides:
+            try:
+                scenario_primary = float(draft_overrides.get(key) or 0.0)
+            except (TypeError, ValueError):
+                scenario_primary = scenario_primary
+
+        liters, packaging_cost = _compute_target_product_components(
+            product_type=product_type, product_id=product_id, target_year=target_year
+        )
+        vaste_kosten = vaste_kosten_per_liter * float(liters)
+        target_cost = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(source_accijns)
+        delta = target_cost - source_cost
+        rows.append(
+            {
+                "bier_id": bier_id,
+                "biernaam": biernaam,
+                "product_id": product_id,
+                "product_type": product_type,
+                "product_label": str(snapshot_row.get("verpakking", "") or snapshot_row.get("product_label", "") or ""),
+                "source_version_id": version_id,
+                "source_cost": float(source_cost),
+                "source_primary": float(source_primary),
+                "scenario_primary": float(scenario_primary),
+                "target_cost": float(target_cost),
+                "delta": float(delta),
+            }
+        )
+
+    rows.sort(key=lambda r: (str(r.get("biernaam", "") or ""), str(r.get("product_label", "") or "")))
+    return {
+        "source_year": int(source_year),
+        "target_year": int(target_year),
+        "rows": rows,
+    }
+
+
+def activate_kostprijzen_for_year(
+    *,
+    owner: str,
+    source_year: int,
+    target_year: int,
+    selections: list[dict[str, str]] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    require_postgres()
+    plan = get_kostprijs_activatie_plan(owner=owner, source_year=source_year, target_year=target_year)
+    plan_rows = plan.get("rows", [])
+    if not isinstance(plan_rows, list):
+        plan_rows = []
+    if not plan_rows:
+        return {"created_versions": 0, "activated": 0, "detail": "Geen plan-rijen beschikbaar."}
+
+    selected_keys: set[str] = set()
+    if selections:
+        for sel in selections:
+            if not isinstance(sel, dict):
+                continue
+            bier_id = str(sel.get("bier_id", "") or "").strip()
+            product_id = str(sel.get("product_id", "") or "").strip()
+            if bier_id and product_id:
+                selected_keys.add(f"{bier_id}::{product_id}")
+    else:
+        selected_keys = {f"{str(r.get('bier_id','') or '')}::{str(r.get('product_id','') or '')}" for r in plan_rows if isinstance(r, dict)}
+
+    # Group by beer.
+    rows_by_beer: dict[str, list[dict[str, Any]]] = {}
+    for row in plan_rows:
+        if not isinstance(row, dict):
+            continue
+        bier_id = str(row.get("bier_id", "") or "").strip()
+        product_id = str(row.get("product_id", "") or "").strip()
+        if not bier_id or not product_id:
+            continue
+        if f"{bier_id}::{product_id}" not in selected_keys:
+            continue
+        rows_by_beer.setdefault(bier_id, []).append(row)
+
+    if not rows_by_beer:
+        return {"created_versions": 0, "activated": 0, "detail": "Geen geselecteerde rijen."}
+
+    versions = [row for row in load_kostprijsversies() if isinstance(row, dict)]
+    version_by_id = {str(row.get("id", "") or ""): row for row in versions}
+    now = datetime.now(UTC).isoformat()
+
+    created_versions = 0
+    activated_scopes = 0
+    created_version_ids: list[str] = []
+    for bier_id, beer_rows in rows_by_beer.items():
+        # pick a source version for metadata
+        source_version_id = str(beer_rows[0].get("source_version_id", "") or "").strip()
+        source_version = version_by_id.get(source_version_id)
+        if not isinstance(source_version, dict):
+            raise ValueError(f"Bron kostprijsversie niet gevonden voor bier_id={bier_id}.")
+        basis = source_version.get("basisgegevens", {}) if isinstance(source_version.get("basisgegevens", {}), dict) else {}
+        bier_snapshot = source_version.get("bier_snapshot", {}) if isinstance(source_version.get("bier_snapshot", {}), dict) else {}
+        # Determine next versie_nummer for this beer+target_year.
+        existing_nums = [
+            int(row.get("versie_nummer", 0) or 0)
+            for row in versions
+            if isinstance(row, dict)
+            and str(row.get("bier_id", "") or "").strip() == bier_id
+            and int(row.get("jaar", 0) or 0) == int(target_year)
+        ]
+        next_num = (max(existing_nums) if existing_nums else 0) + 1
+        new_id = str(uuid4())
+
+        basis_target = {**basis, "jaar": int(target_year)}
+        soort = str(source_version.get("type", "") or "").strip().lower()
+        calc_type = "Inkoop" if soort == "inkoop" else "Productie"
+
+        # Build snapshot product rows.
+        basisproducten_snapshot: list[dict[str, Any]] = []
+        samengestelde_snapshot: list[dict[str, Any]] = []
+        for r in beer_rows:
+            product_id = str(r.get("product_id", "") or "").strip()
+            product_type = str(r.get("product_type", "") or "").strip()
+            label = str(r.get("product_label", "") or "")
+            source_primary = float(r.get("source_primary", 0.0) or 0.0)
+            scenario_primary = float(r.get("scenario_primary", source_primary) or source_primary)
+            liters, packaging_cost = _compute_target_product_components(
+                product_type=product_type, product_id=product_id, target_year=target_year
+            )
+            vaste_kosten_per_liter = float(get_vaste_kosten_per_liter_for_year(target_year) or 0.0)
+            vaste_kosten = vaste_kosten_per_liter * float(liters)
+            # Tarieven/heffingen are currently not used in calc engine; keep snapshot accijns stable.
+            source_version_row = version_by_id.get(str(r.get("source_version_id", "") or ""))
+            source_row = _find_snapshot_product_row(source_version_row, product_id) if isinstance(source_version_row, dict) else None
+            accijns = float((source_row or {}).get("accijns", 0.0) or 0.0)
+            kostprijs = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(accijns)
+            row_payload = {
+                "product_id": product_id,
+                "product_type": product_type,
+                "verpakking": label,
+                "liters_per_product": float(liters),
+                "primaire_kosten": float(scenario_primary),
+                "verpakkingskosten": float(packaging_cost),
+                "vaste_kosten": float(vaste_kosten),
+                "accijns": float(accijns),
+                "kostprijs": float(kostprijs),
+            }
+            if str(product_type or "").strip().lower() in {"basis", "basisproduct"}:
+                basisproducten_snapshot.append(row_payload)
+            else:
+                samengestelde_snapshot.append(row_payload)
+
+        record = normalize_berekening_record(
+            {
+                "id": new_id,
+                "bier_id": bier_id,
+                "basisgegevens": basis_target,
+                "bier_snapshot": bier_snapshot,
+                "status": "definitief",
+                "calculation_type": calc_type,
+                "versie_nummer": int(next_num),
+                "calculation_variant": "jaarovergang",
+                "jaarovergang": {
+                    "bron_berekening_id": str(source_version_id),
+                    "bron_jaar": int(source_year),
+                    "doel_jaar": int(target_year),
+                    "aangemaakt_via": "kostprijs_activatie",
+                    "created_at": now,
+                },
+                "created_at": now,
+                "updated_at": now,
+                "finalized_at": now,
+                "resultaat_snapshot": {
+                    "integrale_kostprijs_per_liter": 0.0,
+                    "variabele_kosten_per_liter": 0.0,
+                    "directe_vaste_kosten_per_liter": 0.0,
+                    "producten": {
+                        "basisproducten": basisproducten_snapshot,
+                        "samengestelde_producten": samengestelde_snapshot,
+                    },
+                },
+            }
+        )
+
+        if dry_run:
+            created_versions += 1
+            activated_scopes += len(beer_rows)
+            continue
+
+        versions.append(record)
+        if not save_berekeningen(versions):
+            raise ValueError("Kon kostprijsversies niet opslaan.")
+        created_versions += 1
+        created_version_ids.append(new_id)
+
+        product_ids = [str(r.get("product_id", "") or "").strip() for r in beer_rows if str(r.get("product_id", "") or "").strip()]
+        activated = activate_kostprijsversie_products(new_id, product_ids, context={"action": "year_activation", "owner": owner})
+        if not activated:
+            raise ValueError("Kon kostprijsproducten niet activeren.")
+        activated_scopes += len(product_ids)
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return {
+        "created_versions": int(created_versions),
+        "activated": int(activated_scopes),
+        "version_ids": created_version_ids,
+        "dry_run": bool(dry_run),
+    }
 
 
 def delete_new_year_drafts_for_target_year(*, target_year: int) -> dict[str, Any]:
