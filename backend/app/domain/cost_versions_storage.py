@@ -110,7 +110,13 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     now = datetime.now(UTC)
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            if overwrite:
+            if not overwrite:
+                cur.execute("SELECT COUNT(*) FROM cost_versions")
+                count_row = cur.fetchone()
+                existing = int((count_row[0] if count_row else 0) or 0)
+                if existing > 0:
+                    return True
+            else:
                 cur.execute("DELETE FROM cost_versions")
             if records:
                 params: list[tuple[Any, ...]] = []
@@ -173,4 +179,3 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     except Exception:
         pass
     return True
-
