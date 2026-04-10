@@ -1260,8 +1260,6 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
     if not isinstance(draft_overrides, dict):
         draft_overrides = {}
 
-    vaste_kosten_per_liter = float(get_vaste_kosten_per_liter_for_year(target_year) or 0.0)
-
     rows: list[dict[str, Any]] = []
     for activation in activations:
         bier_id = str(activation.get("bier_id", "") or "").strip()
@@ -1274,13 +1272,17 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
         if not isinstance(version, dict):
             continue
         basis = version.get("basisgegevens", {}) if isinstance(version.get("basisgegevens", {}), dict) else {}
+        bier_snapshot = version.get("bier_snapshot", {}) if isinstance(version.get("bier_snapshot", {}), dict) else {}
         biernaam = str(basis.get("biernaam", "") or "").strip()
         snapshot_row = _find_snapshot_product_row(version, product_id)
         if not isinstance(snapshot_row, dict):
             continue
         source_cost = float(snapshot_row.get("kostprijs", 0.0) or 0.0)
         source_primary = float(snapshot_row.get("primaire_kosten", 0.0) or 0.0)
-        source_accijns = float(snapshot_row.get("accijns", 0.0) or 0.0)
+        soort = str(version.get("type", "") or "").strip().lower()
+        bier_alcohol = float(bier_snapshot.get("alcoholpercentage", basis.get("alcoholpercentage", 0.0)) or 0.0)
+        bier_tarief_accijns = str(bier_snapshot.get("tarief_accijns", basis.get("tarief_accijns", "Hoog")) or "Hoog")
+        bier_belastingsoort = str(bier_snapshot.get("belastingsoort", basis.get("belastingsoort", "Accijns")) or "Accijns")
 
         key = f"{bier_id}::{product_id}"
         scenario_primary = scenario_by_key.get(key, source_primary)
@@ -1293,8 +1295,21 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
         liters, packaging_cost = _compute_target_product_components(
             product_type=product_type, product_id=product_id, target_year=target_year
         )
+        if soort == "inkoop":
+            vaste_kosten_per_liter = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
+        else:
+            vaste_kosten_per_liter = float(bereken_directe_vaste_kosten_per_productieliter_herverdeeld(target_year) or 0.0)
         vaste_kosten = vaste_kosten_per_liter * float(liters)
-        target_cost = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(source_accijns)
+        accijns = float(
+            bereken_accijns_voor_liters(
+                year=target_year,
+                liters=float(liters),
+                alcoholpercentage=float(bier_alcohol),
+                tarief_accijns=bier_tarief_accijns,
+                belastingsoort=bier_belastingsoort,
+            )
+        )
+        target_cost = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(accijns)
         delta = target_cost - source_cost
         rows.append(
             {
