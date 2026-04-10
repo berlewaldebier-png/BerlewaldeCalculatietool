@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from app.domain import auth_service, dataset_store
-from app.domain import product_registry_storage, beer_storage
+from app.domain import product_registry_storage
 from app.utils.seed_bundles import SeedProfile, read_seed_bundle, write_seed_bundle
 
 
