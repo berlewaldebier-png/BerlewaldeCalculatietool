@@ -928,21 +928,88 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     return cost / Math.max(0.0001, 1 - margin / 100);
   }
 
-  function computeFixedCostsTotalForYear(year: number) {
+  function clampPct(value: unknown) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.min(100, Math.max(0, parsed));
+  }
+
+  function computeHerverdelingTotals(rows: Array<Record<string, unknown>>) {
+    const directRows = rows.filter((row) => {
+      const normalized = String((row as any).kostensoort ?? "").trim().toLowerCase();
+      return normalized.includes("direct") && !normalized.includes("indirect");
+    });
+    const indirectRows = rows.filter((row) => String((row as any).kostensoort ?? "").trim().toLowerCase().includes("indirect"));
+
+    const directBase = directRows.reduce((sum, row) => sum + Number((row as any).bedrag_per_jaar ?? 0), 0);
+    const indirectBase = indirectRows.reduce((sum, row) => sum + Number((row as any).bedrag_per_jaar ?? 0), 0);
+
+    const directOut = directRows.reduce((sum, row) => {
+      const amount = Number((row as any).bedrag_per_jaar ?? 0);
+      const pct = clampPct((row as any).herverdeel_pct);
+      return sum + (amount * pct) / 100;
+    }, 0);
+
+    const indirectOut = indirectRows.reduce((sum, row) => {
+      const amount = Number((row as any).bedrag_per_jaar ?? 0);
+      const pct = clampPct((row as any).herverdeel_pct);
+      return sum + (amount * pct) / 100;
+    }, 0);
+
+    return {
+      directBase,
+      indirectBase,
+      directOut,
+      indirectOut,
+      directAfter: directBase - directOut + indirectOut,
+      indirectAfter: indirectBase - indirectOut + directOut,
+      redistributedTotal: directOut + indirectOut
+    };
+  }
+
+  function fixedCostRowsForYear(year: number): Array<Record<string, unknown>> {
     const rows =
       year === targetYear
         ? sanitizeVasteKostenTarget(draftVasteKostenTarget)
         : ((currentVasteKosten as any)?.[String(year)] as unknown);
-    if (!Array.isArray(rows)) return 0;
-    return rows.reduce((sum, row) => sum + Number((row as any)?.bedrag_per_jaar ?? 0), 0);
+    return Array.isArray(rows) ? (rows as any) : [];
   }
 
-  function computeFixedCostsPerLiter(year: number) {
+  function computeIndirectFixedCostPerInkoopLiter(year: number) {
     const productieRow = getProductieForYear(year);
-    const liters =
-      Number(productieRow?.hoeveelheid_inkoop_l ?? 0) + Number(productieRow?.hoeveelheid_productie_l ?? 0);
+    const liters = Number(productieRow?.hoeveelheid_inkoop_l ?? 0);
     if (!Number.isFinite(liters) || liters <= 0) return 0;
-    return computeFixedCostsTotalForYear(year) / liters;
+    const totals = computeHerverdelingTotals(fixedCostRowsForYear(year));
+    return totals.indirectAfter / liters;
+  }
+
+  function computeDirectFixedCostPerProductieLiter(year: number) {
+    const productieRow = getProductieForYear(year);
+    const liters = Number(productieRow?.hoeveelheid_productie_l ?? 0);
+    if (!Number.isFinite(liters) || liters <= 0) return 0;
+    const totals = computeHerverdelingTotals(fixedCostRowsForYear(year));
+    return totals.directAfter / liters;
+  }
+
+  function computeAccijnsForLiters(year: number, record: any, liters: number) {
+    const basis = typeof record?.basisgegevens === "object" && record?.basisgegevens ? record.basisgegevens : {};
+    const bierSnap = typeof record?.bier_snapshot === "object" && record?.bier_snapshot ? record.bier_snapshot : {};
+    const alcoholpercentage = Number(bierSnap.alcoholpercentage ?? basis.alcoholpercentage ?? 0);
+    const tariefAccijns = String(bierSnap.tarief_accijns ?? basis.tarief_accijns ?? "Hoog");
+    const belastingsoort = String(bierSnap.belastingsoort ?? basis.belastingsoort ?? "Accijns");
+    if (!Number.isFinite(liters) || liters <= 0) return 0;
+    if (String(belastingsoort).trim().toLowerCase() !== "accijns") return 0;
+
+    const tariefRow =
+      year === targetYear
+        ? draftTariefTarget
+        : getTariefForYear(year);
+    if (!tariefRow) return 0;
+    const tarief = tariefAccijns === "Laag" ? Number(tariefRow.tarief_laag ?? 0) : Number(tariefRow.tarief_hoog ?? 0);
+    const vb = Number(tariefRow.verbruikersbelasting ?? 0);
+    if (!Number.isFinite(tarief) || !Number.isFinite(vb) || !Number.isFinite(alcoholpercentage)) return 0;
+    // Matches legacy seed snapshots: accijns scales with liters * alcohol% and the configured tarieven.
+    return (liters * alcoholpercentage * (tarief + vb)) / 420;
   }
 
   function computeSellInPrice(cost: number, marginPct: number) {
@@ -1158,7 +1225,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const previewRows = useMemo<PreviewRow[]>(() => {
     // Preview is intentionally "indicative": we adjust source-year cost by deltas we can derive
     // from the yearset (fixed costs per liter + packaging component prices).
-    const fixedDeltaPerLiter = computeFixedCostsPerLiter(targetYear) - computeFixedCostsPerLiter(sourceYear);
 
     const priceByYearComponent = new Map<string, number>();
     currentPackagingPrices.forEach((row) => {
@@ -1420,10 +1486,23 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const basePackaging = packagingCost(productId, productType, sourceYear);
       const targetPackaging = packagingCost(productId, productType, targetYear);
       const packagingDelta = targetPackaging - basePackaging;
-      const liters = litersPerUnit(productId, productType, sourceYear);
-      const fixedDelta = fixedDeltaPerLiter * Number(liters ?? 0);
+      const liters = litersPerUnit(productId, productType, targetYear);
+      const calcType = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
+      const fixedPerLiterSource =
+        calcType === "inkoop"
+          ? computeIndirectFixedCostPerInkoopLiter(sourceYear)
+          : computeDirectFixedCostPerProductieLiter(sourceYear);
+      const fixedPerLiterTarget =
+        calcType === "inkoop"
+          ? computeIndirectFixedCostPerInkoopLiter(targetYear)
+          : computeDirectFixedCostPerProductieLiter(targetYear);
+      const fixedDelta = (fixedPerLiterTarget - fixedPerLiterSource) * Number(liters ?? 0);
 
-      const estimatedTargetCost = scenarioBaseCost + packagingDelta + fixedDelta;
+      const accijnsDelta =
+        computeAccijnsForLiters(targetYear, record, Number(liters ?? 0)) -
+        computeAccijnsForLiters(sourceYear, record, Number(liters ?? 0));
+
+      const estimatedTargetCost = scenarioBaseCost + packagingDelta + fixedDelta + accijnsDelta;
       const sellIn = Object.fromEntries(
         channels.map((channel) => {
           const margin = effectiveMargin(targetYear, bierId, productId, productType, channel.code, channel.defaultMargin);
@@ -1960,6 +2039,47 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               <div className="editor-status" style={{ marginBottom: 14 }}>
                 Links zie je de vaste kosten van bronjaar {sourceYear} (read-only). Rechts vul je de vaste kosten voor doeljaar{" "}
                 {targetYear} in.
+              </div>
+
+              <div className="dataset-editor-scroll" style={{ marginBottom: 14 }}>
+                <table className="dataset-editor-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "120px" }}>Jaar</th>
+                      <th style={{ width: "220px" }}>Directe kosten</th>
+                      <th style={{ width: "220px" }}>Indirecte kosten</th>
+                      <th style={{ width: "220px" }}>Totale kosten</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const sourceTotals = computeHerverdelingTotals(fixedCostRowsForYear(sourceYear));
+                      const targetTotals = computeHerverdelingTotals(fixedCostRowsForYear(targetYear));
+                      return [
+                        { year: targetYear, totals: targetTotals },
+                        { year: sourceYear, totals: sourceTotals },
+                      ].map(({ year, totals }) => (
+                        <tr key={String(year)}>
+                          <td>
+                            <strong>{year}</strong>
+                          </td>
+                          <td>
+                            {formatEur(totals.directAfter)}{" "}
+                            <span className="muted">(herverdeeld uit direct: {formatEur(totals.directOut)})</span>
+                          </td>
+                          <td>
+                            {formatEur(totals.indirectAfter)}{" "}
+                            <span className="muted">(herverdeeld uit indirect: {formatEur(totals.indirectOut)})</span>
+                          </td>
+                          <td>
+                            {formatEur(totals.directAfter + totals.indirectAfter)}{" "}
+                            <span className="muted">(totaal herverdeeld: {formatEur(totals.redistributedTotal)})</span>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
               </div>
 
               <div className="dataset-editor-scroll" style={{ marginBottom: 14 }}>

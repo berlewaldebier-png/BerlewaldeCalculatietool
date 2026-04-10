@@ -19,6 +19,9 @@ from app.utils.storage import (
     load_kostprijsproductactiveringen,
     load_kostprijsversies,
     get_vaste_kosten_per_liter_for_year,
+    bereken_indirecte_vaste_kosten_per_ingekochte_liter,
+    bereken_directe_vaste_kosten_per_productieliter_herverdeeld,
+    bereken_accijns_voor_liters,
     resolve_basisproduct_for_year,
     resolve_samengesteld_product_for_year,
     load_packaging_component_masters,
@@ -1390,6 +1393,13 @@ def activate_kostprijzen_for_year(
         basis_target = {**basis, "jaar": int(target_year)}
         soort = str(source_version.get("type", "") or "").strip().lower()
         calc_type = "Inkoop" if soort == "inkoop" else "Productie"
+        bier_alcohol = float(bier_snapshot.get("alcoholpercentage", basis_target.get("alcoholpercentage", 0.0)) or 0.0)
+        bier_tarief_accijns = str(
+            bier_snapshot.get("tarief_accijns", basis_target.get("tarief_accijns", "Hoog")) or "Hoog"
+        )
+        bier_belastingsoort = str(
+            bier_snapshot.get("belastingsoort", basis_target.get("belastingsoort", "Accijns")) or "Accijns"
+        )
 
         # Build snapshot product rows.
         basisproducten_snapshot: list[dict[str, Any]] = []
@@ -1403,12 +1413,20 @@ def activate_kostprijzen_for_year(
             liters, packaging_cost = _compute_target_product_components(
                 product_type=product_type, product_id=product_id, target_year=target_year
             )
-            vaste_kosten_per_liter = float(get_vaste_kosten_per_liter_for_year(target_year) or 0.0)
+            if soort == "inkoop":
+                vaste_kosten_per_liter = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
+            else:
+                vaste_kosten_per_liter = float(bereken_directe_vaste_kosten_per_productieliter_herverdeeld(target_year) or 0.0)
             vaste_kosten = vaste_kosten_per_liter * float(liters)
-            # Tarieven/heffingen are currently not used in calc engine; keep snapshot accijns stable.
-            source_version_row = version_by_id.get(str(r.get("source_version_id", "") or ""))
-            source_row = _find_snapshot_product_row(source_version_row, product_id) if isinstance(source_version_row, dict) else None
-            accijns = float((source_row or {}).get("accijns", 0.0) or 0.0)
+            accijns = float(
+                bereken_accijns_voor_liters(
+                    year=target_year,
+                    liters=float(liters),
+                    alcoholpercentage=float(bier_alcohol),
+                    tarief_accijns=bier_tarief_accijns,
+                    belastingsoort=bier_belastingsoort,
+                )
+            )
             kostprijs = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(accijns)
             row_payload = {
                 "product_id": product_id,
@@ -1418,6 +1436,7 @@ def activate_kostprijzen_for_year(
                 "primaire_kosten": float(scenario_primary),
                 "verpakkingskosten": float(packaging_cost),
                 "vaste_kosten": float(vaste_kosten),
+                "indirecte_kosten": float(vaste_kosten),
                 "accijns": float(accijns),
                 "kostprijs": float(kostprijs),
             }

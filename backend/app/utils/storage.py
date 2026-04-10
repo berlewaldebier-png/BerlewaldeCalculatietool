@@ -3117,6 +3117,56 @@ def calculate_total_vaste_kosten(records: list[dict[str, Any]]) -> float:
     )
 
 
+def _clamp_pct(value: Any) -> float:
+    try:
+        parsed = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return float(min(100.0, max(0.0, parsed)))
+
+
+def _split_vaste_kosten(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split vaste kosten regels in directe en indirecte kosten (case-insensitive)."""
+    direct_rows: list[dict[str, Any]] = []
+    indirect_rows: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        kostensoort = str(record.get("kostensoort", record.get("type_kosten", "")) or "").strip().lower()
+        if "indirect" in kostensoort:
+            indirect_rows.append(record)
+        elif "direct" in kostensoort:
+            direct_rows.append(record)
+    return direct_rows, indirect_rows
+
+
+def calculate_herverdeelde_vaste_kosten_totals(records: list[dict[str, Any]]) -> dict[str, float]:
+    """Compute direct/indirect totals after applying herverdeel_pct."""
+    direct_rows, indirect_rows = _split_vaste_kosten(records)
+    direct_base = sum(float(row.get("bedrag_per_jaar", 0.0) or 0.0) for row in direct_rows)
+    indirect_base = sum(float(row.get("bedrag_per_jaar", 0.0) or 0.0) for row in indirect_rows)
+
+    direct_out = sum(
+        float(row.get("bedrag_per_jaar", 0.0) or 0.0) * _clamp_pct(row.get("herverdeel_pct", 0.0)) / 100.0
+        for row in direct_rows
+    )
+    indirect_out = sum(
+        float(row.get("bedrag_per_jaar", 0.0) or 0.0) * _clamp_pct(row.get("herverdeel_pct", 0.0)) / 100.0
+        for row in indirect_rows
+    )
+
+    direct_after = direct_base - direct_out + indirect_out
+    indirect_after = indirect_base - indirect_out + direct_out
+    return {
+        "direct_base": float(direct_base),
+        "indirect_base": float(indirect_base),
+        "direct_out": float(direct_out),
+        "indirect_out": float(indirect_out),
+        "direct_after": float(direct_after),
+        "indirect_after": float(indirect_after),
+    }
+
+
 def calculate_vaste_kosten_per_liter(
     totale_vaste_kosten: float,
     productie_liters: float | int | None,
@@ -3216,6 +3266,71 @@ def get_vaste_kosten_per_liter_for_year(year: int | str) -> float | None:
         productie_liters=productiegegevens.get("hoeveelheid_productie_l"),
         inkoop_liters=productiegegevens.get("hoeveelheid_inkoop_l"),
     )
+
+
+def bereken_indirecte_vaste_kosten_per_ingekochte_liter(year: int | str) -> float | None:
+    """Berekent indirecte vaste kosten per ingekochte liter (na herverdeling)."""
+    productiegegevens = get_productiegegevens_for_year(year)
+    inkoop_liters = productiegegevens.get("hoeveelheid_inkoop_l")
+    if inkoop_liters is None or float(inkoop_liters) <= 0:
+        return None
+    totals = calculate_herverdeelde_vaste_kosten_totals(get_vaste_kosten_for_year(year))
+    return calculate_vaste_kosten_per_ingekochte_liter(
+        totale_vaste_kosten=float(totals.get("indirect_after", 0.0) or 0.0),
+        inkoop_liters=inkoop_liters,
+    )
+
+
+def bereken_directe_vaste_kosten_per_productieliter_herverdeeld(year: int | str) -> float | None:
+    """Berekent directe vaste kosten per productieliter (na herverdeling)."""
+    productiegegevens = get_productiegegevens_for_year(year)
+    productie_liters = productiegegevens.get("hoeveelheid_productie_l")
+    if productie_liters is None or float(productie_liters) <= 0:
+        return None
+    totals = calculate_herverdeelde_vaste_kosten_totals(get_vaste_kosten_for_year(year))
+    return calculate_vaste_kosten_per_liter(
+        totale_vaste_kosten=float(totals.get("direct_after", 0.0) or 0.0),
+        productie_liters=productie_liters,
+    )
+
+
+def bereken_accijns_voor_liters(
+    *,
+    year: int | str,
+    liters: float,
+    alcoholpercentage: float,
+    tarief_accijns: str = DEFAULT_TARIEF_ACCIJNS,
+    belastingsoort: str = DEFAULT_BELASTINGSOORT,
+) -> float:
+    """Bereken accijns obv tarieven/heffingen van een jaar.
+
+    Model: accijns schaalt met liters * alcohol% en gebruikt tarief (hoog/laag) + verbruikersbelasting.
+    Deze sluit aan op de bestaande snapshot-data en maakt nieuw-jaar activaties reproduceerbaar.
+    """
+    try:
+        liters_value = float(liters or 0.0)
+    except (TypeError, ValueError):
+        liters_value = 0.0
+    if liters_value <= 0:
+        return 0.0
+    if str(belastingsoort or "").strip().lower() != "accijns":
+        return 0.0
+
+    tarieven = get_tarieven_heffingen_for_year(year)
+    if not tarieven:
+        return 0.0
+
+    tarief_key = "tarief_laag" if str(tarief_accijns or "").strip().lower() == "laag" else "tarief_hoog"
+    tarief = float(tarieven.get(tarief_key, 0.0) or 0.0)
+    vb = float(tarieven.get("verbruikersbelasting", 0.0) or 0.0)
+    try:
+        alc = float(alcoholpercentage or 0.0)
+    except (TypeError, ValueError):
+        alc = 0.0
+    if alc <= 0:
+        return 0.0
+
+    return max(0.0, (liters_value * alc * (tarief + vb)) / 420.0)
 
 
 def bereken_directe_vaste_kosten_per_liter(year: int | str) -> float | None:
