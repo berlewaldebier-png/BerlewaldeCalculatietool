@@ -1529,6 +1529,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   }, [
     currentActivations,
     currentBerekeningen,
+    currentTarieven,
     currentPackagingPrices,
     currentProductie,
     currentVasteKosten,
@@ -1536,6 +1537,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     draftVerkoopstrategieTarget,
     draftPackagingPrices,
     draftProductieTarget,
+    draftTariefTarget,
     draftVasteKostenTarget,
     initialBasisproducten,
     initialBieren,
