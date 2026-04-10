@@ -376,3 +376,40 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     except Exception:
         pass
     return True
+
+
+def count_versions_for_year(year: int) -> dict[str, int]:
+    """Return counts of normalized cost versions (and their product rows) for a given year."""
+    ensure_schema()
+    year_value = int(year)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM cost_versions WHERE jaar = %s", (year_value,))
+            versions_row = cur.fetchone()
+            versions = int((versions_row[0] if versions_row else 0) or 0)
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM cost_version_product_rows r
+                JOIN cost_versions v ON v.id = r.version_id
+                WHERE v.jaar = %s
+                """,
+                (year_value,),
+            )
+            rows_row = cur.fetchone()
+            rows = int((rows_row[0] if rows_row else 0) or 0)
+    return {"versions": versions, "product_rows": rows}
+
+
+def delete_versions_for_year(year: int) -> dict[str, int]:
+    """Delete normalized cost versions for the given year (cascades to product rows)."""
+    ensure_schema()
+    year_value = int(year)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM cost_versions WHERE jaar = %s", (year_value,))
+            deleted_versions = int(cur.rowcount or 0)
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    # Product rows are deleted via ON DELETE CASCADE.
+    return {"deleted_versions": deleted_versions}

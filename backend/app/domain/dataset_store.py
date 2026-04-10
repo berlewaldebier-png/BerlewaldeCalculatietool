@@ -1876,6 +1876,18 @@ def rollback_year(
                 postgres_storage.save_dataset("prijsvoorstellen", kept, overwrite=True)
 
         if include_cost_versions:
+            # Canonical storage (Phase G): normalized cost version tables.
+            try:
+                from app.domain import cost_versions_storage
+
+                if dry_run:
+                    report["results"]["cost_versions_table"] = cost_versions_storage.count_versions_for_year(year_value)
+                else:
+                    report["results"]["cost_versions_table"] = cost_versions_storage.delete_versions_for_year(year_value)
+            except Exception as exc:
+                # Fail hard: rollback must not silently ignore table storage, otherwise the year becomes inconsistent.
+                raise ValueError(f"Kon cost versions table rollback niet uitvoeren: {exc}") from exc
+
             payload = postgres_storage.load_dataset("kostprijsversies", None)
             kept_versions, removed_versions = _filter_kostprijsversies(payload)
             report["results"]["kostprijsversies"] = {"removed": removed_versions}
@@ -1896,6 +1908,14 @@ def rollback_year(
                 if removed_acts and not dry_run:
                     postgres_storage.save_dataset("kostprijsproductactiveringen", kept_acts, overwrite=True)
 
+            # Scenario inkoop inputs are stored as rows keyed by year; remove them too to avoid stale activation inputs.
+            scenario_rows = postgres_storage.load_dataset("kostprijs-scenario-inkoop", None)
+            if isinstance(scenario_rows, list):
+                kept_scenario, removed_scenario = _filter_list_by_year(scenario_rows)
+                report["results"]["kostprijs-scenario-inkoop"] = {"removed": removed_scenario}
+                if removed_scenario and not dry_run:
+                    postgres_storage.save_dataset("kostprijs-scenario-inkoop", kept_scenario, overwrite=True)
+
     if not dry_run:
         dashboard_service.invalidate_dashboard_summary_cache()
     return report
@@ -1906,7 +1926,7 @@ def rollback_yearset(*, year: int, dry_run: bool = False) -> dict[str, Any]:
 
     Guardrails:
     - Only the latest production year can be rolled back.
-    - Does not touch cost versions, activations, quotes, etc.
+    - Removes all year-scoped data for that year, including cost versions and activations created for that year.
     """
     require_postgres()
     if year <= 0:
@@ -1925,14 +1945,14 @@ def rollback_yearset(*, year: int, dry_run: bool = False) -> dict[str, Any]:
     # Use the existing rollback helper for legacy + normalized production/fixed costs + tarieven + legacy packaging rows.
     report["results"]["base"] = rollback_year(
         year=year_value,
-        include_cost_versions=False,
+        include_cost_versions=True,
         include_quotes=False,
         include_variabele_kosten=False,
         include_sales_strategy=False,
         include_packaging=True,
         include_tarieven=True,
         include_productie_and_fixed_costs=True,
-        include_activations=False,
+        include_activations=True,
         dry_run=dry_run,
     )
 

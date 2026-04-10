@@ -432,7 +432,7 @@ def post_rollback_yearset(
     dry_run: bool = Query(False, description="Wanneer true: alleen rapporteren, niets opslaan."),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Rollback a committed yearset without touching cost versions/activations."""
+    """Rollback a committed yearset (latest production year) including cost versions/activations for that year."""
     try:
         return dataset_store.rollback_yearset(year=int(year), dry_run=bool(dry_run))
     except ValueError as exc:
