@@ -34,8 +34,8 @@ def ensure_schema() -> None:
                         jaar INTEGER NOT NULL REFERENCES production_years(jaar) ON DELETE CASCADE,
                         omschrijving TEXT NOT NULL,
                         kostensoort_code TEXT NOT NULL,
-                        bedrag_per_jaar DOUBLE PRECISION NOT NULL DEFAULT 0,
-                        herverdeel_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        bedrag_per_jaar NUMERIC NOT NULL DEFAULT 0,
+                        herverdeel_pct NUMERIC NOT NULL DEFAULT 0,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         CONSTRAINT fixed_cost_lines_kostensoort_ck
@@ -44,8 +44,13 @@ def ensure_schema() -> None:
                     """
                 )
                 # Idempotent migrations for evolving dev databases.
+                # Legacy column could exist as DOUBLE PRECISION; make it NUMERIC.
+                cur.execute("ALTER TABLE fixed_cost_lines ADD COLUMN IF NOT EXISTS herverdeel_pct NUMERIC NOT NULL DEFAULT 0")
                 cur.execute(
-                    "ALTER TABLE fixed_cost_lines ADD COLUMN IF NOT EXISTS herverdeel_pct DOUBLE PRECISION NOT NULL DEFAULT 0"
+                    "ALTER TABLE fixed_cost_lines ALTER COLUMN bedrag_per_jaar TYPE NUMERIC USING bedrag_per_jaar::numeric"
+                )
+                cur.execute(
+                    "ALTER TABLE fixed_cost_lines ALTER COLUMN herverdeel_pct TYPE NUMERIC USING herverdeel_pct::numeric"
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS fixed_cost_lines_year_idx ON fixed_cost_lines(jaar)")
             if not postgres_storage.in_transaction():

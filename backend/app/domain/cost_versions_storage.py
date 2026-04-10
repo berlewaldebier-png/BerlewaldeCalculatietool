@@ -1,0 +1,370 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from threading import Lock
+from typing import Any
+
+from app.domain import postgres_storage
+
+
+_SCHEMA_READY = False
+_SCHEMA_LOCK = Lock()
+
+
+def ensure_schema() -> None:
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY:
+            return
+        postgres_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cost_versions (
+                        id TEXT PRIMARY KEY,
+                        jaar INTEGER NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT '',
+                        bier_id TEXT NOT NULL DEFAULT '',
+                        versie_nummer INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL DEFAULT '',
+                        updated_at TEXT NOT NULL DEFAULT '',
+                        finalized_at TEXT NOT NULL DEFAULT '',
+                        payload JSONB NOT NULL,
+                        updated_at_ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cost_version_product_rows (
+                        id TEXT PRIMARY KEY,
+                        version_id TEXT NOT NULL REFERENCES cost_versions(id) ON DELETE CASCADE,
+                        kind TEXT NOT NULL,
+                        bier_id TEXT NOT NULL DEFAULT '',
+                        product_id TEXT NOT NULL DEFAULT '',
+                        product_type TEXT NOT NULL DEFAULT '',
+                        verpakking_label TEXT NOT NULL DEFAULT '',
+                        inkoop NUMERIC NOT NULL DEFAULT 0,
+                        verpakkingskosten NUMERIC NOT NULL DEFAULT 0,
+                        indirecte_kosten NUMERIC NOT NULL DEFAULT 0,
+                        accijns NUMERIC NOT NULL DEFAULT 0,
+                        kostprijs NUMERIC NOT NULL DEFAULT 0,
+                        sort_index INTEGER NOT NULL DEFAULT 0
+                    );
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_cost_version_product_rows_version ON cost_version_product_rows(version_id)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_cost_version_product_rows_product ON cost_version_product_rows(product_id)"
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_cost_versions_year
+                    ON cost_versions (jaar);
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_cost_versions_status
+                    ON cost_versions (status);
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_cost_versions_bier
+                    ON cost_versions (bier_id);
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS ix_cost_versions_year_status
+                    ON cost_versions (jaar, status);
+                    """
+                )
+            if not postgres_storage.in_transaction():
+                conn.commit()
+
+        _SCHEMA_READY = True
+
+        # One-time best-effort migration from legacy `app_datasets` payload.
+        try:
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM cost_versions")
+                    count_row = cur.fetchone()
+                    existing = int((count_row[0] if count_row else 0) or 0)
+            if existing == 0:
+                legacy = postgres_storage.load_app_dataset_payload("kostprijsversies")
+                if isinstance(legacy, list) and legacy:
+                    save_dataset(legacy, overwrite=True)
+                    postgres_storage.delete_app_dataset_row("kostprijsversies")
+        except Exception:
+            # Migration is best-effort; schema must still be usable for new writes.
+            pass
+
+
+def _strip_snapshot_sections(row: dict[str, Any]) -> dict[str, Any]:
+    """Keep top-level cost version fields in payload; store product snapshot rows in normalized tables."""
+    cleaned = dict(row)
+    snapshot = cleaned.get("resultaat_snapshot")
+    if isinstance(snapshot, dict):
+        products = snapshot.get("producten")
+        if isinstance(products, dict):
+            products = dict(products)
+            products.pop("basisproducten", None)
+            products.pop("samengestelde_producten", None)
+            snapshot = dict(snapshot)
+            snapshot["producten"] = products
+            cleaned["resultaat_snapshot"] = snapshot
+    return cleaned
+
+
+def load_dataset(default_value: Any) -> Any:
+    ensure_schema()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, payload FROM cost_versions")
+            version_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT id, version_id, kind, bier_id, product_id, product_type, verpakking_label,
+                       inkoop, verpakkingskosten, indirecte_kosten, accijns, kostprijs, sort_index
+                FROM cost_version_product_rows
+                ORDER BY version_id, kind, sort_index, id
+                """
+            )
+            product_rows = cur.fetchall()
+
+    if not version_rows:
+        return default_value
+
+    basis_by_version: dict[str, list[dict[str, Any]]] = {}
+    sameng_by_version: dict[str, list[dict[str, Any]]] = {}
+    for (
+        row_id,
+        version_id,
+        kind,
+        bier_id,
+        product_id,
+        product_type,
+        verpakking_label,
+        inkoop,
+        verpakkingskosten,
+        indirecte_kosten,
+        accijns,
+        kostprijs,
+        _sort_index,
+    ) in product_rows:
+        payload: dict[str, Any] = {
+            "id": str(row_id),
+            "bier_id": str(bier_id or ""),
+            "product_id": str(product_id or ""),
+            "product_type": str(product_type or ""),
+            "verpakking_label": str(verpakking_label or ""),
+            "inkoop": float(inkoop or 0),
+            "verpakkingskosten": float(verpakkingskosten or 0),
+            "indirecte_kosten": float(indirecte_kosten or 0),
+            "accijns": float(accijns or 0),
+            "kostprijs": float(kostprijs or 0),
+        }
+        if str(kind or "") == "samengesteld":
+            sameng_by_version.setdefault(str(version_id), []).append(payload)
+        else:
+            basis_by_version.setdefault(str(version_id), []).append(payload)
+
+    out: list[dict[str, Any]] = []
+    for version_id, payload in version_rows:
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        if not isinstance(payload, dict):
+            continue
+        merged = dict(payload)
+        snapshot = merged.get("resultaat_snapshot")
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        producten = snapshot.get("producten")
+        if not isinstance(producten, dict):
+            producten = {}
+        producten = dict(producten)
+        producten["basisproducten"] = basis_by_version.get(str(version_id), [])
+        producten["samengestelde_producten"] = sameng_by_version.get(str(version_id), [])
+        snapshot = dict(snapshot)
+        snapshot["producten"] = producten
+        merged["resultaat_snapshot"] = snapshot
+        out.append(merged)
+
+    return out
+
+
+def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
+    ensure_schema()
+    if not isinstance(data, list):
+        raise ValueError("Ongeldig payload voor 'kostprijsversies': verwacht list.")
+
+    records: list[dict[str, Any]] = [row for row in data if isinstance(row, dict)]
+    now = datetime.now(UTC)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            if not overwrite:
+                cur.execute("SELECT COUNT(*) FROM cost_versions")
+                count_row = cur.fetchone()
+                existing = int((count_row[0] if count_row else 0) or 0)
+                if existing > 0:
+                    return True
+            else:
+                cur.execute("DELETE FROM cost_versions")
+                cur.execute("DELETE FROM cost_version_product_rows")
+            if records:
+                params: list[tuple[Any, ...]] = []
+                for row in records:
+                    record_id = str(row.get("id", "") or "").strip()
+                    if not record_id:
+                        raise ValueError("Kostprijsversie mist verplicht veld 'id'.")
+                    status = str(row.get("status", "") or "").strip().lower()
+                    bier_id = str(row.get("bier_id", "") or "")
+                    try:
+                        jaar = int(row.get("jaar", 0) or 0)
+                    except (TypeError, ValueError):
+                        jaar = 0
+                    try:
+                        versie_nummer = int(row.get("versie_nummer", 0) or 0)
+                    except (TypeError, ValueError):
+                        versie_nummer = 0
+                    created_at = str(row.get("created_at", "") or "")
+                    updated_at = str(row.get("updated_at", "") or "")
+                    finalized_at = str(row.get("finalized_at", "") or "")
+                    params.append(
+                        (
+                            record_id,
+                            jaar,
+                            status,
+                            bier_id,
+                            versie_nummer,
+                            created_at,
+                            updated_at,
+                            finalized_at,
+                            json.dumps(_strip_snapshot_sections(row), ensure_ascii=False),
+                            now,
+                        )
+                    )
+                cur.executemany(
+                    """
+                    INSERT INTO cost_versions
+                        (id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload, updated_at_ts)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    ON CONFLICT (id)
+                    DO UPDATE SET
+                        jaar = EXCLUDED.jaar,
+                        status = EXCLUDED.status,
+                        bier_id = EXCLUDED.bier_id,
+                        versie_nummer = EXCLUDED.versie_nummer,
+                        created_at = EXCLUDED.created_at,
+                        updated_at = EXCLUDED.updated_at,
+                        finalized_at = EXCLUDED.finalized_at,
+                        payload = EXCLUDED.payload,
+                        updated_at_ts = EXCLUDED.updated_at_ts
+                    """,
+                    params,
+                )
+                row_params: list[tuple[Any, ...]] = []
+                for version in records:
+                    version_id = str(version.get("id", "") or "").strip()
+                    if not version_id:
+                        continue
+                    bier_id = str(version.get("bier_id", "") or "")
+                    snapshot = version.get("resultaat_snapshot") if isinstance(version, dict) else {}
+                    producten = (snapshot or {}).get("producten") if isinstance(snapshot, dict) else {}
+                    basis = (producten or {}).get("basisproducten") if isinstance(producten, dict) else []
+                    sameng = (producten or {}).get("samengestelde_producten") if isinstance(producten, dict) else []
+
+                    sort_index = 0
+                    for item in basis if isinstance(basis, list) else []:
+                        if not isinstance(item, dict):
+                            continue
+                        row_id = str(item.get("id", "") or "").strip()
+                        if not row_id:
+                            continue
+                        row_params.append(
+                            (
+                                row_id,
+                                version_id,
+                                "basis",
+                                bier_id,
+                                str(item.get("product_id", "") or ""),
+                                str(item.get("product_type", "") or ""),
+                                str(item.get("verpakkingseenheid", item.get("verpakking_label", "")) or ""),
+                                float(item.get("inkoop", 0) or 0),
+                                float(item.get("verpakkingskosten", 0) or 0),
+                                float(item.get("indirecte_kosten", 0) or 0),
+                                float(item.get("accijns", 0) or 0),
+                                float(item.get("kostprijs", 0) or 0),
+                                int(sort_index),
+                            )
+                        )
+                        sort_index += 1
+
+                    sort_index = 0
+                    for item in sameng if isinstance(sameng, list) else []:
+                        if not isinstance(item, dict):
+                            continue
+                        row_id = str(item.get("id", "") or "").strip()
+                        if not row_id:
+                            continue
+                        row_params.append(
+                            (
+                                row_id,
+                                version_id,
+                                "samengesteld",
+                                bier_id,
+                                str(item.get("product_id", "") or ""),
+                                str(item.get("product_type", "") or ""),
+                                str(item.get("verpakkingseenheid", item.get("verpakking_label", "")) or ""),
+                                float(item.get("inkoop", 0) or 0),
+                                float(item.get("verpakkingskosten", 0) or 0),
+                                float(item.get("indirecte_kosten", 0) or 0),
+                                float(item.get("accijns", 0) or 0),
+                                float(item.get("kostprijs", 0) or 0),
+                                int(sort_index),
+                            )
+                        )
+                        sort_index += 1
+
+                if row_params:
+                    cur.executemany(
+                        """
+                        INSERT INTO cost_version_product_rows (
+                            id, version_id, kind, bier_id, product_id, product_type, verpakking_label,
+                            inkoop, verpakkingskosten, indirecte_kosten, accijns, kostprijs, sort_index
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE SET
+                            version_id = EXCLUDED.version_id,
+                            kind = EXCLUDED.kind,
+                            bier_id = EXCLUDED.bier_id,
+                            product_id = EXCLUDED.product_id,
+                            product_type = EXCLUDED.product_type,
+                            verpakking_label = EXCLUDED.verpakking_label,
+                            inkoop = EXCLUDED.inkoop,
+                            verpakkingskosten = EXCLUDED.verpakkingskosten,
+                            indirecte_kosten = EXCLUDED.indirecte_kosten,
+                            accijns = EXCLUDED.accijns,
+                            kostprijs = EXCLUDED.kostprijs,
+                            sort_index = EXCLUDED.sort_index
+                        """,
+                        row_params,
+                    )
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    # Ensure we don't keep a stale legacy row around.
+    try:
+        postgres_storage.delete_app_dataset_row("kostprijsversies")
+    except Exception:
+        pass
+    return True

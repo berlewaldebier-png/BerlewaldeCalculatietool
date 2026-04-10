@@ -7,6 +7,7 @@ from threading import Lock
 
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
+from app.domain import cost_versions_storage, price_quotes_storage
 
 
 @dataclass(frozen=True)
@@ -40,24 +41,52 @@ def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
     This intentionally bypasses utils.storage normalization and avoids multiple full dataset loads
     just to compute dashboard badges.
     """
-    postgres_storage.ensure_schema()
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    COUNT(*) FILTER (WHERE elem->>'status' = 'concept')::int AS concept_count,
-                    COUNT(*) FILTER (WHERE elem->>'status' = 'definitief')::int AS definitief_count
-                FROM jsonb_array_elements(
-                    COALESCE(
-                        (SELECT payload FROM app_datasets WHERE dataset_name = %s),
-                        '[]'::jsonb
-                    )
-                ) AS elem
-                """,
-                (dataset_name,),
-            )
-            row = cur.fetchone()
+    # Phase G: some datasets are stored in dedicated tables instead of `app_datasets`.
+    if dataset_name == "kostprijsversies":
+        cost_versions_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE status = 'concept')::int AS concept_count,
+                        COUNT(*) FILTER (WHERE status = 'definitief')::int AS definitief_count
+                    FROM cost_versions
+                    """
+                )
+                row = cur.fetchone()
+    elif dataset_name == "prijsvoorstellen":
+        price_quotes_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE status = 'concept')::int AS concept_count,
+                        COUNT(*) FILTER (WHERE status = 'definitief')::int AS definitief_count
+                    FROM price_quotes
+                    """
+                )
+                row = cur.fetchone()
+    else:
+        postgres_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE elem->>'status' = 'concept')::int AS concept_count,
+                        COUNT(*) FILTER (WHERE elem->>'status' = 'definitief')::int AS definitief_count
+                    FROM jsonb_array_elements(
+                        COALESCE(
+                            (SELECT payload FROM app_datasets WHERE dataset_name = %s),
+                            '[]'::jsonb
+                        )
+                    ) AS elem
+                    """,
+                    (dataset_name,),
+                )
+                row = cur.fetchone()
     if not row:
         return 0, 0
     return int(row[0] or 0), int(row[1] or 0)
@@ -65,7 +94,7 @@ def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
 
 def _expiring_quotes(*, within_days: int = 14, limit: int = 5) -> tuple[int, list[dict[str, str]]]:
     """Count and list concept prijsvoorstellen that expire within a window based on `verloopt_op`."""
-    postgres_storage.ensure_schema()
+    price_quotes_storage.ensure_schema()
     today = date.today()
     until = today + timedelta(days=int(within_days))
 
@@ -74,13 +103,8 @@ def _expiring_quotes(*, within_days: int = 14, limit: int = 5) -> tuple[int, lis
             cur.execute(
                 """
                 WITH proposals AS (
-                    SELECT elem
-                    FROM jsonb_array_elements(
-                        COALESCE(
-                            (SELECT payload FROM app_datasets WHERE dataset_name = 'prijsvoorstellen'),
-                            '[]'::jsonb
-                        )
-                    ) AS elem
+                    SELECT payload AS elem
+                    FROM price_quotes
                 ),
                 normalized AS (
                     SELECT
@@ -153,6 +177,7 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
     """
     postgres_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
@@ -169,53 +194,32 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
                     FROM kostprijs_product_activations
                 ),
                 versions AS (
-                    SELECT elem AS v
-                    FROM jsonb_array_elements(
+                    SELECT
+                        id AS version_id,
+                        bier_id,
+                        jaar,
+                        versie_nummer,
                         COALESCE(
-                            (SELECT payload FROM app_datasets WHERE dataset_name = 'kostprijsversies'),
-                            '[]'::jsonb
-                        )
-                    ) AS elem
-                    WHERE COALESCE(elem->>'status','') = 'definitief'
+                            NULLIF(finalized_at,''),
+                            NULLIF(updated_at,''),
+                            NULLIF(created_at,'')
+                        ) AS version_ts
+                    FROM cost_versions
+                    WHERE status = 'definitief'
                 ),
                 product_costs AS (
                     SELECT
-                        v->>'id' AS version_id,
-                        v->>'bier_id' AS bier_id,
-                        COALESCE(NULLIF(v->>'jaar',''), '0')::int AS jaar,
-                        pr->>'product_id' AS product_id,
-                        COALESCE(NULLIF(pr->>'kostprijs',''), '0')::numeric AS kostprijs,
-                        COALESCE(
-                            NULLIF(v->>'finalized_at',''),
-                            NULLIF(v->>'updated_at',''),
-                            NULLIF(v->>'created_at','')
-                        ) AS version_ts,
-                        COALESCE(NULLIF(v->>'versie_nummer',''), '0')::int AS versie_nummer
-                    FROM versions
-                    CROSS JOIN LATERAL jsonb_array_elements(
-                        COALESCE(versions.v #> '{resultaat_snapshot,producten,basisproducten}', '[]'::jsonb)
-                    ) AS pr
-                    WHERE COALESCE(pr->>'product_id','') <> ''
-
-                    UNION ALL
-
-                    SELECT
-                        v->>'id' AS version_id,
-                        v->>'bier_id' AS bier_id,
-                        COALESCE(NULLIF(v->>'jaar',''), '0')::int AS jaar,
-                        pr->>'product_id' AS product_id,
-                        COALESCE(NULLIF(pr->>'kostprijs',''), '0')::numeric AS kostprijs,
-                        COALESCE(
-                            NULLIF(v->>'finalized_at',''),
-                            NULLIF(v->>'updated_at',''),
-                            NULLIF(v->>'created_at','')
-                        ) AS version_ts,
-                        COALESCE(NULLIF(v->>'versie_nummer',''), '0')::int AS versie_nummer
-                    FROM versions
-                    CROSS JOIN LATERAL jsonb_array_elements(
-                        COALESCE(versions.v #> '{resultaat_snapshot,producten,samengestelde_producten}', '[]'::jsonb)
-                    ) AS pr
-                    WHERE COALESCE(pr->>'product_id','') <> ''
+                        v.version_id,
+                        v.bier_id,
+                        v.jaar,
+                        r.product_id,
+                        COALESCE(r.kostprijs, 0) AS kostprijs,
+                        v.version_ts,
+                        v.versie_nummer
+                    FROM versions v
+                    JOIN cost_version_product_rows r
+                      ON r.version_id = v.version_id
+                    WHERE COALESCE(r.product_id,'') <> ''
                 ),
                 active_cost AS (
                     SELECT

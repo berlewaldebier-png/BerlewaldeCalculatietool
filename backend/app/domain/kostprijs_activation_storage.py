@@ -23,6 +23,17 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _as_iso(value: Any) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()  # type: ignore[no-any-return]
+        except Exception:
+            pass
+    return str(value or "")
+
+
 def ensure_schema() -> None:
     global _SCHEMA_READY, _MIGRATED_FROM_DATASET
     if _SCHEMA_READY:
@@ -40,9 +51,9 @@ def ensure_schema() -> None:
                     product_id TEXT NOT NULL,
                     product_type TEXT NOT NULL,
                     kostprijsversie_id TEXT NOT NULL,
-                    effectief_vanaf TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL DEFAULT '',
-                    updated_at TEXT NOT NULL DEFAULT ''
+                    effectief_vanaf TIMESTAMPTZ NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 """
             )
@@ -74,7 +85,7 @@ def ensure_schema() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS kostprijs_activation_events (
                     id TEXT PRIMARY KEY,
-                    created_at TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     run_id TEXT NOT NULL DEFAULT '',
                     actor TEXT NOT NULL DEFAULT '',
                     action TEXT NOT NULL DEFAULT '',
@@ -84,11 +95,43 @@ def ensure_schema() -> None:
                     product_type TEXT NOT NULL,
                     previous_kostprijsversie_id TEXT NOT NULL DEFAULT '',
                     kostprijsversie_id TEXT NOT NULL,
-                    effectief_vanaf TEXT NOT NULL DEFAULT '',
+                    effectief_vanaf TIMESTAMPTZ NULL,
                     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
                 );
                 """
             )
+            # Migrate legacy TEXT timestamp columns (dev DBs) to TIMESTAMPTZ.
+            # We use NULLIF(...,'') casts so old empty-string defaults won't break the type change.
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN effectief_vanaf DROP DEFAULT")
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN created_at DROP DEFAULT")
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN updated_at DROP DEFAULT")
+            cur.execute(
+                "ALTER TABLE kostprijs_product_activations ALTER COLUMN effectief_vanaf TYPE TIMESTAMPTZ USING NULLIF(effectief_vanaf::text,'')::timestamptz"
+            )
+            cur.execute(
+                "ALTER TABLE kostprijs_product_activations ALTER COLUMN created_at TYPE TIMESTAMPTZ USING NULLIF(created_at::text,'')::timestamptz"
+            )
+            cur.execute(
+                "ALTER TABLE kostprijs_product_activations ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING NULLIF(updated_at::text,'')::timestamptz"
+            )
+            cur.execute("UPDATE kostprijs_product_activations SET created_at = NOW() WHERE created_at IS NULL")
+            cur.execute("UPDATE kostprijs_product_activations SET updated_at = created_at WHERE updated_at IS NULL")
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN created_at SET DEFAULT NOW()")
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN updated_at SET DEFAULT NOW()")
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN created_at SET NOT NULL")
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN updated_at SET NOT NULL")
+
+            cur.execute("ALTER TABLE kostprijs_activation_events ALTER COLUMN created_at DROP DEFAULT")
+            cur.execute("ALTER TABLE kostprijs_activation_events ALTER COLUMN effectief_vanaf DROP DEFAULT")
+            cur.execute(
+                "ALTER TABLE kostprijs_activation_events ALTER COLUMN created_at TYPE TIMESTAMPTZ USING NULLIF(created_at::text,'')::timestamptz"
+            )
+            cur.execute(
+                "ALTER TABLE kostprijs_activation_events ALTER COLUMN effectief_vanaf TYPE TIMESTAMPTZ USING NULLIF(effectief_vanaf::text,'')::timestamptz"
+            )
+            cur.execute("UPDATE kostprijs_activation_events SET created_at = NOW() WHERE created_at IS NULL")
+            cur.execute("ALTER TABLE kostprijs_activation_events ALTER COLUMN created_at SET DEFAULT NOW()")
+            cur.execute("ALTER TABLE kostprijs_activation_events ALTER COLUMN created_at SET NOT NULL")
             cur.execute(
                 """
                 CREATE INDEX IF NOT EXISTS ix_kostprijs_activation_events_created_at
@@ -132,9 +175,9 @@ def reset_defaults() -> None:
 
 def normalize_activation_record(record: dict[str, Any] | None) -> dict[str, Any]:
     src = record if isinstance(record, dict) else {}
-    created_at = str(src.get("created_at", "") or "") or _now_iso()
-    updated_at = str(src.get("updated_at", "") or "") or created_at
-    effectief_vanaf = str(src.get("effectief_vanaf", "") or src.get("effective_from", "") or "")
+    created_at = _as_iso(src.get("created_at")) or _now_iso()
+    updated_at = _as_iso(src.get("updated_at")) or created_at
+    effectief_vanaf = _as_iso(src.get("effectief_vanaf") or src.get("effective_from")) or ""
     return {
         "id": str(src.get("id", "") or uuid4()),
         "bier_id": str(src.get("bier_id", "") or ""),
@@ -233,6 +276,7 @@ def upsert_activations(
                 created_at = str(row.get("created_at", "") or "") or now
                 updated_at = str(row.get("updated_at", "") or "") or now
                 effectief_vanaf = str(row.get("effectief_vanaf", "") or "") or ""
+                effectief_vanaf_ts = effectief_vanaf or None
 
                 cur.execute(
                     """
@@ -255,7 +299,7 @@ def upsert_activations(
                         product_id,
                         str(row.get("product_type", "") or ""),
                         str(row["kostprijsversie_id"]),
-                        effectief_vanaf,
+                        effectief_vanaf_ts,
                         created_at,
                         updated_at,
                     ),
@@ -295,7 +339,7 @@ def upsert_activations(
                             str(row.get("product_type", "") or ""),
                             previous_version_id,
                             new_version_id,
-                            effectief_vanaf,
+                            effectief_vanaf_ts,
                             "{}",
                         ),
                     )
@@ -347,6 +391,7 @@ def replace_activations(
                 created_at = str(row.get("created_at", "") or "") or now
                 updated_at = str(row.get("updated_at", "") or "") or now
                 effectief_vanaf = str(row.get("effectief_vanaf", "") or "") or ""
+                effectief_vanaf_ts = effectief_vanaf or None
 
                 cur.execute(
                     """
@@ -363,7 +408,7 @@ def replace_activations(
                         product_id,
                         str(row.get("product_type", "") or ""),
                         str(row["kostprijsversie_id"]),
-                        effectief_vanaf,
+                        effectief_vanaf_ts,
                         created_at,
                         updated_at,
                     ),
@@ -463,7 +508,7 @@ def list_activation_events(
     return [
         {
             "id": row[0],
-            "created_at": row[1],
+            "created_at": _as_iso(row[1]),
             "run_id": row[2],
             "actor": row[3],
             "action": row[4],
@@ -473,7 +518,7 @@ def list_activation_events(
             "product_type": row[8],
             "previous_kostprijsversie_id": row[9],
             "kostprijsversie_id": row[10],
-            "effectief_vanaf": row[11],
+            "effectief_vanaf": _as_iso(row[11]),
             "metadata": row[12] if isinstance(row[12], dict) else {},
         }
         for row in rows

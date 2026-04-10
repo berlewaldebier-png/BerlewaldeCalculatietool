@@ -134,7 +134,62 @@ def ensure_schema() -> None:
         _schema_ready = True
 
 
+def load_app_dataset_payload(dataset_name: str) -> Any | None:
+    """Load raw payload from `app_datasets` without any dataset routing.
+
+    Phase G introduces table-backed storages for some datasets. This helper is used
+    by one-time migrations and audits that need to inspect legacy rows stored in
+    `app_datasets` without calling `load_dataset()` (which may route elsewhere).
+    """
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM app_datasets WHERE dataset_name = %s",
+                (dataset_name,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    payload = row[0]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return payload
+
+
+def delete_app_dataset_row(dataset_name: str) -> None:
+    """Delete a legacy row from `app_datasets` (no-op if missing)."""
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM app_datasets WHERE dataset_name = %s", (dataset_name,))
+        if not in_transaction():
+            conn.commit()
+
+
+def _get_table_storage(name: str):
+    """Return a module that implements table-backed load/save for a dataset, or None."""
+    if name == "verkoopprijzen":
+        from app.domain import sales_pricing_storage
+
+        return sales_pricing_storage
+    if name == "kostprijsversies":
+        from app.domain import cost_versions_storage
+
+        return cost_versions_storage
+    if name == "prijsvoorstellen":
+        from app.domain import price_quotes_storage
+
+        return price_quotes_storage
+    return None
+
+
 def load_dataset(name: str, default_value: Any) -> Any:
+    # Phase G: some datasets are stored in dedicated tables instead of `app_datasets`.
+    storage = _get_table_storage(name)
+    if storage is not None:
+        return storage.load_dataset(default_value)
+
     ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
@@ -152,6 +207,11 @@ def load_dataset(name: str, default_value: Any) -> Any:
 
 
 def save_dataset(name: str, data: Any, overwrite: bool = True) -> bool:
+    # Phase G: some datasets are stored in dedicated tables instead of `app_datasets`.
+    storage = _get_table_storage(name)
+    if storage is not None:
+        return bool(storage.save_dataset(data, overwrite=overwrite))
+
     ensure_schema()
     now = datetime.now(UTC)
     with connect() as conn:
