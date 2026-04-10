@@ -32,6 +32,20 @@ def ensure_schema() -> None:
                     );
                     """
                 )
+                # Existing dev DBs may already have an older `products_master` without these columns.
+                # We prefer additive migrations here so seed import can run without manual DB resets.
+                cur.execute(
+                    "ALTER TABLE products_master ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE products_master ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE products_master ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb"
+                )
+                cur.execute(
+                    "ALTER TABLE products_master ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS ix_products_master_kind ON products_master(kind);"
                 )
@@ -87,4 +101,3 @@ def rebuild_registry(*, validate_constraints: bool = True) -> dict[str, Any]:
 
     # `validate_constraints` is reserved for future integrity checks.
     return {"ok": True, "count": len(rows), "validate_constraints": bool(validate_constraints)}
-
