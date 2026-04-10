@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from app.domain import postgres_storage
 
@@ -161,12 +162,17 @@ def load_dataset(default_value: Any) -> Any:
         kostprijs,
         _sort_index,
     ) in product_rows:
+        verpakking_text = str(verpakking_label or "")
+        inkoop_value = float(inkoop or 0)
         payload: dict[str, Any] = {
             "id": str(row_id),
             "bier_id": str(bier_id or ""),
             "product_id": str(product_id or ""),
             "product_type": str(product_type or ""),
+            "verpakking": verpakking_text,
             "verpakking_label": str(verpakking_label or ""),
+            # Keep historical key used by wizard tooling (scenario defaults to this).
+            "primaire_kosten": inkoop_value,
             "inkoop": float(inkoop or 0),
             "verpakkingskosten": float(verpakkingskosten or 0),
             "indirecte_kosten": float(indirecte_kosten or 0),
@@ -287,21 +293,22 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     for item in basis if isinstance(basis, list) else []:
                         if not isinstance(item, dict):
                             continue
-                        row_id = str(item.get("id", "") or "").strip()
-                        if not row_id:
-                            continue
+                        product_id = str(item.get("product_id", "") or "").strip()
+                        row_id = str(item.get("id", "") or "").strip() or str(
+                            uuid5(NAMESPACE_URL, f"cost_version_row:{version_id}:basis:{product_id}")
+                        )
                         row_params.append(
                             (
                                 row_id,
                                 version_id,
                                 "basis",
                                 bier_id,
-                                str(item.get("product_id", "") or ""),
+                                product_id,
                                 str(item.get("product_type", "") or ""),
                                 str(item.get("verpakkingseenheid", item.get("verpakking_label", "")) or ""),
-                                float(item.get("inkoop", 0) or 0),
+                                float(item.get("inkoop", item.get("primaire_kosten", item.get("variabele_kosten", 0))) or 0),
                                 float(item.get("verpakkingskosten", 0) or 0),
-                                float(item.get("indirecte_kosten", 0) or 0),
+                                float(item.get("indirecte_kosten", item.get("vaste_kosten", 0)) or 0),
                                 float(item.get("accijns", 0) or 0),
                                 float(item.get("kostprijs", 0) or 0),
                                 int(sort_index),
@@ -313,21 +320,22 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     for item in sameng if isinstance(sameng, list) else []:
                         if not isinstance(item, dict):
                             continue
-                        row_id = str(item.get("id", "") or "").strip()
-                        if not row_id:
-                            continue
+                        product_id = str(item.get("product_id", "") or "").strip()
+                        row_id = str(item.get("id", "") or "").strip() or str(
+                            uuid5(NAMESPACE_URL, f"cost_version_row:{version_id}:samengesteld:{product_id}")
+                        )
                         row_params.append(
                             (
                                 row_id,
                                 version_id,
                                 "samengesteld",
                                 bier_id,
-                                str(item.get("product_id", "") or ""),
+                                product_id,
                                 str(item.get("product_type", "") or ""),
                                 str(item.get("verpakkingseenheid", item.get("verpakking_label", "")) or ""),
-                                float(item.get("inkoop", 0) or 0),
+                                float(item.get("inkoop", item.get("primaire_kosten", item.get("variabele_kosten", 0))) or 0),
                                 float(item.get("verpakkingskosten", 0) or 0),
-                                float(item.get("indirecte_kosten", 0) or 0),
+                                float(item.get("indirecte_kosten", item.get("vaste_kosten", 0)) or 0),
                                 float(item.get("accijns", 0) or 0),
                                 float(item.get("kostprijs", 0) or 0),
                                 int(sort_index),
