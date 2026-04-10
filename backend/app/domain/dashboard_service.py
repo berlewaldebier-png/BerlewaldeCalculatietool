@@ -194,48 +194,32 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
                     FROM kostprijs_product_activations
                 ),
                 versions AS (
-                    SELECT payload AS v
+                    SELECT
+                        id AS version_id,
+                        bier_id,
+                        jaar,
+                        versie_nummer,
+                        COALESCE(
+                            NULLIF(finalized_at,''),
+                            NULLIF(updated_at,''),
+                            NULLIF(created_at,'')
+                        ) AS version_ts
                     FROM cost_versions
                     WHERE status = 'definitief'
                 ),
                 product_costs AS (
                     SELECT
-                        v->>'id' AS version_id,
-                        v->>'bier_id' AS bier_id,
-                        COALESCE(NULLIF(v->>'jaar',''), '0')::int AS jaar,
-                        pr->>'product_id' AS product_id,
-                        COALESCE(NULLIF(pr->>'kostprijs',''), '0')::numeric AS kostprijs,
-                        COALESCE(
-                            NULLIF(v->>'finalized_at',''),
-                            NULLIF(v->>'updated_at',''),
-                            NULLIF(v->>'created_at','')
-                        ) AS version_ts,
-                        COALESCE(NULLIF(v->>'versie_nummer',''), '0')::int AS versie_nummer
-                    FROM versions
-                    CROSS JOIN LATERAL jsonb_array_elements(
-                        COALESCE(versions.v #> '{resultaat_snapshot,producten,basisproducten}', '[]'::jsonb)
-                    ) AS pr
-                    WHERE COALESCE(pr->>'product_id','') <> ''
-
-                    UNION ALL
-
-                    SELECT
-                        v->>'id' AS version_id,
-                        v->>'bier_id' AS bier_id,
-                        COALESCE(NULLIF(v->>'jaar',''), '0')::int AS jaar,
-                        pr->>'product_id' AS product_id,
-                        COALESCE(NULLIF(pr->>'kostprijs',''), '0')::numeric AS kostprijs,
-                        COALESCE(
-                            NULLIF(v->>'finalized_at',''),
-                            NULLIF(v->>'updated_at',''),
-                            NULLIF(v->>'created_at','')
-                        ) AS version_ts,
-                        COALESCE(NULLIF(v->>'versie_nummer',''), '0')::int AS versie_nummer
-                    FROM versions
-                    CROSS JOIN LATERAL jsonb_array_elements(
-                        COALESCE(versions.v #> '{resultaat_snapshot,producten,samengestelde_producten}', '[]'::jsonb)
-                    ) AS pr
-                    WHERE COALESCE(pr->>'product_id','') <> ''
+                        v.version_id,
+                        v.bier_id,
+                        v.jaar,
+                        r.product_id,
+                        COALESCE(r.kostprijs, 0) AS kostprijs,
+                        v.version_ts,
+                        v.versie_nummer
+                    FROM versions v
+                    JOIN cost_version_product_rows r
+                      ON r.version_id = v.version_id
+                    WHERE COALESCE(r.product_id,'') <> ''
                 ),
                 active_cost AS (
                     SELECT
