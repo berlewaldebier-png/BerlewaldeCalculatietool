@@ -195,6 +195,7 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
     report["reset"] = dataset_store.reset_all_datasets_to_defaults()
 
     dataset_names = set(dataset_store.get_dataset_names())
+    imported_masters = False
     for name in _import_dataset_order(profile):
         if name not in datasets:
             continue
@@ -203,6 +204,23 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
         payload = _unwrap_legacy_wrapper(datasets.get(name))
         # Writes are validated inside save_dataset.
         report["saved"][name] = bool(dataset_store.save_dataset(name, payload))
+
+        # Phase G: table-backed stores enforce FK(product_id -> products_master.id) on new rows.
+        # Seed bundles store product masters as datasets; we must rebuild the registry before
+        # importing any table that references products_master (cost versions, activations, quote lines).
+        if not imported_masters and name in {"base-product-masters", "composite-product-masters"}:
+            # When both masters exist in the seed bundle, we rebuild after the second one is imported.
+            have_base = bool(report["saved"].get("base-product-masters")) or ("base-product-masters" not in datasets)
+            have_comp = bool(report["saved"].get("composite-product-masters")) or ("composite-product-masters" not in datasets)
+            if have_base and have_comp:
+                try:
+                    report["maintenance"]["product_registry_pre"] = product_registry_storage.rebuild_registry(
+                        validate_constraints=False
+                    )
+                except Exception as exc:
+                    # Fail hard: without a product registry, downstream imports must not proceed.
+                    raise ValueError(f"Seed import: kon products registry niet opbouwen: {exc}") from exc
+                imported_masters = True
 
     # Align with current invariants.
     report["maintenance"]["wrapped_payloads"] = dataset_store.migrate_wrapped_payloads(dry_run=False)
