@@ -7,6 +7,7 @@ from threading import Lock
 
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
+from app.domain import cost_versions_storage, price_quotes_storage
 
 
 @dataclass(frozen=True)
@@ -40,24 +41,52 @@ def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
     This intentionally bypasses utils.storage normalization and avoids multiple full dataset loads
     just to compute dashboard badges.
     """
-    postgres_storage.ensure_schema()
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    COUNT(*) FILTER (WHERE elem->>'status' = 'concept')::int AS concept_count,
-                    COUNT(*) FILTER (WHERE elem->>'status' = 'definitief')::int AS definitief_count
-                FROM jsonb_array_elements(
-                    COALESCE(
-                        (SELECT payload FROM app_datasets WHERE dataset_name = %s),
-                        '[]'::jsonb
-                    )
-                ) AS elem
-                """,
-                (dataset_name,),
-            )
-            row = cur.fetchone()
+    # Phase G: some datasets are stored in dedicated tables instead of `app_datasets`.
+    if dataset_name == "kostprijsversies":
+        cost_versions_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE status = 'concept')::int AS concept_count,
+                        COUNT(*) FILTER (WHERE status = 'definitief')::int AS definitief_count
+                    FROM cost_versions
+                    """
+                )
+                row = cur.fetchone()
+    elif dataset_name == "prijsvoorstellen":
+        price_quotes_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE status = 'concept')::int AS concept_count,
+                        COUNT(*) FILTER (WHERE status = 'definitief')::int AS definitief_count
+                    FROM price_quotes
+                    """
+                )
+                row = cur.fetchone()
+    else:
+        postgres_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE elem->>'status' = 'concept')::int AS concept_count,
+                        COUNT(*) FILTER (WHERE elem->>'status' = 'definitief')::int AS definitief_count
+                    FROM jsonb_array_elements(
+                        COALESCE(
+                            (SELECT payload FROM app_datasets WHERE dataset_name = %s),
+                            '[]'::jsonb
+                        )
+                    ) AS elem
+                    """,
+                    (dataset_name,),
+                )
+                row = cur.fetchone()
     if not row:
         return 0, 0
     return int(row[0] or 0), int(row[1] or 0)
@@ -65,7 +94,7 @@ def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
 
 def _expiring_quotes(*, within_days: int = 14, limit: int = 5) -> tuple[int, list[dict[str, str]]]:
     """Count and list concept prijsvoorstellen that expire within a window based on `verloopt_op`."""
-    postgres_storage.ensure_schema()
+    price_quotes_storage.ensure_schema()
     today = date.today()
     until = today + timedelta(days=int(within_days))
 
@@ -74,13 +103,8 @@ def _expiring_quotes(*, within_days: int = 14, limit: int = 5) -> tuple[int, lis
             cur.execute(
                 """
                 WITH proposals AS (
-                    SELECT elem
-                    FROM jsonb_array_elements(
-                        COALESCE(
-                            (SELECT payload FROM app_datasets WHERE dataset_name = 'prijsvoorstellen'),
-                            '[]'::jsonb
-                        )
-                    ) AS elem
+                    SELECT payload AS elem
+                    FROM price_quotes
                 ),
                 normalized AS (
                     SELECT
@@ -153,6 +177,7 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
     """
     postgres_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
@@ -169,14 +194,9 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
                     FROM kostprijs_product_activations
                 ),
                 versions AS (
-                    SELECT elem AS v
-                    FROM jsonb_array_elements(
-                        COALESCE(
-                            (SELECT payload FROM app_datasets WHERE dataset_name = 'kostprijsversies'),
-                            '[]'::jsonb
-                        )
-                    ) AS elem
-                    WHERE COALESCE(elem->>'status','') = 'definitief'
+                    SELECT payload AS v
+                    FROM cost_versions
+                    WHERE status = 'definitief'
                 ),
                 product_costs AS (
                     SELECT
