@@ -141,6 +141,22 @@ function formatEur(value: number) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(value);
 }
 
+function snapshotProductCostFromRecord(record: any, productId: string) {
+  const producten = record?.resultaat_snapshot?.producten;
+  const rows = [
+    ...(Array.isArray(producten?.basisproducten) ? producten.basisproducten : []),
+    ...(Array.isArray(producten?.samengestelde_producten) ? producten.samengestelde_producten : [])
+  ];
+  const found = rows.find((row: any) => String(row.product_id ?? "") === productId) ?? null;
+  if (!found) return null;
+  return {
+    kostprijs: Number(found.kostprijs ?? 0),
+    primaireKosten: Number(found.primaire_kosten ?? found.primaireKosten ?? 0),
+    productType: String(found.product_type ?? ""),
+    productLabel: String(found.verpakking ?? found.verpakkingseenheid ?? found.omschrijving ?? productId)
+  };
+}
+
 export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const router = useRouter();
   const {
@@ -1359,22 +1375,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       if (id && naam) bierNameById.set(id, naam);
     });
 
-    function snapshotProductCost(record: any, productId: string) {
-      const producten = record?.resultaat_snapshot?.producten;
-      const rows = [
-        ...(Array.isArray(producten?.basisproducten) ? producten.basisproducten : []),
-        ...(Array.isArray(producten?.samengestelde_producten) ? producten.samengestelde_producten : [])
-      ];
-      const found = rows.find((row: any) => String(row.product_id ?? "") === productId) ?? null;
-      if (!found) return null;
-      return {
-        kostprijs: Number(found.kostprijs ?? 0),
-        primaireKosten: Number(found.primaire_kosten ?? found.primaireKosten ?? 0),
-        productType: String(found.product_type ?? ""),
-        productLabel: String(found.verpakking ?? found.verpakkingseenheid ?? found.omschrijving ?? productId)
-      };
-    }
-
     const channels = [
       { code: "horeca", naam: "Horeca", defaultMargin: 50 },
       { code: "retail", naam: "Supermarkt", defaultMargin: 30 },
@@ -1485,7 +1485,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const versionId = String(activation.kostprijsversie_id ?? "");
       const record = versionById.get(versionId);
       if (!record) return;
-      const snap = snapshotProductCost(record, productId);
+      const snap = snapshotProductCostFromRecord(record, productId);
       if (!snap) return;
 
       const sourceCost = Number(snap.kostprijs ?? 0);
@@ -1690,7 +1690,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const versionId = String(activation.kostprijsversie_id ?? "");
       const record = versionById.get(versionId);
       if (!record) return;
-      const snap = snapshotProductCost(record, productId);
+      const snap = snapshotProductCostFromRecord(record, productId);
       if (!snap) return;
 
       const productType = String(snap.productType ?? "");
