@@ -10,7 +10,11 @@ type ChannelRow = { id: string; code: string; naam: string; actief: boolean; vol
 type StrategyRow = {
   id: string; record_type: string; jaar: number; bier_id: string; biernaam: string; product_id: string;
   product_type: "basis" | "samengesteld" | ""; verpakking: string; strategie_type: string; kostprijs: number;
-  sell_in_margins: Record<string, number>; sell_out_factors: Record<string, number | "">; sell_out_advice_prices: Record<string, number | "">; _uiId: string;
+  sell_in_margins: Record<string, number>;
+  sell_in_prices: Record<string, number | "">;
+  sell_out_factors: Record<string, number | "">;
+  sell_out_advice_prices: Record<string, number | "">;
+  _uiId: string;
 };
 const STRATEGY_RECORD_TYPES = new Set([
   "jaarstrategie",
@@ -20,12 +24,17 @@ const STRATEGY_RECORD_TYPES = new Set([
 type ProductViewRow = {
   productId: string; productType: "basis" | "samengesteld"; product: string;
   marginOverrides: Record<string, number | "">; factorOverrides: Record<string, number | "">;
+  sellInPriceOverrides: Record<string, number | "">;
   activeMargins: Record<string, number>; activeFactors: Record<string, number>;
   isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
 };
 type BeerViewRow = {
   id: string; bierId: string; biernaam: string; productId: string; productType: "basis" | "samengesteld" | ""; product: string; kostprijs: number;
-  productMargins: Record<string, number>; marginOverrides: Record<string, number | "">; activeMargins: Record<string, number>; sellInPrices: Record<string, number>;
+  productMargins: Record<string, number>;
+  marginOverrides: Record<string, number | "">;
+  sellInPriceOverrides: Record<string, number | "">;
+  activeMargins: Record<string, number>;
+  sellInPrices: Record<string, number>;
   productFactors: Record<string, number>; factorOverrides: Record<string, number | "">; activeFactors: Record<string, number>; sellOutPrices: Record<string, number>;
   isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
 };
@@ -66,6 +75,31 @@ const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypt
 const money = (v: number) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 const num = (v: number) => new Intl.NumberFormat("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
 const calcSellPrice = (cost: number, margin: number) => (margin >= 100 ? cost : cost / Math.max(0.0001, 1 - margin / 100));
+const calcMarginPctFromSellInPrice = (cost: number, sellInPrice: number) => {
+  const c = Number(cost ?? 0);
+  const p = Number(sellInPrice ?? 0);
+  if (!Number.isFinite(c) || !Number.isFinite(p) || p <= 0) return 0;
+  const margin = (1 - c / p) * 100;
+  if (!Number.isFinite(margin)) return 0;
+  return Math.min(99.9, Math.max(0, margin));
+};
+const calcOpslagPctFromMarginPct = (marginPct: number) => {
+  const m = Math.min(99.9, Math.max(0, Number(marginPct ?? 0)));
+  if (m >= 99.9) return 9999;
+  return (m / Math.max(0.0001, 100 - m)) * 100;
+};
+const calcMarginPctFromOpslagPct = (opslagPct: number) => {
+  const o = Math.max(0, Number(opslagPct ?? 0));
+  return (o / Math.max(0.0001, 100 + o)) * 100;
+};
+const calcOpslagPctFromSellInPrice = (cost: number, sellInPrice: number) => {
+  const c = Number(cost ?? 0);
+  const p = Number(sellInPrice ?? 0);
+  if (!Number.isFinite(c) || !Number.isFinite(p) || c <= 0) return 0;
+  const opslag = (p / c - 1) * 100;
+  if (!Number.isFinite(opslag)) return 0;
+  return Math.max(0, opslag);
+};
 const normalizeLabel = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const normalizeMap = (raw: unknown, codes: string[]) => {
   const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
@@ -129,6 +163,7 @@ function buildEmptyYearStrategyRow({
     strategie_type: "default",
     kostprijs: 0,
     sell_in_margins: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.margin ?? 50)])),
+    sell_in_prices: {},
     sell_out_factors: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.factor ?? 3)])),
     sell_out_advice_prices: {},
     _uiId: createUiId()
@@ -140,6 +175,11 @@ function normalizeStrategyRow(row: GenericRecord, channelCodes: string[]): Strat
   const marginsSrc =
     typeof marginsSrcRaw === "object" && marginsSrcRaw !== null
       ? (marginsSrcRaw as Record<string, unknown>)
+      : {};
+  const pricesSrcRaw = (row.sell_in_prices ?? row.kanaalprijzen ?? {}) as unknown;
+  const pricesSrc =
+    typeof pricesSrcRaw === "object" && pricesSrcRaw !== null
+      ? (pricesSrcRaw as Record<string, unknown>)
       : {};
   return {
     id: String(row.id ?? ""), record_type: String(row.record_type ?? "verkoopstrategie_verpakking"), jaar: Number(row.jaar ?? new Date().getFullYear()),
@@ -158,6 +198,18 @@ function normalizeStrategyRow(row: GenericRecord, channelCodes: string[]): Strat
       });
       return out;
     })(),
+    sell_in_prices: (() => {
+      const allowed = new Set(channelCodes);
+      const out: Record<string, number> = {};
+      Object.entries(pricesSrc).forEach(([key, value]) => {
+        if (!allowed.has(key)) return;
+        if (value === "" || value === null || value === undefined) return;
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return;
+        out[key] = parsed;
+      });
+      return out;
+    })(),
     sell_out_factors: normalizeMap(row.sell_out_factors, channelCodes),
     sell_out_advice_prices: normalizeMap(row.sell_out_advice_prices, channelCodes),
     _uiId: String(row.id ?? createUiId())
@@ -165,8 +217,18 @@ function normalizeStrategyRow(row: GenericRecord, channelCodes: string[]): Strat
 }
 
 const stripInternal = (row: StrategyRow) => {
-  const { _uiId, sell_in_margins, sell_out_factors, sell_out_advice_prices, ...rest } = row;
-  return { ...rest, kanaalmarges: sell_in_margins, sell_in_margins, sell_out_factors, adviesfactoren: sell_out_factors, sell_out_advice_prices, adviesprijzen: sell_out_advice_prices };
+  const { _uiId, sell_in_margins, sell_in_prices, sell_out_factors, sell_out_advice_prices, ...rest } = row;
+  return {
+    ...rest,
+    kanaalmarges: sell_in_margins,
+    sell_in_margins,
+    kanaalprijzen: sell_in_prices,
+    sell_in_prices,
+    sell_out_factors,
+    adviesfactoren: sell_out_factors,
+    sell_out_advice_prices,
+    adviesprijzen: sell_out_advice_prices
+  };
 };
 
 export function VerkoopstrategieWorkspace({
@@ -271,7 +333,30 @@ export function VerkoopstrategieWorkspace({
       isMountedRef.current = false;
     };
   }, []);
-  const [activeTab, setActiveTab] = useState<"kanalen" | "sell-in" | "sell-out" | "bieren">("kanalen");
+  // Legacy view kept behind a feature flag while we migrate to the new "Prijsinstellingen" UI.
+  // This avoids a giant diff and keeps TypeScript happy for the (disabled) legacy JSX below.
+  const [activeTab, setActiveTab] = useState<"kanalen" | "sell-in" | "sell-out" | "bieren">("sell-in");
+  const [activeView, setActiveView] = useState<"prijzen" | "kanalen">("prijzen");
+  const [selectedChannelCode, setSelectedChannelCode] = useState<string>(() => {
+    const first = (Array.isArray(channels) ? channels : []).find((row) => Boolean((row as any)?.actief));
+    return String((first as any)?.code ?? "horeca");
+  });
+  const [sellFilter, setSellFilter] = useState<string>("");
+
+  useEffect(() => {
+    if (!selectedChannelCode) return;
+    const exists = activeChannels.some((ch) => ch.code === selectedChannelCode);
+    if (exists) return;
+    if (activeChannels.length > 0) {
+      setSelectedChannelCode(activeChannels[0].code);
+    }
+  }, [activeChannels, selectedChannelCode]);
+
+  useEffect(() => {
+    if (mode !== "draft") return;
+    if (activeView !== "kanalen") return;
+    setActiveView("prijzen");
+  }, [activeView, mode]);
   const computedDefaultYear = Math.max(
     new Date().getFullYear(),
     ...verkoopprijzen.map((row) => Number(row.jaar ?? 0)),
@@ -286,6 +371,10 @@ export function VerkoopstrategieWorkspace({
   const yearStrategyRow = useMemo(() => {
     return rows.find((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear) ?? null;
   }, [rows, effectiveSelectedYear]);
+
+  const selectedChannel = useMemo(() => {
+    return activeChannels.find((channel) => channel.code === selectedChannelCode) ?? activeChannels[0] ?? null;
+  }, [activeChannels, selectedChannelCode]);
 
   // Ensure there is exactly one year-defaults record for the selected year.
   useEffect(() => {
@@ -345,6 +434,12 @@ export function VerkoopstrategieWorkspace({
         const value = found?.sell_in_margins?.[code];
         return [code, value === undefined || value === channelYearDefaults[code]?.margin ? "" : Number(value)];
       })) as Record<string, number | "">;
+      const sellInPriceOverrides = Object.fromEntries(channelCodes.map((code) => {
+        const value = (found as any)?.sell_in_prices?.[code];
+        if (value === "" || value === undefined || value === null) return [code, ""];
+        const parsed = Number(value);
+        return [code, Number.isFinite(parsed) ? parsed : ""];
+      })) as Record<string, number | "">;
       const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
         const value = found?.sell_out_factors?.[code];
         return [code, value === "" || value === undefined || Number(value) === channelYearDefaults[code]?.factor ? "" : Number(value)];
@@ -354,6 +449,7 @@ export function VerkoopstrategieWorkspace({
         productType: product.type,
         product: product.label,
         marginOverrides,
+        sellInPriceOverrides,
         factorOverrides,
         activeMargins: Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? channelYearDefaults[code]?.margin ?? 50 : Number(marginOverrides[code])])) as Record<string, number>,
         activeFactors: Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? channelYearDefaults[code]?.factor ?? 3 : Number(factorOverrides[code])])) as Record<string, number>,
@@ -411,6 +507,14 @@ export function VerkoopstrategieWorkspace({
             return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
           })
         ) as Record<string, number | "">;
+        const sellInPriceOverrides = Object.fromEntries(
+          channelCodes.map((code) => {
+            const value = (override as any)?.sell_in_prices?.[code];
+            if (value === "" || value === undefined || value === null) return [code, ""];
+            const parsed = Number(value);
+            return [code, Number.isFinite(parsed) ? parsed : ""];
+          })
+        ) as Record<string, number | "">;
         const factorOverrides = Object.fromEntries(
           channelCodes.map((code) => {
             const value = override?.sell_out_factors?.[code];
@@ -426,7 +530,13 @@ export function VerkoopstrategieWorkspace({
         ) as Record<string, number>;
 
         const kostprijs = Number(row.kostprijs ?? 0);
-        const sellInPrices = Object.fromEntries(channelCodes.map((code) => [code, calcSellPrice(kostprijs, activeMargins[code])])) as Record<string, number>;
+        const sellInPrices = Object.fromEntries(
+          channelCodes.map((code) => {
+            const explicit = sellInPriceOverrides[code];
+            if (explicit !== "") return [code, Number(explicit)];
+            return [code, calcSellPrice(kostprijs, activeMargins[code])];
+          })
+        ) as Record<string, number>;
         const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
 
         out.push({
@@ -439,6 +549,7 @@ export function VerkoopstrategieWorkspace({
           kostprijs,
           productMargins,
           marginOverrides,
+          sellInPriceOverrides,
           activeMargins,
           sellInPrices,
           productFactors,
@@ -523,6 +634,14 @@ export function VerkoopstrategieWorkspace({
           const value = override?.sell_in_margins?.[code];
           return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
         })) as Record<string, number | "">;
+        const sellInPriceOverrides = Object.fromEntries(
+          channelCodes.map((code) => {
+            const value = (override as any)?.sell_in_prices?.[code];
+            if (value === "" || value === undefined || value === null) return [code, ""];
+            const parsed = Number(value);
+            return [code, Number.isFinite(parsed) ? parsed : ""];
+          })
+        ) as Record<string, number | "">;
         const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
           const value = override?.sell_out_factors?.[code];
           return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
@@ -530,9 +649,15 @@ export function VerkoopstrategieWorkspace({
         const activeMargins = Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? productMargins[code] : Number(marginOverrides[code])])) as Record<string, number>;
         const activeFactors = Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])) as Record<string, number>;
         const kostprijs = Number(productRow.kostprijs ?? 0);
-        const sellInPrices = Object.fromEntries(channelCodes.map((code) => [code, calcSellPrice(kostprijs, activeMargins[code])])) as Record<string, number>;
+        const sellInPrices = Object.fromEntries(
+          channelCodes.map((code) => {
+            const explicit = sellInPriceOverrides[code];
+            if (explicit !== "") return [code, Number(explicit)];
+            return [code, calcSellPrice(kostprijs, activeMargins[code])];
+          })
+        ) as Record<string, number>;
         const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
-        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productMargins, marginOverrides, activeMargins, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productMargins, marginOverrides, sellInPriceOverrides, activeMargins, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
       });
     } else {
       definitiveVersions.forEach((record) => {
@@ -551,6 +676,14 @@ export function VerkoopstrategieWorkspace({
             const value = override?.sell_in_margins?.[code];
             return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
           })) as Record<string, number | "">;
+          const sellInPriceOverrides = Object.fromEntries(
+            channelCodes.map((code) => {
+              const value = (override as any)?.sell_in_prices?.[code];
+              if (value === "" || value === undefined || value === null) return [code, ""];
+              const parsed = Number(value);
+              return [code, Number.isFinite(parsed) ? parsed : ""];
+            })
+          ) as Record<string, number | "">;
           const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
             const value = override?.sell_out_factors?.[code];
             return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
@@ -558,9 +691,15 @@ export function VerkoopstrategieWorkspace({
           const activeMargins = Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? productMargins[code] : Number(marginOverrides[code])])) as Record<string, number>;
           const activeFactors = Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])) as Record<string, number>;
           const kostprijs = Number(productRow.kostprijs ?? 0);
-          const sellInPrices = Object.fromEntries(channelCodes.map((code) => [code, calcSellPrice(kostprijs, activeMargins[code])])) as Record<string, number>;
+          const sellInPrices = Object.fromEntries(
+            channelCodes.map((code) => {
+              const explicit = sellInPriceOverrides[code];
+              if (explicit !== "") return [code, Number(explicit)];
+              return [code, calcSellPrice(kostprijs, activeMargins[code])];
+            })
+          ) as Record<string, number>;
           const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
-          out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productMargins, marginOverrides, activeMargins, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+          out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productMargins, marginOverrides, sellInPriceOverrides, activeMargins, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
         });
       });
     }
@@ -579,6 +718,55 @@ export function VerkoopstrategieWorkspace({
     samengesteldById
   ]);
 
+  const normalizedFilter = useMemo(() => sellFilter.trim().toLowerCase(), [sellFilter]);
+
+  const filteredProductOverrideRows = useMemo(() => {
+    if (!normalizedFilter) return productOverrideRows;
+    return productOverrideRows.filter((row) => normalizeLabel(row.product).includes(normalizedFilter));
+  }, [normalizedFilter, productOverrideRows]);
+
+  const filteredSellRows = useMemo(() => {
+    if (!normalizedFilter) return sellRows;
+    return sellRows.filter((row) => {
+      const hay = `${row.biernaam} ${row.product}`.trim().toLowerCase();
+      return hay.includes(normalizedFilter);
+    });
+  }, [normalizedFilter, sellRows]);
+
+  const groupedProductOverrideRows = useMemo(() => {
+    const groups = new Map<string, ProductViewRow[]>();
+    filteredProductOverrideRows.forEach((row) => {
+      const label = normalizeLabel(row.product);
+      const key =
+        label.startsWith("doos") ? "Doos" :
+        label.startsWith("fles") ? "Fles" :
+        label.startsWith("fust") ? "Fust" :
+        "Overig";
+      const current = groups.get(key) ?? [];
+      current.push(row);
+      groups.set(key, current);
+    });
+    const orderedKeys = ["Doos", "Fles", "Fust", "Overig"];
+    return orderedKeys
+      .filter((key) => (groups.get(key) ?? []).length > 0)
+      .map((key) => ({ key, rows: (groups.get(key) ?? []).slice().sort((a, b) => a.product.localeCompare(b.product, "nl-NL")) }));
+  }, [filteredProductOverrideRows]);
+
+  const groupedBeerRows = useMemo(() => {
+    const byBeer = new Map<string, BeerViewRow[]>();
+    filteredSellRows.forEach((row) => {
+      const current = byBeer.get(row.biernaam) ?? [];
+      current.push(row);
+      byBeer.set(row.biernaam, current);
+    });
+    return [...byBeer.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, "nl-NL"))
+      .map(([biernaam, rows]) => ({
+        biernaam,
+        rows: rows.slice().sort((a, b) => a.product.localeCompare(b.product, "nl-NL"))
+      }));
+  }, [filteredSellRows]);
+
   function updateYearMargin(channel: string, value: number) {
     setRows((current) => {
       const next = [...current];
@@ -589,6 +777,26 @@ export function VerkoopstrategieWorkspace({
         jaar: effectiveSelectedYear,
         record_type: "jaarstrategie",
         sell_in_margins: { ...base.sell_in_margins, [channel]: Number(value) }
+      };
+      if (idx >= 0) next[idx] = updated;
+      else next.push(updated);
+      return next;
+    });
+  }
+
+  function updateYearSellInPrice(channel: string, value: number | "") {
+    setRows((current) => {
+      const next = [...current];
+      const idx = next.findIndex((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear);
+      const base = idx >= 0 ? next[idx] : buildEmptyYearStrategyRow({ year: effectiveSelectedYear, channelDefaults: channelMasterDefaults });
+      const nextPrices = { ...(base.sell_in_prices ?? {}) };
+      if (value === "") delete nextPrices[channel];
+      else nextPrices[channel] = value;
+      const updated: StrategyRow = {
+        ...base,
+        jaar: effectiveSelectedYear,
+        record_type: "jaarstrategie",
+        sell_in_prices: nextPrices
       };
       if (idx >= 0) next[idx] = updated;
       else next.push(updated);
@@ -635,6 +843,7 @@ export function VerkoopstrategieWorkspace({
         strategie_type: "override",
         kostprijs: 0,
         sell_in_margins: {},
+        sell_in_prices: {},
         sell_out_factors: {},
         sell_out_advice_prices: {},
         _uiId: createUiId()
@@ -675,6 +884,7 @@ export function VerkoopstrategieWorkspace({
         strategie_type: "override",
         kostprijs: viewRow.kostprijs,
         sell_in_margins: {},
+        sell_in_prices: {},
         sell_out_factors: {},
         sell_out_advice_prices: {},
         _uiId: createUiId()
@@ -699,7 +909,24 @@ export function VerkoopstrategieWorkspace({
       const nextMargins = { ...row!.sell_in_margins };
       if (value === "") delete nextMargins[channel]; else nextMargins[channel] = value;
       const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+      const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
+      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
+        ? null
+        : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+    });
+  }
+
+  function updateProductSellInPrice(productId: string, channel: string, value: number | "") {
+    upsertProduct(productId, (row) => {
+      const nextPrices = { ...(row!.sell_in_prices ?? {}) } as Record<string, number | "">;
+      if (value === "") delete nextPrices[channel]; else nextPrices[channel] = value;
+      const nextMargins = { ...(row!.sell_in_margins ?? {}) } as Record<string, number>;
+      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
+      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && Object.keys(nextPrices).length === 0 && !hasSellOutPrices
+        ? null
+        : { ...row!, sell_in_prices: nextPrices, sell_out_factors: nextFactors };
     });
   }
 
@@ -708,7 +935,11 @@ export function VerkoopstrategieWorkspace({
       const nextFactors = { ...row!.sell_out_factors };
       if (value === "") delete nextFactors[channel]; else nextFactors[channel] = value;
       const nextMargins = Object.fromEntries(Object.entries(row!.sell_in_margins).filter(([, margin]) => margin !== null && margin !== undefined));
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+      const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
+      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
+        ? null
+        : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
     });
   }
 
@@ -717,7 +948,24 @@ export function VerkoopstrategieWorkspace({
       const nextMargins = { ...row!.sell_in_margins };
       if (value === "") delete nextMargins[channel]; else nextMargins[channel] = value;
       const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+      const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
+      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
+        ? null
+        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+    });
+  }
+
+  function updateBeerSellInPrice(viewRow: BeerViewRow, channel: string, value: number | "") {
+    upsertBeer(viewRow, (row) => {
+      const nextPrices = { ...(row!.sell_in_prices ?? {}) } as Record<string, number | "">;
+      if (value === "") delete nextPrices[channel]; else nextPrices[channel] = value;
+      const nextMargins = { ...(row!.sell_in_margins ?? {}) } as Record<string, number>;
+      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
+      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && Object.keys(nextPrices).length === 0 && !hasSellOutPrices
+        ? null
+        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_prices: nextPrices, sell_out_factors: nextFactors };
     });
   }
 
@@ -726,7 +974,11 @@ export function VerkoopstrategieWorkspace({
       const nextFactors = { ...row!.sell_out_factors };
       if (value === "") delete nextFactors[channel]; else nextFactors[channel] = value;
       const nextMargins = Object.fromEntries(Object.entries(row!.sell_in_margins).filter(([, margin]) => margin !== null && margin !== undefined));
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 ? null : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+      const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
+      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
+        ? null
+        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
     });
   }
 
@@ -791,14 +1043,14 @@ export function VerkoopstrategieWorkspace({
         <div className="module-card-text">Kanaaldefaults vormen de basis. Daar bovenop kun je per product of per bier/product afwijken.</div>
       </div>
 
-      <div className="tab-strip">
-        <button type="button" className={`tab-button ${activeTab === "kanalen" ? "active" : ""}`} onClick={() => setActiveTab("kanalen")}>Kanalen</button>
-        <button type="button" className={`tab-button ${activeTab === "sell-in" ? "active" : ""}`} onClick={() => setActiveTab("sell-in")}>Sell-in</button>
-        <button type="button" className={`tab-button ${activeTab === "sell-out" ? "active" : ""}`} onClick={() => setActiveTab("sell-out")}>Sell-out</button>
-        <button type="button" className={`tab-button ${activeTab === "bieren" ? "active" : ""}`} onClick={() => setActiveTab("bieren")}>Bieren</button>
-      </div>
+      {mode !== "draft" ? (
+        <div className="tab-strip" style={{ marginBottom: "1rem" }}>
+          <button type="button" className={`tab-button ${activeView === "prijzen" ? "active" : ""}`} onClick={() => setActiveView("prijzen")}>Prijsinstellingen</button>
+          <button type="button" className={`tab-button ${activeView === "kanalen" ? "active" : ""}`} onClick={() => setActiveView("kanalen")}>Kanalen</button>
+        </div>
+      ) : null}
 
-      {activeTab === "kanalen" ? (
+      {activeView === "kanalen" ? (
         mode === "draft" ? (
           <div className="placeholder-block">
             <strong>Kanalen</strong>
@@ -824,6 +1076,352 @@ export function VerkoopstrategieWorkspace({
         )
       ) : (
         <>
+          <div className="editor-toolbar">
+            <div className="editor-toolbar-meta">
+              <span className="editor-pill">{productSources.length} producten</span>
+              <span className="muted">Actieve kanalen: {activeChannels.map((channel) => channel.naam).join(", ") || "geen"}</span>
+            </div>
+            <div className="editor-actions-group">
+              <label className="nested-field">
+                <span>Jaar</span>
+                <select
+                  className="dataset-input"
+                  value={String(effectiveSelectedYear)}
+                  disabled={Boolean(lockYear)}
+                  onChange={(event) => {
+                    if (lockYear) return;
+                    setSelectedYear(Number(event.target.value));
+                  }}
+                >
+                  {Array.from(
+                    new Set([
+                      effectiveSelectedYear,
+                      ...rows.map((row) => row.jaar),
+                      ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
+                    ])
+                  )
+                    .filter((year) => Number.isFinite(year) && year > 0)
+                    .sort((a, b) => b - a)
+                    .map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="nested-field">
+                <span>Zoeken</span>
+                <input
+                  className="dataset-input"
+                  type="text"
+                  value={sellFilter}
+                  onChange={(event) => setSellFilter(event.target.value)}
+                  placeholder="Zoek bier of product..."
+                />
+              </label>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "1rem", alignItems: "start" }}>
+            <aside className="module-card compact-card">
+              <div className="module-card-header" style={{ paddingBottom: 0 }}>
+                <div className="module-card-title">Kanalen</div>
+                <div className="module-card-text">Klik een kanaal om standaard opslag en overrides te beheren.</div>
+              </div>
+              <div className="stack" style={{ gap: "0.75rem", padding: "0.9rem" }}>
+                {activeChannels.map((channel) => {
+                  const isActive = selectedChannel?.code === channel.code;
+                  const opslag = calcOpslagPctFromMarginPct(channelYearDefaults[channel.code]?.margin ?? 0);
+                  return (
+                    <button
+                      key={channel.code}
+                      type="button"
+                      className={`editor-button ${isActive ? "" : "editor-button-secondary"}`}
+                      style={{ justifyContent: "space-between", gap: "0.75rem" }}
+                      onClick={() => setSelectedChannelCode(channel.code)}
+                    >
+                      <span style={{ fontWeight: 650 }}>{channel.naam}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
+                        <span className="muted">Standaard</span>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          step="any"
+                          value={String(Math.round(opslag * 100) / 100)}
+                          onChange={(event) => {
+                            const nextOpslag = event.target.value === "" ? 0 : Number(event.target.value);
+                            const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
+                            updateYearSellInPrice(channel.code, "");
+                            updateYearMargin(channel.code, Math.round(nextMargin * 100) / 100);
+                          }}
+                          style={{ width: 96 }}
+                        />
+                        <span className="muted">%</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            <div className="stack" style={{ gap: "1rem" }}>
+              <div className="module-card compact-card">
+                <div className="module-card-header">
+                  <div className="module-card-title">{selectedChannel?.naam ?? "Kanaal"}</div>
+                  <div className="module-card-text">
+                    Vul <strong>opslag</strong> in om een verkoopprijs te laten berekenen. Je kunt ook de verkoopprijs invullen (psychologische prijs); opslag en marge worden dan afgeleid.
+                  </div>
+                </div>
+
+                <details open className="module-card compact-card" style={{ margin: "0.9rem" }}>
+                  <summary className="module-card-title" style={{ cursor: "pointer" }}>Producttypes</summary>
+                  <div className="module-card-text" style={{ marginTop: "0.35rem", marginBottom: "0.8rem" }}>
+                    Producttypes zijn generiek. We tonen een voorbeeld-kostprijs van € 1,00 om opslag en marge te visualiseren.
+                  </div>
+                  {groupedProductOverrideRows.length === 0 ? (
+                    <div className="dataset-empty">Geen producttypes gevonden.</div>
+                  ) : (
+                    groupedProductOverrideRows.map((group) => (
+                      <details key={group.key} open style={{ marginBottom: "0.75rem" }}>
+                        <summary className="muted" style={{ cursor: "pointer" }}>
+                          {group.key} ({group.rows.length})
+                        </summary>
+                        <div className="data-table" style={{ marginTop: "0.6rem" }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Product</th>
+                                <th>Kostprijs</th>
+                                <th>Opslag</th>
+                                <th>Marge</th>
+                                <th>Verkoopprijs</th>
+                                <th />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.rows.map((row) => {
+                                const code = selectedChannel?.code ?? "";
+                                const baseCost = 1;
+                                const explicitPrice = code && row.sellInPriceOverrides[code] !== "" ? Number(row.sellInPriceOverrides[code]) : Number.NaN;
+                                const effectiveMargin = code ? Number(row.activeMargins[code] ?? 0) : 0;
+                                const computedSellIn = Number.isFinite(explicitPrice) ? explicitPrice : calcSellPrice(baseCost, effectiveMargin);
+                                const derivedMargin = calcMarginPctFromSellInPrice(baseCost, computedSellIn);
+                                const derivedOpslag = calcOpslagPctFromSellInPrice(baseCost, computedSellIn);
+                                const opslagValue =
+                                  !code ? "" :
+                                  row.marginOverrides[code] === "" && row.sellInPriceOverrides[code] === "" ? "" :
+                                  String(Math.round(derivedOpslag * 100) / 100);
+                                const priceValue = !code || row.sellInPriceOverrides[code] === "" ? "" : String(row.sellInPriceOverrides[code]);
+                                const hasOverride = Boolean(code) && (row.marginOverrides[code] !== "" || row.sellInPriceOverrides[code] !== "");
+                                return (
+                                  <tr key={row.productId}>
+                                    <td>
+                                      <div style={{ fontWeight: 650 }}>{row.product}</div>
+                                      {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                                    </td>
+                                    <td>{money(baseCost)}</td>
+                                    <td>
+                                      <div className="stack" style={{ gap: "0.35rem" }}>
+                                        <input
+                                          className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                          type="number"
+                                          step="any"
+                                          placeholder={code ? String(Math.round(calcOpslagPctFromMarginPct(channelYearDefaults[code]?.margin ?? 0) * 100) / 100) : ""}
+                                          value={opslagValue}
+                                          readOnly={row.isReadOnly}
+                                          onChange={(event) => {
+                                            if (!code) return;
+                                            const nextOpslag = event.target.value === "" ? "" : Number(event.target.value);
+                                            if (nextOpslag === "") {
+                                              updateProductSellInPrice(row.productId, code, "");
+                                              updateProductMargin(row.productId, code, "");
+                                              return;
+                                            }
+                                            const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
+                                            updateProductSellInPrice(row.productId, code, "");
+                                            updateProductMargin(row.productId, code, Math.round(nextMargin * 100) / 100);
+                                          }}
+                                        />
+                                        {!hasOverride ? <div className="muted">Erft standaard</div> : null}
+                                      </div>
+                                    </td>
+                                    <td>{num(derivedMargin)}%</td>
+                                    <td>
+                                      <input
+                                        className={`${inputClass(priceValue !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                        type="number"
+                                        step="any"
+                                        placeholder={String(Math.round(computedSellIn * 100) / 100)}
+                                        value={priceValue}
+                                        readOnly={row.isReadOnly}
+                                        onChange={(event) => {
+                                          if (!code) return;
+                                          const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
+                                          if (nextPrice === "") {
+                                            updateProductSellInPrice(row.productId, code, "");
+                                            return;
+                                          }
+                                          const nextMargin = calcMarginPctFromSellInPrice(baseCost, nextPrice);
+                                          updateProductSellInPrice(row.productId, code, Math.round(nextPrice * 100) / 100);
+                                          updateProductMargin(row.productId, code, Math.round(nextMargin * 100) / 100);
+                                        }}
+                                      />
+                                    </td>
+                                    <td>
+                                      {hasOverride && !row.isReadOnly ? (
+                                        <button
+                                          type="button"
+                                          className="editor-button editor-button-secondary"
+                                          onClick={() => {
+                                            if (!code) return;
+                                            updateProductSellInPrice(row.productId, code, "");
+                                            updateProductMargin(row.productId, code, "");
+                                          }}
+                                        >
+                                          Reset
+                                        </button>
+                                      ) : null}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    ))
+                  )}
+                </details>
+
+                <details open className="module-card compact-card" style={{ margin: "0.9rem" }}>
+                  <summary className="module-card-title" style={{ cursor: "pointer" }}>Bieren</summary>
+                  {groupedBeerRows.length === 0 ? (
+                    <div className="dataset-empty">Nog geen actieve kostprijsversies gevonden voor {effectiveSelectedYear}.</div>
+                  ) : (
+                    groupedBeerRows.map((beer) => (
+                      <details key={beer.biernaam} open style={{ marginBottom: "0.75rem" }}>
+                        <summary style={{ cursor: "pointer", fontWeight: 650 }}>
+                          {beer.biernaam} ({beer.rows.length})
+                        </summary>
+                        <div className="data-table" style={{ marginTop: "0.6rem" }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Product</th>
+                                <th>Kostprijs</th>
+                                <th>Opslag</th>
+                                <th>Marge</th>
+                                <th>Verkoopprijs</th>
+                                <th />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {beer.rows.map((row) => {
+                                const code = selectedChannel?.code ?? "";
+                                const explicitPrice = code && row.sellInPriceOverrides[code] !== "" ? Number(row.sellInPriceOverrides[code]) : Number.NaN;
+                                const effectiveMargin = code ? Number(row.activeMargins[code] ?? 0) : 0;
+                                const computedSellIn = Number.isFinite(explicitPrice) ? explicitPrice : calcSellPrice(row.kostprijs, effectiveMargin);
+                                const derivedMargin = calcMarginPctFromSellInPrice(row.kostprijs, computedSellIn);
+                                const derivedOpslag = calcOpslagPctFromSellInPrice(row.kostprijs, computedSellIn);
+                                const opslagValue =
+                                  !code ? "" :
+                                  row.marginOverrides[code] === "" && row.sellInPriceOverrides[code] === "" ? "" :
+                                  String(Math.round(derivedOpslag * 100) / 100);
+                                const priceValue = !code || row.sellInPriceOverrides[code] === "" ? "" : String(row.sellInPriceOverrides[code]);
+                                const hasOverride = Boolean(code) && (row.marginOverrides[code] !== "" || row.sellInPriceOverrides[code] !== "");
+                                const placeholderOpslag = code ? calcOpslagPctFromMarginPct(row.productMargins[code] ?? channelYearDefaults[code]?.margin ?? 0) : 0;
+                                return (
+                                  <tr key={`${row.bierId}::${row.productId}`}>
+                                    <td>
+                                      <div style={{ fontWeight: 650 }}>{row.product}</div>
+                                      {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                                    </td>
+                                    <td>{money(row.kostprijs)}</td>
+                                    <td>
+                                      <div className="stack" style={{ gap: "0.35rem" }}>
+                                        <input
+                                          className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                          type="number"
+                                          step="any"
+                                          placeholder={String(Math.round(placeholderOpslag * 100) / 100)}
+                                          value={opslagValue}
+                                          readOnly={row.isReadOnly}
+                                          onChange={(event) => {
+                                            if (!code) return;
+                                            const nextOpslag = event.target.value === "" ? "" : Number(event.target.value);
+                                            if (nextOpslag === "") {
+                                              updateBeerSellInPrice(row, code, "");
+                                              updateBeerMargin(row, code, "");
+                                              return;
+                                            }
+                                            const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
+                                            updateBeerSellInPrice(row, code, "");
+                                            updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
+                                          }}
+                                        />
+                                        {!hasOverride ? <div className="muted">Erft standaard</div> : null}
+                                      </div>
+                                    </td>
+                                    <td>{num(derivedMargin)}%</td>
+                                    <td>
+                                      <input
+                                        className={`${inputClass(priceValue !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                        type="number"
+                                        step="any"
+                                        placeholder={String(Math.round(computedSellIn * 100) / 100)}
+                                        value={priceValue}
+                                        readOnly={row.isReadOnly}
+                                        onChange={(event) => {
+                                          if (!code) return;
+                                          const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
+                                          if (nextPrice === "") {
+                                            updateBeerSellInPrice(row, code, "");
+                                            return;
+                                          }
+                                          const nextMargin = calcMarginPctFromSellInPrice(row.kostprijs, nextPrice);
+                                          updateBeerSellInPrice(row, code, Math.round(nextPrice * 100) / 100);
+                                          updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
+                                        }}
+                                      />
+                                    </td>
+                                    <td>
+                                      {hasOverride && !row.isReadOnly ? (
+                                        <button
+                                          type="button"
+                                          className="editor-button editor-button-secondary"
+                                          onClick={() => {
+                                            if (!code) return;
+                                            updateBeerSellInPrice(row, code, "");
+                                            updateBeerMargin(row, code, "");
+                                          }}
+                                        >
+                                          Reset
+                                        </button>
+                                      ) : null}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    ))
+                  )}
+                </details>
+              </div>
+            </div>
+          </div>
+
+          <div className="editor-actions">
+            <div className="editor-actions-group" />
+            <div className="editor-actions-group">
+              {status ? <span className="editor-status">{status}</span> : null}
+              <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>{isSaving ? "Opslaan..." : "Opslaan"}</button>
+            </div>
+          </div>
+
+          {false && (<>
           <div className="editor-toolbar">
             <div className="editor-toolbar-meta">
               <span className="editor-pill">{productSources.length} producten</span>
@@ -1084,6 +1682,7 @@ export function VerkoopstrategieWorkspace({
               <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>{isSaving ? "Opslaan..." : "Opslaan"}</button>
             </div>
           </div>
+          </>)}
         </>
       )}
     </section>
