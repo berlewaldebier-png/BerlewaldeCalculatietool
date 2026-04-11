@@ -43,8 +43,7 @@ function findTarievenRow(
   };
 }
 
-// Central, canonical frontend accijns calculation. This matches Kostprijsbeheer (BerekeningenWizard).
-export function calculateAccijnsPerProduct({
+function calculateAccijnsPerProductCore({
   litersPerProduct,
   basisgegevens,
   tarievenHeffingenRows,
@@ -69,6 +68,27 @@ export function calculateAccijnsPerProduct({
       ? Number(tarieven.tarief_laag ?? 0)
       : Number(tarieven.tarief_hoog ?? 0);
   return tarief * alcoholpercentage * litersPerProduct;
+}
+
+// Central, canonical frontend accijns calculation. This matches Kostprijsbeheer (BerekeningenWizard).
+//
+// Note: we accept both the new object-style signature and the legacy positional signature
+// to avoid runtime breakage during refactors, while keeping the same math.
+export function calculateAccijnsPerProduct(
+  input: AccijnsInput | number,
+  basisgegevens?: GenericRecord,
+  tarievenHeffingenRows?: GenericRecord[] | TarievenHeffingenRow[],
+  year?: number
+): number {
+  if (typeof input === "number") {
+    return calculateAccijnsPerProductCore({
+      litersPerProduct: input,
+      basisgegevens: (basisgegevens ?? {}) as GenericRecord,
+      tarievenHeffingenRows: (tarievenHeffingenRows ?? []) as any,
+      year: Number(year ?? 0)
+    });
+  }
+  return calculateAccijnsPerProductCore(input);
 }
 
 export type VasteKostenRow = {
@@ -129,4 +149,3 @@ export function vasteKostenPerLiter(params: {
   if (!Number.isFinite(deler) || deler <= 0) return 0;
   return totaleVasteKosten / deler;
 }
-
