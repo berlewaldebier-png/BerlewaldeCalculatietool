@@ -1122,13 +1122,13 @@ export function VerkoopstrategieWorkspace({
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "1rem", alignItems: "start" }}>
-            <aside className="module-card compact-card">
-              <div className="module-card-header" style={{ paddingBottom: 0 }}>
-                <div className="module-card-title">Kanalen</div>
-                <div className="module-card-text">Klik een kanaal om standaard opslag en overrides te beheren.</div>
+          <div className="stack" style={{ gap: "1rem" }}>
+            <div className="module-card compact-card">
+              <div className="module-card-header" style={{ marginBottom: "0.7rem" }}>
+                <div className="module-card-title">Prijsinstellingen</div>
+                <div className="module-card-text">Pas prijsinstellingen aan per kanaal, producttype en bier.</div>
               </div>
-              <div className="stack" style={{ gap: "0.75rem", padding: "0.9rem" }}>
+              <div className="stack" style={{ gap: "0.75rem" }}>
                 {activeChannels.map((channel) => {
                   const isActive = selectedChannel?.code === channel.code;
                   const opslag = calcOpslagPctFromMarginPct(channelYearDefaults[channel.code]?.margin ?? 0);
@@ -1137,12 +1137,13 @@ export function VerkoopstrategieWorkspace({
                       key={channel.code}
                       type="button"
                       className={`editor-button ${isActive ? "" : "editor-button-secondary"}`}
-                      style={{ justifyContent: "space-between", gap: "0.75rem" }}
+                      style={{ justifyContent: "space-between", gap: "0.75rem", padding: "0.9rem 1rem" }}
                       onClick={() => setSelectedChannelCode(channel.code)}
                     >
-                      <span style={{ fontWeight: 650 }}>{channel.naam}</span>
+                      <span style={{ fontWeight: 750 }}>{channel.naam}</span>
                       <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
-                        <span className="muted">Standaard</span>
+                        <span className="muted">Standaard:</span>
+                        <span className="muted">+</span>
                         <input
                           className="dataset-input"
                           type="number"
@@ -1162,7 +1163,7 @@ export function VerkoopstrategieWorkspace({
                   );
                 })}
               </div>
-            </aside>
+            </div>
 
             <div className="stack" style={{ gap: "1rem" }}>
               <div className="module-card compact-card">
