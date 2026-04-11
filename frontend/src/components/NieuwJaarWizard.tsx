@@ -1052,7 +1052,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       basisgegevens: mergedBasis,
       tarievenHeffingenRows: [
         {
-          jaar,
+          jaar: year,
           tarief_hoog: Number(tariefRow.tarief_hoog ?? 0),
           tarief_laag: Number(tariefRow.tarief_laag ?? 0),
           verbruikersbelasting: Number(tariefRow.verbruikersbelasting ?? 0)
