@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { usePageShellHeader, usePageShellWizardSidebar } from "@/components/PageShell";
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
 import { API_BASE_URL } from "@/lib/api";
-import { calculateAccijnsPerProduct, vasteKostenPerLiter } from "@/lib/kostprijsEngine";
+import { calculateAccijnsPerProduct, computeVasteKostenTotals, vasteKostenPerLiter } from "@/lib/kostprijsEngine";
 
 type GenericRecord = Record<string, unknown>;
 type ProductieMap = Record<string, GenericRecord>;
@@ -959,43 +959,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     return cost / Math.max(0.0001, 1 - margin / 100);
   }
 
-  function clampPct(value: unknown) {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 0;
-    return Math.min(100, Math.max(0, parsed));
-  }
-
   function computeHerverdelingTotals(rows: Array<Record<string, unknown>>) {
-    const directRows = rows.filter((row) => {
-      const normalized = String((row as any).kostensoort ?? "").trim().toLowerCase();
-      return normalized.includes("direct") && !normalized.includes("indirect");
-    });
-    const indirectRows = rows.filter((row) => String((row as any).kostensoort ?? "").trim().toLowerCase().includes("indirect"));
-
-    const directBase = directRows.reduce((sum, row) => sum + Number((row as any).bedrag_per_jaar ?? 0), 0);
-    const indirectBase = indirectRows.reduce((sum, row) => sum + Number((row as any).bedrag_per_jaar ?? 0), 0);
-
-    const directOut = directRows.reduce((sum, row) => {
-      const amount = Number((row as any).bedrag_per_jaar ?? 0);
-      const pct = clampPct((row as any).herverdeel_pct);
-      return sum + (amount * pct) / 100;
-    }, 0);
-
-    const indirectOut = indirectRows.reduce((sum, row) => {
-      const amount = Number((row as any).bedrag_per_jaar ?? 0);
-      const pct = clampPct((row as any).herverdeel_pct);
-      return sum + (amount * pct) / 100;
-    }, 0);
-
-    return {
-      directBase,
-      indirectBase,
-      directOut,
-      indirectOut,
-      directAfter: directBase - directOut + indirectOut,
-      indirectAfter: indirectBase - indirectOut + directOut,
-      redistributedTotal: directOut + indirectOut
-    };
+    return computeVasteKostenTotals(rows as any);
   }
 
   function fixedCostRowsForYear(year: number): Array<Record<string, unknown>> {

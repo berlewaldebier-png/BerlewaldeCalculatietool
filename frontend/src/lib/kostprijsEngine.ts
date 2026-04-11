@@ -102,7 +102,17 @@ export type ProductieYear = {
   hoeveelheid_productie_l?: number;
 };
 
-function sumVasteKostenByType(rows: VasteKostenRow[], kostensoort: "direct" | "indirect") {
+export type VasteKostenTotals = {
+  directBase: number;
+  indirectBase: number;
+  directOut: number;
+  indirectOut: number;
+  directAfter: number;
+  indirectAfter: number;
+  redistributedTotal: number;
+};
+
+export function computeVasteKostenTotals(rows: VasteKostenRow[]): VasteKostenTotals {
   const directRows = rows.filter((row) => {
     const normalized = String(row.kostensoort ?? "").trim().toLowerCase();
     return normalized.includes("direct") && !normalized.includes("indirect");
@@ -124,10 +134,20 @@ function sumVasteKostenByType(rows: VasteKostenRow[], kostensoort: "direct" | "i
     return sum + (amount * pct) / 100;
   }, 0);
 
-  const directAfter = directBase - directOut + indirectOut;
-  const indirectAfter = indirectBase - indirectOut + directOut;
+  return {
+    directBase,
+    indirectBase,
+    directOut,
+    indirectOut,
+    directAfter: directBase - directOut + indirectOut,
+    indirectAfter: indirectBase - indirectOut + directOut,
+    redistributedTotal: directOut + indirectOut
+  };
+}
 
-  return kostensoort === "indirect" ? indirectAfter : directAfter;
+function sumVasteKostenByType(rows: VasteKostenRow[], kostensoort: "direct" | "indirect") {
+  const totals = computeVasteKostenTotals(rows);
+  return kostensoort === "indirect" ? totals.indirectAfter : totals.directAfter;
 }
 
 export function vasteKostenPerLiter(params: {

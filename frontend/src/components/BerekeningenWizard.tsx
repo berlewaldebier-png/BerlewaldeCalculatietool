@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "
 
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
-import { calculateAccijnsPerProduct } from "@/lib/kostprijsEngine";
+import { calculateAccijnsPerProduct, vasteKostenPerLiter } from "@/lib/kostprijsEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -605,66 +605,6 @@ function getSelectedInkoopProductRows(
   return selected;
 }
 
-function sumVasteKostenByType(rows: GenericRecord[], kostensoort: "direct" | "indirect") {
-  const directRows = rows.filter((row) => {
-    const normalized = String(row.kostensoort ?? "").trim().toLowerCase();
-    return normalized.includes("direct") && !normalized.includes("indirect");
-  });
-  const indirectRows = rows.filter((row) => String(row.kostensoort ?? "").trim().toLowerCase().includes("indirect"));
-
-  const clampPct = (value: unknown) => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 0;
-    return Math.min(100, Math.max(0, parsed));
-  };
-
-  const directBase = directRows.reduce((sum, row) => sum + Number(row.bedrag_per_jaar ?? 0), 0);
-  const indirectBase = indirectRows.reduce((sum, row) => sum + Number(row.bedrag_per_jaar ?? 0), 0);
-
-  const directOut = directRows.reduce((sum, row) => {
-    const amount = Number(row.bedrag_per_jaar ?? 0);
-    const pct = clampPct(row.herverdeel_pct);
-    return sum + (amount * pct) / 100;
-  }, 0);
-
-  const indirectOut = indirectRows.reduce((sum, row) => {
-    const amount = Number(row.bedrag_per_jaar ?? 0);
-    const pct = clampPct(row.herverdeel_pct);
-    return sum + (amount * pct) / 100;
-  }, 0);
-
-  const directAfter = directBase - directOut + indirectOut;
-  const indirectAfter = indirectBase - indirectOut + directOut;
-
-  return kostensoort === "indirect" ? indirectAfter : directAfter;
-}
-
-function getVasteKostenPerLiter(
-  year: number,
-  productie: Record<string, GenericRecord>,
-  vasteKosten: Record<string, GenericRecord[]>,
-  kostensoort: "direct" | "indirect",
-  delerType: "productie" | "inkoop"
-) {
-  const rows = Array.isArray(vasteKosten[String(year)]) ? vasteKosten[String(year)] : [];
-  const totaleVasteKosten = sumVasteKostenByType(rows, kostensoort);
-  if (totaleVasteKosten <= 0) {
-    return 0;
-  }
-
-  const productieGegevens = getYearProduction(year, productie);
-  const deler =
-    delerType === "inkoop"
-      ? Number(productieGegevens.hoeveelheid_inkoop_l ?? 0)
-      : Number(productieGegevens.hoeveelheid_productie_l ?? 0);
-
-  if (deler <= 0) {
-    return 0;
-  }
-
-  return totaleVasteKosten / deler;
-}
-
 function getInkoopFactuurregels(row: GenericRecord) {
   const inkoop = ((row.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
   const topLevelFactuurregels = Array.isArray(inkoop.factuurregels)
@@ -994,10 +934,24 @@ export function BerekeningenWizard({
     const biernaam = String(basisgegevens.biernaam ?? "");
     const variabeleKostenPerLiter =
       calculateVariabeleKostenPerLiter(row, jaar, productie, basisproducten, samengesteldeProducten) ?? 0;
-    const vasteKostenPerLiter =
+    const productieGegevens = getYearProduction(jaar, productie);
+    const vasteKostenRows = Array.isArray(vasteKosten[String(jaar)]) ? vasteKosten[String(jaar)] : [];
+    const fixedPerLiter =
       soort === "Inkoop"
-        ? getVasteKostenPerLiter(jaar, productie, vasteKosten, "indirect", "inkoop")
-        : getVasteKostenPerLiter(jaar, productie, vasteKosten, "direct", "productie");
+        ? vasteKostenPerLiter({
+            year: jaar,
+            productieYear: productieGegevens as any,
+            vasteKostenRows: vasteKostenRows as any,
+            kostensoort: "indirect",
+            delerType: "inkoop"
+          })
+        : vasteKostenPerLiter({
+            year: jaar,
+            productieYear: productieGegevens as any,
+            vasteKostenRows: vasteKostenRows as any,
+            kostensoort: "direct",
+            delerType: "productie"
+          });
     const geselecteerdeInkoopProducten =
       soort === "Inkoop"
         ? expandSelectedInkoopProductsToBasisproducten(
@@ -1024,7 +978,7 @@ export function BerekeningenWizard({
       soort,
       "basis",
       variabeleKostenPerLiter,
-      vasteKostenPerLiter,
+      fixedPerLiter,
       basisgegevens,
       tarievenHeffingen,
       jaar,
@@ -1036,7 +990,7 @@ export function BerekeningenWizard({
       soort,
       "samengesteld",
       variabeleKostenPerLiter,
-      vasteKostenPerLiter,
+      fixedPerLiter,
       basisgegevens,
       tarievenHeffingen,
       jaar,
@@ -1044,9 +998,9 @@ export function BerekeningenWizard({
     );
 
     return {
-      integrale_kostprijs_per_liter: roundValue(variabeleKostenPerLiter + vasteKostenPerLiter),
+      integrale_kostprijs_per_liter: roundValue(variabeleKostenPerLiter + fixedPerLiter),
       variabele_kosten_per_liter: roundValue(variabeleKostenPerLiter),
-      directe_vaste_kosten_per_liter: roundValue(vasteKostenPerLiter),
+      directe_vaste_kosten_per_liter: roundValue(fixedPerLiter),
       producten: {
         basisproducten: basisproductenRows,
         samengestelde_producten: samengesteldeRows
