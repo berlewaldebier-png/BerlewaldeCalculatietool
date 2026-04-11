@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "
 
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
+import { calculateAccijnsPerProduct } from "@/lib/kostprijsEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -831,25 +832,6 @@ function calculateVariabeleKostenPerLiter(
   return totaleBatchkosten / batchGrootte;
 }
 
-function calculateAccijnsPerProduct(
-  litersPerProduct: number,
-  basisgegevens: GenericRecord,
-  tarievenHeffingen: GenericRecord[],
-  year: number
-) {
-  const tarieven = tarievenHeffingen.find((row) => Number(row.jaar ?? 0) === year) ?? {};
-  const belastingsoort = String(basisgegevens.belastingsoort ?? "").trim().toLowerCase();
-  const alcoholpercentage = (parseOptionalNumber(basisgegevens.alcoholpercentage) ?? 0) / 100;
-  const tariefAccijns = String(basisgegevens.tarief_accijns ?? "").trim().toLowerCase();
-
-  if (belastingsoort === "verbruiksbelasting") {
-    return Number(tarieven.verbruikersbelasting ?? 0) * (litersPerProduct / 100);
-  }
-
-  const tarief =
-    tariefAccijns === "laag" ? Number(tarieven.tarief_laag ?? 0) : Number(tarieven.tarief_hoog ?? 0);
-  return tarief * alcoholpercentage * litersPerProduct;
-}
 
 function buildSummaryRows(
   sourceRows: (GenericRecord | SelectedInkoopProduct)[],
@@ -879,7 +861,12 @@ function buildSummaryRows(
     const verpakkingskosten = Number(
       sourceRow.totale_verpakkingskosten ?? sourceRow.verpakkingskosten ?? 0
     );
-    const accijns = calculateAccijnsPerProduct(liters, basisgegevens, tarievenHeffingen, year);
+    const accijns = calculateAccijnsPerProduct({
+      litersPerProduct: liters,
+      basisgegevens,
+      tarievenHeffingenRows: tarievenHeffingen,
+      year
+    });
     const primaireKosten = isSelectedInkoopProduct
       ? (row as SelectedInkoopProduct).prijsPerEenheid
       : primaireKostenPerLiter * liters;

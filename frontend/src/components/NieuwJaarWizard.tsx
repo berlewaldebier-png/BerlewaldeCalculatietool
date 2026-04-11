@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { usePageShellHeader, usePageShellWizardSidebar } from "@/components/PageShell";
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
 import { API_BASE_URL } from "@/lib/api";
+import { calculateAccijnsPerProduct, vasteKostenPerLiter } from "@/lib/kostprijsEngine";
 
 type GenericRecord = Record<string, unknown>;
 type ProductieMap = Record<string, GenericRecord>;
@@ -1007,39 +1008,58 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
   function computeIndirectFixedCostPerInkoopLiter(year: number) {
     const productieRow = getProductieForYear(year);
-    const liters = Number(productieRow?.hoeveelheid_inkoop_l ?? 0);
-    if (!Number.isFinite(liters) || liters <= 0) return 0;
-    const totals = computeHerverdelingTotals(fixedCostRowsForYear(year));
-    return totals.indirectAfter / liters;
+    return vasteKostenPerLiter({
+      year,
+      productieYear: productieRow,
+      vasteKostenRows: fixedCostRowsForYear(year) as any,
+      kostensoort: "indirect",
+      delerType: "inkoop"
+    });
   }
 
   function computeDirectFixedCostPerProductieLiter(year: number) {
     const productieRow = getProductieForYear(year);
-    const liters = Number(productieRow?.hoeveelheid_productie_l ?? 0);
-    if (!Number.isFinite(liters) || liters <= 0) return 0;
-    const totals = computeHerverdelingTotals(fixedCostRowsForYear(year));
-    return totals.directAfter / liters;
+    return vasteKostenPerLiter({
+      year,
+      productieYear: productieRow,
+      vasteKostenRows: fixedCostRowsForYear(year) as any,
+      kostensoort: "direct",
+      delerType: "productie"
+    });
   }
 
   function computeAccijnsForLiters(year: number, record: any, liters: number) {
     const basis = typeof record?.basisgegevens === "object" && record?.basisgegevens ? record.basisgegevens : {};
     const bierSnap = typeof record?.bier_snapshot === "object" && record?.bier_snapshot ? record.bier_snapshot : {};
-    const alcoholpercentage = Number(bierSnap.alcoholpercentage ?? basis.alcoholpercentage ?? 0);
-    const tariefAccijns = String(bierSnap.tarief_accijns ?? basis.tarief_accijns ?? "Hoog");
-    const belastingsoort = String(bierSnap.belastingsoort ?? basis.belastingsoort ?? "Accijns");
     if (!Number.isFinite(liters) || liters <= 0) return 0;
-    if (String(belastingsoort).trim().toLowerCase() !== "accijns") return 0;
 
     const tariefRow =
       year === targetYear
         ? draftTariefTarget
         : getTariefForYear(year);
     if (!tariefRow) return 0;
-    const tarief = tariefAccijns === "Laag" ? Number(tariefRow.tarief_laag ?? 0) : Number(tariefRow.tarief_hoog ?? 0);
-    const vb = Number(tariefRow.verbruikersbelasting ?? 0);
-    if (!Number.isFinite(tarief) || !Number.isFinite(vb) || !Number.isFinite(alcoholpercentage)) return 0;
-    // Matches legacy seed snapshots: accijns scales with liters * alcohol% and the configured tarieven.
-    return (liters * alcoholpercentage * (tarief + vb)) / 420;
+
+    // Canonical frontend accijns calculation (same as Kostprijsbeheer).
+    const mergedBasis: GenericRecord = {
+      ...basis,
+      alcoholpercentage: bierSnap.alcoholpercentage ?? (basis as any).alcoholpercentage ?? 0,
+      tarief_accijns: bierSnap.tarief_accijns ?? (basis as any).tarief_accijns ?? "hoog",
+      belastingsoort: bierSnap.belastingsoort ?? (basis as any).belastingsoort ?? "Accijns"
+    };
+
+    return calculateAccijnsPerProduct({
+      litersPerProduct: liters,
+      basisgegevens: mergedBasis,
+      tarievenHeffingenRows: [
+        {
+          jaar,
+          tarief_hoog: Number(tariefRow.tarief_hoog ?? 0),
+          tarief_laag: Number(tariefRow.tarief_laag ?? 0),
+          verbruikersbelasting: Number(tariefRow.verbruikersbelasting ?? 0)
+        }
+      ],
+      year
+    });
   }
 
   function computeSellInPrice(cost: number, marginPct: number) {
