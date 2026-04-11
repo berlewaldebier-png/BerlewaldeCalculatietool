@@ -67,6 +67,18 @@ type PreviewRow = {
   sellIn: Record<string, number>;
 };
 
+type KostprijsPreviewRow = {
+  biernaam: string;
+  soort: string;
+  product_type: "basis" | "samengesteld";
+  verpakkingseenheid: string;
+  primaire_kosten: number;
+  verpakkingskosten: number;
+  vaste_kosten: number;
+  accijns: number;
+  kostprijs: number;
+};
+
 type PricingMode = "keep_price" | "scale_cost_ratio" | "keep_margin" | "free";
 
 export type NieuwJaarWizardProps = {
@@ -455,7 +467,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     // Silent save: avoid noisy status updates while still persisting user work.
     const ok = await saveDraftToServer("");
     if (!ok) return;
-    if (activeStep === 7 && nextIndex !== 7) {
+    if (activeStep === 8 && nextIndex !== 8) {
       // Avoid retaining a save callback tied to an unmounted VerkoopstrategieWorkspace.
       setVerkoopstrategieSave(null);
     }
@@ -550,7 +562,9 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         setCompletedStepIds(payload.completed_step_ids as any);
       }
       if (Number.isFinite(Number(payload?.active_step ?? 0))) {
-        setActiveStep(Number(payload.active_step ?? 0));
+        const parsed = Number(payload.active_step ?? 0);
+        // Keep drafts resilient across wizard step inserts/reorders.
+        setActiveStep(Math.max(0, Math.min(10, Number.isFinite(parsed) ? parsed : 0)));
       }
 
       setStatus(`Concept geladen voor doeljaar ${effectiveTarget}.`);
@@ -1547,6 +1561,209 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     targetYear
   ]);
 
+  const kostprijsTargetRows = useMemo(() => {
+    const priceByYearComponent = new Map<string, number>();
+    currentPackagingPrices.forEach((row) => {
+      const key = `${row.jaar}|${row.verpakkingsonderdeel_id}`;
+      priceByYearComponent.set(key, Number(row.prijs_per_stuk ?? 0));
+    });
+
+    function packagingComponentPrice(year: number, componentId: string) {
+      if (year === targetYear) {
+        return Number(draftPackagingPrices[componentId] ?? 0);
+      }
+      return Number(priceByYearComponent.get(`${year}|${componentId}`) ?? 0);
+    }
+
+    const baseDefs = (Array.isArray(initialBasisproducten) ? initialBasisproducten : [])
+      .filter((row) => typeof row === "object" && row !== null)
+      .map((row) => row as any);
+    const compositeDefs = (Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : [])
+      .filter((row) => typeof row === "object" && row !== null)
+      .map((row) => row as any);
+
+    const baseByIdYear = new Map<string, any>();
+    baseDefs.forEach((row) => {
+      const id = String(row.id ?? "");
+      const jaar = Number(row.jaar ?? 0);
+      if (!id || !jaar) return;
+      baseByIdYear.set(`${jaar}|${id}`, row);
+    });
+    const compositeByIdYear = new Map<string, any>();
+    compositeDefs.forEach((row) => {
+      const id = String(row.id ?? "");
+      const jaar = Number(row.jaar ?? 0);
+      if (!id || !jaar) return;
+      compositeByIdYear.set(`${jaar}|${id}`, row);
+    });
+
+    function getBaseDef(id: string, year: number) {
+      return baseByIdYear.get(`${year}|${id}`) ?? baseDefs.find((row) => String(row.id ?? "") === id) ?? null;
+    }
+    function getCompositeDef(id: string, year: number) {
+      return (
+        compositeByIdYear.get(`${year}|${id}`) ??
+        compositeDefs.find((row) => String(row.id ?? "") === id) ??
+        null
+      );
+    }
+
+    function packagingCostForBase(productId: string, year: number) {
+      const def = getBaseDef(productId, year);
+      if (!def) return 0;
+      const onderdelen = Array.isArray(def.onderdelen) ? def.onderdelen : [];
+      return onderdelen.reduce((sum: number, onderdeel: any) => {
+        const componentId = String(onderdeel.verpakkingsonderdeel_id ?? "");
+        const qty = Number(onderdeel.hoeveelheid ?? 0);
+        const price = packagingComponentPrice(year, componentId);
+        return sum + qty * price;
+      }, 0);
+    }
+
+    function packagingCostForComposite(productId: string, year: number) {
+      const def = getCompositeDef(productId, year);
+      if (!def) return 0;
+      const basisproducten = Array.isArray(def.basisproducten) ? def.basisproducten : [];
+      return basisproducten.reduce((sum: number, row: any) => {
+        const baseId = String(row.basisproduct_id ?? "");
+        const count = Number(row.aantal ?? 0);
+        return sum + count * packagingCostForBase(baseId, year);
+      }, 0);
+    }
+
+    function packagingCost(productId: string, productType: string, year: number) {
+      if (productType === "basis") return packagingCostForBase(productId, year);
+      if (productType === "samengesteld") return packagingCostForComposite(productId, year);
+      return 0;
+    }
+
+    function litersPerUnit(productId: string, productType: string, year: number) {
+      if (productType === "basis") {
+        const def = getBaseDef(productId, year);
+        return Number(def?.inhoud_per_eenheid_liter ?? 0);
+      }
+      if (productType === "samengesteld") {
+        const def = getCompositeDef(productId, year);
+        return Number(def?.totale_inhoud_liter ?? 0);
+      }
+      return 0;
+    }
+
+    const versionById = new Map<string, any>();
+    (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((record: any) => {
+      const basis = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? record.basisgegevens : {};
+      const jaar = Number(record.jaar ?? basis.jaar ?? 0);
+      const statusVal = String(record.status ?? "").toLowerCase();
+      if (jaar !== sourceYear || statusVal !== "definitief") return;
+      const id = String(record.id ?? "");
+      if (id) versionById.set(id, record);
+    });
+
+    const latestActivationByKey = new Map<string, any>();
+    (Array.isArray(currentActivations) ? currentActivations : []).forEach((row: any) => {
+      if (Number(row.jaar ?? 0) !== sourceYear) return;
+      const bierId = String(row.bier_id ?? "");
+      const productId = String(row.product_id ?? "");
+      if (!bierId || !productId) return;
+      const key = `${bierId}::${productId}`;
+      const current = latestActivationByKey.get(key);
+      const ts = String(row.effectief_vanaf ?? row.updated_at ?? "");
+      const curTs = String(current?.effectief_vanaf ?? current?.updated_at ?? "");
+      if (!current || ts.localeCompare(curTs) > 0) {
+        latestActivationByKey.set(key, row);
+      }
+    });
+
+    const bierNameById = new Map<string, string>();
+    (Array.isArray(initialBieren) ? initialBieren : []).forEach((row: any) => {
+      const id = String(row.id ?? "");
+      const naam = String(row.naam ?? row.biernaam ?? "");
+      if (id && naam) bierNameById.set(id, naam);
+    });
+
+    const basisRows: KostprijsPreviewRow[] = [];
+    const samengRows: KostprijsPreviewRow[] = [];
+
+    latestActivationByKey.forEach((activation) => {
+      const bierId = String(activation.bier_id ?? "");
+      const productId = String(activation.product_id ?? "");
+      const versionId = String(activation.kostprijsversie_id ?? "");
+      const record = versionById.get(versionId);
+      if (!record) return;
+      const snap = snapshotProductCost(record, productId);
+      if (!snap) return;
+
+      const productType = String(snap.productType ?? "");
+      if (productType !== "basis" && productType !== "samengesteld") return;
+
+      const calcType = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
+      const soortLabel = calcType === "inkoop" ? "Inkoop" : "Eigen productie";
+
+      const liters = Number(litersPerUnit(productId, productType, targetYear) ?? 0) || 0;
+      const sourcePrimary = Number(snap.primaireKosten ?? 0);
+      const scenarioKey = `${bierId}::${productId}`;
+      const scenarioPrimary = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
+        ? Number(scenarioPrimaryCosts[scenarioKey] ?? sourcePrimary)
+        : sourcePrimary;
+      const primaireKosten = Number.isFinite(scenarioPrimary) ? scenarioPrimary : sourcePrimary;
+
+      const verpakkingskosten = calcType === "inkoop" ? 0 : packagingCost(productId, productType, targetYear);
+      const vastePerLiter =
+        calcType === "inkoop"
+          ? computeIndirectFixedCostPerInkoopLiter(targetYear)
+          : computeDirectFixedCostPerProductieLiter(targetYear);
+      const vasteKosten = vastePerLiter * liters;
+      const accijns = computeAccijnsForLiters(targetYear, record, liters);
+      const kostprijs = primaireKosten + verpakkingskosten + vasteKosten + accijns;
+
+      const row: KostprijsPreviewRow = {
+        biernaam:
+          bierNameById.get(bierId) ??
+          String(((record.basisgegevens ?? {}) as any)?.biernaam ?? bierId),
+        soort: soortLabel,
+        product_type: productType as any,
+        verpakkingseenheid: String(snap.productLabel ?? productId),
+        primaire_kosten: primaireKosten,
+        verpakkingskosten,
+        vaste_kosten: vasteKosten,
+        accijns,
+        kostprijs
+      };
+
+      if (productType === "samengesteld") {
+        samengRows.push(row);
+      } else {
+        basisRows.push(row);
+      }
+    });
+
+    function sortKey(row: KostprijsPreviewRow) {
+      return `${row.biernaam}::${row.verpakkingseenheid}`;
+    }
+
+    basisRows.sort((a, b) => sortKey(a).localeCompare(sortKey(b), "nl-NL"));
+    samengRows.sort((a, b) => sortKey(a).localeCompare(sortKey(b), "nl-NL"));
+
+    return { basisRows, samengRows };
+  }, [
+    currentActivations,
+    currentBerekeningen,
+    currentPackagingPrices,
+    currentProductie,
+    currentTarieven,
+    currentVasteKosten,
+    draftPackagingPrices,
+    draftProductieTarget,
+    draftTariefTarget,
+    draftVasteKostenTarget,
+    initialBasisproducten,
+    initialBieren,
+    initialSamengesteldeProducten,
+    scenarioPrimaryCosts,
+    sourceYear,
+    targetYear
+  ]);
+
   const steps: WizardStep[] = useMemo(
     () => [
       {
@@ -1601,6 +1818,13 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           "Vul scenario inkoopprijzen (primair/inkoopdeel) in om direct de impact op kostprijs en verkoopprijzen te zien. Deze waarden worden niet opgeslagen."
       },
       {
+        id: "kostprijs",
+        label: "Kostprijs",
+        description: `Kostprijs ${targetYear} (opbouw)`,
+        panelTitle: `Kostprijs ${targetYear}`,
+        panelDescription: "Bekijk de opbouw per bier en verpakkingseenheid op basis van jouw doeljaar-invoer en scenario."
+      },
+      {
         id: "verkoopstrategie",
         label: "Verkoopstrategie",
         description: "Sell-in en sell-out defaults/overrides voor het doeljaar",
@@ -1645,6 +1869,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                     ? copyVasteKosten
                     : step.id === "verpakking"
                       ? copyVerpakkingsonderdelen
+                      : step.id === "kostprijs"
+                        ? true
                       : step.id === "verkoopstrategie"
                         ? copyVerkoopstrategie
                         : true;
@@ -1671,6 +1897,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 ? copyVasteKosten
                 : nextStep.id === "verpakking"
                   ? copyVerpakkingsonderdelen
+                  : nextStep.id === "kostprijs"
+                    ? true
                   : nextStep.id === "verkoopstrategie"
                     ? copyVerkoopstrategie
                     : true;
@@ -2465,6 +2693,89 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
           {activeStep === 7 ? (
             <div>
+              <div className="module-card compact-card" style={{ marginBottom: 14 }}>
+                <div className="module-card-title">Kostprijs {targetYear}</div>
+                <div className="module-card-text">
+                  Read-only opbouw per bier en verpakkingseenheid op basis van jouw doeljaar-invoer en inkoopscenario.
+                </div>
+              </div>
+
+              {(
+                [
+                  ["Basisproducten", kostprijsTargetRows.basisRows],
+                  ["Samengestelde producten", kostprijsTargetRows.samengRows]
+                ] as [string, KostprijsPreviewRow[]][]
+              ).map(([label, records]) => (
+                <div key={label} className="module-card compact-card" style={{ marginBottom: 14 }}>
+                  <div className="module-card-title">{label}</div>
+                  <div className="data-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Biernaam</th>
+                          <th>Soort</th>
+                          <th>Verpakkingseenheid</th>
+                          <th>Inkoop/Ingrediënten</th>
+                          <th>Verpakkingskosten</th>
+                          <th>Indirecte/Directe kosten</th>
+                          <th>Accijns</th>
+                          <th>Kostprijs</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {records.length === 0 ? (
+                          <tr>
+                            <td className="dataset-empty" colSpan={8}>
+                              Geen regels beschikbaar (controleer of er actieve kostprijzen zijn voor {sourceYear}).
+                            </td>
+                          </tr>
+                        ) : null}
+                        {records.map((row, index) => (
+                          <tr key={`${row.biernaam}::${row.verpakkingseenheid}::${index}`}>
+                            <td>{row.biernaam}</td>
+                            <td>{row.soort}</td>
+                            <td>{row.verpakkingseenheid}</td>
+                            <td>{formatEur(row.primaire_kosten)}</td>
+                            <td>{formatEur(row.verpakkingskosten)}</td>
+                            <td>{formatEur(row.vaste_kosten)}</td>
+                            <td>{formatEur(row.accijns)}</td>
+                            <td>{formatEur(row.kostprijs)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+
+              <div className="editor-actions wizard-footer-actions">
+                <div className="editor-actions-group">
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => void navigateToStep(6)}
+                    disabled={isRunning}
+                  >
+                    Vorige
+                  </button>
+                </div>
+                <div className="editor-actions-group">
+                  {saveAndCloseButton}
+                  <button
+                    type="button"
+                    className="editor-button"
+                    onClick={() => void navigateToStep(8)}
+                    disabled={isRunning}
+                  >
+                    Volgende
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeStep === 8 ? (
+            <div>
               <div className="placeholder-block" style={{ marginBottom: 14 }}>
                 <strong>Prijsstrategie (wizard)</strong>
                 <div className="muted" style={{ marginTop: 8 }}>
@@ -2574,7 +2885,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(6)}
+                    onClick={() => void navigateToStep(7)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -2595,7 +2906,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button"
-                    onClick={() => void navigateToStep(8)}
+                    onClick={() => void navigateToStep(9)}
                     disabled={isRunning}
                   >
                     Volgende
@@ -2605,7 +2916,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
             </div>
           ) : null}
 
-          {activeStep === 8 ? (
+          {activeStep === 10 ? (
             <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
                 Hieronder zie je de indicatieve kostprijzen voor het doeljaar {targetYear}. Pas als recepten of
@@ -2659,7 +2970,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(7)}
+                    onClick={() => void navigateToStep(9)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -2675,7 +2986,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   >
                     Opslaan
                   </button>
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(9)} disabled={isRunning}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(10)} disabled={isRunning}>
                     Volgende
                   </button>
                 </div>
