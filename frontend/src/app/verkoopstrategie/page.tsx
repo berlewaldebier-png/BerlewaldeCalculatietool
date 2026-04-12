@@ -5,6 +5,7 @@ import { getBootstrap } from "@/lib/apiServer";
 export default async function VerkoopstrategiePage() {
   const bootstrap = await getBootstrap(
     [
+      "productie",
       "verkoopprijzen",
       "basisproducten",
       "samengestelde-producten",
@@ -18,6 +19,7 @@ export default async function VerkoopstrategiePage() {
   );
   const navigation = bootstrap.navigation ?? [];
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] as any) ?? {};
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
   const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
@@ -35,6 +37,7 @@ export default async function VerkoopstrategiePage() {
       <VerkoopstrategieWorkspace
         endpoint="/data/verkoopprijzen"
         verkoopprijzen={verkoopprijzen}
+        productie={productie}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         bieren={bieren}

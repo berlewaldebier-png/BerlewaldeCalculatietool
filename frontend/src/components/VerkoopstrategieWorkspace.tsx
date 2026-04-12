@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
-import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
@@ -45,6 +44,8 @@ type Props = {
   samengesteldeProducten: GenericRecord[];
   bieren: GenericRecord[];
   berekeningen: GenericRecord[];
+  /** Authoritative list of available years comes from productie. */
+  productie?: unknown;
   channels: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   /** Wizard-only: if provided in `mode="draft"`, sell-in/sell-out is computed from these preview cost rows instead of activations/snapshots. */
@@ -74,6 +75,13 @@ const DEFAULT_CHANNELS: ChannelRow[] = [
 const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const money = (v: number) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 const num = (v: number) => new Intl.NumberFormat("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
+const round2 = (v: number) => Math.round((Number(v ?? 0) + Number.EPSILON) * 100) / 100;
+const parseNumberLoose = (raw: string) => {
+  const cleaned = String(raw ?? "").trim().replace(",", ".");
+  if (!cleaned) return Number.NaN;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+};
 const calcSellPrice = (cost: number, margin: number) => (margin >= 100 ? cost : cost / Math.max(0.0001, 1 - margin / 100));
 const calcMarginPctFromSellInPrice = (cost: number, sellInPrice: number) => {
   const c = Number(cost ?? 0);
@@ -238,6 +246,7 @@ export function VerkoopstrategieWorkspace({
   samengesteldeProducten,
   bieren,
   berekeningen,
+  productie,
   channels,
   kostprijsproductactiveringen,
   draftKostprijsPreviewRows,
@@ -327,16 +336,32 @@ export function VerkoopstrategieWorkspace({
     setRows(verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
   }, [mode, verkoopStrategyRows, channelCodes]);
 
+  const productieYears = useMemo(() => {
+    const out: number[] = [];
+    if (!productie) return out;
+    if (Array.isArray(productie)) {
+      productie.forEach((row) => {
+        const year = Number((row as any)?.jaar ?? 0);
+        if (Number.isFinite(year) && year > 0) out.push(year);
+      });
+      return Array.from(new Set(out)).sort((a, b) => a - b);
+    }
+    if (typeof productie === "object") {
+      Object.keys(productie as Record<string, unknown>).forEach((key) => {
+        const year = Number(key);
+        if (Number.isFinite(year) && year > 0) out.push(year);
+      });
+      return Array.from(new Set(out)).sort((a, b) => a - b);
+    }
+    return out;
+  }, [productie]);
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
   }, []);
-  // Legacy view kept behind a feature flag while we migrate to the new "Prijsinstellingen" UI.
-  // This avoids a giant diff and keeps TypeScript happy for the (disabled) legacy JSX below.
-  const [activeTab, setActiveTab] = useState<"kanalen" | "sell-in" | "sell-out" | "bieren">("sell-in");
-  const [activeView, setActiveView] = useState<"prijzen" | "kanalen">("prijzen");
   const [selectedChannelCode, setSelectedChannelCode] = useState<string>(() => {
     const first = (Array.isArray(channels) ? channels : []).find((row) => Boolean((row as any)?.actief));
     return String((first as any)?.code ?? "horeca");
@@ -351,19 +376,16 @@ export function VerkoopstrategieWorkspace({
       setSelectedChannelCode(activeChannels[0].code);
     }
   }, [activeChannels, selectedChannelCode]);
-
-  useEffect(() => {
-    if (mode !== "draft") return;
-    if (activeView !== "kanalen") return;
-    setActiveView("prijzen");
-  }, [activeView, mode]);
-  const computedDefaultYear = Math.max(
-    new Date().getFullYear(),
-    ...verkoopprijzen.map((row) => Number(row.jaar ?? 0)),
-    ...berekeningen
-      .map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
-      .filter((year) => Number.isFinite(year))
-  );
+  const computedDefaultYear = useMemo(() => {
+    if (productieYears.length > 0) return Math.max(...productieYears);
+    return Math.max(
+      new Date().getFullYear(),
+      ...verkoopprijzen.map((row) => Number(row.jaar ?? 0)),
+      ...berekeningen
+        .map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
+        .filter((year) => Number.isFinite(year))
+    );
+  }, [berekeningen, productieYears, verkoopprijzen]);
   const resolvedInitialYear =
     typeof initialYear === "number" && Number.isFinite(initialYear) ? initialYear : computedDefaultYear;
   const [selectedYear, setSelectedYear] = useState<number>(resolvedInitialYear);
@@ -373,8 +395,31 @@ export function VerkoopstrategieWorkspace({
   }, [rows, effectiveSelectedYear]);
 
   const selectedChannel = useMemo(() => {
-    return activeChannels.find((channel) => channel.code === selectedChannelCode) ?? activeChannels[0] ?? null;
+    if (!selectedChannelCode) return null;
+    return activeChannels.find((channel) => channel.code === selectedChannelCode) ?? null;
   }, [activeChannels, selectedChannelCode]);
+
+  useEffect(() => {
+    if (lockYear) return;
+    if (productieYears.length === 0) return;
+    if (productieYears.includes(selectedYear)) return;
+    setSelectedYear(Math.max(...productieYears));
+  }, [lockYear, productieYears, selectedYear]);
+
+  // Keep raw opslag inputs stable (avoid 50% => 49.99% drift from derived margin).
+  const [opslagDraft, setOpslagDraft] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setOpslagDraft({});
+  }, [effectiveSelectedYear, selectedChannelCode, sellFilter]);
+  const getDraft = (key: string) => opslagDraft[key];
+  const setDraft = (key: string, value: string) => setOpslagDraft((current) => ({ ...current, [key]: value }));
+  const clearDraft = (key: string) =>
+    setOpslagDraft((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
 
   // Ensure there is exactly one year-defaults record for the selected year.
   useEffect(() => {
@@ -1036,6 +1081,26 @@ export function VerkoopstrategieWorkspace({
     exposeSave(() => exposed);
   }, [exposeSave]);
 
+  // Current UX: the accordion-style "Prijsinstellingen" UI is the only supported UI.
+  const useAccordion = true;
+  // Legacy tabs UI is intentionally inactive; keep a value that renders nothing.
+  const activeTab: string = "";
+
+  const yearOptions = useMemo(() => {
+    if (productieYears.length > 0) {
+      return [...productieYears].sort((a, b) => b - a);
+    }
+    return Array.from(
+      new Set([
+        effectiveSelectedYear,
+        ...rows.map((row) => row.jaar),
+        ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
+      ])
+    )
+      .filter((year) => Number.isFinite(year) && year > 0)
+      .sort((a, b) => b - a);
+  }, [berekeningen, effectiveSelectedYear, productieYears, rows]);
+
   return (
     <section className="module-card">
       <div className="module-card-header">
@@ -1043,39 +1108,7 @@ export function VerkoopstrategieWorkspace({
         <div className="module-card-text">Kanaaldefaults vormen de basis. Daar bovenop kun je per product of per bier/product afwijken.</div>
       </div>
 
-      {mode !== "draft" ? (
-        <div className="tab-strip" style={{ marginBottom: "1rem" }}>
-          <button type="button" className={`tab-button ${activeView === "prijzen" ? "active" : ""}`} onClick={() => setActiveView("prijzen")}>Prijsinstellingen</button>
-          <button type="button" className={`tab-button ${activeView === "kanalen" ? "active" : ""}`} onClick={() => setActiveView("kanalen")}>Kanalen</button>
-        </div>
-      ) : null}
-
-      {activeView === "kanalen" ? (
-        mode === "draft" ? (
-          <div className="placeholder-block">
-            <strong>Kanalen</strong>
-            <div className="muted" style={{ marginTop: 8 }}>
-              Kanaal-masterdata (zoals actief/volgorde) beheer je buiten deze wizard. Default marges en factoren zijn per
-              jaar en worden opgeslagen in <code>jaarstrategie</code> (tab Sell-in/Sell-out).
-            </div>
-          </div>
-        ) : (
-          <DatasetTableEditor
-            endpoint="/data/dataset/channels"
-            initialRows={normalizedChannels}
-            addRowTemplate={{ id: "", code: "", naam: "", actief: true, volgorde: 999, default_marge_pct: 50, default_factor: 3 }}
-            columns={[
-              { key: "naam", label: "Kanaal", width: "220px" },
-              { key: "code", label: "Code", width: "140px" },
-              { key: "actief", label: "Actief", type: "checkbox", width: "110px" },
-              { key: "volgorde", label: "Volgorde", type: "number", width: "120px" }
-            ]}
-            title="Kanalen"
-            description="Kanaal-masterdata. Default marges en factoren zijn per jaar en worden beheerd via jaarstrategie."
-          />
-        )
-      ) : (
-        <>
+      <>
           <div className="editor-toolbar">
             <div className="editor-toolbar-meta">
               <span className="editor-pill">{productSources.length} producten</span>
@@ -1093,20 +1126,11 @@ export function VerkoopstrategieWorkspace({
                     setSelectedYear(Number(event.target.value));
                   }}
                 >
-                  {Array.from(
-                    new Set([
-                      effectiveSelectedYear,
-                      ...rows.map((row) => row.jaar),
-                      ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
-                    ])
-                  )
-                    .filter((year) => Number.isFinite(year) && year > 0)
-                    .sort((a, b) => b - a)
-                    .map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
+                  {yearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="nested-field">
@@ -1122,330 +1146,344 @@ export function VerkoopstrategieWorkspace({
             </div>
           </div>
 
-          <div className="stack" style={{ gap: "1rem" }}>
+          {useAccordion ? (
             <div className="module-card compact-card">
               <div className="module-card-header" style={{ marginBottom: "0.7rem" }}>
                 <div className="module-card-title">Prijsinstellingen</div>
                 <div className="module-card-text">Pas prijsinstellingen aan per kanaal, producttype en bier.</div>
               </div>
+              <div className="editor-actions" style={{ marginBottom: "0.75rem" }}>
+                <div className="editor-actions-group">
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => setSelectedChannelCode("")}
+                    disabled={!selectedChannelCode}
+                  >
+                    Alles inklappen
+                  </button>
+                </div>
+              </div>
               <div className="stack" style={{ gap: "0.75rem" }}>
                 {activeChannels.map((channel) => {
-                  const isActive = selectedChannel?.code === channel.code;
+                  const isActive = selectedChannelCode === channel.code;
                   const opslag = calcOpslagPctFromMarginPct(channelYearDefaults[channel.code]?.margin ?? 0);
+                  const opslagKey = `year:${effectiveSelectedYear}:channel:${channel.code}:defaults`;
+                  const opslagDraftValue = getDraft(opslagKey);
                   return (
-                    <button
-                      key={channel.code}
-                      type="button"
-                      className={`editor-button ${isActive ? "" : "editor-button-secondary"}`}
-                      style={{ justifyContent: "space-between", gap: "0.75rem", padding: "0.9rem 1rem" }}
-                      onClick={() => setSelectedChannelCode(channel.code)}
-                    >
-                      <span style={{ fontWeight: 750 }}>{channel.naam}</span>
-                      <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
-                        <span className="muted">Standaard:</span>
-                        <span className="muted">+</span>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          step="any"
-                          value={String(Math.round(opslag * 100) / 100)}
-                          onChange={(event) => {
-                            const nextOpslag = event.target.value === "" ? 0 : Number(event.target.value);
-                            const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
-                            updateYearSellInPrice(channel.code, "");
-                            updateYearMargin(channel.code, Math.round(nextMargin * 100) / 100);
-                          }}
-                          style={{ width: 96 }}
-                        />
-                        <span className="muted">%</span>
-                      </span>
-                    </button>
+                    <div key={channel.code} className="module-card compact-card" style={{ padding: 0 }}>
+                      <button
+                        type="button"
+                        className="editor-button editor-button-secondary"
+                        style={{
+                          justifyContent: "space-between",
+                          gap: "0.75rem",
+                          padding: "0.9rem 1rem",
+                          width: "100%",
+                          borderRadius: 0,
+                          borderColor: isActive ? "#C6D5FF" : undefined,
+                          background: isActive ? "#F3F7FF" : undefined
+                        }}
+                        onClick={() => setSelectedChannelCode((current) => (current === channel.code ? "" : channel.code))}
+                      >
+                        <span style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontWeight: 750 }}>
+                          <span className="muted" style={{ fontSize: "1rem" }}>{isActive ? "v" : ">"}</span>
+                          {channel.naam}
+                        </span>
+                        <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
+                          <span className="muted">Standaard:</span>
+                          <span className="muted">+</span>
+                          <input
+                            className="dataset-input"
+                            type="number"
+                            step="any"
+                            value={opslagDraftValue ?? String(round2(opslag))}
+                            onChange={(event) => {
+                              const raw = event.target.value;
+                              setDraft(opslagKey, raw);
+                              const parsed = parseNumberLoose(raw);
+                              if (!Number.isFinite(parsed)) return;
+                              const nextMargin = calcMarginPctFromOpslagPct(parsed);
+                              updateYearSellInPrice(channel.code, "");
+                              updateYearMargin(channel.code, round2(nextMargin));
+                            }}
+                            onBlur={(event) => {
+                              const raw = event.target.value;
+                              const parsed = parseNumberLoose(raw);
+                              if (!Number.isFinite(parsed)) {
+                                clearDraft(opslagKey);
+                                return;
+                              }
+                              setDraft(opslagKey, String(parsed));
+                            }}
+                            style={{ width: 96 }}
+                          />
+                          <span className="muted">%</span>
+                        </span>
+                      </button>
+
+                      {isActive ? (
+                        <div style={{ padding: "0.9rem 1rem", borderTop: "1px solid #E5EAF5" }}>
+                          <div className="module-card-text" style={{ marginBottom: "0.8rem" }}>
+                            Vul <strong>opslag</strong> in om een verkoopprijs te laten berekenen. Je kunt ook de verkoopprijs invullen (psychologische prijs); opslag en marge worden dan afgeleid.
+                          </div>
+
+                          <details open className="module-card compact-card" style={{ marginBottom: "0.9rem" }}>
+                            <summary className="module-card-title" style={{ cursor: "pointer" }}>Producttypes</summary>
+                            <div className="module-card-text" style={{ marginTop: "0.35rem", marginBottom: "0.8rem" }}>
+                              Producttypes zijn generiek. We tonen een voorbeeld-kostprijs van EUR 1,00 om opslag en marge te visualiseren.
+                            </div>
+                            {groupedProductOverrideRows.length === 0 ? (
+                              <div className="dataset-empty">Geen producttypes gevonden.</div>
+                            ) : (
+                              groupedProductOverrideRows.map((group) => (
+                                <details key={group.key} open style={{ marginBottom: "0.75rem" }}>
+                                  <summary className="muted" style={{ cursor: "pointer" }}>
+                                    {group.key} ({group.rows.length})
+                                  </summary>
+                                  <div className="data-table" style={{ marginTop: "0.6rem" }}>
+                                    <table>
+                                      <thead>
+                                        <tr>
+                                          <th>Product</th>
+                                          <th>Opslag</th>
+                                          <th>Marge</th>
+                                          <th />
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {group.rows.map((row) => {
+                                          const code = selectedChannel?.code ?? "";
+                                          const effectiveMargin = code ? Number(row.activeMargins[code] ?? 0) : 0;
+                                          const derivedMargin = effectiveMargin;
+                                          const derivedOpslag = calcOpslagPctFromMarginPct(effectiveMargin);
+                                          const opslagValue =
+                                            !code ? "" :
+                                            row.marginOverrides[code] === "" && row.sellInPriceOverrides[code] === "" ? "" :
+                                            String(round2(derivedOpslag));
+                                          const hasOverride = Boolean(code) && (row.marginOverrides[code] !== "" || row.sellInPriceOverrides[code] !== "");
+                                          const opslagKey = code ? `year:${effectiveSelectedYear}:channel:${code}:product:${row.productId}:opslag` : "";
+                                          const opslagDraftValue = opslagKey ? getDraft(opslagKey) : undefined;
+                                          return (
+                                            <tr key={row.productId}>
+                                              <td>
+                                                <div style={{ fontWeight: 650 }}>{row.product}</div>
+                                                {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                                              </td>
+                                              <td>
+                                                <div className="stack" style={{ gap: "0.35rem" }}>
+                                                  <input
+                                                    className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                                    type="number"
+                                                    step="any"
+                                                    placeholder={code ? String(round2(calcOpslagPctFromMarginPct(channelYearDefaults[code]?.margin ?? 0))) : ""}
+                                                    value={opslagDraftValue ?? opslagValue}
+                                                    readOnly={row.isReadOnly}
+                                                    onChange={(event) => {
+                                                      if (!code) return;
+                                                      const raw = event.target.value;
+                                                      if (opslagKey) setDraft(opslagKey, raw);
+                                                      const parsed = parseNumberLoose(raw);
+                                                      const nextOpslag = raw === "" ? "" : parsed;
+                                                      if (nextOpslag === "") {
+                                                        updateProductSellInPrice(row.productId, code, "");
+                                                        updateProductMargin(row.productId, code, "");
+                                                        clearDraft(opslagKey);
+                                                        return;
+                                                      }
+                                                      if (!Number.isFinite(nextOpslag)) return;
+                                                      const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
+                                                      updateProductSellInPrice(row.productId, code, "");
+                                                      updateProductMargin(row.productId, code, round2(nextMargin));
+                                                    }}
+                                                    onBlur={(event) => {
+                                                      if (!opslagKey) return;
+                                                      const raw = event.target.value;
+                                                      const parsed = parseNumberLoose(raw);
+                                                      if (!Number.isFinite(parsed)) {
+                                                        clearDraft(opslagKey);
+                                                        return;
+                                                      }
+                                                      setDraft(opslagKey, String(parsed));
+                                                    }}
+                                                  />
+                                                  {!hasOverride ? <div className="muted">Erft standaard</div> : null}
+                                                </div>
+                                              </td>
+                                              <td>{num(derivedMargin)}%</td>
+                                              <td>
+                                                {hasOverride && !row.isReadOnly ? (
+                                                  <button
+                                                    type="button"
+                                                    className="editor-button editor-button-secondary"
+                                                    onClick={() => {
+                                                      if (!code) return;
+                                                      updateProductSellInPrice(row.productId, code, "");
+                                                      updateProductMargin(row.productId, code, "");
+                                                    }}
+                                                  >
+                                                    Reset
+                                                  </button>
+                                                ) : null}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </details>
+                              ))
+                            )}
+                          </details>
+
+                          <details open className="module-card compact-card">
+                            <summary className="module-card-title" style={{ cursor: "pointer" }}>Bieren</summary>
+                            {groupedBeerRows.length === 0 ? (
+                              <div className="dataset-empty">Nog geen actieve kostprijsversies gevonden voor {effectiveSelectedYear}.</div>
+                            ) : (
+                              groupedBeerRows.map((beer) => (
+                                <details key={beer.biernaam} open style={{ marginBottom: "0.75rem" }}>
+                                  <summary style={{ cursor: "pointer", fontWeight: 650 }}>
+                                    {beer.biernaam} ({beer.rows.length})
+                                  </summary>
+                                  <div className="data-table" style={{ marginTop: "0.6rem" }}>
+                                    <table>
+                                      <thead>
+                                        <tr>
+                                          <th>Product</th>
+                                          <th>Kostprijs</th>
+                                          <th>Opslag</th>
+                                          <th>Marge</th>
+                                          <th>Verkoopprijs</th>
+                                          <th />
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {beer.rows.map((row) => {
+                                          const code = selectedChannel?.code ?? "";
+                                          const explicitPrice = code && row.sellInPriceOverrides[code] !== "" ? Number(row.sellInPriceOverrides[code]) : Number.NaN;
+                                          const effectiveMargin = code ? Number(row.activeMargins[code] ?? 0) : 0;
+                                          const computedSellIn = Number.isFinite(explicitPrice) ? explicitPrice : calcSellPrice(row.kostprijs, effectiveMargin);
+                                          const derivedMargin = calcMarginPctFromSellInPrice(row.kostprijs, computedSellIn);
+                                          const derivedOpslag = calcOpslagPctFromSellInPrice(row.kostprijs, computedSellIn);
+                                          const opslagValue =
+                                            !code ? "" :
+                                            row.marginOverrides[code] === "" && row.sellInPriceOverrides[code] === "" ? "" :
+                                            String(round2(derivedOpslag));
+                                          const priceValue = !code || row.sellInPriceOverrides[code] === "" ? "" : String(row.sellInPriceOverrides[code]);
+                                          const hasOverride = Boolean(code) && (row.marginOverrides[code] !== "" || row.sellInPriceOverrides[code] !== "");
+                                          const placeholderOpslag = code ? calcOpslagPctFromMarginPct(row.productMargins[code] ?? channelYearDefaults[code]?.margin ?? 0) : 0;
+                                          const opslagKey = code ? `year:${effectiveSelectedYear}:channel:${code}:beer:${row.bierId}:product:${row.productId}:opslag` : "";
+                                          const opslagDraftValue = opslagKey ? getDraft(opslagKey) : undefined;
+                                          return (
+                                            <tr key={`${row.bierId}::${row.productId}`}>
+                                              <td>
+                                                <div style={{ fontWeight: 650 }}>{row.product}</div>
+                                                {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                                              </td>
+                                              <td>{money(row.kostprijs)}</td>
+                                              <td>
+                                                <div className="stack" style={{ gap: "0.35rem" }}>
+                                                  <input
+                                                    className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                                    type="number"
+                                                    step="any"
+                                                    placeholder={String(round2(placeholderOpslag))}
+                                                    value={opslagDraftValue ?? opslagValue}
+                                                    readOnly={row.isReadOnly}
+                                                    onChange={(event) => {
+                                                      if (!code) return;
+                                                      const raw = event.target.value;
+                                                      if (opslagKey) setDraft(opslagKey, raw);
+                                                      const parsed = parseNumberLoose(raw);
+                                                      const nextOpslag = raw === "" ? "" : parsed;
+                                                      if (nextOpslag === "") {
+                                                        updateBeerSellInPrice(row, code, "");
+                                                        updateBeerMargin(row, code, "");
+                                                        clearDraft(opslagKey);
+                                                        return;
+                                                      }
+                                                      if (!Number.isFinite(nextOpslag)) return;
+                                                      const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
+                                                      updateBeerSellInPrice(row, code, "");
+                                                      updateBeerMargin(row, code, round2(nextMargin));
+                                                    }}
+                                                    onBlur={(event) => {
+                                                      if (!opslagKey) return;
+                                                      const raw = event.target.value;
+                                                      const parsed = parseNumberLoose(raw);
+                                                      if (!Number.isFinite(parsed)) {
+                                                        clearDraft(opslagKey);
+                                                        return;
+                                                      }
+                                                      setDraft(opslagKey, String(parsed));
+                                                    }}
+                                                  />
+                                                  {!hasOverride ? <div className="muted">Erft standaard</div> : null}
+                                                </div>
+                                              </td>
+                                              <td>{num(derivedMargin)}%</td>
+                                              <td>
+                                                <input
+                                                  className={`${inputClass(priceValue !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                                  type="number"
+                                                  step="any"
+                                                  placeholder={String(Math.round(computedSellIn * 100) / 100)}
+                                                  value={priceValue}
+                                                  readOnly={row.isReadOnly}
+                                                  onChange={(event) => {
+                                                    if (!code) return;
+                                                    const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
+                                                    if (nextPrice === "") {
+                                                      updateBeerSellInPrice(row, code, "");
+                                                      return;
+                                                    }
+                                                    const nextMargin = calcMarginPctFromSellInPrice(row.kostprijs, nextPrice);
+                                                    updateBeerSellInPrice(row, code, Math.round(nextPrice * 100) / 100);
+                                                    updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
+                                                  }}
+                                                />
+                                              </td>
+                                              <td>
+                                                {hasOverride && !row.isReadOnly ? (
+                                                  <button
+                                                    type="button"
+                                                    className="editor-button editor-button-secondary"
+                                                    onClick={() => {
+                                                      if (!code) return;
+                                                      updateBeerSellInPrice(row, code, "");
+                                                      updateBeerMargin(row, code, "");
+                                                    }}
+                                                  >
+                                                    Reset
+                                                  </button>
+                                                ) : null}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </details>
+                              ))
+                            )}
+                          </details>
+                        </div>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>
             </div>
-
-            <div className="stack" style={{ gap: "1rem" }}>
-              <div className="module-card compact-card">
-                <div className="module-card-header">
-                  <div className="module-card-title">{selectedChannel?.naam ?? "Kanaal"}</div>
-                  <div className="module-card-text">
-                    Vul <strong>opslag</strong> in om een verkoopprijs te laten berekenen. Je kunt ook de verkoopprijs invullen (psychologische prijs); opslag en marge worden dan afgeleid.
-                  </div>
-                </div>
-
-                <details open className="module-card compact-card" style={{ margin: "0.9rem" }}>
-                  <summary className="module-card-title" style={{ cursor: "pointer" }}>Producttypes</summary>
-                  <div className="module-card-text" style={{ marginTop: "0.35rem", marginBottom: "0.8rem" }}>
-                    Producttypes zijn generiek. We tonen een voorbeeld-kostprijs van € 1,00 om opslag en marge te visualiseren.
-                  </div>
-                  {groupedProductOverrideRows.length === 0 ? (
-                    <div className="dataset-empty">Geen producttypes gevonden.</div>
-                  ) : (
-                    groupedProductOverrideRows.map((group) => (
-                      <details key={group.key} open style={{ marginBottom: "0.75rem" }}>
-                        <summary className="muted" style={{ cursor: "pointer" }}>
-                          {group.key} ({group.rows.length})
-                        </summary>
-                        <div className="data-table" style={{ marginTop: "0.6rem" }}>
-                          <table>
-                            <thead>
-                              <tr>
-                                <th>Product</th>
-                                <th>Kostprijs</th>
-                                <th>Opslag</th>
-                                <th>Marge</th>
-                                <th>Verkoopprijs</th>
-                                <th />
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {group.rows.map((row) => {
-                                const code = selectedChannel?.code ?? "";
-                                const baseCost = 1;
-                                const explicitPrice = code && row.sellInPriceOverrides[code] !== "" ? Number(row.sellInPriceOverrides[code]) : Number.NaN;
-                                const effectiveMargin = code ? Number(row.activeMargins[code] ?? 0) : 0;
-                                const computedSellIn = Number.isFinite(explicitPrice) ? explicitPrice : calcSellPrice(baseCost, effectiveMargin);
-                                const derivedMargin = calcMarginPctFromSellInPrice(baseCost, computedSellIn);
-                                const derivedOpslag = calcOpslagPctFromSellInPrice(baseCost, computedSellIn);
-                                const opslagValue =
-                                  !code ? "" :
-                                  row.marginOverrides[code] === "" && row.sellInPriceOverrides[code] === "" ? "" :
-                                  String(Math.round(derivedOpslag * 100) / 100);
-                                const priceValue = !code || row.sellInPriceOverrides[code] === "" ? "" : String(row.sellInPriceOverrides[code]);
-                                const hasOverride = Boolean(code) && (row.marginOverrides[code] !== "" || row.sellInPriceOverrides[code] !== "");
-                                return (
-                                  <tr key={row.productId}>
-                                    <td>
-                                      <div style={{ fontWeight: 650 }}>{row.product}</div>
-                                      {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
-                                    </td>
-                                    <td>{money(baseCost)}</td>
-                                    <td>
-                                      <div className="stack" style={{ gap: "0.35rem" }}>
-                                        <input
-                                          className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
-                                          type="number"
-                                          step="any"
-                                          placeholder={code ? String(Math.round(calcOpslagPctFromMarginPct(channelYearDefaults[code]?.margin ?? 0) * 100) / 100) : ""}
-                                          value={opslagValue}
-                                          readOnly={row.isReadOnly}
-                                          onChange={(event) => {
-                                            if (!code) return;
-                                            const nextOpslag = event.target.value === "" ? "" : Number(event.target.value);
-                                            if (nextOpslag === "") {
-                                              updateProductSellInPrice(row.productId, code, "");
-                                              updateProductMargin(row.productId, code, "");
-                                              return;
-                                            }
-                                            const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
-                                            updateProductSellInPrice(row.productId, code, "");
-                                            updateProductMargin(row.productId, code, Math.round(nextMargin * 100) / 100);
-                                          }}
-                                        />
-                                        {!hasOverride ? <div className="muted">Erft standaard</div> : null}
-                                      </div>
-                                    </td>
-                                    <td>{num(derivedMargin)}%</td>
-                                    <td>
-                                      <input
-                                        className={`${inputClass(priceValue !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
-                                        type="number"
-                                        step="any"
-                                        placeholder={String(Math.round(computedSellIn * 100) / 100)}
-                                        value={priceValue}
-                                        readOnly={row.isReadOnly}
-                                        onChange={(event) => {
-                                          if (!code) return;
-                                          const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
-                                          if (nextPrice === "") {
-                                            updateProductSellInPrice(row.productId, code, "");
-                                            return;
-                                          }
-                                          const nextMargin = calcMarginPctFromSellInPrice(baseCost, nextPrice);
-                                          updateProductSellInPrice(row.productId, code, Math.round(nextPrice * 100) / 100);
-                                          updateProductMargin(row.productId, code, Math.round(nextMargin * 100) / 100);
-                                        }}
-                                      />
-                                    </td>
-                                    <td>
-                                      {hasOverride && !row.isReadOnly ? (
-                                        <button
-                                          type="button"
-                                          className="editor-button editor-button-secondary"
-                                          onClick={() => {
-                                            if (!code) return;
-                                            updateProductSellInPrice(row.productId, code, "");
-                                            updateProductMargin(row.productId, code, "");
-                                          }}
-                                        >
-                                          Reset
-                                        </button>
-                                      ) : null}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </details>
-                    ))
-                  )}
-                </details>
-
-                <details open className="module-card compact-card" style={{ margin: "0.9rem" }}>
-                  <summary className="module-card-title" style={{ cursor: "pointer" }}>Bieren</summary>
-                  {groupedBeerRows.length === 0 ? (
-                    <div className="dataset-empty">Nog geen actieve kostprijsversies gevonden voor {effectiveSelectedYear}.</div>
-                  ) : (
-                    groupedBeerRows.map((beer) => (
-                      <details key={beer.biernaam} open style={{ marginBottom: "0.75rem" }}>
-                        <summary style={{ cursor: "pointer", fontWeight: 650 }}>
-                          {beer.biernaam} ({beer.rows.length})
-                        </summary>
-                        <div className="data-table" style={{ marginTop: "0.6rem" }}>
-                          <table>
-                            <thead>
-                              <tr>
-                                <th>Product</th>
-                                <th>Kostprijs</th>
-                                <th>Opslag</th>
-                                <th>Marge</th>
-                                <th>Verkoopprijs</th>
-                                <th />
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {beer.rows.map((row) => {
-                                const code = selectedChannel?.code ?? "";
-                                const explicitPrice = code && row.sellInPriceOverrides[code] !== "" ? Number(row.sellInPriceOverrides[code]) : Number.NaN;
-                                const effectiveMargin = code ? Number(row.activeMargins[code] ?? 0) : 0;
-                                const computedSellIn = Number.isFinite(explicitPrice) ? explicitPrice : calcSellPrice(row.kostprijs, effectiveMargin);
-                                const derivedMargin = calcMarginPctFromSellInPrice(row.kostprijs, computedSellIn);
-                                const derivedOpslag = calcOpslagPctFromSellInPrice(row.kostprijs, computedSellIn);
-                                const opslagValue =
-                                  !code ? "" :
-                                  row.marginOverrides[code] === "" && row.sellInPriceOverrides[code] === "" ? "" :
-                                  String(Math.round(derivedOpslag * 100) / 100);
-                                const priceValue = !code || row.sellInPriceOverrides[code] === "" ? "" : String(row.sellInPriceOverrides[code]);
-                                const hasOverride = Boolean(code) && (row.marginOverrides[code] !== "" || row.sellInPriceOverrides[code] !== "");
-                                const placeholderOpslag = code ? calcOpslagPctFromMarginPct(row.productMargins[code] ?? channelYearDefaults[code]?.margin ?? 0) : 0;
-                                return (
-                                  <tr key={`${row.bierId}::${row.productId}`}>
-                                    <td>
-                                      <div style={{ fontWeight: 650 }}>{row.product}</div>
-                                      {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
-                                    </td>
-                                    <td>{money(row.kostprijs)}</td>
-                                    <td>
-                                      <div className="stack" style={{ gap: "0.35rem" }}>
-                                        <input
-                                          className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
-                                          type="number"
-                                          step="any"
-                                          placeholder={String(Math.round(placeholderOpslag * 100) / 100)}
-                                          value={opslagValue}
-                                          readOnly={row.isReadOnly}
-                                          onChange={(event) => {
-                                            if (!code) return;
-                                            const nextOpslag = event.target.value === "" ? "" : Number(event.target.value);
-                                            if (nextOpslag === "") {
-                                              updateBeerSellInPrice(row, code, "");
-                                              updateBeerMargin(row, code, "");
-                                              return;
-                                            }
-                                            const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
-                                            updateBeerSellInPrice(row, code, "");
-                                            updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
-                                          }}
-                                        />
-                                        {!hasOverride ? <div className="muted">Erft standaard</div> : null}
-                                      </div>
-                                    </td>
-                                    <td>{num(derivedMargin)}%</td>
-                                    <td>
-                                      <input
-                                        className={`${inputClass(priceValue !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
-                                        type="number"
-                                        step="any"
-                                        placeholder={String(Math.round(computedSellIn * 100) / 100)}
-                                        value={priceValue}
-                                        readOnly={row.isReadOnly}
-                                        onChange={(event) => {
-                                          if (!code) return;
-                                          const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
-                                          if (nextPrice === "") {
-                                            updateBeerSellInPrice(row, code, "");
-                                            return;
-                                          }
-                                          const nextMargin = calcMarginPctFromSellInPrice(row.kostprijs, nextPrice);
-                                          updateBeerSellInPrice(row, code, Math.round(nextPrice * 100) / 100);
-                                          updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
-                                        }}
-                                      />
-                                    </td>
-                                    <td>
-                                      {hasOverride && !row.isReadOnly ? (
-                                        <button
-                                          type="button"
-                                          className="editor-button editor-button-secondary"
-                                          onClick={() => {
-                                            if (!code) return;
-                                            updateBeerSellInPrice(row, code, "");
-                                            updateBeerMargin(row, code, "");
-                                          }}
-                                        >
-                                          Reset
-                                        </button>
-                                      ) : null}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </details>
-                    ))
-                  )}
-                </details>
-              </div>
-            </div>
-          </div>
+          ) : null}
 
           <div className="editor-actions">
             <div className="editor-actions-group" />
             <div className="editor-actions-group">
               {status ? <span className="editor-status">{status}</span> : null}
               <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>{isSaving ? "Opslaan..." : "Opslaan"}</button>
-            </div>
-          </div>
-
-          {false && (<>
-          <div className="editor-toolbar">
-            <div className="editor-toolbar-meta">
-              <span className="editor-pill">{productSources.length} producten</span>
-              <span className="muted">Actieve kanalen: {activeChannels.map((channel) => channel.naam).join(", ") || "geen"}</span>
-            </div>
-            <div className="editor-actions-group">
-              <label className="nested-field">
-                <span>Jaar</span>
-                <select
-                  className="dataset-input"
-                  value={String(effectiveSelectedYear)}
-                  disabled={Boolean(lockYear)}
-                  onChange={(event) => {
-                    if (lockYear) return;
-                    setSelectedYear(Number(event.target.value));
-                  }}
-                >
-                  {Array.from(new Set([effectiveSelectedYear, ...rows.map((row) => row.jaar), ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))]))
-                    .filter((year) => Number.isFinite(year) && year > 0)
-                    .sort((a, b) => b - a)
-                    .map((year) => <option key={year} value={year}>{year}</option>)}
-                </select>
-              </label>
             </div>
           </div>
 
@@ -1683,9 +1721,7 @@ export function VerkoopstrategieWorkspace({
               <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>{isSaving ? "Opslaan..." : "Opslaan"}</button>
             </div>
           </div>
-          </>)}
         </>
-      )}
     </section>
   );
 }

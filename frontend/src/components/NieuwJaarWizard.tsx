@@ -2832,6 +2832,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               <VerkoopstrategieWorkspace
                 endpoint="/data/verkoopprijzen"
                 verkoopprijzen={wizardVerkoopprijzen}
+                productie={currentProductie}
                 basisproducten={Array.isArray(initialBasisproducten) ? initialBasisproducten : []}
                 samengesteldeProducten={Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : []}
                 bieren={Array.isArray(initialBieren) ? initialBieren : []}
