@@ -184,18 +184,26 @@ def load_dataset(default_value: Any) -> Any:
     ) in product_rows:
         verpakking_text = str(verpakking_label or "")
         inkoop_value = float(inkoop or 0)
+        indirect_value = float(indirecte_kosten or 0)
         payload: dict[str, Any] = {
             "id": str(row_id),
             "bier_id": str(bier_id or ""),
             "product_id": str(product_id or ""),
             "product_type": str(product_type or ""),
             "verpakking": verpakking_text,
+            "verpakkingseenheid": verpakking_text,
             "verpakking_label": str(verpakking_label or ""),
             # Keep historical key used by wizard tooling (scenario defaults to this).
             "primaire_kosten": inkoop_value,
+            "variabele_kosten": inkoop_value,
             "inkoop": float(inkoop or 0),
             "verpakkingskosten": float(verpakkingskosten or 0),
-            "indirecte_kosten": float(indirecte_kosten or 0),
+            # Legacy UIs (KostprijsBeheerWorkspace) read `vaste_kosten` / `vaste_directe_kosten`.
+            # We store the year-activation fixed allocation as `indirecte_kosten` in the table,
+            # so rehydrate it into the expected legacy keys here.
+            "indirecte_kosten": indirect_value,
+            "vaste_kosten": indirect_value,
+            "vaste_directe_kosten": indirect_value,
             "accijns": float(accijns or 0),
             "kostprijs": float(kostprijs or 0),
         }
