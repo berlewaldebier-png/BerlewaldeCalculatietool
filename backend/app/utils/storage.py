@@ -1958,11 +1958,15 @@ def load_basisproducten(year: int | str | None = None) -> list[dict[str, Any]]:
         year_value = int(year)
     except (TypeError, ValueError):
         return []
-    return [
+    filtered = [
         record
         for record in normalized
         if int(record.get("jaar", 0) or 0) == year_value
     ]
+    # Basisproducten are treated as "masters" (year-independent) but legacy records still
+    # carry a `jaar`. For new years (e.g. 2026) we still want the masters to resolve so
+    # year-based price resolution (packaging component prices) works.
+    return filtered or normalized
 
 
 def save_basisproducten(data: list[dict[str, Any]]) -> bool:
@@ -2026,6 +2030,11 @@ def get_basisproduct_by_id(
     for basisproduct in load_basisproducten(year):
         if str(basisproduct.get("id")) == basisproduct_id:
             return basisproduct
+    # Fallback: masters are year-independent; year-filtered view can be empty for new years.
+    if year is not None:
+        for basisproduct in load_basisproducten(None):
+            if str(basisproduct.get("id")) == basisproduct_id:
+                return basisproduct
 
     return None
 
@@ -2215,11 +2224,13 @@ def load_samengestelde_producten(year: int | str | None = None) -> list[dict[str
         year_value = int(year)
     except (TypeError, ValueError):
         return []
-    return [
+    filtered = [
         record
         for record in normalized
         if int(record.get("jaar", 0) or 0) == year_value
     ]
+    # Samengestelde producten are also treated as masters (year-independent).
+    return filtered or normalized
 
 
 def save_samengestelde_producten(data: list[dict[str, Any]]) -> bool:
@@ -2485,6 +2496,10 @@ def get_samengesteld_product_by_id(
     for samengesteld_product in load_samengestelde_producten(year):
         if str(samengesteld_product.get("id")) == samengesteld_product_id:
             return samengesteld_product
+    if year is not None:
+        for samengesteld_product in load_samengestelde_producten(None):
+            if str(samengesteld_product.get("id")) == samengesteld_product_id:
+                return samengesteld_product
 
     return None
 

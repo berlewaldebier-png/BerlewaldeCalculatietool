@@ -1295,6 +1295,10 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
         liters, packaging_cost = _compute_target_product_components(
             product_type=product_type, product_id=product_id, target_year=target_year
         )
+        # For inkoop cost versions we treat packaging as included in the purchase price.
+        # The legacy snapshots and the UI both expect verpakkingskosten = 0.0 for inkoop rows.
+        if soort == "inkoop":
+            packaging_cost = 0.0
         if soort == "inkoop":
             vaste_kosten_per_liter = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
         else:
@@ -1428,6 +1432,8 @@ def activate_kostprijzen_for_year(
             liters, packaging_cost = _compute_target_product_components(
                 product_type=product_type, product_id=product_id, target_year=target_year
             )
+            if soort == "inkoop":
+                packaging_cost = 0.0
             if soort == "inkoop":
                 vaste_kosten_per_liter = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
             else:
