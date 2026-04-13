@@ -243,11 +243,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                 existing = int((count_row[0] if count_row else 0) or 0)
                 if existing > 0:
                     return True
-            else:
-                cur.execute("DELETE FROM cost_versions")
-                cur.execute("DELETE FROM cost_version_product_rows")
             if records:
                 params: list[tuple[Any, ...]] = []
+                years_in_payload: set[int] = set()
+                version_ids_by_year: dict[int, set[str]] = {}
                 for row in records:
                     record_id = str(row.get("id", "") or "").strip()
                     if not record_id:
@@ -258,6 +257,8 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         jaar = int(row.get("jaar", 0) or 0)
                     except (TypeError, ValueError):
                         jaar = 0
+                    years_in_payload.add(jaar)
+                    version_ids_by_year.setdefault(jaar, set()).add(record_id)
                     try:
                         versie_nummer = int(row.get("versie_nummer", 0) or 0)
                     except (TypeError, ValueError):
@@ -279,6 +280,20 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                             now,
                         )
                     )
+
+                # Replace-by-scope (overwrite): only delete stale versions for the years present in this payload.
+                # This prevents wiping other years when saving a single year from the UI.
+                if overwrite:
+                    for jaar in sorted(years_in_payload):
+                        ids = sorted(version_ids_by_year.get(jaar, set()))
+                        if not ids:
+                            cur.execute("DELETE FROM cost_versions WHERE jaar = %s", (jaar,))
+                            continue
+                        placeholders = ", ".join(["%s"] * len(ids))
+                        cur.execute(
+                            f"DELETE FROM cost_versions WHERE jaar = %s AND id NOT IN ({placeholders})",
+                            (jaar, *ids),
+                        )
                 cur.executemany(
                     """
                     INSERT INTO cost_versions
@@ -299,6 +314,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     params,
                 )
                 row_params: list[tuple[Any, ...]] = []
+                row_ids_by_version: dict[str, set[str]] = {}
                 for version in records:
                     version_id = str(version.get("id", "") or "").strip()
                     if not version_id:
@@ -317,6 +333,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         row_id = str(item.get("id", "") or "").strip() or str(
                             uuid5(NAMESPACE_URL, f"cost_version_row:{version_id}:basis:{product_id}")
                         )
+                        row_ids_by_version.setdefault(version_id, set()).add(row_id)
                         row_params.append(
                             (
                                 row_id,
@@ -344,6 +361,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         row_id = str(item.get("id", "") or "").strip() or str(
                             uuid5(NAMESPACE_URL, f"cost_version_row:{version_id}:samengesteld:{product_id}")
                         )
+                        row_ids_by_version.setdefault(version_id, set()).add(row_id)
                         row_params.append(
                             (
                                 row_id,
@@ -362,6 +380,22 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                             )
                         )
                         sort_index += 1
+
+                # Replace-by-scope for snapshot rows: per version_id, delete rows that are no longer present.
+                if overwrite:
+                    for version in records:
+                        version_id = str(version.get("id", "") or "").strip()
+                        if not version_id:
+                            continue
+                        ids = sorted(row_ids_by_version.get(version_id, set()))
+                        if not ids:
+                            cur.execute("DELETE FROM cost_version_product_rows WHERE version_id = %s", (version_id,))
+                            continue
+                        placeholders = ", ".join(["%s"] * len(ids))
+                        cur.execute(
+                            f"DELETE FROM cost_version_product_rows WHERE version_id = %s AND id NOT IN ({placeholders})",
+                            (version_id, *ids),
+                        )
 
                 if row_params:
                     cur.executemany(
@@ -387,6 +421,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         """,
                         row_params,
                     )
+            elif overwrite:
+                # Overwrite with an empty list means "clear all cost versions".
+                cur.execute("DELETE FROM cost_versions")
         if not postgres_storage.in_transaction():
             conn.commit()
 

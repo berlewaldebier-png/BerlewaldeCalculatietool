@@ -124,6 +124,8 @@ def save_grouped_by_year(payload: dict[str, Any]) -> bool:
     # Flatten rows, validate cost type up-front (avoid silent bad data).
     existing_years = set(production_storage.list_years())
     flattened: list[tuple[str, int, str, str, float, float]] = []
+    years_in_payload: set[int] = set()
+    ids_by_year: dict[int, set[str]] = {}
     for year_key, raw_rows in (payload or {}).items():
         try:
             jaar = int(year_key)
@@ -131,12 +133,15 @@ def save_grouped_by_year(payload: dict[str, Any]) -> bool:
             continue
         if jaar not in existing_years:
             raise ValueError(f"Jaar {jaar} bestaat niet in productie. Voeg eerst een productiejaar toe.")
+        years_in_payload.add(jaar)
+        ids_by_year.setdefault(jaar, set())
         if not isinstance(raw_rows, list):
             continue
         for raw in raw_rows:
             if not isinstance(raw, dict):
                 continue
             line_id = str(raw.get("id", "") or "").strip() or str(uuid4())
+            ids_by_year[jaar].add(line_id)
             omschrijving = str(raw.get("omschrijving", "") or "").strip()
             kostensoort_code = _normalize_cost_type(raw.get("kostensoort", ""))
             if not omschrijving or not kostensoort_code:
@@ -151,8 +156,18 @@ def save_grouped_by_year(payload: dict[str, Any]) -> bool:
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            # Overwrite strategy to keep dev consistent.
-            cur.execute("DELETE FROM fixed_cost_lines")
+            # Replace-by-scope: only mutate years present in the payload.
+            # This avoids wiping other years when the UI saves a single year.
+            for jaar in sorted(years_in_payload):
+                ids = sorted(ids_by_year.get(jaar, set()))
+                if not ids:
+                    cur.execute("DELETE FROM fixed_cost_lines WHERE jaar = %s", (jaar,))
+                    continue
+                placeholders = ", ".join(["%s"] * len(ids))
+                cur.execute(
+                    f"DELETE FROM fixed_cost_lines WHERE jaar = %s AND id NOT IN ({placeholders})",
+                    (jaar, *ids),
+                )
             for line_id, jaar, omschrijving, kostensoort_code, bedrag, pct in flattened:
                 cur.execute(
                     """

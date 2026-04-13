@@ -114,8 +114,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                 existing = int((count_row[0] if count_row else 0) or 0)
                 if existing > 0:
                     return True
-            else:
-                cur.execute("DELETE FROM sales_pricing_records")
+
+            years_in_payload: set[int] = set()
+            ids_by_year: dict[int, set[str]] = {}
             if records:
                 params: list[tuple[Any, ...]] = []
                 for row in records:
@@ -127,6 +128,8 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         jaar = int(row.get("jaar", 0) or 0)
                     except (TypeError, ValueError):
                         jaar = 0
+                    years_in_payload.add(jaar)
+                    ids_by_year.setdefault(jaar, set()).add(record_id)
                     bier_id = str(row.get("bier_id", "") or "")
                     product_id = str(row.get("product_id", "") or "")
                     verpakking = str(row.get("verpakking", "") or "")
@@ -142,6 +145,20 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                             now,
                         )
                     )
+
+                # Replace-by-scope (when overwriting): delete stale ids only for the years we are saving.
+                if overwrite:
+                    for jaar in sorted(years_in_payload):
+                        ids = sorted(ids_by_year.get(jaar, set()))
+                        if not ids:
+                            cur.execute("DELETE FROM sales_pricing_records WHERE jaar = %s", (jaar,))
+                            continue
+                        placeholders = ", ".join(["%s"] * len(ids))
+                        cur.execute(
+                            f"DELETE FROM sales_pricing_records WHERE jaar = %s AND id NOT IN ({placeholders})",
+                            (jaar, *ids),
+                        )
+
                 cur.executemany(
                     """
                     INSERT INTO sales_pricing_records (id, record_type, jaar, bier_id, product_id, verpakking, payload, updated_at)
@@ -158,6 +175,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     """,
                     params,
                 )
+            elif overwrite:
+                # If we overwrite with an empty list, we interpret it as "clear all verkoopprijzen".
+                cur.execute("DELETE FROM sales_pricing_records")
         if not postgres_storage.in_transaction():
             conn.commit()
 
