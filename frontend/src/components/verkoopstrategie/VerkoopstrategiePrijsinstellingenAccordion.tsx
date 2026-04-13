@@ -4,6 +4,7 @@ import {
   calcMarginPctFromOpslagPct,
   calcMarginPctFromSellInPrice,
   calcOpslagPctFromMarginPct,
+  calcOpslagPctFromSellInPrice,
   parseNumberLoose,
   round2
 } from "@/lib/verkoopstrategieMath";
