@@ -170,14 +170,9 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                               <tbody>
                                 {group.rows.map((row, idx) => {
                                   const code = channel.code;
-                                  const derivedOpslag = calcOpslagPctFromMarginPct(row.activeMargins?.[code] ?? 0);
                                   const derivedMargin = row.activeMargins?.[code] ?? 0;
-                                  const opslagValue =
-                                    !code
-                                      ? ""
-                                      : row.marginOverrides?.[code] === "" && row.sellInPriceOverrides?.[code] === ""
-                                        ? ""
-                                        : String(round2(derivedOpslag));
+                                  const derivedOpslag = calcOpslagPctFromMarginPct(derivedMargin);
+                                  const opslagValue = !code ? "" : String(round2(derivedOpslag));
                                   const hasOverride =
                                     Boolean(code) &&
                                     (row.marginOverrides?.[code] !== "" || row.sellInPriceOverrides?.[code] !== "");
@@ -287,17 +282,15 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                 {beer.rows.map((row, idx) => {
                                   const code = channel.code;
                                   const computedSellIn = row.sellInPrices?.[code] ?? 0;
-                                  const derivedOpslag = calcOpslagPctFromSellInPrice(row.kostprijs ?? 0, computedSellIn);
                                   const derivedMargin = row.activeMargins?.[code] ?? 0;
+                                  const hasPriceOverride = row.sellInPriceOverrides?.[code] !== "";
+                                  const derivedOpslag = hasPriceOverride
+                                    ? calcOpslagPctFromSellInPrice(row.kostprijs ?? 0, computedSellIn)
+                                    : calcOpslagPctFromMarginPct(derivedMargin);
                                   const hasOverride =
                                     Boolean(code) &&
                                     (row.marginOverrides?.[code] !== "" || row.sellInPriceOverrides?.[code] !== "");
-                                  const opslagValue =
-                                    !code
-                                      ? ""
-                                      : row.marginOverrides?.[code] === "" && row.sellInPriceOverrides?.[code] === ""
-                                        ? ""
-                                        : String(round2(derivedOpslag));
+                                  const opslagValue = !code ? "" : String(round2(derivedOpslag));
                                   const opslagKey3 = code
                                     ? `year:${effectiveSelectedYear}:channel:${code}:beer:${row.id}:opslag`
                                     : "";
@@ -319,8 +312,9 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                             step="any"
                                             placeholder={code ? String(round2(calcOpslagPctFromMarginPct(channelYearDefaults[code]?.margin ?? 0))) : ""}
                                             value={opslagDraftValue3 ?? opslagValue}
-                                            readOnly={row.isReadOnly}
+                                            readOnly={row.isReadOnly || hasPriceOverride}
                                             onChange={(event) => {
+                                              if (hasPriceOverride) return;
                                               if (!code) return;
                                               const raw = event.target.value;
                                               if (opslagKey3) setDraft(opslagKey3, raw);
