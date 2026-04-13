@@ -386,13 +386,9 @@ export function VerkoopstrategieWorkspace({
   }, [activeChannels]);
   const computedDefaultYear = useMemo(() => {
     if (productieYears.length > 0) return Math.max(...productieYears);
-    return Math.max(
-      new Date().getFullYear(),
-      ...verkoopprijzen.map((row) => Number(row.jaar ?? 0)),
-      ...berekeningen
-        .map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
-        .filter((year) => Number.isFinite(year))
-    );
+    // If productie has no years yet, do not guess based on other datasets.
+    // We render an explicit empty-state instead of silently selecting a future year (e.g. 2026).
+    return new Date().getFullYear();
   }, [berekeningen, productieYears, verkoopprijzen]);
   const resolvedInitialYear =
     typeof initialYear === "number" && Number.isFinite(initialYear) ? initialYear : computedDefaultYear;
@@ -1037,15 +1033,8 @@ export function VerkoopstrategieWorkspace({
     if (productieYears.length > 0) {
       return [...productieYears].sort((a, b) => b - a);
     }
-    return Array.from(
-      new Set([
-        effectiveSelectedYear,
-        ...rows.map((row) => row.jaar),
-        ...berekeningen.map((row) => Number(((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0)))
-      ])
-    )
-      .filter((year) => Number.isFinite(year) && year > 0)
-      .sort((a, b) => b - a);
+    // No productie years: hide year selection entirely (empty-state is shown).
+    return [];
   }, [berekeningen, effectiveSelectedYear, productieYears, rows]);
 
   return (
@@ -1055,6 +1044,14 @@ export function VerkoopstrategieWorkspace({
         <div className="module-card-text">Kanaaldefaults vormen de basis. Daar bovenop kun je per product of per bier/product afwijken.</div>
       </div>
 
+      {productieYears.length === 0 ? (
+        <div className="module-card compact-card" style={{ marginTop: "1rem" }}>
+          <div className="module-card-title">Nog geen productiejaar</div>
+          <div className="module-card-text">
+            Maak eerst een productiejaar aan. Zodra er een productiejaar bestaat kun je hier per jaar de verkoopprijzen instellen.
+          </div>
+        </div>
+      ) : (
       <>
           <div className="editor-toolbar">
             <div className="editor-toolbar-meta">
@@ -1133,6 +1130,7 @@ export function VerkoopstrategieWorkspace({
           </div>
 
         </>
+      )}
     </section>
   );
 }
