@@ -8,17 +8,23 @@ import {
   round2
 } from "@/lib/verkoopstrategieMath";
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
-
-type Channel = { code: string; naam: string };
+import type {
+  BeerGroup,
+  BeerViewRow,
+  ChannelLite,
+  ChannelYearDefaults,
+  ProductOverrideGroup,
+  ProductViewRow
+} from "@/components/verkoopstrategie/verkoopstrategieTypes";
 
 type Props = {
-  activeChannels: Channel[];
+  activeChannels: ChannelLite[];
   selectedChannelCode: string;
   setSelectedChannelCode: React.Dispatch<React.SetStateAction<string>>;
   effectiveSelectedYear: number;
-  channelYearDefaults: Record<string, { opslag?: number; factor?: number }>;
-  groupedProductOverrideRows: Array<{ key: string; rows: any[] }>;
-  groupedBeerRows: Array<{ biernaam: string; rows: any[] }>;
+  channelYearDefaults: ChannelYearDefaults;
+  groupedProductOverrideRows: ProductOverrideGroup[];
+  groupedBeerRows: BeerGroup[];
   getDraft: (key: string) => string | undefined;
   setDraft: (key: string, value: string) => void;
   clearDraft: (key: string) => void;
@@ -26,8 +32,8 @@ type Props = {
   updateYearMargin: (channelCode: string, value: number | "") => void; // value is opslag%
   updateProductSellInPrice: (productId: string, channelCode: string, value: number | "") => void;
   updateProductMargin: (productId: string, channelCode: string, value: number | "") => void; // value is opslag%
-  updateBeerSellInPrice: (row: any, channelCode: string, value: number | "") => void;
-  updateBeerMargin: (row: any, channelCode: string, value: number | "") => void; // value is opslag%
+  updateBeerSellInPrice: (row: BeerViewRow, channelCode: string, value: number | "") => void;
+  updateBeerMargin: (row: BeerViewRow, channelCode: string, value: number | "") => void; // value is opslag%
 };
 
 export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
@@ -170,7 +176,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {group.rows.map((row, idx) => {
+                                {group.rows.map((row: ProductViewRow, idx) => {
                                   const code = channel.code;
                                   const derivedOpslagRaw = Number(row.activeOpslags?.[code] ?? 0);
                                   const derivedOpslag = round2(derivedOpslagRaw);
@@ -287,7 +293,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {beer.rows.map((row, idx) => {
+                                {beer.rows.map((row: BeerViewRow, idx) => {
                                   const code = channel.code;
                                   const derivedOpslagRaw = Number(row.activeOpslags?.[code] ?? 0);
                                   // "Volgt"-producten mogen geen eigen prijs-override erven; ze volgen altijd de (eventueel afgeleide) marge/opslag van de "moeder".

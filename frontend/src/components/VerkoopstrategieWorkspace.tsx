@@ -10,6 +10,7 @@ import {
 } from "@/lib/verkoopstrategieMath";
 import { VerkoopstrategiePrijsinstellingenAccordion } from "@/components/verkoopstrategie/VerkoopstrategiePrijsinstellingenAccordion";
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
+import type { BeerViewRow, ProductViewRow } from "@/components/verkoopstrategie/verkoopstrategieTypes";
 
 type GenericRecord = Record<string, unknown>;
 type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number; default_factor: number };
@@ -27,23 +28,6 @@ const STRATEGY_RECORD_TYPES = new Set([
   "verkoopstrategie_product",
   "verkoopstrategie_verpakking"
 ]);
-type ProductViewRow = {
-  productId: string; productType: "basis" | "samengesteld"; product: string;
-  opslagOverrides: Record<string, number | "">; factorOverrides: Record<string, number | "">;
-  sellInPriceOverrides: Record<string, number | "">;
-  activeOpslags: Record<string, number>; activeFactors: Record<string, number>;
-  isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
-};
-type BeerViewRow = {
-  id: string; bierId: string; biernaam: string; productId: string; productType: "basis" | "samengesteld" | ""; product: string; kostprijs: number;
-  productOpslags: Record<string, number>;
-  opslagOverrides: Record<string, number | "">;
-  sellInPriceOverrides: Record<string, number | "">;
-  activeOpslags: Record<string, number>;
-  sellInPrices: Record<string, number>;
-  productFactors: Record<string, number>; factorOverrides: Record<string, number | "">; activeFactors: Record<string, number>; sellOutPrices: Record<string, number>;
-  isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
-};
 type Props = {
   endpoint: string;
   verkoopprijzen: GenericRecord[];
