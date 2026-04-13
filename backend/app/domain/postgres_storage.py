@@ -193,6 +193,10 @@ def _get_table_storage(name: str):
         from app.domain import kostprijs_scenario_inkoop_storage
 
         return kostprijs_scenario_inkoop_storage
+    if name == "tarieven-heffingen":
+        from app.domain import tarieven_heffingen_storage
+
+        return tarieven_heffingen_storage
     return None
 
 
