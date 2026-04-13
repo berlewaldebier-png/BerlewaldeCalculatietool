@@ -171,12 +171,15 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                               <tbody>
                                 {group.rows.map((row, idx) => {
                                   const code = channel.code;
-                                  const derivedMargin = row.activeMargins?.[code] ?? 0;
-                                  const derivedOpslag = calcOpslagPctFromMarginPct(derivedMargin);
-                                  const opslagValue = !code ? "" : String(round2(derivedOpslag));
+                                  const derivedMarginRaw = row.activeMargins?.[code] ?? 0;
+                                  const derivedMargin = round2(derivedMarginRaw);
+                                  const derivedOpslag = round2(calcOpslagPctFromMarginPct(derivedMarginRaw));
+                                  const opslagValue = !code ? "" : String(derivedOpslag);
                                   const hasOverride =
                                     Boolean(code) &&
-                                    (row.marginOverrides?.[code] !== "" || row.sellInPriceOverrides?.[code] !== "");
+                                    (row.marginOverrides?.[code] !== "" ||
+                                      row.sellInPriceOverrides?.[code] !== "" ||
+                                      (opslagDraftValue2 !== undefined && opslagDraftValue2 !== ""));
                                   const opslagKey2 = code
                                     ? `year:${effectiveSelectedYear}:channel:${code}:product:${row.productId}:opslag`
                                     : "";
@@ -206,7 +209,6 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                               if (nextOpslag === "") {
                                                 updateProductSellInPrice(row.productId, code, "");
                                                 updateProductMargin(row.productId, code, "");
-                                                clearDraft(opslagKey2);
                                                 return;
                                               }
                                               if (!Number.isFinite(nextOpslag)) return;
@@ -217,6 +219,10 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                             onBlur={(event) => {
                                               if (!opslagKey2) return;
                                               const raw = event.target.value;
+                                              if (raw === "") {
+                                                clearDraft(opslagKey2);
+                                                return;
+                                              }
                                               const parsed = parseNumberLoose(raw);
                                               if (!Number.isFinite(parsed)) {
                                                 clearDraft(opslagKey2);
@@ -238,6 +244,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                               if (!code) return;
                                               updateProductSellInPrice(row.productId, code, "");
                                               updateProductMargin(row.productId, code, "");
+                                              clearDraft(opslagKey2);
                                             }}
                                           >
                                             Reset
@@ -282,7 +289,8 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                               <tbody>
                                 {beer.rows.map((row, idx) => {
                                   const code = channel.code;
-                                  const derivedMargin = row.activeMargins?.[code] ?? 0;
+                                  const derivedMarginRaw = row.activeMargins?.[code] ?? 0;
+                                  const derivedMargin = round2(derivedMarginRaw);
                                   // "Volgt"-producten mogen geen eigen prijs-override erven; ze volgen altijd de (eventueel afgeleide) marge/opslag van de "moeder".
                                   const hasPriceOverride = !row.isReadOnly && row.sellInPriceOverrides?.[code] !== "";
                                   const computedSellIn = row.isReadOnly
@@ -293,7 +301,9 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                     : calcOpslagPctFromMarginPct(derivedMargin);
                                   const hasOverride =
                                     Boolean(code) &&
-                                    (row.marginOverrides?.[code] !== "" || row.sellInPriceOverrides?.[code] !== "");
+                                    (row.marginOverrides?.[code] !== "" ||
+                                      row.sellInPriceOverrides?.[code] !== "" ||
+                                      (opslagDraftValue3 !== undefined && opslagDraftValue3 !== ""));
                                   const opslagValue = !code ? "" : String(round2(derivedOpslag));
                                   const opslagKey3 = code
                                     ? `year:${effectiveSelectedYear}:channel:${code}:beer:${row.id}:opslag`
@@ -330,7 +340,6 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                               if (nextOpslag === "") {
                                                 updateBeerSellInPrice(row, code, "");
                                                 updateBeerMargin(row, code, "");
-                                                clearDraft(opslagKey3);
                                                 return;
                                               }
                                               if (!Number.isFinite(nextOpslag)) return;
@@ -341,6 +350,10 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                             onBlur={(event) => {
                                               if (!opslagKey3) return;
                                               const raw = event.target.value;
+                                              if (raw === "") {
+                                                clearDraft(opslagKey3);
+                                                return;
+                                              }
                                               const parsed = parseNumberLoose(raw);
                                               if (!Number.isFinite(parsed)) {
                                                 clearDraft(opslagKey3);
@@ -361,18 +374,18 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                           placeholder={String(Math.round(computedSellIn * 100) / 100)}
                                           value={priceValue}
                                           readOnly={row.isReadOnly}
-                                          onChange={(event) => {
-                                            if (!code) return;
-                                            const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
-                                            if (nextPrice === "") {
-                                              updateBeerSellInPrice(row, code, "");
-                                              return;
-                                            }
-                                            const nextMargin = calcMarginPctFromSellInPrice(row.kostprijs, nextPrice);
-                                            updateBeerSellInPrice(row, code, Math.round(nextPrice * 100) / 100);
-                                            updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
-                                          }}
-                                        />
+                                            onChange={(event) => {
+                                              if (!code) return;
+                                              const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
+                                              if (nextPrice === "") {
+                                                updateBeerSellInPrice(row, code, "");
+                                                return;
+                                              }
+                                              const nextMargin = calcMarginPctFromSellInPrice(row.kostprijs, nextPrice);
+                                              updateBeerSellInPrice(row, code, Math.round(nextPrice * 100) / 100);
+                                              updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
+                                            }}
+                                          />
                                       </td>
                                       <td>
                                         {hasOverride && !row.isReadOnly ? (
@@ -383,6 +396,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                               if (!code) return;
                                               updateBeerSellInPrice(row, code, "");
                                               updateBeerMargin(row, code, "");
+                                              clearDraft(opslagKey3);
                                             }}
                                           >
                                             Reset
