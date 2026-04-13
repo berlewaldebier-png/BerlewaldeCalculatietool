@@ -1423,6 +1423,8 @@ def activate_kostprijzen_for_year(
         # Build snapshot product rows.
         basisproducten_snapshot: list[dict[str, Any]] = []
         samengestelde_snapshot: list[dict[str, Any]] = []
+        # Build per-liter summary values (these drive PrijsvoorstelWizard comparisons).
+        per_liter_candidates: list[float] = []
         for r in beer_rows:
             product_id = str(r.get("product_id", "") or "").strip()
             product_type = str(r.get("product_type", "") or "").strip()
@@ -1449,6 +1451,11 @@ def activate_kostprijzen_for_year(
                 )
             )
             kostprijs = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(accijns)
+            if float(liters) > 0 and float(scenario_primary) > 0:
+                try:
+                    per_liter_candidates.append(float(scenario_primary) / float(liters))
+                except ZeroDivisionError:
+                    pass
             row_payload = {
                 "product_id": product_id,
                 "product_type": product_type,
@@ -1466,6 +1473,32 @@ def activate_kostprijzen_for_year(
             else:
                 samengestelde_snapshot.append(row_payload)
 
+        vaste_kosten_per_liter_summary = 0.0
+        if soort == "inkoop":
+            vaste_kosten_per_liter_summary = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
+        else:
+            vaste_kosten_per_liter_summary = float(bereken_directe_vaste_kosten_per_productieliter_herverdeeld(target_year) or 0.0)
+
+        # Estimate variabele kosten per liter from scenario primary costs. For inkoop this should
+        # be stable across verpakkingen (scenario_primary scales with liters).
+        variabele_kosten_per_liter_summary = float(sum(per_liter_candidates) / len(per_liter_candidates)) if per_liter_candidates else 0.0
+
+        # Accijns is linear in liters; compute per-liter by evaluating liters=1.
+        accijns_per_liter_summary = float(
+            bereken_accijns_voor_liters(
+                year=target_year,
+                liters=1.0,
+                alcoholpercentage=float(bier_alcohol),
+                tarief_accijns=bier_tarief_accijns,
+                belastingsoort=bier_belastingsoort,
+            )
+        )
+        integrale_kostprijs_per_liter_summary = (
+            float(variabele_kosten_per_liter_summary)
+            + float(vaste_kosten_per_liter_summary)
+            + float(accijns_per_liter_summary)
+        )
+
         record = normalize_berekening_record(
             {
                 "id": new_id,
@@ -1475,6 +1508,7 @@ def activate_kostprijzen_for_year(
                 "status": "definitief",
                 "calculation_type": calc_type,
                 "versie_nummer": int(next_num),
+                "kostprijs": float(integrale_kostprijs_per_liter_summary),
                 "calculation_variant": "jaarovergang",
                 "jaarovergang": {
                     "bron_berekening_id": str(source_version_id),
@@ -1487,9 +1521,9 @@ def activate_kostprijzen_for_year(
                 "updated_at": now,
                 "finalized_at": now,
                 "resultaat_snapshot": {
-                    "integrale_kostprijs_per_liter": 0.0,
-                    "variabele_kosten_per_liter": 0.0,
-                    "directe_vaste_kosten_per_liter": 0.0,
+                    "integrale_kostprijs_per_liter": float(integrale_kostprijs_per_liter_summary),
+                    "variabele_kosten_per_liter": float(variabele_kosten_per_liter_summary),
+                    "directe_vaste_kosten_per_liter": float(vaste_kosten_per_liter_summary),
                     "producten": {
                         "basisproducten": basisproducten_snapshot,
                         "samengestelde_producten": samengestelde_snapshot,
