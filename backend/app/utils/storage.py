@@ -3347,8 +3347,9 @@ def bereken_accijns_voor_liters(
 ) -> float:
     """Bereken accijns obv tarieven/heffingen van een jaar.
 
-    Model: accijns schaalt met liters * alcohol% en gebruikt tarief (hoog/laag) + verbruikersbelasting.
-    Deze sluit aan op de bestaande snapshot-data en maakt nieuw-jaar activaties reproduceerbaar.
+    Canonical model (matches frontend Kostprijsbeheer + NieuwJaarWizard):
+    - Accijns: `tarief_(hoog/laag) * (alcohol% / 100) * liters`
+    - Verbruiksbelasting: `verbruikersbelasting * (liters / 100)`
     """
     try:
         liters_value = float(liters or 0.0)
@@ -3356,16 +3357,21 @@ def bereken_accijns_voor_liters(
         liters_value = 0.0
     if liters_value <= 0:
         return 0.0
-    if str(belastingsoort or "").strip().lower() != "accijns":
-        return 0.0
 
     tarieven = get_tarieven_heffingen_for_year(year)
     if not tarieven:
         return 0.0
 
+    belasting_key = str(belastingsoort or "").strip().lower()
+    vb = float(tarieven.get("verbruikersbelasting", 0.0) or 0.0)
+    if belasting_key == "verbruiksbelasting":
+        # Stored as EUR per hectoliter; liters/100 converts to hectoliter.
+        return max(0.0, vb * (liters_value / 100.0))
+    if belasting_key != "accijns":
+        return 0.0
+
     tarief_key = "tarief_laag" if str(tarief_accijns or "").strip().lower() == "laag" else "tarief_hoog"
     tarief = float(tarieven.get(tarief_key, 0.0) or 0.0)
-    vb = float(tarieven.get("verbruikersbelasting", 0.0) or 0.0)
     try:
         alc = float(alcoholpercentage or 0.0)
     except (TypeError, ValueError):
@@ -3373,7 +3379,7 @@ def bereken_accijns_voor_liters(
     if alc <= 0:
         return 0.0
 
-    return max(0.0, (liters_value * alc * (tarief + vb)) / 420.0)
+    return max(0.0, tarief * (alc / 100.0) * liters_value)
 
 
 def bereken_directe_vaste_kosten_per_liter(year: int | str) -> float | None:
