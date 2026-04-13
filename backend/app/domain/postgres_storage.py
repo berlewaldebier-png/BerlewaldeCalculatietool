@@ -181,6 +181,14 @@ def _get_table_storage(name: str):
         from app.domain import price_quotes_storage
 
         return price_quotes_storage
+    if name == "new-year-drafts":
+        from app.domain import new_year_drafts_storage
+
+        return new_year_drafts_storage
+    if name == "kostprijs-activatie-drafts":
+        from app.domain import kostprijs_activatie_drafts_storage
+
+        return kostprijs_activatie_drafts_storage
     return None
 
 
