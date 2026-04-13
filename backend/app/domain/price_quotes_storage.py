@@ -274,11 +274,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                 existing = int((count_row[0] if count_row else 0) or 0)
                 if existing > 0:
                     return True
-            else:
-                cur.execute("DELETE FROM price_quotes")
-                cur.execute("DELETE FROM price_quote_lines")
-                cur.execute("DELETE FROM price_quote_staffels")
             if records:
+                years_in_payload: set[int] = set()
+                quote_ids_by_year: dict[int, set[str]] = {}
                 params: list[tuple[Any, ...]] = []
                 for row in records:
                     record_id = str(row.get("id", "") or "").strip()
@@ -288,6 +286,8 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         jaar = int(row.get("jaar", 0) or 0)
                     except (TypeError, ValueError):
                         jaar = 0
+                    years_in_payload.add(jaar)
+                    quote_ids_by_year.setdefault(jaar, set()).add(record_id)
                     status = str(row.get("status", "") or "").strip().lower()
                     verloopt_op = str(row.get("verloopt_op", "") or "")
                     created_at = str(row.get("created_at", "") or "")
@@ -306,6 +306,20 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                             now,
                         )
                     )
+
+                # Replace-by-scope (overwrite): only delete stale quotes for the years present in this payload.
+                # This prevents wiping other years when saving a single year from the UI.
+                if overwrite:
+                    for jaar in sorted(years_in_payload):
+                        ids = sorted(quote_ids_by_year.get(jaar, set()))
+                        if not ids:
+                            cur.execute("DELETE FROM price_quotes WHERE jaar = %s", (jaar,))
+                            continue
+                        placeholders = ", ".join(["%s"] * len(ids))
+                        cur.execute(
+                            f"DELETE FROM price_quotes WHERE jaar = %s AND id NOT IN ({placeholders})",
+                            (jaar, *ids),
+                        )
                 cur.executemany(
                     """
                     INSERT INTO price_quotes
@@ -326,6 +340,16 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                 )
                 line_params: list[tuple[Any, ...]] = []
                 staffel_params: list[tuple[Any, ...]] = []
+
+                # Replace-by-scope for quote details: per quote, clear old lines/staffels then insert the new truth.
+                # This avoids global deletes while keeping id semantics stable.
+                for row in records:
+                    quote_id = str(row.get("id", "") or "").strip()
+                    if not quote_id:
+                        continue
+                    cur.execute("DELETE FROM price_quote_lines WHERE quote_id = %s", (quote_id,))
+                    cur.execute("DELETE FROM price_quote_staffels WHERE quote_id = %s", (quote_id,))
+
                 for row in records:
                     quote_id = str(row.get("id", "") or "").strip()
                     if not quote_id:
@@ -437,6 +461,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         """,
                         staffel_params,
                     )
+            elif overwrite:
+                # Overwrite with an empty list means "clear all quotes".
+                cur.execute("DELETE FROM price_quotes")
         if not postgres_storage.in_transaction():
             conn.commit()
 

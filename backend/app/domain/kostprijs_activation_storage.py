@@ -398,10 +398,14 @@ def replace_activations(
     ctx = context or ActivationContext()
     now = _now_iso()
 
+    years_in_payload: set[int] = {int(row["jaar"]) for row in normalized_rows if int(row.get("jaar") or 0) > 0}
+
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            # Full replace to guarantee that old/legacy ids are removed.
-            cur.execute("DELETE FROM kostprijs_product_activations")
+            # Replace-by-scope: only clear years present in this payload.
+            # This avoids wiping other years when saving a single year via the UI/admin tooling.
+            for jaar in sorted(years_in_payload):
+                cur.execute("DELETE FROM kostprijs_product_activations WHERE jaar = %s", (jaar,))
 
             for row in normalized_rows:
                 bier_id = str(row["bier_id"])
