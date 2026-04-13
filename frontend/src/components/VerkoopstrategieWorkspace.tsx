@@ -12,6 +12,7 @@ import {
   parseNumberLoose,
   round2
 } from "@/lib/verkoopstrategieMath";
+import { VerkoopstrategiePrijsinstellingenAccordion } from "@/components/verkoopstrategie/VerkoopstrategiePrijsinstellingenAccordion";
 
 type GenericRecord = Record<string, unknown>;
 type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number; default_factor: number };
@@ -1118,6 +1119,26 @@ export function VerkoopstrategieWorkspace({
             </div>
           </div>
 
+          <VerkoopstrategiePrijsinstellingenAccordion
+            activeChannels={activeChannels}
+            selectedChannelCode={selectedChannelCode}
+            setSelectedChannelCode={setSelectedChannelCode}
+            effectiveSelectedYear={effectiveSelectedYear}
+            channelYearDefaults={channelYearDefaults}
+            groupedProductOverrideRows={groupedProductOverrideRows}
+            groupedBeerRows={groupedBeerRows}
+            getDraft={getDraft}
+            setDraft={setDraft}
+            clearDraft={clearDraft}
+            updateYearSellInPrice={updateYearSellInPrice}
+            updateYearMargin={updateYearMargin}
+            updateProductSellInPrice={updateProductSellInPrice}
+            updateProductMargin={updateProductMargin}
+            updateBeerSellInPrice={updateBeerSellInPrice}
+            updateBeerMargin={updateBeerMargin}
+          />
+
+          {/*
           <div className="module-card compact-card">
               <div className="module-card-header" style={{ marginBottom: "0.7rem" }}>
                 <div className="module-card-title">Prijsinstellingen</div>
@@ -1449,6 +1470,7 @@ export function VerkoopstrategieWorkspace({
               </div>
             </div>
           ) : null}
+          */}
 
           <div className="editor-actions">
             <div className="editor-actions-group" />
