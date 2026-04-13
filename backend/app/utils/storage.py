@@ -51,6 +51,19 @@ def _load_postgres_dataset(dataset_name: str) -> Any | None:
     postgres_storage = _get_postgres_storage_module()
     if postgres_storage is None or not postgres_storage.uses_postgres():
         raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+
+    # Phase G: some datasets are stored in dedicated tables but are not routed through
+    # `postgres_storage.load_dataset()` (which only knows about app_datasets + a subset of table stores).
+    # Route them explicitly here so calculation helpers see the canonical data.
+    if dataset_name == "productie":
+        from app.domain import production_storage  # type: ignore
+
+        return production_storage.load_productie()
+    if dataset_name == "vaste-kosten":
+        from app.domain import fixed_costs_storage  # type: ignore
+
+        return fixed_costs_storage.load_grouped_by_year()
+
     payload = postgres_storage.load_dataset(dataset_name, None)
     _fail_if_wrapped_payload(dataset_name, payload)
     return payload
@@ -86,6 +99,21 @@ def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
     postgres_storage = _get_postgres_storage_module()
     if postgres_storage is None or not postgres_storage.uses_postgres():
         raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+
+    # Phase G: keep table-backed datasets consistent by routing writes to their canonical stores.
+    if dataset_name == "productie":
+        from app.domain import production_storage  # type: ignore
+
+        if not isinstance(data, dict):
+            raise ValueError("Ongeldig payload voor 'productie': verwacht dict.")
+        return bool(production_storage.save_productie(data))
+    if dataset_name == "vaste-kosten":
+        from app.domain import fixed_costs_storage  # type: ignore
+
+        if not isinstance(data, dict):
+            raise ValueError("Ongeldig payload voor 'vaste-kosten': verwacht dict.")
+        return bool(fixed_costs_storage.save_grouped_by_year(data))
+
     return postgres_storage.save_dataset(dataset_name, data, overwrite=True)
 
 
