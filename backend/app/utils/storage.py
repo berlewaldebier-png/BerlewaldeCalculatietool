@@ -4212,14 +4212,6 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
     sell_in_prices_source = record.get("sell_in_prices", kanaalprijzen_source)
     if not isinstance(sell_in_prices_source, dict):
         sell_in_prices_source = {}
-    sell_out_prices_source = record.get(
-        "sell_out_advice_prices", record.get("adviesprijzen", {})
-    )
-    if not isinstance(sell_out_prices_source, dict):
-        sell_out_prices_source = {}
-    sell_out_factors_source = record.get("sell_out_factors", record.get("adviesfactoren", {}))
-    if not isinstance(sell_out_factors_source, dict):
-        sell_out_factors_source = {}
 
     kanaalmarges = _normalize_sparse_float_overrides(
         primary=sell_in_margins_source,
@@ -4237,8 +4229,6 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
             kanaalprijzen[categorie] = float(price_value)
         except (TypeError, ValueError):
             continue
-    sell_out_prices = _normalize_channel_price_map(sell_out_prices_source)
-    sell_out_factors = _normalize_channel_price_map(sell_out_factors_source)
 
     created_at = str(record.get("created_at", "") or "") or _now_iso()
     updated_at = str(record.get("updated_at", "") or "") or created_at
@@ -4263,10 +4253,6 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
         "kanaalprijzen": kanaalprijzen,
         "sell_in_margins": dict(kanaalmarges),
         "sell_in_prices": dict(kanaalprijzen),
-        "sell_out_advice_prices": sell_out_prices,
-        "sell_out_factors": sell_out_factors,
-        "adviesprijzen": dict(sell_out_prices),
-        "adviesfactoren": dict(sell_out_factors),
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -4300,14 +4286,6 @@ def normalize_verkoopstrategie_verpakking_record(record: dict[str, Any]) -> dict
     sell_in_prices_source = record.get("sell_in_prices", record.get("kanaalprijzen", {}))
     if not isinstance(sell_in_prices_source, dict):
         sell_in_prices_source = {}
-    sell_out_prices_source = record.get(
-        "sell_out_advice_prices", record.get("adviesprijzen", {})
-    )
-    if not isinstance(sell_out_prices_source, dict):
-        sell_out_prices_source = {}
-    sell_out_factors_source = record.get("sell_out_factors", record.get("adviesfactoren", {}))
-    if not isinstance(sell_out_factors_source, dict):
-        sell_out_factors_source = {}
 
     strategie_type = str(record.get("strategie_type", "") or "")
     kanaalmarges = _normalize_sparse_float_overrides(
@@ -4326,8 +4304,6 @@ def normalize_verkoopstrategie_verpakking_record(record: dict[str, Any]) -> dict
             kanaalprijzen[categorie] = float(price_value)
         except (TypeError, ValueError):
             continue
-    sell_out_prices = _normalize_channel_price_map(sell_out_prices_source)
-    sell_out_factors = _normalize_channel_price_map(sell_out_factors_source)
 
     created_at = str(record.get("created_at", "") or "") or _now_iso()
     updated_at = str(record.get("updated_at", "") or "") or created_at
@@ -4347,10 +4323,6 @@ def normalize_verkoopstrategie_verpakking_record(record: dict[str, Any]) -> dict
         "kanaalprijzen": kanaalprijzen,
         "sell_in_margins": dict(kanaalmarges),
         "sell_in_prices": dict(kanaalprijzen),
-        "sell_out_advice_prices": sell_out_prices,
-        "sell_out_factors": sell_out_factors,
-        "adviesprijzen": dict(sell_out_prices),
-        "adviesfactoren": dict(sell_out_factors),
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -5230,11 +5202,9 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
                 "included": bool(row.get("included", True)),
                 "cost_at_quote": _float_value(row.get("cost_at_quote")),
                 "sales_price_at_quote": _float_value(row.get("sales_price_at_quote")),
-                "sell_out_price_at_quote": _float_value(row.get("sell_out_price_at_quote")),
                 "revenue_at_quote": _float_value(row.get("revenue_at_quote")),
                 "margin_at_quote": _float_value(row.get("margin_at_quote")),
                 "target_margin_pct_at_quote": _float_value(row.get("target_margin_pct_at_quote")),
-                "sell_out_factor_at_quote": _float_value(row.get("sell_out_factor_at_quote")),
                 "channel_at_quote": str(row.get("channel_at_quote", "") or ""),
             }
         )
@@ -5259,11 +5229,9 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
                 "verpakking_label": str(row.get("verpakking_label", "") or ""),
                 "cost_at_quote": _float_value(row.get("cost_at_quote")),
                 "sales_price_at_quote": _float_value(row.get("sales_price_at_quote")),
-                "sell_out_price_at_quote": _float_value(row.get("sell_out_price_at_quote")),
                 "revenue_at_quote": _float_value(row.get("revenue_at_quote")),
                 "margin_at_quote": _float_value(row.get("margin_at_quote")),
                 "target_margin_pct_at_quote": _float_value(row.get("target_margin_pct_at_quote")),
-                "sell_out_factor_at_quote": _float_value(row.get("sell_out_factor_at_quote")),
                 "channel_at_quote": str(row.get("channel_at_quote", "") or ""),
             }
         )

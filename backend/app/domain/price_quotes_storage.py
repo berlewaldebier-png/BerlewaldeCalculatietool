@@ -54,16 +54,17 @@ def ensure_schema() -> None:
                         included BOOLEAN NOT NULL DEFAULT TRUE,
                         cost_at_quote NUMERIC NOT NULL DEFAULT 0,
                         sales_price_at_quote NUMERIC NOT NULL DEFAULT 0,
-                        sell_out_price_at_quote NUMERIC NOT NULL DEFAULT 0,
                         revenue_at_quote NUMERIC NOT NULL DEFAULT 0,
                         margin_at_quote NUMERIC NOT NULL DEFAULT 0,
                         target_margin_pct_at_quote NUMERIC NOT NULL DEFAULT 0,
-                        sell_out_factor_at_quote NUMERIC NOT NULL DEFAULT 0,
                         channel_at_quote TEXT NOT NULL DEFAULT '',
                         sort_index INTEGER NOT NULL DEFAULT 0
                     );
                     """
                 )
+                # Sell-out was removed; drop legacy columns if they exist (dev-only data can be discarded).
+                cur.execute("ALTER TABLE price_quote_lines DROP COLUMN IF EXISTS sell_out_price_at_quote;")
+                cur.execute("ALTER TABLE price_quote_lines DROP COLUMN IF EXISTS sell_out_factor_at_quote;")
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS ix_price_quote_lines_quote ON price_quote_lines(quote_id)"
                 )
@@ -143,8 +144,8 @@ def load_dataset(default_value: Any) -> Any:
                 SELECT
                     id, quote_id, line_kind, bier_id, kostprijsversie_id, product_id, product_type,
                     verpakking_label, liters, aantal, korting_pct, included,
-                    cost_at_quote, sales_price_at_quote, sell_out_price_at_quote, revenue_at_quote, margin_at_quote,
-                    target_margin_pct_at_quote, sell_out_factor_at_quote, channel_at_quote, sort_index
+                    cost_at_quote, sales_price_at_quote, revenue_at_quote, margin_at_quote,
+                    target_margin_pct_at_quote, channel_at_quote, sort_index
                 FROM price_quote_lines
                 ORDER BY quote_id, sort_index, id
                 """
@@ -179,11 +180,9 @@ def load_dataset(default_value: Any) -> Any:
         included,
         cost_at_quote,
         sales_price_at_quote,
-        sell_out_price_at_quote,
         revenue_at_quote,
         margin_at_quote,
         target_margin_pct_at_quote,
-        sell_out_factor_at_quote,
         channel_at_quote,
         _sort_index,
     ) in line_rows:
@@ -200,11 +199,9 @@ def load_dataset(default_value: Any) -> Any:
             "included": bool(included),
             "cost_at_quote": float(cost_at_quote or 0),
             "sales_price_at_quote": float(sales_price_at_quote or 0),
-            "sell_out_price_at_quote": float(sell_out_price_at_quote or 0),
             "revenue_at_quote": float(revenue_at_quote or 0),
             "margin_at_quote": float(margin_at_quote or 0),
             "target_margin_pct_at_quote": float(target_margin_pct_at_quote or 0),
-            "sell_out_factor_at_quote": float(sell_out_factor_at_quote or 0),
             "channel_at_quote": str(channel_at_quote or ""),
         }
         if str(line_kind or "") == "beer":
@@ -336,11 +333,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 bool(item.get("included", True)),
                                 float(item.get("cost_at_quote", 0) or 0),
                                 float(item.get("sales_price_at_quote", 0) or 0),
-                                float(item.get("sell_out_price_at_quote", 0) or 0),
                                 float(item.get("revenue_at_quote", 0) or 0),
                                 float(item.get("margin_at_quote", 0) or 0),
                                 float(item.get("target_margin_pct_at_quote", 0) or 0),
-                                float(item.get("sell_out_factor_at_quote", 0) or 0),
                                 str(item.get("channel_at_quote", "") or ""),
                                 int(sort_index),
                             )
@@ -368,11 +363,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 bool(item.get("included", True)),
                                 float(item.get("cost_at_quote", 0) or 0),
                                 float(item.get("sales_price_at_quote", 0) or 0),
-                                float(item.get("sell_out_price_at_quote", 0) or 0),
                                 float(item.get("revenue_at_quote", 0) or 0),
                                 float(item.get("margin_at_quote", 0) or 0),
                                 float(item.get("target_margin_pct_at_quote", 0) or 0),
-                                float(item.get("sell_out_factor_at_quote", 0) or 0),
                                 str(item.get("channel_at_quote", "") or ""),
                                 int(sort_index),
                             )
@@ -404,14 +397,14 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         INSERT INTO price_quote_lines (
                             id, quote_id, line_kind, bier_id, kostprijsversie_id, product_id, product_type,
                             verpakking_label, liters, aantal, korting_pct, included,
-                            cost_at_quote, sales_price_at_quote, sell_out_price_at_quote, revenue_at_quote, margin_at_quote,
-                            target_margin_pct_at_quote, sell_out_factor_at_quote, channel_at_quote, sort_index
+                            cost_at_quote, sales_price_at_quote, revenue_at_quote, margin_at_quote,
+                            target_margin_pct_at_quote, channel_at_quote, sort_index
                         )
                         VALUES (
                             %s, %s, %s, %s, %s, %s, %s,
                             %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s
+                            %s, %s, %s, %s,
+                            %s, %s, %s
                         )
                         """,
                         line_params,

@@ -19,9 +19,10 @@ import type {
 
 type Props = {
   activeChannels: ChannelLite[];
-  selectedChannelCode: string;
-  setSelectedChannelCode: React.Dispatch<React.SetStateAction<string>>;
+  openChannelCodes: string[];
+  setOpenChannelCodes: React.Dispatch<React.SetStateAction<string[]>>;
   effectiveSelectedYear: number;
+  channelMasterDefaults: ChannelYearDefaults;
   channelYearDefaults: ChannelYearDefaults;
   groupedProductOverrideRows: ProductOverrideGroup[];
   groupedBeerRows: BeerGroup[];
@@ -34,14 +35,16 @@ type Props = {
   updateProductMargin: (productId: string, channelCode: string, value: number | "") => void; // value is opslag%
   updateBeerSellInPrice: (row: BeerViewRow, channelCode: string, value: number | "") => void;
   updateBeerMargin: (row: BeerViewRow, channelCode: string, value: number | "") => void; // value is opslag%
+  resetChannelOverrides: (channelCode: string) => void;
 };
 
 export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
   const {
     activeChannels,
-    selectedChannelCode,
-    setSelectedChannelCode,
+    openChannelCodes,
+    setOpenChannelCodes,
     effectiveSelectedYear,
+    channelMasterDefaults,
     channelYearDefaults,
     groupedProductOverrideRows,
     groupedBeerRows,
@@ -53,8 +56,57 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
     updateProductSellInPrice,
     updateProductMargin,
     updateBeerSellInPrice,
-    updateBeerMargin
+    updateBeerMargin,
+    resetChannelOverrides
   } = props;
+
+  const [showOnlyOverrides, setShowOnlyOverrides] = React.useState(false);
+
+  const rowHasOverrideForChannel = (row: { opslagOverrides?: Record<string, unknown>; sellInPriceOverrides?: Record<string, unknown> }, code: string) =>
+    row.opslagOverrides?.[code] !== "" || row.sellInPriceOverrides?.[code] !== "";
+
+  const channelHasAnyOverrides = React.useCallback(
+    (code: string) => {
+      const master = Number(channelMasterDefaults[code]?.opslag ?? 0);
+      const current = Number(channelYearDefaults[code]?.opslag ?? 0);
+      if (Number.isFinite(master) && Number.isFinite(current) && Math.abs(master - current) > 1e-9) return true;
+
+      for (const group of groupedProductOverrideRows) {
+        for (const row of group.rows) {
+          if (rowHasOverrideForChannel(row, code)) return true;
+          const draftKey = `year:${effectiveSelectedYear}:channel:${code}:product:${row.productId}:opslag`;
+          const draft = getDraft(draftKey);
+          if (draft !== undefined && draft !== "") return true;
+        }
+      }
+
+      for (const beer of groupedBeerRows) {
+        for (const row of beer.rows) {
+          if (rowHasOverrideForChannel(row, code)) return true;
+          const draftKey = `year:${effectiveSelectedYear}:channel:${code}:beer:${row.id}:opslag`;
+          const draft = getDraft(draftKey);
+          if (draft !== undefined && draft !== "") return true;
+        }
+      }
+
+      const yearDraftKey = `year:${effectiveSelectedYear}:channel:${code}:defaults`;
+      const yearDraft = getDraft(yearDraftKey);
+      if (yearDraft !== undefined && yearDraft !== "") return true;
+
+      return false;
+    },
+    [channelMasterDefaults, channelYearDefaults, effectiveSelectedYear, getDraft, groupedBeerRows, groupedProductOverrideRows]
+  );
+
+  const visibleChannels = React.useMemo(() => {
+    if (!showOnlyOverrides) return activeChannels;
+    return activeChannels.filter((channel) => channelHasAnyOverrides(channel.code));
+  }, [activeChannels, channelHasAnyOverrides, showOnlyOverrides]);
+
+  const collapseAll = () => setOpenChannelCodes([]);
+  const expandAll = () => setOpenChannelCodes(visibleChannels.map((ch) => ch.code));
+  const toggleChannel = (code: string) =>
+    setOpenChannelCodes((current) => (current.includes(code) ? current.filter((c) => c !== code) : [...current, code]));
 
   return (
     <div className="module-card compact-card">
@@ -67,17 +119,33 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
           <button
             type="button"
             className="editor-button editor-button-secondary"
-            onClick={() => setSelectedChannelCode("")}
-            disabled={!selectedChannelCode}
+            onClick={collapseAll}
+            disabled={openChannelCodes.length === 0}
           >
             Alles inklappen
           </button>
+          <button
+            type="button"
+            className="editor-button editor-button-secondary"
+            onClick={expandAll}
+            disabled={openChannelCodes.length === visibleChannels.length}
+          >
+            Alles uitklappen
+          </button>
+          <label className="nested-field" style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+            <input
+              type="checkbox"
+              checked={showOnlyOverrides}
+              onChange={(event) => setShowOnlyOverrides(event.target.checked)}
+            />
+            <span className="muted">Toon alleen overrides</span>
+          </label>
         </div>
       </div>
 
       <div className="stack" style={{ gap: "0.75rem" }}>
-        {activeChannels.map((channel) => {
-          const isActive = selectedChannelCode === channel.code;
+        {visibleChannels.map((channel) => {
+          const isActive = openChannelCodes.includes(channel.code);
           const opslag = round2(Number(channelYearDefaults[channel.code]?.opslag ?? 0));
           const opslagKey = `year:${effectiveSelectedYear}:channel:${channel.code}:defaults`;
           const opslagDraftValue = getDraft(opslagKey);
@@ -96,7 +164,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                   borderColor: isActive ? "#C6D5FF" : undefined,
                   background: isActive ? "#F3F7FF" : undefined
                 }}
-                onClick={() => setSelectedChannelCode((current) => (current === channel.code ? "" : channel.code))}
+                onClick={() => toggleChannel(channel.code)}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontWeight: 750 }}>
                   <span className="muted" style={{ fontSize: "1rem" }}>
@@ -118,6 +186,12 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                     onChange={(event) => {
                       const raw = event.target.value;
                       setDraft(opslagKey, raw);
+                      if (raw === "") {
+                        // Empty = reset to the channel's default (no override) once the draft clears.
+                        updateYearSellInPrice(channel.code, "");
+                        updateYearMargin(channel.code, "");
+                        return;
+                      }
                       const parsed = parseNumberLoose(raw);
                       if (!Number.isFinite(parsed)) return;
                       updateYearSellInPrice(channel.code, "");
@@ -127,6 +201,8 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                       const raw = event.target.value;
                       if (raw === "") {
                         clearDraft(opslagKey);
+                        updateYearSellInPrice(channel.code, "");
+                        updateYearMargin(channel.code, "");
                         return;
                       }
                       const parsed = parseNumberLoose(raw);
@@ -147,6 +223,18 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                   <div className="module-card-text" style={{ marginBottom: "0.8rem" }}>
                     Vul <strong>opslag</strong> in om een verkoopprijs te laten berekenen. Je kunt ook de verkoopprijs
                     invullen (psychologische prijs); opslag en marge worden dan afgeleid.
+                  </div>
+                  <div className="editor-actions" style={{ marginBottom: "0.9rem" }}>
+                    <div className="editor-actions-group" />
+                    <div className="editor-actions-group">
+                      <button
+                        type="button"
+                        className="editor-button editor-button-secondary"
+                        onClick={() => resetChannelOverrides(channel.code)}
+                      >
+                        Reset overrides (kanaal)
+                      </button>
+                    </div>
                   </div>
 
                   <details open className="module-card compact-card" style={{ marginBottom: "0.9rem" }}>
@@ -176,7 +264,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {group.rows.map((row: ProductViewRow, idx) => {
+                                {group.rows.flatMap((row: ProductViewRow, idx) => {
                                   const code = channel.code;
                                   const derivedOpslagRaw = Number(row.activeOpslags?.[code] ?? 0);
                                   const derivedOpslag = round2(derivedOpslagRaw);
@@ -191,12 +279,16 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                     (row.opslagOverrides?.[code] !== "" ||
                                       row.sellInPriceOverrides?.[code] !== "" ||
                                       (opslagDraftValue2 !== undefined && opslagDraftValue2 !== ""));
+                                  if (showOnlyOverrides && !hasOverride) return [];
+
+                                  const inheritanceLabel = hasOverride ? "Override" : "Erft: Kanaal";
 
                                   return (
                                     <tr key={`${row.productId}::${idx}`}>
                                       <td>
                                         <div style={{ fontWeight: 650 }}>{row.product}</div>
                                         {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                                        <div className="muted">{inheritanceLabel}</div>
                                       </td>
                                       <td>
                                         <div className="stack" style={{ gap: "0.35rem" }}>
@@ -237,7 +329,6 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                               setDraft(opslagKey2, String(parsed));
                                             }}
                                           />
-                                          {!hasOverride ? <div className="muted">Erft standaard</div> : null}
                                         </div>
                                       </td>
                                       <td>{num(derivedMargin)}%</td>
@@ -293,7 +384,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {beer.rows.map((row: BeerViewRow, idx) => {
+                                {beer.rows.flatMap((row: BeerViewRow, idx) => {
                                   const code = channel.code;
                                   const derivedOpslagRaw = Number(row.activeOpslags?.[code] ?? 0);
                                   // "Volgt"-producten mogen geen eigen prijs-override erven; ze volgen altijd de (eventueel afgeleide) marge/opslag van de "moeder".
@@ -313,6 +404,14 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                     (row.opslagOverrides?.[code] !== "" ||
                                       row.sellInPriceOverrides?.[code] !== "" ||
                                       (opslagDraftValue3 !== undefined && opslagDraftValue3 !== ""));
+                                  if (showOnlyOverrides && !hasOverride) return [];
+
+                                  const channelDefault = Number(channelYearDefaults[code]?.opslag ?? 0);
+                                  const producttypeOpslag = Number(row.productOpslags?.[code] ?? channelDefault);
+                                  const inheritsFromProducttype = Math.abs(producttypeOpslag - channelDefault) > 1e-9;
+                                  const inheritanceLabel = hasOverride
+                                    ? (hasPriceOverride ? "Override: Prijs" : "Override: Opslag")
+                                    : (inheritsFromProducttype ? "Erft: Producttype" : "Erft: Kanaal");
                                   const opslagValue = !code ? "" : String(round2(derivedOpslag));
                                   const priceValue =
                                     row.isReadOnly || row.sellInPriceOverrides?.[code] === ""
@@ -325,6 +424,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                       <td>
                                         <div style={{ fontWeight: 650 }}>{row.product}</div>
                                         {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
+                                        <div className="muted">{inheritanceLabel}</div>
                                       </td>
                                       <td>{money(row.kostprijs ?? 0)}</td>
                                       <td>
@@ -367,7 +467,6 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                               setDraft(opslagKey3, String(parsed));
                                             }}
                                           />
-                                          {!hasOverride ? <div className="muted">Erft standaard</div> : null}
                                         </div>
                                       </td>
                                       <td>{num(derivedMargin)}%</td>

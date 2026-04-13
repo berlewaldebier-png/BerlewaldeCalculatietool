@@ -13,14 +13,12 @@ import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstr
 import type { BeerViewRow, ProductViewRow } from "@/components/verkoopstrategie/verkoopstrategieTypes";
 
 type GenericRecord = Record<string, unknown>;
-type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number; default_factor: number };
+type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number };
 type StrategyRow = {
   id: string; record_type: string; jaar: number; bier_id: string; biernaam: string; product_id: string;
   product_type: "basis" | "samengesteld" | ""; verpakking: string; strategie_type: string; kostprijs: number;
   sell_in_margins: Record<string, number>;
   sell_in_prices: Record<string, number | "">;
-  sell_out_factors: Record<string, number | "">;
-  sell_out_advice_prices: Record<string, number | "">;
   _uiId: string;
 };
 const STRATEGY_RECORD_TYPES = new Set([
@@ -39,7 +37,7 @@ type Props = {
   productie?: unknown;
   channels: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
-  /** Wizard-only: if provided in `mode="draft"`, sell-in/sell-out is computed from these preview cost rows instead of activations/snapshots. */
+  /** Wizard-only: if provided in `mode="draft"`, pricing is computed from these preview cost rows instead of activations/snapshots. */
   draftKostprijsPreviewRows?: Array<{
     bierId: string;
     biernaam: string;
@@ -56,29 +54,55 @@ type Props = {
 };
 
 const DEFAULT_CHANNELS: ChannelRow[] = [
-  { id: "horeca", code: "horeca", naam: "Horeca", actief: true, volgorde: 10, default_marge_pct: 50, default_factor: 3.5 },
-  { id: "retail", code: "retail", naam: "Supermarkt", actief: true, volgorde: 20, default_marge_pct: 30, default_factor: 2.4 },
-  { id: "slijterij", code: "slijterij", naam: "Slijterij", actief: true, volgorde: 30, default_marge_pct: 40, default_factor: 3 },
-  { id: "zakelijk", code: "zakelijk", naam: "Speciaalzaak", actief: true, volgorde: 40, default_marge_pct: 45, default_factor: 3.2 },
-  { id: "particulier", code: "particulier", naam: "Particulier", actief: false, volgorde: 50, default_marge_pct: 50, default_factor: 3 }
+  { id: "horeca", code: "horeca", naam: "Horeca", actief: true, volgorde: 10, default_marge_pct: 50 },
+  { id: "retail", code: "retail", naam: "Supermarkt", actief: true, volgorde: 20, default_marge_pct: 30 },
+  { id: "slijterij", code: "slijterij", naam: "Slijterij", actief: true, volgorde: 30, default_marge_pct: 40 },
+  { id: "zakelijk", code: "zakelijk", naam: "Speciaalzaak", actief: true, volgorde: 40, default_marge_pct: 45 },
+  { id: "particulier", code: "particulier", naam: "Particulier", actief: false, volgorde: 50, default_marge_pct: 50 }
 ];
 
 const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 // Pricing helpers are shared with the nieuw-jaar wizard via `lib/verkoopstrategieMath.ts`.
 const normalizeLabel = (value: unknown) => String(value ?? "").trim().toLowerCase();
-const normalizeMap = (raw: unknown, codes: string[]) => {
-  const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-  const allowed = new Set(codes);
-  const out: Record<string, number> = {};
-  Object.entries(src).forEach(([key, value]) => {
-    if (!allowed.has(key)) return;
-    if (value === "" || value === null || value === undefined) return;
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return;
-    out[key] = parsed;
-  });
-  return out as Record<string, number | "">;
-};
+function computeDraftSignature(records: GenericRecord[], channelCodes: string[]) {
+  const mapToSortedPairs = (raw: unknown) => {
+    const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+    return channelCodes
+      .slice()
+      .sort((a, b) => a.localeCompare(b))
+      .flatMap((code) => {
+        const value = src[code];
+        if (value === "" || value === null || value === undefined) return [];
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return [];
+        return [[code, parsed] as const];
+      });
+  };
+
+  const normalized = (Array.isArray(records) ? records : [])
+    .map((row) => ({
+      id: String(row.id ?? ""),
+      record_type: String(row.record_type ?? ""),
+      jaar: Number(row.jaar ?? 0),
+      bier_id: String((row as any).bier_id ?? ""),
+      product_id: String((row as any).product_id ?? ""),
+      sell_in_margins: mapToSortedPairs((row as any).sell_in_margins ?? (row as any).kanaalmarges ?? {}),
+      sell_in_prices: mapToSortedPairs((row as any).sell_in_prices ?? (row as any).kanaalprijzen ?? {})
+    }))
+    .sort((a, b) => {
+      const rt = a.record_type.localeCompare(b.record_type);
+      if (rt !== 0) return rt;
+      const y = a.jaar - b.jaar;
+      if (y !== 0) return y;
+      const bi = a.bier_id.localeCompare(b.bier_id);
+      if (bi !== 0) return bi;
+      const pi = a.product_id.localeCompare(b.product_id);
+      if (pi !== 0) return pi;
+      return a.id.localeCompare(b.id);
+    });
+
+  return JSON.stringify(normalized);
+}
 
 function normalizeChannels(raw: GenericRecord[]) {
   const source = Array.isArray(raw) && raw.length > 0 ? raw : DEFAULT_CHANNELS;
@@ -93,7 +117,6 @@ function normalizeChannels(raw: GenericRecord[]) {
       actief: Boolean(row.actief ?? true),
       volgorde: Number(row.volgorde ?? 999),
       default_marge_pct: Number(row.default_marge_pct ?? byCode.get(code)?.default_marge_pct ?? 50),
-      default_factor: Number(row.default_factor ?? byCode.get(code)?.default_factor ?? 3)
     });
   });
   return [...byCode.values()].map((row) => ({
@@ -103,7 +126,6 @@ function normalizeChannels(raw: GenericRecord[]) {
     actief: Boolean(row.actief ?? true),
     volgorde: Number(row.volgorde ?? 999),
     default_marge_pct: Number(row.default_marge_pct ?? 50),
-    default_factor: Number(row.default_factor ?? 3)
   })).filter((row) => row.code && row.naam && row.code !== "groothandel").sort((a, b) => (a.volgorde === b.volgorde ? a.naam.localeCompare(b.naam, "nl-NL") : a.volgorde - b.volgorde));
 }
 
@@ -112,7 +134,7 @@ function buildEmptyYearStrategyRow({
   channelDefaults
 }: {
   year: number;
-  channelDefaults: Record<string, { opslag: number; factor: number }>;
+  channelDefaults: Record<string, { opslag: number }>;
 }): StrategyRow {
   // This is a year-specific defaults record. It becomes the single source of truth for default margins/factors per year.
   return {
@@ -129,8 +151,6 @@ function buildEmptyYearStrategyRow({
     // NOTE: despite the legacy field name `sell_in_margins`, we now persist opslag% as the source of truth.
     sell_in_margins: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.opslag ?? 50)])),
     sell_in_prices: {},
-    sell_out_factors: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.factor ?? 3)])),
-    sell_out_advice_prices: {},
     _uiId: createUiId()
   };
 }
@@ -175,24 +195,18 @@ function normalizeStrategyRow(row: GenericRecord, channelCodes: string[]): Strat
       });
       return out;
     })(),
-    sell_out_factors: normalizeMap(row.sell_out_factors, channelCodes),
-    sell_out_advice_prices: normalizeMap(row.sell_out_advice_prices, channelCodes),
     _uiId: String(row.id ?? createUiId())
   };
 }
 
 const stripInternal = (row: StrategyRow) => {
-  const { _uiId, sell_in_margins, sell_in_prices, sell_out_factors, sell_out_advice_prices, ...rest } = row;
+  const { _uiId, sell_in_margins, sell_in_prices, ...rest } = row;
   return {
     ...rest,
     kanaalmarges: sell_in_margins,
     sell_in_margins,
     kanaalprijzen: sell_in_prices,
-    sell_in_prices,
-    sell_out_factors,
-    adviesfactoren: sell_out_factors,
-    sell_out_advice_prices,
-    adviesprijzen: sell_out_advice_prices
+    sell_in_prices
   };
 };
 
@@ -221,9 +235,9 @@ export function VerkoopstrategieWorkspace({
       Object.fromEntries(
         normalizedChannels.map((channel) => [
           channel.code,
-          { opslag: Number(channel.default_marge_pct ?? 50), factor: Number(channel.default_factor ?? 3) }
+          { opslag: Number(channel.default_marge_pct ?? 50) }
         ])
-      ) as Record<string, { opslag: number; factor: number }>,
+      ) as Record<string, { opslag: number }>,
     [normalizedChannels]
   );
   const verkoopPassthroughRows = useMemo(() => {
@@ -283,6 +297,13 @@ export function VerkoopstrategieWorkspace({
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const isMountedRef = useRef(true);
+  const isDirtyRef = useRef(false);
+  const lastSyncedDraftSigRef = useRef("");
+  const pendingServerSigRef = useRef("");
+  const [hasPendingServerUpdate, setHasPendingServerUpdate] = useState(false);
+  const markDirty = () => {
+    isDirtyRef.current = true;
+  };
 
   // In draft mode (wizard), the source rows may be replaced by the parent component when:
   // - a saved concept is loaded from the server
@@ -290,8 +311,36 @@ export function VerkoopstrategieWorkspace({
   // To keep the embedded workspace consistent, we sync local state from props only in draft mode.
   useEffect(() => {
     if (mode !== "draft") return;
+    const sig = computeDraftSignature(verkoopStrategyRows, channelCodes);
+    if (sig === lastSyncedDraftSigRef.current) return;
+
+    if (isDirtyRef.current) {
+      if (pendingServerSigRef.current !== sig && isMountedRef.current) {
+        pendingServerSigRef.current = sig;
+        setHasPendingServerUpdate(true);
+        setStatus("Er is nieuwere conceptdata beschikbaar, maar je hebt lokale wijzigingen. Sla op of herlaad om te verversen.");
+      }
+      return;
+    }
+
+    lastSyncedDraftSigRef.current = sig;
+    pendingServerSigRef.current = "";
+    setHasPendingServerUpdate(false);
+    isDirtyRef.current = false;
     setRows(verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
   }, [mode, verkoopStrategyRows, channelCodes]);
+
+  function handleReloadFromServerDraft() {
+    if (mode !== "draft") return;
+    const sig = computeDraftSignature(verkoopStrategyRows, channelCodes);
+    lastSyncedDraftSigRef.current = sig;
+    pendingServerSigRef.current = "";
+    setHasPendingServerUpdate(false);
+    isDirtyRef.current = false;
+    setOpslagDraft({});
+    setRows(verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
+    setStatus("Concept herladen.");
+  }
 
   const productieYears = useMemo(() => {
     const out: number[] = [];
@@ -319,20 +368,22 @@ export function VerkoopstrategieWorkspace({
       isMountedRef.current = false;
     };
   }, []);
-  const [selectedChannelCode, setSelectedChannelCode] = useState<string>(() => {
-    const first = (Array.isArray(channels) ? channels : []).find((row) => Boolean((row as any)?.actief));
-    return String((first as any)?.code ?? "horeca");
+  const [openChannelCodes, setOpenChannelCodes] = useState<string[]>(() => {
+    const first = activeChannels[0]?.code ?? "";
+    return first ? [first] : [];
   });
   const [sellFilter, setSellFilter] = useState<string>("");
 
   useEffect(() => {
-    if (!selectedChannelCode) return;
-    const exists = activeChannels.some((ch) => ch.code === selectedChannelCode);
-    if (exists) return;
     if (activeChannels.length > 0) {
-      setSelectedChannelCode(activeChannels[0].code);
+      setOpenChannelCodes((current) => {
+        const allowed = new Set(activeChannels.map((ch) => ch.code));
+        const filtered = current.filter((code) => allowed.has(code));
+        if (filtered.length > 0) return filtered;
+        return [activeChannels[0].code];
+      });
     }
-  }, [activeChannels, selectedChannelCode]);
+  }, [activeChannels]);
   const computedDefaultYear = useMemo(() => {
     if (productieYears.length > 0) return Math.max(...productieYears);
     return Math.max(
@@ -351,10 +402,7 @@ export function VerkoopstrategieWorkspace({
     return rows.find((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear) ?? null;
   }, [rows, effectiveSelectedYear]);
 
-  const selectedChannel = useMemo(() => {
-    if (!selectedChannelCode) return null;
-    return activeChannels.find((channel) => channel.code === selectedChannelCode) ?? null;
-  }, [activeChannels, selectedChannelCode]);
+  // Multi-channel accordion UI: selection is handled inside the accordion by `openChannelCodes`.
 
   useEffect(() => {
     if (lockYear) return;
@@ -367,7 +415,7 @@ export function VerkoopstrategieWorkspace({
   const [opslagDraft, setOpslagDraft] = useState<Record<string, string>>({});
   useEffect(() => {
     setOpslagDraft({});
-  }, [effectiveSelectedYear, selectedChannelCode, sellFilter]);
+  }, [effectiveSelectedYear, openChannelCodes.join("|"), sellFilter]);
   const getDraft = (key: string) => opslagDraft[key];
   const setDraft = (key: string, value: string) => setOpslagDraft((current) => ({ ...current, [key]: value }));
   const clearDraft = (key: string) =>
@@ -400,11 +448,10 @@ export function VerkoopstrategieWorkspace({
       channelCodes.map((code) => [
         code,
         {
-          opslag: Number(source.sell_in_margins?.[code] ?? channelMasterDefaults[code]?.opslag ?? 50),
-          factor: Number((source.sell_out_factors as any)?.[code] ?? channelMasterDefaults[code]?.factor ?? 3),
+          opslag: Number(source.sell_in_margins?.[code] ?? channelMasterDefaults[code]?.opslag ?? 50)
         },
       ])
-    ) as Record<string, { opslag: number; factor: number }>;
+    ) as Record<string, { opslag: number }>;
   }, [channelCodes, channelMasterDefaults, effectiveSelectedYear, yearStrategyRow]);
 
   const basisById = useMemo(() => new Map(basisproducten.map((row) => [String(row.id ?? ""), row])), [basisproducten]);
@@ -442,19 +489,13 @@ export function VerkoopstrategieWorkspace({
         const parsed = Number(value);
         return [code, Number.isFinite(parsed) ? parsed : ""];
       })) as Record<string, number | "">;
-      const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
-        const value = found?.sell_out_factors?.[code];
-        return [code, value === "" || value === undefined || Number(value) === channelYearDefaults[code]?.factor ? "" : Number(value)];
-      })) as Record<string, number | "">;
       return {
         productId: product.id,
         productType: product.type,
         product: product.label,
         opslagOverrides,
         sellInPriceOverrides,
-        factorOverrides,
         activeOpslags: Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? channelYearDefaults[code]?.opslag ?? 50 : Number(opslagOverrides[code])])) as Record<string, number>,
-        activeFactors: Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? channelYearDefaults[code]?.factor ?? 3 : Number(factorOverrides[code])])) as Record<string, number>,
         isReadOnly: Boolean(parentComposite),
         followsProductId: parentComposite?.productId ?? "",
         followsProductLabel: parentComposite?.label ?? ""
@@ -495,12 +536,6 @@ export function VerkoopstrategieWorkspace({
             string,
             number
           >);
-        const productFactors =
-          productDefaults?.activeFactors ??
-          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<
-            string,
-            number
-          >);
 
         const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
         const opslagOverrides = Object.fromEntries(
@@ -517,18 +552,9 @@ export function VerkoopstrategieWorkspace({
             return [code, Number.isFinite(parsed) ? parsed : ""];
           })
         ) as Record<string, number | "">;
-        const factorOverrides = Object.fromEntries(
-          channelCodes.map((code) => {
-            const value = override?.sell_out_factors?.[code];
-            return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
-          })
-        ) as Record<string, number | "">;
 
         const activeOpslags = Object.fromEntries(
           channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])
-        ) as Record<string, number>;
-        const activeFactors = Object.fromEntries(
-          channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])
         ) as Record<string, number>;
 
         const kostprijs = Number(row.kostprijs ?? 0);
@@ -539,7 +565,6 @@ export function VerkoopstrategieWorkspace({
             return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
           })
         ) as Record<string, number>;
-        const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
 
         out.push({
           id: override?.id || `${bierId}:${productId}`,
@@ -554,10 +579,6 @@ export function VerkoopstrategieWorkspace({
           sellInPriceOverrides,
           activeOpslags,
           sellInPrices,
-          productFactors,
-          factorOverrides,
-          activeFactors,
-          sellOutPrices,
           isReadOnly: Boolean(productDefaults?.isReadOnly),
           followsProductId: followProductId,
           followsProductLabel: productDefaults?.followsProductLabel ?? ""
@@ -628,9 +649,6 @@ export function VerkoopstrategieWorkspace({
         const productOpslags =
           productDefaults?.activeOpslags ??
           (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<string, number>);
-        const productFactors =
-          productDefaults?.activeFactors ??
-          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<string, number>);
         const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
         const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
           const value = override?.sell_in_margins?.[code];
@@ -644,12 +662,7 @@ export function VerkoopstrategieWorkspace({
             return [code, Number.isFinite(parsed) ? parsed : ""];
           })
         ) as Record<string, number | "">;
-        const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
-          const value = override?.sell_out_factors?.[code];
-          return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
-        })) as Record<string, number | "">;
         const activeOpslags = Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])) as Record<string, number>;
-        const activeFactors = Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])) as Record<string, number>;
         const kostprijs = Number(productRow.kostprijs ?? 0);
         const sellInPrices = Object.fromEntries(
           channelCodes.map((code) => {
@@ -658,8 +671,7 @@ export function VerkoopstrategieWorkspace({
             return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
           })
         ) as Record<string, number>;
-        const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
-        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
       });
     } else {
       definitiveVersions.forEach((record) => {
@@ -672,7 +684,6 @@ export function VerkoopstrategieWorkspace({
           const productDefaults = productById.get(productId);
           const followProductId = productDefaults?.followsProductId ?? "";
           const productOpslags = productDefaults?.activeOpslags ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<string, number>;
-          const productFactors = productDefaults?.activeFactors ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<string, number>;
           const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
           const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
             const value = override?.sell_in_margins?.[code];
@@ -686,12 +697,7 @@ export function VerkoopstrategieWorkspace({
               return [code, Number.isFinite(parsed) ? parsed : ""];
             })
           ) as Record<string, number | "">;
-          const factorOverrides = Object.fromEntries(channelCodes.map((code) => {
-            const value = override?.sell_out_factors?.[code];
-            return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
-          })) as Record<string, number | "">;
           const activeOpslags = Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])) as Record<string, number>;
-          const activeFactors = Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])) as Record<string, number>;
           const kostprijs = Number(productRow.kostprijs ?? 0);
           const sellInPrices = Object.fromEntries(
             channelCodes.map((code) => {
@@ -700,8 +706,7 @@ export function VerkoopstrategieWorkspace({
               return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
             })
           ) as Record<string, number>;
-          const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
-          out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+          out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
         });
       });
     }
@@ -769,16 +774,49 @@ export function VerkoopstrategieWorkspace({
       }));
   }, [filteredSellRows]);
 
-  function updateYearMargin(channel: string, value: number) {
+  function resetChannelOverrides(channelCode: string) {
+    markDirty();
+    setOpslagDraft({});
+    setRows((current) => {
+      const next = current
+        .map((row) => {
+          if (row.jaar !== effectiveSelectedYear) return row;
+          if (row.record_type !== "verkoopstrategie_verpakking" && row.record_type !== "verkoopstrategie_product") return row;
+          const nextMargins = { ...(row.sell_in_margins ?? {}) };
+          const nextPrices = { ...(row.sell_in_prices ?? {}) } as Record<string, number | "">;
+          delete nextMargins[channelCode];
+          delete nextPrices[channelCode];
+          const hasAnything =
+            Object.keys(nextMargins).length > 0 ||
+            Object.keys(nextPrices).length > 0;
+          if (!hasAnything) return null;
+          return {
+            ...row,
+            sell_in_margins: nextMargins,
+            sell_in_prices: nextPrices
+          } as StrategyRow;
+        })
+        .filter(Boolean) as StrategyRow[];
+      return next;
+    });
+    setStatus(`Overrides voor kanaal ${channelCode} gereset.`);
+  }
+
+  function updateYearMargin(channel: string, value: number | "") {
+    markDirty();
     setRows((current) => {
       const next = [...current];
       const idx = next.findIndex((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear);
       const base = idx >= 0 ? next[idx] : buildEmptyYearStrategyRow({ year: effectiveSelectedYear, channelDefaults: channelMasterDefaults });
+      const resolvedValue =
+        value === ""
+          ? Number(channelMasterDefaults[channel]?.opslag ?? 50)
+          : Number(value);
       const updated: StrategyRow = {
         ...base,
         jaar: effectiveSelectedYear,
         record_type: "jaarstrategie",
-        sell_in_margins: { ...base.sell_in_margins, [channel]: Number(value) }
+        sell_in_margins: { ...base.sell_in_margins, [channel]: resolvedValue }
       };
       if (idx >= 0) next[idx] = updated;
       else next.push(updated);
@@ -787,6 +825,7 @@ export function VerkoopstrategieWorkspace({
   }
 
   function updateYearSellInPrice(channel: string, value: number | "") {
+    markDirty();
     setRows((current) => {
       const next = [...current];
       const idx = next.findIndex((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear);
@@ -806,24 +845,8 @@ export function VerkoopstrategieWorkspace({
     });
   }
 
-  function updateYearFactor(channel: string, value: number) {
-    setRows((current) => {
-      const next = [...current];
-      const idx = next.findIndex((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear);
-      const base = idx >= 0 ? next[idx] : buildEmptyYearStrategyRow({ year: effectiveSelectedYear, channelDefaults: channelMasterDefaults });
-      const updated: StrategyRow = {
-        ...base,
-        jaar: effectiveSelectedYear,
-        record_type: "jaarstrategie",
-        sell_out_factors: { ...(base.sell_out_factors as any), [channel]: Number(value) }
-      };
-      if (idx >= 0) next[idx] = updated;
-      else next.push(updated);
-      return next;
-    });
-  }
-
   function upsertProduct(productId: string, updater: (row: StrategyRow | null) => StrategyRow | null) {
+    markDirty();
     setRows((current) => {
       const existing =
         current.find(
@@ -846,8 +869,6 @@ export function VerkoopstrategieWorkspace({
         kostprijs: 0,
         sell_in_margins: {},
         sell_in_prices: {},
-        sell_out_factors: {},
-        sell_out_advice_prices: {},
         _uiId: createUiId()
       });
       return [
@@ -865,6 +886,7 @@ export function VerkoopstrategieWorkspace({
   }
 
   function upsertBeer(viewRow: BeerViewRow, updater: (row: StrategyRow | null) => StrategyRow | null) {
+    markDirty();
     setRows((current) => {
       const existing =
         current.find(
@@ -887,8 +909,6 @@ export function VerkoopstrategieWorkspace({
         kostprijs: viewRow.kostprijs,
         sell_in_margins: {},
         sell_in_prices: {},
-        sell_out_factors: {},
-        sell_out_advice_prices: {},
         _uiId: createUiId()
       });
       return [
@@ -907,80 +927,50 @@ export function VerkoopstrategieWorkspace({
   }
 
   function updateProductMargin(productId: string, channel: string, value: number | "") {
+    markDirty();
     upsertProduct(productId, (row) => {
       const nextMargins = { ...row!.sell_in_margins };
       if (value === "") delete nextMargins[channel]; else nextMargins[channel] = value;
-      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
       const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
-      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
+      return Object.keys(nextMargins).length === 0 && !hasSellInPrices
         ? null
-        : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+        : { ...row!, sell_in_margins: nextMargins };
     });
   }
 
   function updateProductSellInPrice(productId: string, channel: string, value: number | "") {
+    markDirty();
     upsertProduct(productId, (row) => {
       const nextPrices = { ...(row!.sell_in_prices ?? {}) } as Record<string, number | "">;
       if (value === "") delete nextPrices[channel]; else nextPrices[channel] = value;
       const nextMargins = { ...(row!.sell_in_margins ?? {}) } as Record<string, number>;
-      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
-      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && Object.keys(nextPrices).length === 0 && !hasSellOutPrices
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextPrices).length === 0
         ? null
-        : { ...row!, sell_in_prices: nextPrices, sell_out_factors: nextFactors };
-    });
-  }
-
-  function updateProductFactor(productId: string, channel: string, value: number | "") {
-    upsertProduct(productId, (row) => {
-      const nextFactors = { ...row!.sell_out_factors };
-      if (value === "") delete nextFactors[channel]; else nextFactors[channel] = value;
-      const nextMargins = Object.fromEntries(Object.entries(row!.sell_in_margins).filter(([, margin]) => margin !== null && margin !== undefined));
-      const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
-      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
-        ? null
-        : { ...row!, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+        : { ...row!, sell_in_prices: nextPrices };
     });
   }
 
   function updateBeerMargin(viewRow: BeerViewRow, channel: string, value: number | "") {
+    markDirty();
     upsertBeer(viewRow, (row) => {
       const nextMargins = { ...row!.sell_in_margins };
       if (value === "") delete nextMargins[channel]; else nextMargins[channel] = value;
-      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
       const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
-      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
+      return Object.keys(nextMargins).length === 0 && !hasSellInPrices
         ? null
-        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins };
     });
   }
 
   function updateBeerSellInPrice(viewRow: BeerViewRow, channel: string, value: number | "") {
+    markDirty();
     upsertBeer(viewRow, (row) => {
       const nextPrices = { ...(row!.sell_in_prices ?? {}) } as Record<string, number | "">;
       if (value === "") delete nextPrices[channel]; else nextPrices[channel] = value;
       const nextMargins = { ...(row!.sell_in_margins ?? {}) } as Record<string, number>;
-      const nextFactors = Object.fromEntries(Object.entries(row!.sell_out_factors).filter(([, factor]) => factor !== "" && factor !== null && factor !== undefined));
-      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && Object.keys(nextPrices).length === 0 && !hasSellOutPrices
+      return Object.keys(nextMargins).length === 0 && Object.keys(nextPrices).length === 0
         ? null
-        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_prices: nextPrices, sell_out_factors: nextFactors };
-    });
-  }
-
-  function updateBeerFactor(viewRow: BeerViewRow, channel: string, value: number | "") {
-    upsertBeer(viewRow, (row) => {
-      const nextFactors = { ...row!.sell_out_factors };
-      if (value === "") delete nextFactors[channel]; else nextFactors[channel] = value;
-      const nextMargins = Object.fromEntries(Object.entries(row!.sell_in_margins).filter(([, margin]) => margin !== null && margin !== undefined));
-      const hasSellInPrices = Object.keys(row!.sell_in_prices ?? {}).length > 0;
-      const hasSellOutPrices = Object.keys(row!.sell_out_advice_prices ?? {}).length > 0;
-      return Object.keys(nextMargins).length === 0 && Object.keys(nextFactors).length === 0 && !hasSellInPrices && !hasSellOutPrices
-        ? null
-        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_margins: nextMargins, sell_out_factors: nextFactors };
+        : { ...row!, kostprijs: viewRow.kostprijs, sell_in_prices: nextPrices };
     });
   }
 
@@ -994,6 +984,10 @@ export function VerkoopstrategieWorkspace({
       if (mode === "draft") {
         await onDraftSave?.(payload);
         if (isMountedRef.current) {
+          lastSyncedDraftSigRef.current = computeDraftSignature(rows as unknown as GenericRecord[], channelCodes);
+          pendingServerSigRef.current = "";
+          setHasPendingServerUpdate(false);
+          isDirtyRef.current = false;
           setStatus("Concept opgeslagen.");
         }
       } else {
@@ -1005,6 +999,7 @@ export function VerkoopstrategieWorkspace({
         });
         if (!response.ok) throw new Error("Opslaan mislukt");
         if (isMountedRef.current) {
+          isDirtyRef.current = false;
           setStatus("Opgeslagen.");
         }
       }
@@ -1100,9 +1095,10 @@ export function VerkoopstrategieWorkspace({
 
           <VerkoopstrategiePrijsinstellingenAccordion
             activeChannels={activeChannels}
-            selectedChannelCode={selectedChannelCode}
-            setSelectedChannelCode={setSelectedChannelCode}
+            openChannelCodes={openChannelCodes}
+            setOpenChannelCodes={setOpenChannelCodes}
             effectiveSelectedYear={effectiveSelectedYear}
+            channelMasterDefaults={channelMasterDefaults}
             channelYearDefaults={channelYearDefaults}
             groupedProductOverrideRows={groupedProductOverrideRows}
             groupedBeerRows={groupedBeerRows}
@@ -1115,12 +1111,23 @@ export function VerkoopstrategieWorkspace({
             updateProductMargin={updateProductMargin}
             updateBeerSellInPrice={updateBeerSellInPrice}
             updateBeerMargin={updateBeerMargin}
+            resetChannelOverrides={resetChannelOverrides}
           />
 
           <div className="editor-actions">
             <div className="editor-actions-group" />
             <div className="editor-actions-group">
               {status ? <span className="editor-status">{status}</span> : null}
+              {mode === "draft" && hasPendingServerUpdate ? (
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={handleReloadFromServerDraft}
+                  disabled={isSaving}
+                >
+                  Herlaad
+                </button>
+              ) : null}
               <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>{isSaving ? "Opslaan..." : "Opslaan"}</button>
             </div>
           </div>

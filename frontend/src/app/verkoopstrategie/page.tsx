@@ -30,7 +30,7 @@ export default async function VerkoopstrategiePage() {
   return (
     <PageShell
       title="Verkoopstrategie"
-      subtitle="Beheer per jaar sell-in en sell-out per verpakking. Sell-in stuurt op onze marge en verkoopprijs; sell-out op de adviesverkoopprijs voor de markt."
+      subtitle="Beheer per jaar de verkoopprijzen per verpakking. We sturen op opslag en verkoopprijs; marge wordt afgeleid."
       activePath="/verkoopstrategie"
       navigation={navigation}
     >

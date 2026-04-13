@@ -1181,8 +1181,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 verpakking: productLabel,
                 strategie_type: "override",
                 sell_in_margins: {},
-                sell_out_factors: {},
-                sell_out_advice_prices: {}
+                // Sell-out is being redesigned; store only sell-in pricing inputs for now.
               };
         if (!base.sell_in_margins || typeof base.sell_in_margins !== "object") base.sell_in_margins = {};
         if (existingIndex >= 0) nextRows[existingIndex] = base;
@@ -1814,7 +1813,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       {
         id: "verkoopstrategie",
         label: "Verkoopstrategie",
-        description: "Sell-in en sell-out defaults/overrides voor het doeljaar",
+        description: "Verkoopprijsinstellingen (opslag/prijs) voor het doeljaar",
         panelTitle: `Verkoopstrategie ${targetYear}`,
         panelDescription: "Controleer en pas marges/prijzen aan voor het doeljaar."
       },
