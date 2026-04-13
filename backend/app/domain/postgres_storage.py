@@ -15,6 +15,8 @@ _request_connection: ContextVar[Any | None] = ContextVar("calculatietool_request
 _transaction_depth: ContextVar[int] = ContextVar("calculatietool_transaction_depth", default=0)
 _schema_ready = False
 _schema_lock = Lock()
+_legacy_purge_lock = Lock()
+_legacy_purged: set[str] = set()
 
 
 def set_request_connection(conn: Any) -> Any:
@@ -167,6 +169,23 @@ def delete_app_dataset_row(dataset_name: str) -> None:
             conn.commit()
 
 
+def _purge_legacy_row_once(dataset_name: str) -> None:
+    """Best-effort cleanup: ensure table-backed datasets don't keep stale `app_datasets` rows."""
+    name = str(dataset_name or "").strip()
+    if not name:
+        return
+    if name in _legacy_purged:
+        return
+    with _legacy_purge_lock:
+        if name in _legacy_purged:
+            return
+        try:
+            delete_app_dataset_row(name)
+        except Exception:
+            pass
+        _legacy_purged.add(name)
+
+
 def _get_table_storage(name: str):
     """Return a module that implements table-backed load/save for a dataset, or None."""
     if name == "verkoopprijzen":
@@ -204,7 +223,9 @@ def load_dataset(name: str, default_value: Any) -> Any:
     # Phase G: some datasets are stored in dedicated tables instead of `app_datasets`.
     storage = _get_table_storage(name)
     if storage is not None:
-        return storage.load_dataset(default_value)
+        value = storage.load_dataset(default_value)
+        _purge_legacy_row_once(name)
+        return value
 
     ensure_schema()
     with connect() as conn:
@@ -226,7 +247,10 @@ def save_dataset(name: str, data: Any, overwrite: bool = True) -> bool:
     # Phase G: some datasets are stored in dedicated tables instead of `app_datasets`.
     storage = _get_table_storage(name)
     if storage is not None:
-        return bool(storage.save_dataset(data, overwrite=overwrite))
+        ok = bool(storage.save_dataset(data, overwrite=overwrite))
+        if ok:
+            _purge_legacy_row_once(name)
+        return ok
 
     ensure_schema()
     now = datetime.now(UTC)
