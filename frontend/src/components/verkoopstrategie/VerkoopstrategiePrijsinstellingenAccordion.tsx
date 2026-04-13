@@ -167,7 +167,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {group.rows.map((row) => {
+                                {group.rows.map((row, idx) => {
                                   const code = channel.code;
                                   const derivedOpslag = calcOpslagPctFromMarginPct(row.activeMargins?.[code] ?? 0);
                                   const derivedMargin = row.activeMargins?.[code] ?? 0;
@@ -186,7 +186,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                   const opslagDraftValue2 = opslagKey2 ? getDraft(opslagKey2) : undefined;
 
                                   return (
-                                    <tr key={row.productId}>
+                                    <tr key={`${row.productId}::${idx}`}>
                                       <td>
                                         <div style={{ fontWeight: 650 }}>{row.product}</div>
                                         {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
@@ -283,7 +283,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                 </tr>
                               </thead>
                               <tbody>
-                                {beer.rows.map((row) => {
+                                {beer.rows.map((row, idx) => {
                                   const code = channel.code;
                                   const computedSellIn = row.sellInPrices?.[code] ?? 0;
                                   const derivedOpslag = calcOpslagPctFromSellInPrice(row.kostprijs ?? 0, computedSellIn);
@@ -304,7 +304,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                   const priceValue = row.sellInPriceOverrides?.[code] === "" ? "" : String(row.sellInPriceOverrides?.[code] ?? "");
 
                                   return (
-                                    <tr key={row.id}>
+                                    <tr key={`${row.id ?? row.productId ?? row.product ?? "row"}::${idx}`}>
                                       <td>
                                         <div style={{ fontWeight: 650 }}>{row.product}</div>
                                         {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
