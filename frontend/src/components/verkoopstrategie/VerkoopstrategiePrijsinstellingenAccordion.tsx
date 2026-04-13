@@ -281,9 +281,12 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                               <tbody>
                                 {beer.rows.map((row, idx) => {
                                   const code = channel.code;
-                                  const computedSellIn = row.sellInPrices?.[code] ?? 0;
                                   const derivedMargin = row.activeMargins?.[code] ?? 0;
-                                  const hasPriceOverride = row.sellInPriceOverrides?.[code] !== "";
+                                  // "Volgt"-producten mogen geen eigen prijs-override erven; ze volgen altijd de (eventueel afgeleide) marge/opslag van de "moeder".
+                                  const hasPriceOverride = !row.isReadOnly && row.sellInPriceOverrides?.[code] !== "";
+                                  const computedSellIn = row.isReadOnly
+                                    ? calcSellPrice(row.kostprijs ?? 0, derivedMargin)
+                                    : (row.sellInPrices?.[code] ?? 0);
                                   const derivedOpslag = hasPriceOverride
                                     ? calcOpslagPctFromSellInPrice(row.kostprijs ?? 0, computedSellIn)
                                     : calcOpslagPctFromMarginPct(derivedMargin);
@@ -295,7 +298,10 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                     ? `year:${effectiveSelectedYear}:channel:${code}:beer:${row.id}:opslag`
                                     : "";
                                   const opslagDraftValue3 = opslagKey3 ? getDraft(opslagKey3) : undefined;
-                                  const priceValue = row.sellInPriceOverrides?.[code] === "" ? "" : String(row.sellInPriceOverrides?.[code] ?? "");
+                                  const priceValue =
+                                    row.isReadOnly || row.sellInPriceOverrides?.[code] === ""
+                                      ? ""
+                                      : String(row.sellInPriceOverrides?.[code] ?? "");
 
                                   return (
                                     <tr key={`${row.id ?? row.productId ?? row.product ?? "row"}::${idx}`}>
