@@ -2,10 +2,8 @@ import React from "react";
 
 import {
   calcMarginPctFromOpslagPct,
-  calcMarginPctFromSellInPrice,
-  calcOpslagPctFromMarginPct,
   calcOpslagPctFromSellInPrice,
-  calcSellPrice,
+  calcSellPriceFromOpslagPct,
   parseNumberLoose,
   round2
 } from "@/lib/verkoopstrategieMath";
@@ -18,18 +16,18 @@ type Props = {
   selectedChannelCode: string;
   setSelectedChannelCode: React.Dispatch<React.SetStateAction<string>>;
   effectiveSelectedYear: number;
-  channelYearDefaults: Record<string, { margin?: number; factor?: number }>;
+  channelYearDefaults: Record<string, { opslag?: number; factor?: number }>;
   groupedProductOverrideRows: Array<{ key: string; rows: any[] }>;
   groupedBeerRows: Array<{ biernaam: string; rows: any[] }>;
   getDraft: (key: string) => string | undefined;
   setDraft: (key: string, value: string) => void;
   clearDraft: (key: string) => void;
   updateYearSellInPrice: (channelCode: string, value: number | "") => void;
-  updateYearMargin: (channelCode: string, value: number | "") => void;
+  updateYearMargin: (channelCode: string, value: number | "") => void; // value is opslag%
   updateProductSellInPrice: (productId: string, channelCode: string, value: number | "") => void;
-  updateProductMargin: (productId: string, channelCode: string, value: number | "") => void;
+  updateProductMargin: (productId: string, channelCode: string, value: number | "") => void; // value is opslag%
   updateBeerSellInPrice: (row: any, channelCode: string, value: number | "") => void;
-  updateBeerMargin: (row: any, channelCode: string, value: number | "") => void;
+  updateBeerMargin: (row: any, channelCode: string, value: number | "") => void; // value is opslag%
 };
 
 export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
@@ -74,7 +72,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
       <div className="stack" style={{ gap: "0.75rem" }}>
         {activeChannels.map((channel) => {
           const isActive = selectedChannelCode === channel.code;
-          const opslag = calcOpslagPctFromMarginPct(channelYearDefaults[channel.code]?.margin ?? 0);
+          const opslag = round2(Number(channelYearDefaults[channel.code]?.opslag ?? 0));
           const opslagKey = `year:${effectiveSelectedYear}:channel:${channel.code}:defaults`;
           const opslagDraftValue = getDraft(opslagKey);
 
@@ -110,18 +108,21 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                     className="dataset-input"
                     type="number"
                     step="any"
-                    value={opslagDraftValue ?? String(round2(opslag))}
+                    value={opslagDraftValue ?? String(opslag)}
                     onChange={(event) => {
                       const raw = event.target.value;
                       setDraft(opslagKey, raw);
                       const parsed = parseNumberLoose(raw);
                       if (!Number.isFinite(parsed)) return;
-                      const nextMargin = calcMarginPctFromOpslagPct(parsed);
                       updateYearSellInPrice(channel.code, "");
-                      updateYearMargin(channel.code, round2(nextMargin));
+                      updateYearMargin(channel.code, round2(parsed));
                     }}
                     onBlur={(event) => {
                       const raw = event.target.value;
+                      if (raw === "") {
+                        clearDraft(opslagKey);
+                        return;
+                      }
                       const parsed = parseNumberLoose(raw);
                       if (!Number.isFinite(parsed)) {
                         clearDraft(opslagKey);
@@ -171,9 +172,9 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                               <tbody>
                                 {group.rows.map((row, idx) => {
                                   const code = channel.code;
-                                  const derivedMarginRaw = row.activeMargins?.[code] ?? 0;
-                                  const derivedMargin = round2(derivedMarginRaw);
-                                  const derivedOpslag = round2(calcOpslagPctFromMarginPct(derivedMarginRaw));
+                                  const derivedOpslagRaw = Number(row.activeOpslags?.[code] ?? 0);
+                                  const derivedOpslag = round2(derivedOpslagRaw);
+                                  const derivedMargin = round2(calcMarginPctFromOpslagPct(derivedOpslagRaw));
                                   const opslagValue = !code ? "" : String(derivedOpslag);
                                   const opslagKey2 = code
                                     ? `year:${effectiveSelectedYear}:channel:${code}:product:${row.productId}:opslag`
@@ -181,7 +182,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                   const opslagDraftValue2 = opslagKey2 ? getDraft(opslagKey2) : undefined;
                                   const hasOverride =
                                     Boolean(code) &&
-                                    (row.marginOverrides?.[code] !== "" ||
+                                    (row.opslagOverrides?.[code] !== "" ||
                                       row.sellInPriceOverrides?.[code] !== "" ||
                                       (opslagDraftValue2 !== undefined && opslagDraftValue2 !== ""));
 
@@ -197,7 +198,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                             className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
                                             type="number"
                                             step="any"
-                                            placeholder={code ? String(round2(calcOpslagPctFromMarginPct(channelYearDefaults[code]?.margin ?? 0))) : ""}
+                                            placeholder={code ? String(round2(channelYearDefaults[code]?.opslag ?? 0)) : ""}
                                             value={opslagDraftValue2 ?? opslagValue}
                                             readOnly={row.isReadOnly}
                                             onChange={(event) => {
@@ -212,9 +213,8 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                                 return;
                                               }
                                               if (!Number.isFinite(nextOpslag)) return;
-                                              const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
                                               updateProductSellInPrice(row.productId, code, "");
-                                              updateProductMargin(row.productId, code, round2(nextMargin));
+                                              updateProductMargin(row.productId, code, round2(nextOpslag));
                                             }}
                                             onBlur={(event) => {
                                               if (!opslagKey2) return;
@@ -289,23 +289,22 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                               <tbody>
                                 {beer.rows.map((row, idx) => {
                                   const code = channel.code;
-                                  const derivedMarginRaw = row.activeMargins?.[code] ?? 0;
-                                  const derivedMargin = round2(derivedMarginRaw);
+                                  const derivedOpslagRaw = Number(row.activeOpslags?.[code] ?? 0);
                                   // "Volgt"-producten mogen geen eigen prijs-override erven; ze volgen altijd de (eventueel afgeleide) marge/opslag van de "moeder".
                                   const hasPriceOverride = !row.isReadOnly && row.sellInPriceOverrides?.[code] !== "";
                                   const computedSellIn = row.isReadOnly
-                                    ? calcSellPrice(row.kostprijs ?? 0, derivedMargin)
+                                    ? calcSellPriceFromOpslagPct(row.kostprijs ?? 0, derivedOpslagRaw)
                                     : (row.sellInPrices?.[code] ?? 0);
                                   const derivedOpslag = hasPriceOverride
                                     ? calcOpslagPctFromSellInPrice(row.kostprijs ?? 0, computedSellIn)
-                                    : calcOpslagPctFromMarginPct(derivedMargin);
+                                    : derivedOpslagRaw;
                                   const opslagKey3 = code
                                     ? `year:${effectiveSelectedYear}:channel:${code}:beer:${row.id}:opslag`
                                     : "";
                                   const opslagDraftValue3 = opslagKey3 ? getDraft(opslagKey3) : undefined;
                                   const hasOverride =
                                     Boolean(code) &&
-                                    (row.marginOverrides?.[code] !== "" ||
+                                    (row.opslagOverrides?.[code] !== "" ||
                                       row.sellInPriceOverrides?.[code] !== "" ||
                                       (opslagDraftValue3 !== undefined && opslagDraftValue3 !== ""));
                                   const opslagValue = !code ? "" : String(round2(derivedOpslag));
@@ -313,6 +312,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                     row.isReadOnly || row.sellInPriceOverrides?.[code] === ""
                                       ? ""
                                       : String(row.sellInPriceOverrides?.[code] ?? "");
+                                  const derivedMargin = round2(calcMarginPctFromOpslagPct(derivedOpslag));
 
                                   return (
                                     <tr key={`${row.id ?? row.productId ?? row.product ?? "row"}::${idx}`}>
@@ -327,7 +327,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                             className={`${inputClass(hasOverride)} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
                                             type="number"
                                             step="any"
-                                            placeholder={code ? String(round2(calcOpslagPctFromMarginPct(channelYearDefaults[code]?.margin ?? 0))) : ""}
+                                            placeholder={code ? String(round2(channelYearDefaults[code]?.opslag ?? 0)) : ""}
                                             value={opslagDraftValue3 ?? opslagValue}
                                             readOnly={row.isReadOnly || hasPriceOverride}
                                             onChange={(event) => {
@@ -343,9 +343,8 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                                 return;
                                               }
                                               if (!Number.isFinite(nextOpslag)) return;
-                                              const nextMargin = calcMarginPctFromOpslagPct(nextOpslag);
                                               updateBeerSellInPrice(row, code, "");
-                                              updateBeerMargin(row, code, round2(nextMargin));
+                                              updateBeerMargin(row, code, round2(nextOpslag));
                                             }}
                                             onBlur={(event) => {
                                               if (!opslagKey3) return;
@@ -367,13 +366,13 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                       </td>
                                       <td>{num(derivedMargin)}%</td>
                                       <td>
-                                        <input
-                                          className={`${inputClass(priceValue !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
-                                          type="number"
-                                          step="any"
-                                          placeholder={String(Math.round(computedSellIn * 100) / 100)}
-                                          value={priceValue}
-                                          readOnly={row.isReadOnly}
+                                          <input
+                                            className={`${inputClass(priceValue !== "")} ${row.isReadOnly ? "dataset-input-readonly" : ""}`.trim()}
+                                            type="number"
+                                            step="any"
+                                            placeholder={String(Math.round(computedSellIn * 100) / 100)}
+                                            value={priceValue}
+                                            readOnly={row.isReadOnly}
                                             onChange={(event) => {
                                               if (!code) return;
                                               const nextPrice = event.target.value === "" ? "" : Number(event.target.value);
@@ -381,9 +380,9 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                                 updateBeerSellInPrice(row, code, "");
                                                 return;
                                               }
-                                              const nextMargin = calcMarginPctFromSellInPrice(row.kostprijs, nextPrice);
+                                              const nextOpslag = calcOpslagPctFromSellInPrice(row.kostprijs, nextPrice);
                                               updateBeerSellInPrice(row, code, Math.round(nextPrice * 100) / 100);
-                                              updateBeerMargin(row, code, Math.round(nextMargin * 100) / 100);
+                                              updateBeerMargin(row, code, round2(nextOpslag));
                                             }}
                                           />
                                       </td>

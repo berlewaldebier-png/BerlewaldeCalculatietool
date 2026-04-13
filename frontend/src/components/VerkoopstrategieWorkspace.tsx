@@ -4,8 +4,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 
 import { API_BASE_URL } from "@/lib/api";
 import {
-  calcOpslagPctFromMarginPct,
-  calcSellPrice,
+  calcSellPriceFromOpslagPct,
   parseNumberLoose,
   round2
 } from "@/lib/verkoopstrategieMath";
@@ -30,17 +29,17 @@ const STRATEGY_RECORD_TYPES = new Set([
 ]);
 type ProductViewRow = {
   productId: string; productType: "basis" | "samengesteld"; product: string;
-  marginOverrides: Record<string, number | "">; factorOverrides: Record<string, number | "">;
+  opslagOverrides: Record<string, number | "">; factorOverrides: Record<string, number | "">;
   sellInPriceOverrides: Record<string, number | "">;
-  activeMargins: Record<string, number>; activeFactors: Record<string, number>;
+  activeOpslags: Record<string, number>; activeFactors: Record<string, number>;
   isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
 };
 type BeerViewRow = {
   id: string; bierId: string; biernaam: string; productId: string; productType: "basis" | "samengesteld" | ""; product: string; kostprijs: number;
-  productMargins: Record<string, number>;
-  marginOverrides: Record<string, number | "">;
+  productOpslags: Record<string, number>;
+  opslagOverrides: Record<string, number | "">;
   sellInPriceOverrides: Record<string, number | "">;
-  activeMargins: Record<string, number>;
+  activeOpslags: Record<string, number>;
   sellInPrices: Record<string, number>;
   productFactors: Record<string, number>; factorOverrides: Record<string, number | "">; activeFactors: Record<string, number>; sellOutPrices: Record<string, number>;
   isReadOnly: boolean; followsProductId: string; followsProductLabel: string;
@@ -129,7 +128,7 @@ function buildEmptyYearStrategyRow({
   channelDefaults
 }: {
   year: number;
-  channelDefaults: Record<string, { margin: number; factor: number }>;
+  channelDefaults: Record<string, { opslag: number; factor: number }>;
 }): StrategyRow {
   // This is a year-specific defaults record. It becomes the single source of truth for default margins/factors per year.
   return {
@@ -143,7 +142,8 @@ function buildEmptyYearStrategyRow({
     verpakking: "",
     strategie_type: "default",
     kostprijs: 0,
-    sell_in_margins: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.margin ?? 50)])),
+    // NOTE: despite the legacy field name `sell_in_margins`, we now persist opslag% as the source of truth.
+    sell_in_margins: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.opslag ?? 50)])),
     sell_in_prices: {},
     sell_out_factors: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.factor ?? 3)])),
     sell_out_advice_prices: {},
@@ -237,9 +237,9 @@ export function VerkoopstrategieWorkspace({
       Object.fromEntries(
         normalizedChannels.map((channel) => [
           channel.code,
-          { margin: Number(channel.default_marge_pct ?? 50), factor: Number(channel.default_factor ?? 3) }
+          { opslag: Number(channel.default_marge_pct ?? 50), factor: Number(channel.default_factor ?? 3) }
         ])
-      ) as Record<string, { margin: number; factor: number }>,
+      ) as Record<string, { opslag: number; factor: number }>,
     [normalizedChannels]
   );
   const verkoopPassthroughRows = useMemo(() => {
@@ -416,11 +416,11 @@ export function VerkoopstrategieWorkspace({
       channelCodes.map((code) => [
         code,
         {
-          margin: Number(source.sell_in_margins?.[code] ?? channelMasterDefaults[code]?.margin ?? 50),
+          opslag: Number(source.sell_in_margins?.[code] ?? channelMasterDefaults[code]?.opslag ?? 50),
           factor: Number((source.sell_out_factors as any)?.[code] ?? channelMasterDefaults[code]?.factor ?? 3),
         },
       ])
-    ) as Record<string, { margin: number; factor: number }>;
+    ) as Record<string, { opslag: number; factor: number }>;
   }, [channelCodes, channelMasterDefaults, effectiveSelectedYear, yearStrategyRow]);
 
   const basisById = useMemo(() => new Map(basisproducten.map((row) => [String(row.id ?? ""), row])), [basisproducten]);
@@ -448,9 +448,9 @@ export function VerkoopstrategieWorkspace({
       const parentComposite = product.type === "basis" ? basisProductParentMap.get(product.id) : undefined;
       const effectiveProductId = parentComposite?.productId ?? product.id;
       const found = byProduct.get(effectiveProductId) ?? null;
-      const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
+      const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
         const value = found?.sell_in_margins?.[code];
-        return [code, value === undefined || value === channelYearDefaults[code]?.margin ? "" : Number(value)];
+        return [code, value === undefined || value === channelYearDefaults[code]?.opslag ? "" : Number(value)];
       })) as Record<string, number | "">;
       const sellInPriceOverrides = Object.fromEntries(channelCodes.map((code) => {
         const value = (found as any)?.sell_in_prices?.[code];
@@ -466,10 +466,10 @@ export function VerkoopstrategieWorkspace({
         productId: product.id,
         productType: product.type,
         product: product.label,
-        marginOverrides,
+        opslagOverrides,
         sellInPriceOverrides,
         factorOverrides,
-        activeMargins: Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? channelYearDefaults[code]?.margin ?? 50 : Number(marginOverrides[code])])) as Record<string, number>,
+        activeOpslags: Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? channelYearDefaults[code]?.opslag ?? 50 : Number(opslagOverrides[code])])) as Record<string, number>,
         activeFactors: Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? channelYearDefaults[code]?.factor ?? 3 : Number(factorOverrides[code])])) as Record<string, number>,
         isReadOnly: Boolean(parentComposite),
         followsProductId: parentComposite?.productId ?? "",
@@ -505,9 +505,9 @@ export function VerkoopstrategieWorkspace({
         const productDefaults = productById.get(productId);
         const followProductId = productDefaults?.followsProductId ?? "";
 
-        const productMargins =
-          productDefaults?.activeMargins ??
-          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.margin ?? 50])) as Record<
+        const productOpslags =
+          productDefaults?.activeOpslags ??
+          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<
             string,
             number
           >);
@@ -519,10 +519,10 @@ export function VerkoopstrategieWorkspace({
           >);
 
         const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
-        const marginOverrides = Object.fromEntries(
+        const opslagOverrides = Object.fromEntries(
           channelCodes.map((code) => {
             const value = override?.sell_in_margins?.[code];
-            return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
+            return [code, value === undefined || value === productOpslags[code] ? "" : Number(value)];
           })
         ) as Record<string, number | "">;
         const sellInPriceOverrides = Object.fromEntries(
@@ -540,8 +540,8 @@ export function VerkoopstrategieWorkspace({
           })
         ) as Record<string, number | "">;
 
-        const activeMargins = Object.fromEntries(
-          channelCodes.map((code) => [code, marginOverrides[code] === "" ? productMargins[code] : Number(marginOverrides[code])])
+        const activeOpslags = Object.fromEntries(
+          channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])
         ) as Record<string, number>;
         const activeFactors = Object.fromEntries(
           channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])
@@ -552,7 +552,7 @@ export function VerkoopstrategieWorkspace({
           channelCodes.map((code) => {
             const explicit = sellInPriceOverrides[code];
             if (explicit !== "") return [code, Number(explicit)];
-            return [code, calcSellPrice(kostprijs, activeMargins[code])];
+            return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
           })
         ) as Record<string, number>;
         const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
@@ -565,10 +565,10 @@ export function VerkoopstrategieWorkspace({
           productType: row.productType,
           product: productLabel,
           kostprijs,
-          productMargins,
-          marginOverrides,
+          productOpslags,
+          opslagOverrides,
           sellInPriceOverrides,
-          activeMargins,
+          activeOpslags,
           sellInPrices,
           productFactors,
           factorOverrides,
@@ -641,16 +641,16 @@ export function VerkoopstrategieWorkspace({
         if (!biernaam || !productRow) return;
         const productDefaults = productById.get(productId);
         const followProductId = productDefaults?.followsProductId ?? "";
-        const productMargins =
-          productDefaults?.activeMargins ??
-          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.margin ?? 50])) as Record<string, number>);
+        const productOpslags =
+          productDefaults?.activeOpslags ??
+          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<string, number>);
         const productFactors =
           productDefaults?.activeFactors ??
           (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<string, number>);
         const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
-        const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
+        const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
           const value = override?.sell_in_margins?.[code];
-          return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
+          return [code, value === undefined || value === productOpslags[code] ? "" : Number(value)];
         })) as Record<string, number | "">;
         const sellInPriceOverrides = Object.fromEntries(
           channelCodes.map((code) => {
@@ -664,18 +664,18 @@ export function VerkoopstrategieWorkspace({
           const value = override?.sell_out_factors?.[code];
           return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
         })) as Record<string, number | "">;
-        const activeMargins = Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? productMargins[code] : Number(marginOverrides[code])])) as Record<string, number>;
+        const activeOpslags = Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])) as Record<string, number>;
         const activeFactors = Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])) as Record<string, number>;
         const kostprijs = Number(productRow.kostprijs ?? 0);
         const sellInPrices = Object.fromEntries(
           channelCodes.map((code) => {
             const explicit = sellInPriceOverrides[code];
             if (explicit !== "") return [code, Number(explicit)];
-            return [code, calcSellPrice(kostprijs, activeMargins[code])];
+            return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
           })
         ) as Record<string, number>;
         const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
-        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productMargins, marginOverrides, sellInPriceOverrides, activeMargins, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
       });
     } else {
       definitiveVersions.forEach((record) => {
@@ -687,12 +687,12 @@ export function VerkoopstrategieWorkspace({
           const productId = productRow.productId;
           const productDefaults = productById.get(productId);
           const followProductId = productDefaults?.followsProductId ?? "";
-          const productMargins = productDefaults?.activeMargins ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.margin ?? 50])) as Record<string, number>;
+          const productOpslags = productDefaults?.activeOpslags ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<string, number>;
           const productFactors = productDefaults?.activeFactors ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.factor ?? 3])) as Record<string, number>;
           const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
-          const marginOverrides = Object.fromEntries(channelCodes.map((code) => {
+          const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
             const value = override?.sell_in_margins?.[code];
-            return [code, value === undefined || value === productMargins[code] ? "" : Number(value)];
+            return [code, value === undefined || value === productOpslags[code] ? "" : Number(value)];
           })) as Record<string, number | "">;
           const sellInPriceOverrides = Object.fromEntries(
             channelCodes.map((code) => {
@@ -706,18 +706,18 @@ export function VerkoopstrategieWorkspace({
             const value = override?.sell_out_factors?.[code];
             return [code, value === "" || value === undefined || Number(value) === productFactors[code] ? "" : Number(value)];
           })) as Record<string, number | "">;
-          const activeMargins = Object.fromEntries(channelCodes.map((code) => [code, marginOverrides[code] === "" ? productMargins[code] : Number(marginOverrides[code])])) as Record<string, number>;
+          const activeOpslags = Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])) as Record<string, number>;
           const activeFactors = Object.fromEntries(channelCodes.map((code) => [code, factorOverrides[code] === "" ? productFactors[code] : Number(factorOverrides[code])])) as Record<string, number>;
           const kostprijs = Number(productRow.kostprijs ?? 0);
           const sellInPrices = Object.fromEntries(
             channelCodes.map((code) => {
               const explicit = sellInPriceOverrides[code];
               if (explicit !== "") return [code, Number(explicit)];
-              return [code, calcSellPrice(kostprijs, activeMargins[code])];
+              return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
             })
           ) as Record<string, number>;
           const sellOutPrices = Object.fromEntries(channelCodes.map((code) => [code, sellInPrices[code] * activeFactors[code]])) as Record<string, number>;
-          out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productMargins, marginOverrides, sellInPriceOverrides, activeMargins, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+          out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, productFactors, factorOverrides, activeFactors, sellOutPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
         });
       });
     }

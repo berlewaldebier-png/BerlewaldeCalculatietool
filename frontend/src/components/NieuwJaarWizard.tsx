@@ -1027,19 +1027,21 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     });
   }
 
-  function computeSellInPrice(cost: number, marginPct: number) {
-    const margin = clampNumber(marginPct, 0);
-    if (margin >= 100) return cost;
-    return cost / Math.max(0.0001, 1 - margin / 100);
+  // NOTE: In verkoopstrategie we persist opslag% as the source of truth (legacy field name `sell_in_margins`).
+  function computeSellInPrice(cost: number, opslagPct: number) {
+    const c = clampNumber(cost, 0);
+    const o = clampNumber(opslagPct, 0);
+    return c * (1 + o / 100);
   }
 
   function computeMarginFromSellIn(cost: number, sellIn: number) {
+    // Backwards-compatible name; this now returns opslag% derived from sell-in price.
     const c = clampNumber(cost, 0);
     const p = clampNumber(sellIn, 0);
-    if (!Number.isFinite(c) || !Number.isFinite(p) || p <= 0) return 0;
-    const margin = (1 - c / p) * 100;
-    if (!Number.isFinite(margin)) return 0;
-    return Math.min(99.9, Math.max(0, margin));
+    if (!Number.isFinite(c) || !Number.isFinite(p) || c <= 0) return 0;
+    const opslag = (p / c - 1) * 100;
+    if (!Number.isFinite(opslag)) return 0;
+    return Math.max(0, opslag);
   }
 
   const basisParentForStrategy = useMemo(() => {

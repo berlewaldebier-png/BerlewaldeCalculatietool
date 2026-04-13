@@ -10,6 +10,13 @@ export const parseNumberLoose = (raw: string) => {
 export const calcSellPrice = (cost: number, margin: number) =>
   Number(margin ?? 0) >= 100 ? Number(cost ?? 0) : Number(cost ?? 0) / Math.max(0.0001, 1 - Number(margin ?? 0) / 100);
 
+export const calcSellPriceFromOpslagPct = (cost: number, opslagPct: number) => {
+  const c = Number(cost ?? 0);
+  const o = Math.max(0, Number(opslagPct ?? 0));
+  if (!Number.isFinite(c) || !Number.isFinite(o)) return 0;
+  return c * (1 + o / 100);
+};
+
 export const calcMarginPctFromSellInPrice = (cost: number, sellInPrice: number) => {
   const c = Number(cost ?? 0);
   const p = Number(sellInPrice ?? 0);
