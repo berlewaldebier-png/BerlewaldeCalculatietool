@@ -113,22 +113,6 @@ def ensure_schema() -> None:
 
         _SCHEMA_READY = True
 
-        # One-time best-effort migration from legacy `app_datasets` payload.
-        try:
-            with postgres_storage.connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT COUNT(*) FROM cost_versions")
-                    count_row = cur.fetchone()
-                    existing = int((count_row[0] if count_row else 0) or 0)
-            if existing == 0:
-                legacy = postgres_storage.load_app_dataset_payload("kostprijsversies")
-                if isinstance(legacy, list) and legacy:
-                    save_dataset(legacy, overwrite=True)
-                    postgres_storage.delete_app_dataset_row("kostprijsversies")
-        except Exception:
-            # Migration is best-effort; schema must still be usable for new writes.
-            pass
-
 
 def _strip_snapshot_sections(row: dict[str, Any]) -> dict[str, Any]:
     """Keep top-level cost version fields in payload; store product snapshot rows in normalized tables."""

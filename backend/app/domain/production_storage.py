@@ -9,7 +9,6 @@ from app.domain import postgres_storage
 
 _schema_ready = False
 _schema_lock = Lock()
-_migrated_from_dataset = False
 
 
 def ensure_schema() -> None:
@@ -92,21 +91,6 @@ def list_years() -> list[int]:
             cur.execute("SELECT jaar FROM production_years ORDER BY jaar")
             rows = cur.fetchall()
     years = [int(row[0]) for row in rows]
-    if years:
-        return years
-
-    # One-time migration from legacy app_datasets payload (if present).
-    global _migrated_from_dataset
-    if _migrated_from_dataset:
-        return years
-
-    legacy = postgres_storage.load_dataset("productie", None)
-    if isinstance(legacy, dict) and legacy:
-        _migrated_from_dataset = True
-        save_productie(legacy)
-        return list_years()
-
-    _migrated_from_dataset = True
     return years
 
 
@@ -122,17 +106,6 @@ def load_productie() -> dict[str, dict[str, Any]]:
                 """
             )
             rows = cur.fetchall()
-
-    if not rows:
-        # One-time migration from legacy app_datasets payload (if present).
-        global _migrated_from_dataset
-        if not _migrated_from_dataset:
-            legacy = postgres_storage.load_dataset("productie", None)
-            if isinstance(legacy, dict) and legacy:
-                _migrated_from_dataset = True
-                save_productie(legacy)
-                return load_productie()
-            _migrated_from_dataset = True
 
     result: dict[str, dict[str, Any]] = {}
     for jaar, inkoop, productie, batch in rows:

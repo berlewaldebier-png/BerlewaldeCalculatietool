@@ -16,7 +16,6 @@ class ActivationContext:
 
 
 _SCHEMA_READY = False
-_MIGRATED_FROM_DATASET = False
 
 
 def _now_iso() -> str:
@@ -35,7 +34,7 @@ def _as_iso(value: Any) -> str:
 
 
 def ensure_schema() -> None:
-    global _SCHEMA_READY, _MIGRATED_FROM_DATASET
+    global _SCHEMA_READY
     if _SCHEMA_READY:
         return
 
@@ -161,25 +160,6 @@ def ensure_schema() -> None:
         conn.commit()
 
     _SCHEMA_READY = True
-
-    # One-time migration from legacy app_datasets payload into the normalized table.
-    if not _MIGRATED_FROM_DATASET:
-        _MIGRATED_FROM_DATASET = True
-        try:
-            with postgres_storage.connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT COUNT(*) FROM kostprijs_product_activations")
-                    count_row = cur.fetchone()
-                    existing_count = int((count_row[0] if count_row else 0) or 0)
-            if existing_count == 0:
-                legacy = postgres_storage.load_dataset("kostprijsproductactiveringen", None)
-                if isinstance(legacy, list) and legacy:
-                    upsert_activations([row for row in legacy if isinstance(row, dict)], context=ActivationContext(action="migrate"))
-        except Exception:
-            # Migration is best-effort; schema must still be usable for new writes.
-            pass
-
-    # _SCHEMA_READY already set above
 
 
 def reset_defaults() -> None:

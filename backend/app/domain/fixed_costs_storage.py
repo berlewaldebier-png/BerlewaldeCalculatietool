@@ -11,7 +11,6 @@ from app.domain import production_storage
 
 _schema_ready = False
 _schema_lock = Lock()
-_migrated_from_dataset = False
 
 
 def ensure_schema() -> None:
@@ -83,18 +82,6 @@ def load_grouped_by_year() -> dict[str, list[dict[str, Any]]]:
                 """
             )
             rows = cur.fetchall()
-
-    if not rows:
-        # One-time migration from legacy app_datasets payload (if present).
-        global _migrated_from_dataset
-        if not _migrated_from_dataset:
-            legacy = postgres_storage.load_dataset("vaste-kosten", None)
-            if isinstance(legacy, dict) and legacy:
-                _migrated_from_dataset = True
-                # Will validate years against production_years (after production migration).
-                save_grouped_by_year(legacy)
-                return load_grouped_by_year()
-            _migrated_from_dataset = True
 
     result: dict[str, list[dict[str, Any]]] = {}
     for line_id, jaar, omschrijving, kostensoort_code, bedrag, herverdeel_pct in rows:

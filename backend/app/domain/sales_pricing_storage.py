@@ -65,22 +65,6 @@ def ensure_schema() -> None:
 
         _SCHEMA_READY = True
 
-        # One-time best-effort migration from legacy `app_datasets` payload.
-        try:
-            with postgres_storage.connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT COUNT(*) FROM sales_pricing_records")
-                    count_row = cur.fetchone()
-                    existing = int((count_row[0] if count_row else 0) or 0)
-            if existing == 0:
-                legacy = postgres_storage.load_app_dataset_payload("verkoopprijzen")
-                if isinstance(legacy, list) and legacy:
-                    save_dataset(legacy, overwrite=True)
-                    postgres_storage.delete_app_dataset_row("verkoopprijzen")
-        except Exception:
-            # Migration is best-effort; schema must still be usable for new writes.
-            pass
-
 
 def load_dataset(default_value: Any) -> Any:
     ensure_schema()
