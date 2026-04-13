@@ -7,6 +7,7 @@ import {
   parseNumberLoose,
   round2
 } from "@/lib/verkoopstrategieMath";
+import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
 
 type Channel = { code: string; naam: string };
 
@@ -28,20 +29,6 @@ type Props = {
   updateBeerSellInPrice: (row: any, channelCode: string, value: number | "") => void;
   updateBeerMargin: (row: any, channelCode: string, value: number | "") => void;
 };
-
-const money = (v: number) =>
-  new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(v);
-
-const num = (v: number) =>
-  new Intl.NumberFormat("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
-
-const inputClass = (hasOverride: boolean) =>
-  hasOverride ? "dataset-input dataset-input-override-active" : "dataset-input";
 
 export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
   const {
@@ -419,4 +406,3 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
     </div>
   );
 }
-

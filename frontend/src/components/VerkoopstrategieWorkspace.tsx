@@ -10,6 +10,7 @@ import {
   round2
 } from "@/lib/verkoopstrategieMath";
 import { VerkoopstrategiePrijsinstellingenAccordion } from "@/components/verkoopstrategie/VerkoopstrategiePrijsinstellingenAccordion";
+import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
 
 type GenericRecord = Record<string, unknown>;
 type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number; default_factor: number };
@@ -80,8 +81,6 @@ const DEFAULT_CHANNELS: ChannelRow[] = [
 ];
 
 const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
-const money = (v: number) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
-const num = (v: number) => new Intl.NumberFormat("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
 // Pricing helpers are shared with the nieuw-jaar wizard via `lib/verkoopstrategieMath.ts`.
 const normalizeLabel = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const normalizeMap = (raw: unknown, codes: string[]) => {
@@ -97,7 +96,6 @@ const normalizeMap = (raw: unknown, codes: string[]) => {
   });
   return out as Record<string, number | "">;
 };
-const inputClass = (hasOverride: boolean) => hasOverride ? "dataset-input dataset-input-override-active" : "dataset-input";
 
 function normalizeChannels(raw: GenericRecord[]) {
   const source = Array.isArray(raw) && raw.length > 0 ? raw : DEFAULT_CHANNELS;
