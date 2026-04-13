@@ -27,12 +27,57 @@ def ensure_schema() -> None:
                     """
                     CREATE TABLE IF NOT EXISTS production_years (
                         jaar INTEGER PRIMARY KEY,
-                        hoeveelheid_inkoop_l DOUBLE PRECISION NOT NULL DEFAULT 0,
-                        hoeveelheid_productie_l DOUBLE PRECISION NOT NULL DEFAULT 0,
-                        batchgrootte_eigen_productie_l DOUBLE PRECISION NOT NULL DEFAULT 0,
+                        hoeveelheid_inkoop_l NUMERIC NOT NULL DEFAULT 0,
+                        hoeveelheid_productie_l NUMERIC NOT NULL DEFAULT 0,
+                        batchgrootte_eigen_productie_l NUMERIC NOT NULL DEFAULT 0,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
+                    """
+                )
+
+                # Legacy dev DBs may have these columns as DOUBLE PRECISION; make them NUMERIC to
+                # avoid floating point drift in cost allocation calculations.
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                      IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'production_years'
+                          AND column_name = 'hoeveelheid_inkoop_l'
+                          AND data_type = 'double precision'
+                      ) THEN
+                        ALTER TABLE production_years
+                          ALTER COLUMN hoeveelheid_inkoop_l TYPE NUMERIC USING hoeveelheid_inkoop_l::numeric;
+                      END IF;
+
+                      IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'production_years'
+                          AND column_name = 'hoeveelheid_productie_l'
+                          AND data_type = 'double precision'
+                      ) THEN
+                        ALTER TABLE production_years
+                          ALTER COLUMN hoeveelheid_productie_l TYPE NUMERIC USING hoeveelheid_productie_l::numeric;
+                      END IF;
+
+                      IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'production_years'
+                          AND column_name = 'batchgrootte_eigen_productie_l'
+                          AND data_type = 'double precision'
+                      ) THEN
+                        ALTER TABLE production_years
+                          ALTER COLUMN batchgrootte_eigen_productie_l TYPE NUMERIC USING batchgrootte_eigen_productie_l::numeric;
+                      END IF;
+                    END $$;
                     """
                 )
             if not postgres_storage.in_transaction():
