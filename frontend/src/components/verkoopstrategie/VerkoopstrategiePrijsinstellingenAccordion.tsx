@@ -175,15 +175,15 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                   const derivedMargin = round2(derivedMarginRaw);
                                   const derivedOpslag = round2(calcOpslagPctFromMarginPct(derivedMarginRaw));
                                   const opslagValue = !code ? "" : String(derivedOpslag);
+                                  const opslagKey2 = code
+                                    ? `year:${effectiveSelectedYear}:channel:${code}:product:${row.productId}:opslag`
+                                    : "";
+                                  const opslagDraftValue2 = opslagKey2 ? getDraft(opslagKey2) : undefined;
                                   const hasOverride =
                                     Boolean(code) &&
                                     (row.marginOverrides?.[code] !== "" ||
                                       row.sellInPriceOverrides?.[code] !== "" ||
                                       (opslagDraftValue2 !== undefined && opslagDraftValue2 !== ""));
-                                  const opslagKey2 = code
-                                    ? `year:${effectiveSelectedYear}:channel:${code}:product:${row.productId}:opslag`
-                                    : "";
-                                  const opslagDraftValue2 = opslagKey2 ? getDraft(opslagKey2) : undefined;
 
                                   return (
                                     <tr key={`${row.productId}::${idx}`}>
@@ -299,16 +299,16 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                   const derivedOpslag = hasPriceOverride
                                     ? calcOpslagPctFromSellInPrice(row.kostprijs ?? 0, computedSellIn)
                                     : calcOpslagPctFromMarginPct(derivedMargin);
+                                  const opslagKey3 = code
+                                    ? `year:${effectiveSelectedYear}:channel:${code}:beer:${row.id}:opslag`
+                                    : "";
+                                  const opslagDraftValue3 = opslagKey3 ? getDraft(opslagKey3) : undefined;
                                   const hasOverride =
                                     Boolean(code) &&
                                     (row.marginOverrides?.[code] !== "" ||
                                       row.sellInPriceOverrides?.[code] !== "" ||
                                       (opslagDraftValue3 !== undefined && opslagDraftValue3 !== ""));
                                   const opslagValue = !code ? "" : String(round2(derivedOpslag));
-                                  const opslagKey3 = code
-                                    ? `year:${effectiveSelectedYear}:channel:${code}:beer:${row.id}:opslag`
-                                    : "";
-                                  const opslagDraftValue3 = opslagKey3 ? getDraft(opslagKey3) : undefined;
                                   const priceValue =
                                     row.isReadOnly || row.sellInPriceOverrides?.[code] === ""
                                       ? ""
