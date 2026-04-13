@@ -3,6 +3,15 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
+import {
+  calcMarginPctFromOpslagPct,
+  calcMarginPctFromSellInPrice,
+  calcOpslagPctFromMarginPct,
+  calcOpslagPctFromSellInPrice,
+  calcSellPrice,
+  parseNumberLoose,
+  round2
+} from "@/lib/verkoopstrategieMath";
 
 type GenericRecord = Record<string, unknown>;
 type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number; default_factor: number };
@@ -75,39 +84,7 @@ const DEFAULT_CHANNELS: ChannelRow[] = [
 const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const money = (v: number) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 const num = (v: number) => new Intl.NumberFormat("nl-NL", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
-const round2 = (v: number) => Math.round((Number(v ?? 0) + Number.EPSILON) * 100) / 100;
-const parseNumberLoose = (raw: string) => {
-  const cleaned = String(raw ?? "").trim().replace(",", ".");
-  if (!cleaned) return Number.NaN;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
-};
-const calcSellPrice = (cost: number, margin: number) => (margin >= 100 ? cost : cost / Math.max(0.0001, 1 - margin / 100));
-const calcMarginPctFromSellInPrice = (cost: number, sellInPrice: number) => {
-  const c = Number(cost ?? 0);
-  const p = Number(sellInPrice ?? 0);
-  if (!Number.isFinite(c) || !Number.isFinite(p) || p <= 0) return 0;
-  const margin = (1 - c / p) * 100;
-  if (!Number.isFinite(margin)) return 0;
-  return Math.min(99.9, Math.max(0, margin));
-};
-const calcOpslagPctFromMarginPct = (marginPct: number) => {
-  const m = Math.min(99.9, Math.max(0, Number(marginPct ?? 0)));
-  if (m >= 99.9) return 9999;
-  return (m / Math.max(0.0001, 100 - m)) * 100;
-};
-const calcMarginPctFromOpslagPct = (opslagPct: number) => {
-  const o = Math.max(0, Number(opslagPct ?? 0));
-  return (o / Math.max(0.0001, 100 + o)) * 100;
-};
-const calcOpslagPctFromSellInPrice = (cost: number, sellInPrice: number) => {
-  const c = Number(cost ?? 0);
-  const p = Number(sellInPrice ?? 0);
-  if (!Number.isFinite(c) || !Number.isFinite(p) || c <= 0) return 0;
-  const opslag = (p / c - 1) * 100;
-  if (!Number.isFinite(opslag)) return 0;
-  return Math.max(0, opslag);
-};
+// Pricing helpers are shared with the nieuw-jaar wizard via `lib/verkoopstrategieMath.ts`.
 const normalizeLabel = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const normalizeMap = (raw: unknown, codes: string[]) => {
   const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
@@ -1081,11 +1058,6 @@ export function VerkoopstrategieWorkspace({
     exposeSave(() => exposed);
   }, [exposeSave]);
 
-  // Current UX: the accordion-style "Prijsinstellingen" UI is the only supported UI.
-  const useAccordion = true;
-  // Legacy tabs UI is intentionally inactive; keep a value that renders nothing.
-  const activeTab: string = "";
-
   const yearOptions = useMemo(() => {
     if (productieYears.length > 0) {
       return [...productieYears].sort((a, b) => b - a);
@@ -1146,8 +1118,7 @@ export function VerkoopstrategieWorkspace({
             </div>
           </div>
 
-          {useAccordion ? (
-            <div className="module-card compact-card">
+          <div className="module-card compact-card">
               <div className="module-card-header" style={{ marginBottom: "0.7rem" }}>
                 <div className="module-card-title">Prijsinstellingen</div>
                 <div className="module-card-text">Pas prijsinstellingen aan per kanaal, producttype en bier.</div>
@@ -1487,6 +1458,7 @@ export function VerkoopstrategieWorkspace({
             </div>
           </div>
 
+          {/*
           {activeTab === "sell-in" ? (
             <div className="stack" style={{ gap: "1rem" }}>
               <details open className="module-card compact-card">
@@ -1687,40 +1659,9 @@ export function VerkoopstrategieWorkspace({
                 </div>
               </details>
             </div>
-          ) : null}
-
-          {activeTab === "bieren" ? (
-            <div className="data-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Bier</th><th>Product</th><th>Kostprijs</th>
-                    {activeChannels.map((channel) => <th key={`in-${channel.code}`}>{channel.naam} verkoopprijs</th>)}
-                    {activeChannels.map((channel) => <th key={`out-${channel.code}`}>{channel.naam} adviesprijs</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sellRows.length === 0 ? (
-                    <tr><td className="dataset-empty" colSpan={3 + activeChannels.length * 2}>Nog geen bieren gevonden voor {effectiveSelectedYear}.</td></tr>
-                  ) : sellRows.map((row) => (
-                    <tr key={`${row.bierId}-${row.productId}`}>
-                      <td>{row.biernaam}</td><td>{row.product}</td><td>{money(row.kostprijs)}</td>
-                      {activeChannels.map((channel) => <td key={`${row.id}-in-${channel.code}`}>{money(row.sellInPrices[channel.code])}</td>)}
-                      {activeChannels.map((channel) => <td key={`${row.id}-out-${channel.code}`}>{money(row.sellOutPrices[channel.code])}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
-          <div className="editor-actions">
-            <div className="editor-actions-group" />
-            <div className="editor-actions-group">
-              {status ? <span className="editor-status">{status}</span> : null}
-              <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>{isSaving ? "Opslaan..." : "Opslaan"}</button>
-            </div>
           </div>
+
+          */}
         </>
     </section>
   );
