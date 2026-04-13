@@ -20,6 +20,9 @@ def ensure_schema() -> None:
         if _SCHEMA_READY:
             return
         postgres_storage.ensure_schema()
+        # Ensure master registry exists before we add FK constraints.
+        from app.domain import product_registry_storage
+        product_registry_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -65,6 +68,23 @@ def ensure_schema() -> None:
                 # Sell-out was removed; drop legacy columns if they exist (dev-only data can be discarded).
                 cur.execute("ALTER TABLE price_quote_lines DROP COLUMN IF EXISTS sell_out_price_at_quote;")
                 cur.execute("ALTER TABLE price_quote_lines DROP COLUMN IF EXISTS sell_out_factor_at_quote;")
+                # Enforce product_id integrity against the master registry.
+                # NOT VALID keeps existing legacy rows from blocking startup; new rows are checked.
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint WHERE conname = 'fk_price_quote_lines_product'
+                        ) THEN
+                            ALTER TABLE price_quote_lines
+                            ADD CONSTRAINT fk_price_quote_lines_product
+                            FOREIGN KEY (product_id) REFERENCES products_master(id) ON DELETE RESTRICT
+                            NOT VALID;
+                        END IF;
+                    END $$;
+                    """
+                )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS ix_price_quote_lines_quote ON price_quote_lines(quote_id)"
                 )

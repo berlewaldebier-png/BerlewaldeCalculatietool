@@ -21,6 +21,9 @@ def ensure_schema() -> None:
         if _SCHEMA_READY:
             return
         postgres_storage.ensure_schema()
+        # Ensure master registry exists before we add FK constraints.
+        from app.domain import product_registry_storage
+        product_registry_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -56,6 +59,23 @@ def ensure_schema() -> None:
                         kostprijs NUMERIC NOT NULL DEFAULT 0,
                         sort_index INTEGER NOT NULL DEFAULT 0
                     );
+                    """
+                )
+                # Enforce product_id integrity against the master registry for snapshot rows.
+                # NOT VALID keeps existing legacy rows from blocking startup; new rows are checked.
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint WHERE conname = 'fk_cost_version_rows_product'
+                        ) THEN
+                            ALTER TABLE cost_version_product_rows
+                            ADD CONSTRAINT fk_cost_version_rows_product
+                            FOREIGN KEY (product_id) REFERENCES products_master(id) ON DELETE RESTRICT
+                            NOT VALID;
+                        END IF;
+                    END $$;
                     """
                 )
                 cur.execute(

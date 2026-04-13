@@ -197,11 +197,35 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
 
     dataset_names = set(dataset_store.get_dataset_names())
     imported_masters = False
+
+    fk_dependent = {
+        # Table-backed stores that enforce FK(product_id -> products_master.id).
+        "kostprijsversies",
+        "kostprijsproductactiveringen",
+        "prijsvoorstellen",
+    }
+
     for name in _import_dataset_order(profile):
         if name not in datasets:
             continue
         if name not in dataset_names:
             continue
+
+        # Ensure product registry exists before importing FK-dependent datasets.
+        if name in fk_dependent and not imported_masters:
+            try:
+                registry_report = product_registry_storage.rebuild_registry(
+                    validate_constraints=False
+                )
+            except Exception as exc:
+                raise ValueError(f"Seed import: kon products registry niet opbouwen: {exc}") from exc
+            if int(registry_report.get("count", 0) or 0) <= 0:
+                raise ValueError(
+                    "Seed import: products registry is leeg. Controleer of base/composite product masters in de seed bundle zitten."
+                )
+            report["maintenance"]["product_registry_pre"] = registry_report
+            imported_masters = True
+
         payload = _unwrap_legacy_wrapper(datasets.get(name))
         # Writes are validated inside save_dataset.
         report["saved"][name] = bool(dataset_store.save_dataset(name, payload))
@@ -215,12 +239,17 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
             have_comp = bool(report["saved"].get("composite-product-masters")) or ("composite-product-masters" not in datasets)
             if have_base and have_comp:
                 try:
-                    report["maintenance"]["product_registry_pre"] = product_registry_storage.rebuild_registry(
+                    registry_report = product_registry_storage.rebuild_registry(
                         validate_constraints=False
                     )
                 except Exception as exc:
                     # Fail hard: without a product registry, downstream imports must not proceed.
                     raise ValueError(f"Seed import: kon products registry niet opbouwen: {exc}") from exc
+                if int(registry_report.get("count", 0) or 0) <= 0:
+                    raise ValueError(
+                        "Seed import: products registry is leeg na import van product masters."
+                    )
+                report["maintenance"]["product_registry_pre"] = registry_report
                 imported_masters = True
 
     # Align with current invariants.

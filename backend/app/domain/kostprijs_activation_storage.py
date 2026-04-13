@@ -40,6 +40,9 @@ def ensure_schema() -> None:
         return
 
     postgres_storage.ensure_schema()
+    # Ensure master registry exists before we add FK constraints.
+    from app.domain import product_registry_storage
+    product_registry_storage.ensure_schema()
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -136,6 +139,23 @@ def ensure_schema() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS ix_kostprijs_activation_events_created_at
                 ON kostprijs_activation_events (created_at);
+                """
+            )
+
+            # Enforce product_id integrity against the master registry.
+            # Use an idempotent DO block (Postgres lacks IF NOT EXISTS for ADD CONSTRAINT).
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint WHERE conname = 'fk_kostprijs_activations_product'
+                    ) THEN
+                        ALTER TABLE kostprijs_product_activations
+                        ADD CONSTRAINT fk_kostprijs_activations_product
+                        FOREIGN KEY (product_id) REFERENCES products_master(id) ON DELETE RESTRICT;
+                    END IF;
+                END $$;
                 """
             )
         conn.commit()
