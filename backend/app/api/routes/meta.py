@@ -267,6 +267,15 @@ def post_activate_kostprijzen(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/validate-phase-g-constraints")
+def post_validate_phase_g_constraints(
+    validate_all: bool = Query(False, description="Wanneer true: valideer ook al-validated constraints opnieuw."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Validate NOT VALID FK constraints introduced during Phase G."""
+    return dataset_store.validate_phase_g_constraints(validate_all=bool(validate_all))
+
+
 @router.post("/prepare-new-year")
 def post_prepare_new_year(
     payload: PrepareNewYearRequest,

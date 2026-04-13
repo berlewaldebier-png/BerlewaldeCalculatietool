@@ -1961,6 +1961,71 @@ def rollback_year(
     return report
 
 
+def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any]:
+    """Validate NOT VALID FK constraints introduced during Phase G."""
+    require_postgres()
+
+    from app.domain import (
+        product_registry_storage,
+        cost_versions_storage,
+        price_quotes_storage,
+        kostprijs_scenario_inkoop_storage,
+        kostprijs_activation_storage,
+    )
+
+    product_registry_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
+    price_quotes_storage.ensure_schema()
+    kostprijs_scenario_inkoop_storage.ensure_schema()
+    kostprijs_activation_storage.ensure_schema()
+
+    try:
+        product_registry_storage.rebuild_registry(validate_constraints=False)
+    except Exception:
+        pass
+
+    targets: list[dict[str, str]] = [
+        {"constraint": "fk_cost_version_rows_product", "table": "cost_version_product_rows"},
+        {"constraint": "fk_kostprijs_scenario_product", "table": "kostprijs_scenario_inkoop_rows"},
+        {"constraint": "fk_price_quote_lines_product", "table": "price_quote_lines"},
+        {"constraint": "fk_kostprijs_activations_product", "table": "kostprijs_product_activations"},
+    ]
+
+    report: dict[str, Any] = {"ok": True, "validated": [], "already_valid": [], "missing": [], "failed": []}
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            for target in targets:
+                name = str(target.get("constraint", "") or "")
+                table = str(target.get("table", "") or "")
+                if not name or not table:
+                    continue
+
+                cur.execute("SELECT convalidated FROM pg_constraint WHERE conname = %s", (name,))
+                row = cur.fetchone()
+                if not row:
+                    report["missing"].append({"constraint": name, "table": table})
+                    continue
+
+                is_validated = bool(row[0])
+                if is_validated and not validate_all:
+                    report["already_valid"].append({"constraint": name, "table": table})
+                    continue
+                if is_validated and validate_all:
+                    report["already_valid"].append({"constraint": name, "table": table})
+                    continue
+
+                try:
+                    cur.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT {name}")
+                    report["validated"].append({"constraint": name, "table": table})
+                except Exception as exc:
+                    report["ok"] = False
+                    report["failed"].append({"constraint": name, "table": table, "error": str(exc)})
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    return report
+
+
 def rollback_yearset(*, year: int, dry_run: bool = False) -> dict[str, Any]:
     """Rollback a committed yearset (production data for a given year).
 
