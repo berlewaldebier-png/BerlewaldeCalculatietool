@@ -189,6 +189,10 @@ def _get_table_storage(name: str):
         from app.domain import kostprijs_activatie_drafts_storage
 
         return kostprijs_activatie_drafts_storage
+    if name == "kostprijs-scenario-inkoop":
+        from app.domain import kostprijs_scenario_inkoop_storage
+
+        return kostprijs_scenario_inkoop_storage
     return None
 
 
