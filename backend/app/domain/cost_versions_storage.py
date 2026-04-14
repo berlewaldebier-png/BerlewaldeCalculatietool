@@ -34,12 +34,65 @@ def ensure_schema() -> None:
                         status TEXT NOT NULL DEFAULT '',
                         bier_id TEXT NOT NULL DEFAULT '',
                         versie_nummer INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT NOT NULL DEFAULT '',
-                        updated_at TEXT NOT NULL DEFAULT '',
-                        finalized_at TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NULL,
+                        updated_at TIMESTAMPTZ NULL,
+                        finalized_at TIMESTAMPTZ NULL,
                         payload JSONB NOT NULL,
                         updated_at_ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     );
+                    """
+                )
+                # Legacy dev DBs may still have these timestamps as TEXT; normalize to TIMESTAMPTZ.
+                # Important: columns must allow NULL because legacy rows used ''.
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                      IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'cost_versions'
+                          AND column_name = 'created_at'
+                          AND data_type = 'text'
+                      ) THEN
+                        ALTER TABLE cost_versions ALTER COLUMN created_at DROP DEFAULT;
+                        ALTER TABLE cost_versions ALTER COLUMN created_at DROP NOT NULL;
+                        ALTER TABLE cost_versions
+                          ALTER COLUMN created_at TYPE TIMESTAMPTZ
+                          USING NULLIF(created_at::text,'')::timestamptz;
+                      END IF;
+
+                      IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'cost_versions'
+                          AND column_name = 'updated_at'
+                          AND data_type = 'text'
+                      ) THEN
+                        ALTER TABLE cost_versions ALTER COLUMN updated_at DROP DEFAULT;
+                        ALTER TABLE cost_versions ALTER COLUMN updated_at DROP NOT NULL;
+                        ALTER TABLE cost_versions
+                          ALTER COLUMN updated_at TYPE TIMESTAMPTZ
+                          USING NULLIF(updated_at::text,'')::timestamptz;
+                      END IF;
+
+                      IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'cost_versions'
+                          AND column_name = 'finalized_at'
+                          AND data_type = 'text'
+                      ) THEN
+                        ALTER TABLE cost_versions ALTER COLUMN finalized_at DROP DEFAULT;
+                        ALTER TABLE cost_versions ALTER COLUMN finalized_at DROP NOT NULL;
+                        ALTER TABLE cost_versions
+                          ALTER COLUMN finalized_at TYPE TIMESTAMPTZ
+                          USING NULLIF(finalized_at::text,'')::timestamptz;
+                      END IF;
+                    END $$;
                     """
                 )
                 cur.execute(
@@ -290,7 +343,13 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     """
                     INSERT INTO cost_versions
                         (id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload, updated_at_ts)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    VALUES (
+                        %s, %s, %s, %s, %s,
+                        NULLIF(%s,'')::timestamptz,
+                        NULLIF(%s,'')::timestamptz,
+                        NULLIF(%s,'')::timestamptz,
+                        %s::jsonb, %s
+                    )
                     ON CONFLICT (id)
                     DO UPDATE SET
                         jaar = EXCLUDED.jaar,
