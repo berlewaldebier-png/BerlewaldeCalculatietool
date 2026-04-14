@@ -1247,6 +1247,11 @@ export function PrijsvoorstelWizard({
         snapshotRows.map((row) => [normalizeKey(row.verpakking), row])
       );
       const factuurRegels = getEnrichedInkoopFactuurregels(berekening).map(({ regel }) => regel);
+      if (factuurRegels.length === 0) {
+        // Year-over-year activated cost versions (and some manual inkoop calculations) can be definitive without
+        // any factuurregels yet. In that case we still want the UI to show the snapshot build-up.
+        return snapshotRows;
+      }
 
       const seenUnitIds = new Set<string>();
       const resultRows = new Map<string, ProductSnapshotRow>();
@@ -1342,6 +1347,9 @@ export function PrijsvoorstelWizard({
           }
         });
 
+      if (resultRows.size === 0) {
+        return snapshotRows;
+      }
       return [...resultRows.values()];
     }
 
