@@ -1979,13 +1979,24 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
     kostprijs_scenario_inkoop_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
 
+    # NOTE: Do not rebuild the products registry here.
+    # Rebuilding (`DELETE FROM products_master`) is destructive and can fail once FK-dependent
+    # rows exist (even with NOT VALID constraints). Validation should be non-destructive.
     report: dict[str, Any] = {"ok": True, "validated": [], "already_valid": [], "missing": [], "failed": []}
-    try:
-        report["product_registry"] = product_registry_storage.rebuild_registry(validate_constraints=False)
-    except Exception as exc:
-        # No silent fallbacks: if we cannot build the registry, FK validation is unreliable.
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM products_master")
+            count_row = cur.fetchone()
+            report["products_master_count"] = int((count_row[0] if count_row else 0) or 0)
+    if int(report.get("products_master_count", 0) or 0) <= 0:
         report["ok"] = False
-        report["failed"].append({"constraint": "products_master", "table": "products_master", "error": str(exc)})
+        report["failed"].append(
+            {
+                "constraint": "products_master",
+                "table": "products_master",
+                "error": "products_master is leeg; rebuild registry via seed import of admin tooling.",
+            }
+        )
 
     targets: list[dict[str, str]] = [
         {"constraint": "fk_cost_version_rows_product", "table": "cost_version_product_rows"},
