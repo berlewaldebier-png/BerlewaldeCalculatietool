@@ -144,7 +144,7 @@ export function KostprijsBeheerWorkspace({
     if (statusLabel && statusLabel !== "definitief") {
       parts.push(statusLabel);
     }
-    return parts.join(" · ");
+    return parts.join(" - ");
   }
 
   function SortIcon({ direction }: { direction: "asc" | "desc" }) {
@@ -218,6 +218,11 @@ export function KostprijsBeheerWorkspace({
   }, [activationYears, productionYears]);
 
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
+  const [selectedVersionsYear, setSelectedVersionsYear] = useState<number>(defaultYear);
+  const [versionsSearch, setVersionsSearch] = useState("");
+  const [showOnlyActiveVersions, setShowOnlyActiveVersions] = useState(true);
+
+  const versionsRef = useRef<HTMLDivElement | null>(null);
 
   const bierenById = useMemo(() => {
     const map = new Map<string, string>();
@@ -541,6 +546,67 @@ export function KostprijsBeheerWorkspace({
     });
   }, [currentBerekeningen, filterMode]);
 
+  const versionActivationCounts = useMemo(() => {
+    const countsByVersion = new Map<string, number>();
+    (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).forEach((row) => {
+      const versionId = String((row as any)?.kostprijsversie_id ?? "");
+      if (!versionId) return;
+      countsByVersion.set(versionId, (countsByVersion.get(versionId) ?? 0) + 1);
+    });
+    return countsByVersion;
+  }, [kostprijsproductactiveringen]);
+
+  const versionsTableRows = useMemo(() => {
+    const q = versionsSearch.trim().toLowerCase();
+    return filteredRows
+      .filter((row) => {
+        const year = Number((row as any)?.jaar ?? (row as any)?.basisgegevens?.jaar ?? 0) || 0;
+        if (year !== selectedVersionsYear) return false;
+        if (showOnlyActiveVersions) {
+          const versionId = String((row as any)?.id ?? "");
+          return (versionActivationCounts.get(versionId) ?? 0) > 0;
+        }
+        return true;
+      })
+      .map((row) => {
+        const id = String((row as any)?.id ?? "");
+        const basis = ((row as any)?.basisgegevens ?? {}) as GenericRecord;
+        const bierId = String((row as any)?.bier_id ?? "");
+        const bierNaam = String((basis as any)?.biernaam ?? bierenById.get(bierId) ?? bierId ?? "-");
+        const jaar = Number((row as any)?.jaar ?? (basis as any)?.jaar ?? 0) || 0;
+        const type = String((row as any)?.type ?? "");
+        const status = String((row as any)?.status ?? "");
+        const kostprijsPerLiter = Number((row as any)?.kostprijs ?? 0) || 0;
+        const activeForProducts = versionActivationCounts.get(id) ?? 0;
+        const ts = String((row as any)?.finalized_at ?? (row as any)?.updated_at ?? (row as any)?.created_at ?? "");
+        const style = String((basis as any)?.stijl ?? "");
+        const label = buildVersionLabel(row);
+
+        const searchHaystack = `${bierNaam} ${jaar} ${type} ${status} ${style} ${label}`.toLowerCase();
+        const matches = !q || searchHaystack.includes(q);
+        return {
+          id,
+          bierNaam,
+          jaar,
+          type,
+          status,
+          kostprijsPerLiter,
+          activeForProducts,
+          ts,
+          matches
+        };
+      })
+      .filter((row) => row.matches)
+      .sort((left, right) => String(right.ts).localeCompare(String(left.ts)));
+  }, [
+    filteredRows,
+    versionsSearch,
+    selectedVersionsYear,
+    showOnlyActiveVersions,
+    versionActivationCounts,
+    bierenById
+  ]);
+
   if (mode === "wizard-new") {
     return (
       <BerekeningenWizard
@@ -572,7 +638,7 @@ export function KostprijsBeheerWorkspace({
         initialSelectedId={selectedId}
         onRowsChange={setCurrentBerekeningen}
         onFinish={() => setMode("landing")}
-        onBackToLanding={() => setMode("select-existing")}
+        onBackToLanding={() => setMode("landing")}
       />
     );
   }
@@ -581,14 +647,48 @@ export function KostprijsBeheerWorkspace({
     return (
       <section className="module-card">
         <div className="module-card-header">
-          <div className="module-card-title">Bestaande kostprijsversie aanpassen</div>
+          <div className="module-card-title">Kostprijsversies (dossiers)</div>
           <div className="module-card-text">
-            Kies een concept of definitieve kostprijsversie en open daarna de wizard.
+            Alle kostprijsversies voor het gekozen jaar. Alleen geactiveerde versies tellen mee in offertes en prijsvoorstellen.
           </div>
         </div>
 
-        <div className="kostprijs-toolbar">
-          <div className="kostprijs-filter-tabs">
+        <div className="wizard-form-grid" style={{ alignItems: "end" }}>
+          <label className="nested-field">
+            <span>Jaar</span>
+            <select
+              className="dataset-input"
+              value={String(selectedVersionsYear)}
+              onChange={(event) => setSelectedVersionsYear(Number(event.target.value))}
+            >
+              {yearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="nested-field">
+            <span>Zoeken</span>
+            <input
+              className="dataset-input"
+              value={versionsSearch}
+              onChange={(event) => setVersionsSearch(event.target.value)}
+              placeholder="Zoek bier, status of bron..."
+            />
+          </label>
+
+          <label className="nested-field" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ whiteSpace: "nowrap" }}>Alleen actief</span>
+            <input
+              type="checkbox"
+              checked={showOnlyActiveVersions}
+              onChange={(event) => setShowOnlyActiveVersions(event.target.checked)}
+            />
+          </label>
+
+          <div className="kostprijs-filter-tabs" style={{ justifyContent: "flex-start" }}>
             {[
               ["all", `Alles (${counts.all})`],
               ["concept", `Concept (${counts.concept})`],
@@ -614,39 +714,54 @@ export function KostprijsBeheerWorkspace({
           </button>
         </div>
 
-        <div className="kostprijs-record-grid">
-          {filteredRows.map((row) => {
-            const basis = (row.basisgegevens as GenericRecord) ?? {};
-            const type = (row.soort_berekening as GenericRecord) ?? {};
-            return (
-              <button
-                key={String(row.id)}
-                type="button"
-                className="kostprijs-record-card"
-                onClick={() => {
-                  setSelectedId(String(row.id));
-                  setMode("wizard-edit");
-                }}
-              >
-                <div className="kostprijs-record-title">
-                  {String(basis.biernaam ?? "Onbekende berekening")}
-                </div>
-                <div className="kostprijs-record-meta">
-                  {String(basis.jaar ?? "-")} | {String(type.type ?? "-")} | {String(row.status ?? "-")}
-                  {Boolean(row.is_actief) ? " | actief" : ""}
-                  {Number(row.versie_nummer ?? 0) > 0 ? ` | v${Number(row.versie_nummer)}` : ""}
-                </div>
-                <div className="kostprijs-record-text">
-                  {String(basis.stijl ?? "Geen stijl opgegeven")}
-                </div>
-              </button>
-            );
-          })}
-          {filteredRows.length === 0 ? (
-            <div className="empty-state-card">
-              Geen berekeningen gevonden voor deze selectie.
-            </div>
-          ) : null}
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table">
+            <thead>
+              <tr>
+                <th>Bier</th>
+                <th>Jaar</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Kostprijs / L</th>
+                <th>Actief voor</th>
+                <th>Laatst gewijzigd</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {versionsTableRows.length > 0 ? (
+                versionsTableRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.bierNaam}</td>
+                    <td>{row.jaar || "-"}</td>
+                    <td>{row.type || "-"}</td>
+                    <td>{row.status || "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.kostprijsPerLiter)}</td>
+                    <td>{row.activeForProducts > 0 ? `${row.activeForProducts} producten` : "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{row.ts || "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        type="button"
+                        className="editor-button editor-button-secondary"
+                        onClick={() => {
+                          setSelectedId(row.id);
+                          setMode("wizard-edit");
+                        }}
+                      >
+                        Openen
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="dataset-empty" colSpan={8}>
+                    Geen kostprijsversies gevonden voor {selectedVersionsYear}.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
     );
@@ -676,7 +791,7 @@ export function KostprijsBeheerWorkspace({
         <button
           type="button"
           className="dashboard-quick-card kostprijs-choice-card"
-          onClick={() => setMode("select-existing")}
+          onClick={() => versionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
         >
           <div className="dashboard-quick-card-title">Bestaande aanpassen</div>
           <div className="dashboard-quick-card-text">
@@ -744,6 +859,7 @@ export function KostprijsBeheerWorkspace({
                     <SortIcon direction={activeSort.direction} />
                   </span>
                 </th>
+                <th>Kostprijs</th>
                 <th />
                 <th />
               </tr>
@@ -759,6 +875,7 @@ export function KostprijsBeheerWorkspace({
                     </td>
                     <td>{row.effectiefVanaf || "-"}</td>
                     <td>{row.versieLabel}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.currentCost)}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       {row.hasUpdate ? (
                         <span style={{ display: "inline-flex", gap: 6 }}>
@@ -813,7 +930,7 @@ export function KostprijsBeheerWorkspace({
                 ))
               ) : (
                 <tr>
-                  <td className="dataset-empty" colSpan={6}>
+                  <td className="dataset-empty" colSpan={7}>
                     Geen actieve kostprijzen gevonden voor {selectedYear}.
                   </td>
                 </tr>
@@ -835,7 +952,7 @@ export function KostprijsBeheerWorkspace({
               </div>
               <div className="confirm-modal-text">
                 <strong>
-                  {pendingActivation.bierNaam} · {pendingActivation.productNaam} · {pendingActivation.jaar}
+                  {pendingActivation.bierNaam} - {pendingActivation.productNaam} - {pendingActivation.jaar}
                 </strong>
                 <div style={{ marginTop: 10 }} />
                 <div>
@@ -915,6 +1032,120 @@ export function KostprijsBeheerWorkspace({
             </div>
           </div>
         ) : null}
+      </section>
+
+      <div style={{ marginTop: 18 }} ref={versionsRef} />
+
+      <section className="module-card">
+        <div className="module-card-header">
+          <div className="module-card-title">Kostprijsversies (dossiers)</div>
+          <div className="module-card-text">
+            Alle kostprijsversies voor het gekozen jaar. Alleen geactiveerde versies tellen mee in offertes en prijsvoorstellen.
+          </div>
+        </div>
+
+        <div className="wizard-form-grid" style={{ alignItems: "end" }}>
+          <label className="nested-field">
+            <span>Jaar</span>
+            <select
+              className="dataset-input"
+              value={String(selectedVersionsYear)}
+              onChange={(event) => setSelectedVersionsYear(Number(event.target.value))}
+            >
+              {yearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="nested-field">
+            <span>Zoeken</span>
+            <input
+              className="dataset-input"
+              value={versionsSearch}
+              onChange={(event) => setVersionsSearch(event.target.value)}
+              placeholder="Zoek bier, status of bron..."
+            />
+          </label>
+
+          <label className="nested-field" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ whiteSpace: "nowrap" }}>Alleen actief</span>
+            <input
+              type="checkbox"
+              checked={showOnlyActiveVersions}
+              onChange={(event) => setShowOnlyActiveVersions(event.target.checked)}
+            />
+          </label>
+
+          <div className="kostprijs-filter-tabs" style={{ justifyContent: "flex-start" }}>
+            {[
+              ["all", `Alles (${counts.all})`],
+              ["concept", `Concept (${counts.concept})`],
+              ["definitief", `Definitief (${counts.definitief})`]
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`tab-button${filterMode === value ? " active" : ""}`}
+                onClick={() => setFilterMode(value as FilterMode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table">
+            <thead>
+              <tr>
+                <th>Bier</th>
+                <th>Jaar</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Kostprijs / L</th>
+                <th>Actief voor</th>
+                <th>Laatst gewijzigd</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {versionsTableRows.length > 0 ? (
+                versionsTableRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.bierNaam}</td>
+                    <td>{row.jaar || "-"}</td>
+                    <td>{row.type || "-"}</td>
+                    <td>{row.status || "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.kostprijsPerLiter)}</td>
+                    <td>{row.activeForProducts > 0 ? `${row.activeForProducts} producten` : "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{row.ts || "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        type="button"
+                        className="editor-button editor-button-secondary"
+                        onClick={() => {
+                          setSelectedId(row.id);
+                          setMode("wizard-edit");
+                        }}
+                      >
+                        Openen
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="dataset-empty" colSpan={8}>
+                    Geen kostprijsversies gevonden voor {selectedVersionsYear}.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </section>
   );
