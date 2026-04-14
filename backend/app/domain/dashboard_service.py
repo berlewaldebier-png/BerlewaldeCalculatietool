@@ -200,9 +200,10 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
                         jaar,
                         versie_nummer,
                         COALESCE(
-                            NULLIF(finalized_at,''),
-                            NULLIF(updated_at,''),
-                            NULLIF(created_at,'')
+                            finalized_at,
+                            updated_at,
+                            created_at,
+                            updated_at_ts
                         ) AS version_ts
                     FROM cost_versions
                     WHERE status = 'definitief'
