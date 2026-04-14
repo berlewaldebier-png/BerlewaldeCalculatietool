@@ -1478,12 +1478,17 @@ export function BerekeningenWizard({
       const verpakking = Number(regel.hoeveelheid ?? 0);
       const nodig = Number(regel.benodigd_in_recept ?? 0);
       if (!Number.isFinite(verpakking) || !Number.isFinite(nodig) || verpakking <= 0 || nodig <= 0) return minValue;
-      const batches = Math.floor(verpakking / nodig);
+      const batches = verpakking / nodig;
       if (!Number.isFinite(batches) || batches <= 0) return minValue ?? 0;
       if (minValue === null) return batches;
       return Math.min(minValue, batches);
     }, null);
-    const batchesLabel = batchesPossible === null ? "-" : String(Math.max(0, batchesPossible));
+    const batchesLabel =
+      batchesPossible === null
+        ? "-"
+        : formatDecimalValue(Math.max(0, batchesPossible), 2);
+    const batchesNeedsAttention =
+      batchesPossible !== null && Number.isFinite(batchesPossible) && batchesPossible >= 1 && batchesPossible < 2;
 
     return (
       <div className="wizard-stack">
@@ -1506,7 +1511,7 @@ export function BerekeningenWizard({
           </div>
           <div className="stat-card">
             <div className="stat-label">Batches mogelijk</div>
-            <div className="stat-value small">{batchesLabel}</div>
+            <div className={`stat-value small${batchesNeedsAttention ? " warning" : ""}`}>{batchesLabel}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Ingredienten</div>

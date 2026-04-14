@@ -1786,6 +1786,11 @@ a {
   font-size: 1.15rem;
 }
 
+.stat-value.warning {
+  color: #9a5b00;
+  font-weight: 600;
+}
+
 .compact-card {
   margin-bottom: 0;
 }
