@@ -141,31 +141,38 @@ def get_bootstrap(
         payload["navigation"] = get_navigation()
 
     for name in names:
-        if name == "dashboard-summary":
-            summary = dashboard_service.get_dashboard_summary()
-            payload["datasets"][name] = {
-                "concept_berekeningen": summary.concept_berekeningen,
-                "definitieve_berekeningen": summary.definitieve_berekeningen,
-                "concept_prijsvoorstellen": summary.concept_prijsvoorstellen,
-                "definitieve_prijsvoorstellen": summary.definitieve_prijsvoorstellen,
-                "klaar_om_te_activeren": summary.klaar_om_te_activeren,
-                "klaar_om_te_activeren_waarschuwing": summary.klaar_om_te_activeren_waarschuwing,
-                "aflopende_offertes": summary.aflopende_offertes,
-                "aflopende_offertes_items": summary.aflopende_offertes_items,
-            }
-            continue
-        if name == "auth-status":
-            payload["datasets"][name] = auth_service.auth_status()
-            continue
-        if name == "auth-users":
-            if str(session.get("role", "") or "") != "admin":
-                raise HTTPException(status_code=403, detail="Geen rechten.")
-            payload["datasets"][name] = auth_service.list_users()
-            continue
-        if name not in dataset_store.get_dataset_names():
-            payload["datasets"][name] = None
-            continue
-        payload["datasets"][name] = dataset_store.load_dataset(name)
+        try:
+            if name == "dashboard-summary":
+                summary = dashboard_service.get_dashboard_summary()
+                payload["datasets"][name] = {
+                    "concept_berekeningen": summary.concept_berekeningen,
+                    "definitieve_berekeningen": summary.definitieve_berekeningen,
+                    "concept_prijsvoorstellen": summary.concept_prijsvoorstellen,
+                    "definitieve_prijsvoorstellen": summary.definitieve_prijsvoorstellen,
+                    "klaar_om_te_activeren": summary.klaar_om_te_activeren,
+                    "klaar_om_te_activeren_waarschuwing": summary.klaar_om_te_activeren_waarschuwing,
+                    "aflopende_offertes": summary.aflopende_offertes,
+                    "aflopende_offertes_items": summary.aflopende_offertes_items,
+                }
+                continue
+            if name == "auth-status":
+                payload["datasets"][name] = auth_service.auth_status()
+                continue
+            if name == "auth-users":
+                if str(session.get("role", "") or "") != "admin":
+                    raise HTTPException(status_code=403, detail="Geen rechten.")
+                payload["datasets"][name] = auth_service.list_users()
+                continue
+            if name not in dataset_store.get_dataset_names():
+                payload["datasets"][name] = None
+                continue
+            payload["datasets"][name] = dataset_store.load_dataset(name)
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"bootstrap dataset '{name}': {exc}") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"bootstrap dataset '{name}' faalde: {exc}") from exc
 
     return payload
 

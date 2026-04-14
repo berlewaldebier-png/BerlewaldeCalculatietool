@@ -39,7 +39,15 @@ export async function apiGetServer<T>(path: string, nextPath: string): Promise<T
   }
 
   if (!response.ok) {
-    throw new Error(`API request failed (${response.status}): ${path}`);
+    let bodyText = "";
+    try {
+      bodyText = (await response.text()) || "";
+    } catch {
+      bodyText = "";
+    }
+    const snippet = bodyText.trim().slice(0, 500);
+    const suffix = bodyText.trim().length > 500 ? "…" : "";
+    throw new Error(`API request failed (${response.status}): ${path}${snippet ? `\n${snippet}${suffix}` : ""}`);
   }
 
   return (await response.json()) as T;
