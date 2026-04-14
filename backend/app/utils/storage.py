@@ -536,6 +536,9 @@ def normalize_kostprijsproduct_activering_record(
         "effectief_vanaf": str(
             source.get("effectief_vanaf", "") or source.get("effective_from", "") or ""
         ),
+        "effectief_tot": str(
+            source.get("effectief_tot", "") or source.get("effective_to", "") or ""
+        ),
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -554,6 +557,8 @@ def load_kostprijsproductactiveringen() -> list[dict[str, Any]]:
             normalize_kostprijsproduct_activering_record(row)
             for row in data
             if isinstance(row, dict)
+            # Canonical dataset payload: only active activations.
+            and not str(row.get("effectief_tot", "") or "")
         ]
 
     postgres_payload = _load_postgres_dataset("kostprijsproductactiveringen")
@@ -697,6 +702,10 @@ def upsert_kostprijsproductactiveringen(
             actor=str((context or {}).get("actor", "") or ""),
             action=str((context or {}).get("action", "") or ""),
         )
+        # Activation semantics should preserve history (close old, open new) instead of overwriting.
+        action = str(ctx.action or "")
+        if action == "year_activation" or action.startswith("activate_") or action == "activate_products" or action == "activate_version":
+            return bool(activation_storage.activate_activations(normalized, context=ctx))
         return bool(activation_storage.upsert_activations(normalized, context=ctx))
 
     # Fallback: merge and overwrite the dataset payload.
