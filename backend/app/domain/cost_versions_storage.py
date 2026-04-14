@@ -299,6 +299,26 @@ def load_dataset(default_value: Any) -> Any:
         producten = dict(producten)
         producten["basisproducten"] = basis_by_version.get(str(version_id), [])
         producten["samengestelde_producten"] = sameng_by_version.get(str(version_id), [])
+
+        # Provide row-level display metadata (biernaam/soort) derived from the version itself,
+        # so UIs can render a stable summary without having to recompute/guess.
+        basisgegevens = merged.get("basisgegevens") if isinstance(merged.get("basisgegevens"), dict) else {}
+        bier_snapshot = merged.get("bier_snapshot") if isinstance(merged.get("bier_snapshot"), dict) else {}
+        biernaam = str(
+            (basisgegevens or {}).get("biernaam", "") or (bier_snapshot or {}).get("biernaam", "") or ""
+        ).strip()
+        version_type = str(merged.get("type", "") or "").strip().lower()
+        soort_label = "Inkoop" if version_type == "inkoop" else "Eigen productie"
+
+        for row in producten.get("basisproducten", []) if isinstance(producten.get("basisproducten", []), list) else []:
+            if isinstance(row, dict):
+                row.setdefault("biernaam", biernaam)
+                row.setdefault("soort", soort_label)
+        for row in producten.get("samengestelde_producten", []) if isinstance(producten.get("samengestelde_producten", []), list) else []:
+            if isinstance(row, dict):
+                row.setdefault("biernaam", biernaam)
+                row.setdefault("soort", soort_label)
+
         snapshot = dict(snapshot)
         snapshot["producten"] = producten
         merged["resultaat_snapshot"] = snapshot
