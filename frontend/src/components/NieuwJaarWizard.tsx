@@ -6,7 +6,12 @@ import { useRouter } from "next/navigation";
 import { usePageShellHeader, usePageShellWizardSidebar } from "@/components/PageShell";
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
 import { API_BASE_URL } from "@/lib/api";
-import { calculateAccijnsPerProduct, computeVasteKostenTotals, vasteKostenPerLiter } from "@/lib/kostprijsEngine";
+import { computeVasteKostenTotals } from "@/lib/kostprijsEngine";
+import {
+  createPackagingResolvers,
+  computeAccijnsForLiters as computeAccijnsForLitersEngine,
+  computeFixedCostPerLiter as computeFixedCostPerLiterEngine
+} from "@/lib/kostprijsSnapshotEngine";
 
 type GenericRecord = Record<string, unknown>;
 type ProductieMap = Record<string, GenericRecord>;
@@ -972,24 +977,20 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   }
 
   function computeIndirectFixedCostPerInkoopLiter(year: number) {
-    const productieRow = getProductieForYear(year);
-    return vasteKostenPerLiter({
+    return computeFixedCostPerLiterEngine({
+      calcType: "inkoop",
       year,
-      productieYear: productieRow,
-      vasteKostenRows: fixedCostRowsForYear(year) as any,
-      kostensoort: "indirect",
-      delerType: "inkoop"
+      productieYear: getProductieForYear(year) as any,
+      vasteKostenRows: fixedCostRowsForYear(year) as any
     });
   }
 
   function computeDirectFixedCostPerProductieLiter(year: number) {
-    const productieRow = getProductieForYear(year);
-    return vasteKostenPerLiter({
+    return computeFixedCostPerLiterEngine({
+      calcType: "eigen_productie",
       year,
-      productieYear: productieRow,
-      vasteKostenRows: fixedCostRowsForYear(year) as any,
-      kostensoort: "direct",
-      delerType: "productie"
+      productieYear: getProductieForYear(year) as any,
+      vasteKostenRows: fixedCostRowsForYear(year) as any
     });
   }
 
@@ -1004,26 +1005,12 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         : getTariefForYear(year);
     if (!tariefRow) return 0;
 
-    // Canonical frontend accijns calculation (same as Kostprijsbeheer).
-    const mergedBasis: GenericRecord = {
-      ...basis,
-      alcoholpercentage: bierSnap.alcoholpercentage ?? (basis as any).alcoholpercentage ?? 0,
-      tarief_accijns: bierSnap.tarief_accijns ?? (basis as any).tarief_accijns ?? "hoog",
-      belastingsoort: bierSnap.belastingsoort ?? (basis as any).belastingsoort ?? "Accijns"
-    };
-
-    return calculateAccijnsPerProduct({
-      litersPerProduct: liters,
-      basisgegevens: mergedBasis,
-      tarievenHeffingenRows: [
-        {
-          jaar: year,
-          tarief_hoog: Number(tariefRow.tarief_hoog ?? 0),
-          tarief_laag: Number(tariefRow.tarief_laag ?? 0),
-          verbruikersbelasting: Number(tariefRow.verbruikersbelasting ?? 0)
-        }
-      ],
-      year
+    return computeAccijnsForLitersEngine({
+      year,
+      liters,
+      basisgegevens: basis,
+      bierSnapshot: bierSnap,
+      tarievenHeffingenRow: tariefRow
     });
   }
 
@@ -1242,19 +1229,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     // Preview is intentionally "indicative": we adjust source-year cost by deltas we can derive
     // from the yearset (fixed costs per liter + packaging component prices).
 
-    const priceByYearComponent = new Map<string, number>();
-    currentPackagingPrices.forEach((row) => {
-      const key = `${row.jaar}|${row.verpakkingsonderdeel_id}`;
-      priceByYearComponent.set(key, Number(row.prijs_per_stuk ?? 0));
-    });
-
-    function packagingComponentPrice(year: number, componentId: string) {
-      if (year === targetYear) {
-        return Number(draftPackagingPrices[componentId] ?? 0);
-      }
-      return Number(priceByYearComponent.get(`${year}|${componentId}`) ?? 0);
-    }
-
     const baseDefs = (Array.isArray(initialBasisproducten) ? initialBasisproducten : [])
       .filter((row) => typeof row === "object" && row !== null)
       .map((row) => row as any);
@@ -1262,72 +1236,13 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       .filter((row) => typeof row === "object" && row !== null)
       .map((row) => row as any);
 
-    const baseByIdYear = new Map<string, any>();
-    baseDefs.forEach((row) => {
-      const id = String(row.id ?? "");
-      const jaar = Number(row.jaar ?? 0);
-      if (!id || !jaar) return;
-      baseByIdYear.set(`${jaar}|${id}`, row);
+    const { packagingCost, litersPerUnit } = createPackagingResolvers({
+      baseDefs,
+      compositeDefs,
+      packagingPrices: currentPackagingPrices as any,
+      draftPackagingPrices,
+      draftYear: targetYear
     });
-    const compositeByIdYear = new Map<string, any>();
-    compositeDefs.forEach((row) => {
-      const id = String(row.id ?? "");
-      const jaar = Number(row.jaar ?? 0);
-      if (!id || !jaar) return;
-      compositeByIdYear.set(`${jaar}|${id}`, row);
-    });
-
-    function getBaseDef(id: string, year: number) {
-      return baseByIdYear.get(`${year}|${id}`) ?? baseDefs.find((row) => String(row.id ?? "") === id) ?? null;
-    }
-    function getCompositeDef(id: string, year: number) {
-      return (
-        compositeByIdYear.get(`${year}|${id}`) ??
-        compositeDefs.find((row) => String(row.id ?? "") === id) ??
-        null
-      );
-    }
-
-    function packagingCostForBase(productId: string, year: number) {
-      const def = getBaseDef(productId, year);
-      if (!def) return 0;
-      const onderdelen = Array.isArray(def.onderdelen) ? def.onderdelen : [];
-      return onderdelen.reduce((sum: number, onderdeel: any) => {
-        const componentId = String(onderdeel.verpakkingsonderdeel_id ?? "");
-        const qty = Number(onderdeel.hoeveelheid ?? 0);
-        const price = packagingComponentPrice(year, componentId);
-        return sum + qty * price;
-      }, 0);
-    }
-
-    function litersPerUnit(productId: string, productType: string, year: number) {
-      if (productType === "basis") {
-        const def = getBaseDef(productId, year);
-        return Number(def?.inhoud_per_eenheid_liter ?? 0);
-      }
-      if (productType === "samengesteld") {
-        const def = getCompositeDef(productId, year);
-        return Number(def?.totale_inhoud_liter ?? 0);
-      }
-      return 0;
-    }
-
-    function packagingCostForComposite(productId: string, year: number) {
-      const def = getCompositeDef(productId, year);
-      if (!def) return 0;
-      const basisproducten = Array.isArray(def.basisproducten) ? def.basisproducten : [];
-      return basisproducten.reduce((sum: number, row: any) => {
-        const baseId = String(row.basisproduct_id ?? "");
-        const count = Number(row.aantal ?? 0);
-        return sum + count * packagingCostForBase(baseId, year);
-      }, 0);
-    }
-
-    function packagingCost(productId: string, productType: string, year: number) {
-      if (productType === "basis") return packagingCostForBase(productId, year);
-      if (productType === "samengesteld") return packagingCostForComposite(productId, year);
-      return 0;
-    }
 
     const versionById = new Map<string, any>();
     (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((record: any) => {
@@ -1483,10 +1398,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         : sourcePrimary;
       const scenarioBaseCost = Number.isFinite(scenarioPrimary) ? scenarioPrimary + otherCost : sourceCost;
       const productType = String(snap.productType ?? "");
-      const basePackaging = packagingCost(productId, productType, sourceYear);
-      const targetPackaging = packagingCost(productId, productType, targetYear);
+      const basePackaging = packagingCost(productId, productType as any, sourceYear);
+      const targetPackaging = packagingCost(productId, productType as any, targetYear);
       const packagingDelta = targetPackaging - basePackaging;
-      const liters = litersPerUnit(productId, productType, targetYear);
+      const liters = litersPerUnit(productId, productType as any, targetYear);
       const calcType = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
       const fixedPerLiterSource =
         calcType === "inkoop"
@@ -1548,19 +1463,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   ]);
 
   const kostprijsTargetRows = useMemo(() => {
-    const priceByYearComponent = new Map<string, number>();
-    currentPackagingPrices.forEach((row) => {
-      const key = `${row.jaar}|${row.verpakkingsonderdeel_id}`;
-      priceByYearComponent.set(key, Number(row.prijs_per_stuk ?? 0));
-    });
-
-    function packagingComponentPrice(year: number, componentId: string) {
-      if (year === targetYear) {
-        return Number(draftPackagingPrices[componentId] ?? 0);
-      }
-      return Number(priceByYearComponent.get(`${year}|${componentId}`) ?? 0);
-    }
-
     const baseDefs = (Array.isArray(initialBasisproducten) ? initialBasisproducten : [])
       .filter((row) => typeof row === "object" && row !== null)
       .map((row) => row as any);
@@ -1568,72 +1470,13 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       .filter((row) => typeof row === "object" && row !== null)
       .map((row) => row as any);
 
-    const baseByIdYear = new Map<string, any>();
-    baseDefs.forEach((row) => {
-      const id = String(row.id ?? "");
-      const jaar = Number(row.jaar ?? 0);
-      if (!id || !jaar) return;
-      baseByIdYear.set(`${jaar}|${id}`, row);
+    const { packagingCost, litersPerUnit } = createPackagingResolvers({
+      baseDefs,
+      compositeDefs,
+      packagingPrices: currentPackagingPrices as any,
+      draftPackagingPrices,
+      draftYear: targetYear
     });
-    const compositeByIdYear = new Map<string, any>();
-    compositeDefs.forEach((row) => {
-      const id = String(row.id ?? "");
-      const jaar = Number(row.jaar ?? 0);
-      if (!id || !jaar) return;
-      compositeByIdYear.set(`${jaar}|${id}`, row);
-    });
-
-    function getBaseDef(id: string, year: number) {
-      return baseByIdYear.get(`${year}|${id}`) ?? baseDefs.find((row) => String(row.id ?? "") === id) ?? null;
-    }
-    function getCompositeDef(id: string, year: number) {
-      return (
-        compositeByIdYear.get(`${year}|${id}`) ??
-        compositeDefs.find((row) => String(row.id ?? "") === id) ??
-        null
-      );
-    }
-
-    function packagingCostForBase(productId: string, year: number) {
-      const def = getBaseDef(productId, year);
-      if (!def) return 0;
-      const onderdelen = Array.isArray(def.onderdelen) ? def.onderdelen : [];
-      return onderdelen.reduce((sum: number, onderdeel: any) => {
-        const componentId = String(onderdeel.verpakkingsonderdeel_id ?? "");
-        const qty = Number(onderdeel.hoeveelheid ?? 0);
-        const price = packagingComponentPrice(year, componentId);
-        return sum + qty * price;
-      }, 0);
-    }
-
-    function packagingCostForComposite(productId: string, year: number) {
-      const def = getCompositeDef(productId, year);
-      if (!def) return 0;
-      const basisproducten = Array.isArray(def.basisproducten) ? def.basisproducten : [];
-      return basisproducten.reduce((sum: number, row: any) => {
-        const baseId = String(row.basisproduct_id ?? "");
-        const count = Number(row.aantal ?? 0);
-        return sum + count * packagingCostForBase(baseId, year);
-      }, 0);
-    }
-
-    function packagingCost(productId: string, productType: string, year: number) {
-      if (productType === "basis") return packagingCostForBase(productId, year);
-      if (productType === "samengesteld") return packagingCostForComposite(productId, year);
-      return 0;
-    }
-
-    function litersPerUnit(productId: string, productType: string, year: number) {
-      if (productType === "basis") {
-        const def = getBaseDef(productId, year);
-        return Number(def?.inhoud_per_eenheid_liter ?? 0);
-      }
-      if (productType === "samengesteld") {
-        const def = getCompositeDef(productId, year);
-        return Number(def?.totale_inhoud_liter ?? 0);
-      }
-      return 0;
-    }
 
     const versionById = new Map<string, any>();
     (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((record: any) => {
@@ -1685,7 +1528,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const calcType = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
       const soortLabel = calcType === "inkoop" ? "Inkoop" : "Eigen productie";
 
-      const liters = Number(litersPerUnit(productId, productType, targetYear) ?? 0) || 0;
+      const liters = Number(litersPerUnit(productId, productType as any, targetYear) ?? 0) || 0;
       const sourcePrimary = Number(snap.primaireKosten ?? 0);
       const scenarioKey = `${bierId}::${productId}`;
       const scenarioPrimary = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
@@ -1693,11 +1536,13 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         : sourcePrimary;
       const primaireKosten = Number.isFinite(scenarioPrimary) ? scenarioPrimary : sourcePrimary;
 
-      const verpakkingskosten = calcType === "inkoop" ? 0 : packagingCost(productId, productType, targetYear);
-      const vastePerLiter =
-        calcType === "inkoop"
-          ? computeIndirectFixedCostPerInkoopLiter(targetYear)
-          : computeDirectFixedCostPerProductieLiter(targetYear);
+      const verpakkingskosten = calcType === "inkoop" ? 0 : packagingCost(productId, productType as any, targetYear);
+      const vastePerLiter = computeFixedCostPerLiterEngine({
+        calcType: calcType === "inkoop" ? "inkoop" : "eigen_productie",
+        year: targetYear,
+        productieYear: getProductieForYear(targetYear) as any,
+        vasteKostenRows: fixedCostRowsForYear(targetYear) as any
+      });
       const vasteKosten = vastePerLiter * liters;
       const accijns = computeAccijnsForLiters(targetYear, record, liters);
       const kostprijs = primaireKosten + verpakkingskosten + vasteKosten + accijns;

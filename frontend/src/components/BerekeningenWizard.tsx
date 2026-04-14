@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "
 
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
-import { calculateAccijnsPerProduct, vasteKostenPerLiter } from "@/lib/kostprijsEngine";
+import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
+import { computeResultaatSnapshot, type ResultaatSnapshot } from "@/lib/kostprijsSnapshotEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -36,20 +37,6 @@ type PendingDeleteDialog = {
   onConfirm: () => void;
 };
 
-type SummaryProductRow = {
-  biernaam: string;
-  soort: string;
-  product_id?: string;
-  product_type?: string;
-  verpakking?: string;
-  verpakkingseenheid: string;
-  primaire_kosten: string | number;
-  verpakkingskosten: string | number;
-  vaste_kosten: string | number;
-  accijns: string | number;
-  kostprijs: string | number;
-};
-
 type ProductUnitOption = {
   id: string;
   label: string;
@@ -65,16 +52,6 @@ type SelectedInkoopProduct = {
 type EnrichedFactuurRegel = {
   regel: GenericRecord;
   extraKostenPerRegel: number;
-};
-
-type ResultaatSnapshot = {
-  integrale_kostprijs_per_liter: number | null;
-  variabele_kosten_per_liter: number | null;
-  directe_vaste_kosten_per_liter: number | null;
-  producten: {
-    basisproducten: SummaryProductRow[];
-    samengestelde_producten: SummaryProductRow[];
-  };
 };
 
 const KOSTPRIJSVERSIES_API = `${API_BASE_URL}/data/kostprijsversies`;
@@ -773,62 +750,6 @@ function calculateVariabeleKostenPerLiter(
 }
 
 
-function buildSummaryRows(
-  sourceRows: (GenericRecord | SelectedInkoopProduct)[],
-  biernaam: string,
-  soort: string,
-  productType: "basis" | "samengesteld",
-  primaireKostenPerLiter: number,
-  vasteKostenPerLiter: number,
-  basisgegevens: GenericRecord,
-  tarievenHeffingen: GenericRecord[],
-  year: number,
-  includePackagingCosts: boolean
-): SummaryProductRow[] {
-  return sourceRows.map((row) => {
-    const isSelectedInkoopProduct = "product" in (row as SelectedInkoopProduct);
-    const sourceRow = isSelectedInkoopProduct
-      ? (row as SelectedInkoopProduct).product
-      : (row as GenericRecord);
-    const label = getProductDisplayName(sourceRow);
-    const liters =
-      Number(
-        sourceRow.totale_inhoud_liter ??
-          sourceRow.inhoud_per_eenheid_liter ??
-          sourceRow.liters_per_product ??
-          0
-      ) || 0;
-    const verpakkingskosten = Number(
-      sourceRow.totale_verpakkingskosten ?? sourceRow.verpakkingskosten ?? 0
-    );
-    const accijns = calculateAccijnsPerProduct({
-      litersPerProduct: liters,
-      basisgegevens,
-      tarievenHeffingenRows: tarievenHeffingen,
-      year
-    });
-    const primaireKosten = isSelectedInkoopProduct
-      ? (row as SelectedInkoopProduct).prijsPerEenheid
-      : primaireKostenPerLiter * liters;
-    const vasteKosten = vasteKostenPerLiter * liters;
-    const packaging = includePackagingCosts ? verpakkingskosten : 0;
-
-    return {
-      biernaam,
-      soort,
-      product_id: String((sourceRow as GenericRecord).id ?? ""),
-      product_type: productType,
-      verpakking: label || "-",
-      verpakkingseenheid: label || "-",
-      primaire_kosten: roundValue(primaireKosten),
-      verpakkingskosten: roundValue(packaging),
-      vaste_kosten: roundValue(vasteKosten),
-      accijns: roundValue(accijns),
-      kostprijs: roundValue(primaireKosten + packaging + vasteKosten + accijns)
-    };
-  });
-}
-
 export function BerekeningenWizard({
   initialRows,
   basisproducten,
@@ -972,40 +893,69 @@ export function BerekeningenWizard({
           )
         : samengesteldeProducten.filter((item) => Number(item.jaar ?? 0) === jaar);
 
-    const basisproductenRows = buildSummaryRows(
-      basisproductenVanJaar,
-      biernaam,
-      soort,
-      "basis",
-      variabeleKostenPerLiter,
-      fixedPerLiter,
-      basisgegevens,
-      tarievenHeffingen,
-      jaar,
-      soort !== "Inkoop"
-    );
-    const samengesteldeRows = buildSummaryRows(
-      samengesteldeVanJaar,
-      biernaam,
-      soort,
-      "samengesteld",
-      variabeleKostenPerLiter,
-      fixedPerLiter,
-      basisgegevens,
-      tarievenHeffingen,
-      jaar,
-      soort !== "Inkoop"
-    );
+    const tarievenRow =
+      (Array.isArray(tarievenHeffingen)
+        ? (tarievenHeffingen.find((r: any) => Number(r?.jaar ?? 0) === jaar) as any)
+        : null) ?? null;
 
-    return {
-      integrale_kostprijs_per_liter: roundValue(variabeleKostenPerLiter + fixedPerLiter),
-      variabele_kosten_per_liter: roundValue(variabeleKostenPerLiter),
-      directe_vaste_kosten_per_liter: roundValue(fixedPerLiter),
-      producten: {
-        basisproducten: basisproductenRows,
-        samengestelde_producten: samengesteldeRows
-      }
-    };
+    const includePackagingCosts = soort !== "Inkoop";
+    const calcType = soort.trim().toLowerCase() === "inkoop" ? "inkoop" : "eigen_productie";
+
+    const packagingByProductId = new Map<string, number>();
+    const litersByProductId = new Map<string, number>();
+
+    function registerProduct(product: any, productType: "basis" | "samengesteld") {
+      const id = String(product?.id ?? "");
+      if (!id) return;
+      const liters =
+        productType === "basis"
+          ? Number(product?.inhoud_per_eenheid_liter ?? product?.liters_per_product ?? 0)
+          : Number(product?.totale_inhoud_liter ?? product?.liters_per_product ?? 0);
+      litersByProductId.set(id, Number.isFinite(liters) ? liters : 0);
+      const packaging = Number(product?.totale_verpakkingskosten ?? product?.verpakkingskosten ?? 0);
+      packagingByProductId.set(id, Number.isFinite(packaging) ? packaging : 0);
+    }
+
+    const basisInputs = basisproductenVanJaar.map((item: any) => {
+      const isSelectedInkoopProduct = typeof item === "object" && item !== null && "product" in item;
+      const product = isSelectedInkoopProduct ? (item as any).product : item;
+      registerProduct(product, "basis");
+      const liters = litersByProductId.get(String(product?.id ?? "")) ?? 0;
+      const primaryCost = isSelectedInkoopProduct
+        ? Number((item as any).prijsPerEenheid ?? 0)
+        : variabeleKostenPerLiter * liters;
+      return { product, primaryCost };
+    });
+
+    const samengInputs = samengesteldeVanJaar.map((item: any) => {
+      const isSelectedInkoopProduct = typeof item === "object" && item !== null && "product" in item;
+      const product = isSelectedInkoopProduct ? (item as any).product : item;
+      registerProduct(product, "samengesteld");
+      const liters = litersByProductId.get(String(product?.id ?? "")) ?? 0;
+      const primaryCost = isSelectedInkoopProduct
+        ? Number((item as any).prijsPerEenheid ?? 0)
+        : variabeleKostenPerLiter * liters;
+      return { product, primaryCost };
+    });
+
+    return computeResultaatSnapshot({
+      biernaam,
+      soortLabel: soort,
+      year: jaar,
+      calcType,
+      variabeleKostenPerLiter,
+      fixedCostPerLiter: fixedPerLiter,
+      basisgegevens,
+      bierSnapshot: basisgegevens,
+      tarievenHeffingenRow: tarievenRow,
+      basisRows: basisInputs,
+      samengRows: samengInputs,
+      includePackagingCosts,
+      packagingCost: (productId) =>
+        includePackagingCosts ? Number(packagingByProductId.get(String(productId)) ?? 0) : 0,
+      litersPerUnit: (productId) => Number(litersByProductId.get(String(productId)) ?? 0),
+      productLabel: (product: any) => getProductDisplayName(product)
+    });
   }
 
   function updateCurrent(updater: (draft: GenericRecord) => void) {
