@@ -1149,19 +1149,28 @@ export function PrijsvoorstelWizard({
 
     const snapshotRows = [...basisRows, ...samengesteldRows].map((row) => {
       const verpakking = getSnapshotPackagingLabel(row);
-      const rowId = String(row.id ?? "");
-      const explicitSource = basisById.get(rowId) ?? samengesteldById.get(rowId);
+      // Normalized snapshot rows may carry both a stable row id and the actual product_id.
+      // For resolving definitions and matching activations we always want the real product id.
+      const productIdFromRow = String((row as any).product_id ?? (row as any).productId ?? row.id ?? "");
+      const explicitSource = basisById.get(productIdFromRow) ?? samengesteldById.get(productIdFromRow);
       const definitionByPackaging = resolveProductDefinition(
-        rowId || String(explicitSource?.id ?? ""),
-        basisById.has(rowId) ? "basis" : samengesteldById.has(rowId) ? "samengesteld" : "",
+        productIdFromRow || String(explicitSource?.id ?? ""),
+        basisById.has(productIdFromRow) ? "basis" : samengesteldById.has(productIdFromRow) ? "samengesteld" : "",
         verpakking
       );
-      const explicitKind = definitionByPackaging?.kind ?? "samengesteld";
+      const explicitKind: "basis" | "samengesteld" =
+        definitionByPackaging?.kind === "basis"
+          ? "basis"
+          : definitionByPackaging?.kind === "samengesteld"
+            ? "samengesteld"
+            : normalizeKey((row as any).product_type) === "basis"
+              ? "basis"
+              : "samengesteld";
       return {
         bierKey: bierId,
         biernaam,
         kostprijsversieId: String(berekening.id ?? ""),
-        productId: definitionByPackaging?.id ?? "",
+        productId: definitionByPackaging?.id ?? productIdFromRow ?? "",
         productType: explicitKind,
         productKey: `${explicitKind}|${normalizeKey(verpakking)}`,
         verpakking,
