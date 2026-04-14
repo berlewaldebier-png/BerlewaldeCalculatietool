@@ -4,7 +4,13 @@ import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "
 
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
-import { calculateAccijnsPerProduct, vasteKostenPerLiter } from "@/lib/kostprijsEngine";
+import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
+import {
+  createPackagingResolvers,
+  computeResultaatSnapshot,
+  type ResultaatSnapshot,
+  type SummaryProductRow
+} from "@/lib/kostprijsSnapshotEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -23,6 +29,7 @@ type BerekeningenWizardProps = {
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
+  packagingComponentPrices: GenericRecord[];
   initialSelectedId?: string;
   startWithNew?: boolean;
   onBackToLanding?: () => void;
@@ -34,20 +41,6 @@ type PendingDeleteDialog = {
   title: string;
   body: string;
   onConfirm: () => void;
-};
-
-type SummaryProductRow = {
-  biernaam: string;
-  soort: string;
-  product_id?: string;
-  product_type?: string;
-  verpakking?: string;
-  verpakkingseenheid: string;
-  primaire_kosten: string | number;
-  verpakkingskosten: string | number;
-  vaste_kosten: string | number;
-  accijns: string | number;
-  kostprijs: string | number;
 };
 
 type ProductUnitOption = {
@@ -65,16 +58,6 @@ type SelectedInkoopProduct = {
 type EnrichedFactuurRegel = {
   regel: GenericRecord;
   extraKostenPerRegel: number;
-};
-
-type ResultaatSnapshot = {
-  integrale_kostprijs_per_liter: number | null;
-  variabele_kosten_per_liter: number | null;
-  directe_vaste_kosten_per_liter: number | null;
-  producten: {
-    basisproducten: SummaryProductRow[];
-    samengestelde_producten: SummaryProductRow[];
-  };
 };
 
 const KOSTPRIJSVERSIES_API = `${API_BASE_URL}/data/kostprijsversies`;
@@ -773,62 +756,6 @@ function calculateVariabeleKostenPerLiter(
 }
 
 
-function buildSummaryRows(
-  sourceRows: (GenericRecord | SelectedInkoopProduct)[],
-  biernaam: string,
-  soort: string,
-  productType: "basis" | "samengesteld",
-  primaireKostenPerLiter: number,
-  vasteKostenPerLiter: number,
-  basisgegevens: GenericRecord,
-  tarievenHeffingen: GenericRecord[],
-  year: number,
-  includePackagingCosts: boolean
-): SummaryProductRow[] {
-  return sourceRows.map((row) => {
-    const isSelectedInkoopProduct = "product" in (row as SelectedInkoopProduct);
-    const sourceRow = isSelectedInkoopProduct
-      ? (row as SelectedInkoopProduct).product
-      : (row as GenericRecord);
-    const label = getProductDisplayName(sourceRow);
-    const liters =
-      Number(
-        sourceRow.totale_inhoud_liter ??
-          sourceRow.inhoud_per_eenheid_liter ??
-          sourceRow.liters_per_product ??
-          0
-      ) || 0;
-    const verpakkingskosten = Number(
-      sourceRow.totale_verpakkingskosten ?? sourceRow.verpakkingskosten ?? 0
-    );
-    const accijns = calculateAccijnsPerProduct({
-      litersPerProduct: liters,
-      basisgegevens,
-      tarievenHeffingenRows: tarievenHeffingen,
-      year
-    });
-    const primaireKosten = isSelectedInkoopProduct
-      ? (row as SelectedInkoopProduct).prijsPerEenheid
-      : primaireKostenPerLiter * liters;
-    const vasteKosten = vasteKostenPerLiter * liters;
-    const packaging = includePackagingCosts ? verpakkingskosten : 0;
-
-    return {
-      biernaam,
-      soort,
-      product_id: String((sourceRow as GenericRecord).id ?? ""),
-      product_type: productType,
-      verpakking: label || "-",
-      verpakkingseenheid: label || "-",
-      primaire_kosten: roundValue(primaireKosten),
-      verpakkingskosten: roundValue(packaging),
-      vaste_kosten: roundValue(vasteKosten),
-      accijns: roundValue(accijns),
-      kostprijs: roundValue(primaireKosten + packaging + vasteKosten + accijns)
-    };
-  });
-}
-
 export function BerekeningenWizard({
   initialRows,
   basisproducten,
@@ -836,6 +763,7 @@ export function BerekeningenWizard({
   productie,
   vasteKosten,
   tarievenHeffingen,
+  packagingComponentPrices,
   initialSelectedId,
   startWithNew = false,
   onBackToLanding,
@@ -972,40 +900,73 @@ export function BerekeningenWizard({
           )
         : samengesteldeProducten.filter((item) => Number(item.jaar ?? 0) === jaar);
 
-    const basisproductenRows = buildSummaryRows(
-      basisproductenVanJaar,
-      biernaam,
-      soort,
-      "basis",
-      variabeleKostenPerLiter,
-      fixedPerLiter,
-      basisgegevens,
-      tarievenHeffingen,
-      jaar,
-      soort !== "Inkoop"
-    );
-    const samengesteldeRows = buildSummaryRows(
-      samengesteldeVanJaar,
-      biernaam,
-      soort,
-      "samengesteld",
-      variabeleKostenPerLiter,
-      fixedPerLiter,
-      basisgegevens,
-      tarievenHeffingen,
-      jaar,
-      soort !== "Inkoop"
-    );
+    const tarievenRow =
+      (Array.isArray(tarievenHeffingen)
+        ? (tarievenHeffingen.find((r: any) => Number(r?.jaar ?? 0) === jaar) as any)
+        : null) ?? null;
 
-    return {
-      integrale_kostprijs_per_liter: roundValue(variabeleKostenPerLiter + fixedPerLiter),
-      variabele_kosten_per_liter: roundValue(variabeleKostenPerLiter),
-      directe_vaste_kosten_per_liter: roundValue(fixedPerLiter),
-      producten: {
-        basisproducten: basisproductenRows,
-        samengestelde_producten: samengesteldeRows
-      }
-    };
+    const includePackagingCosts = soort !== "Inkoop";
+    const calcType = soort.trim().toLowerCase() === "inkoop" ? "inkoop" : "eigen_productie";
+
+    const packagingByProductId = new Map<string, number>();
+    const litersByProductId = new Map<string, number>();
+
+    const { packagingCost, litersPerUnit } = createPackagingResolvers({
+      baseDefs: Array.isArray(basisproducten) ? (basisproducten as any[]) : [],
+      compositeDefs: Array.isArray(samengesteldeProducten) ? (samengesteldeProducten as any[]) : [],
+      packagingPrices: Array.isArray(packagingComponentPrices) ? (packagingComponentPrices as any[]) : []
+    });
+
+    function registerProduct(product: any, productType: "basis" | "samengesteld") {
+      const id = String(product?.id ?? "");
+      if (!id) return;
+      // Liters are always required (even for inkoop) to allocate fixed costs and compute accijns.
+      const liters = litersPerUnit(id, productType, jaar);
+      litersByProductId.set(id, Number.isFinite(liters) ? liters : 0);
+      const packaging = includePackagingCosts ? packagingCost(id, productType, jaar) : 0;
+      packagingByProductId.set(id, Number.isFinite(packaging) ? packaging : 0);
+    }
+
+    const basisInputs = basisproductenVanJaar.map((item: any) => {
+      const isSelectedInkoopProduct = typeof item === "object" && item !== null && "product" in item;
+      const product = isSelectedInkoopProduct ? (item as any).product : item;
+      registerProduct(product, "basis");
+      const liters = litersByProductId.get(String(product?.id ?? "")) ?? 0;
+      const primaryCost = isSelectedInkoopProduct
+        ? Number((item as any).prijsPerEenheid ?? 0)
+        : variabeleKostenPerLiter * liters;
+      return { product, primaryCost };
+    });
+
+    const samengInputs = samengesteldeVanJaar.map((item: any) => {
+      const isSelectedInkoopProduct = typeof item === "object" && item !== null && "product" in item;
+      const product = isSelectedInkoopProduct ? (item as any).product : item;
+      registerProduct(product, "samengesteld");
+      const liters = litersByProductId.get(String(product?.id ?? "")) ?? 0;
+      const primaryCost = isSelectedInkoopProduct
+        ? Number((item as any).prijsPerEenheid ?? 0)
+        : variabeleKostenPerLiter * liters;
+      return { product, primaryCost };
+    });
+
+    return computeResultaatSnapshot({
+      biernaam,
+      soortLabel: soort,
+      year: jaar,
+      calcType,
+      variabeleKostenPerLiter,
+      fixedCostPerLiter: fixedPerLiter,
+      basisgegevens,
+      bierSnapshot: basisgegevens,
+      tarievenHeffingenRow: tarievenRow,
+      basisRows: basisInputs,
+      samengRows: samengInputs,
+      includePackagingCosts,
+      packagingCost: (productId) =>
+        includePackagingCosts ? Number(packagingByProductId.get(String(productId)) ?? 0) : 0,
+      litersPerUnit: (productId) => Number(litersByProductId.get(String(productId)) ?? 0),
+      productLabel: (product: any) => getProductDisplayName(product)
+    });
   }
 
   function updateCurrent(updater: (draft: GenericRecord) => void) {
@@ -1480,8 +1441,101 @@ export function BerekeningenWizard({
     const ingredienten =
       ((((current.invoer as GenericRecord).ingredienten as GenericRecord).regels as GenericRecord[]) ??
         []);
+
+    const ingredientOptions = (() => {
+      const defaults = [
+        "Overig",
+        "Mout",
+        "Hop",
+        "Gist",
+        "Suiker",
+        "Water",
+        "Kruiden",
+        "Fruit",
+        "Hulpstof"
+      ];
+
+      const seen = new Set<string>();
+      const push = (value: unknown) => {
+        const text = String(value ?? "").trim();
+        if (!text) return;
+        const normalized = text;
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+      };
+
+      defaults.forEach((value) => push(value));
+
+      rows.forEach((row) => {
+        const regels =
+          ((((row.invoer as GenericRecord)?.ingredienten as GenericRecord)?.regels as GenericRecord[]) ?? []);
+        regels.forEach((regel) => push(getIngredientType(regel)));
+      });
+
+      const items = Array.from(seen);
+      const overig = items.find((v) => v.toLowerCase() === "overig");
+      const rest = items
+        .filter((v) => v.toLowerCase() !== "overig")
+        .sort((a, b) => a.localeCompare(b, "nl-NL"));
+      return overig ? [overig, ...rest] : rest;
+    })();
+
+    const year = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0) || 0);
+    const batchGrootte = Number(getYearProduction(year, productie).batchgrootte_eigen_productie_l ?? 0);
+    const leveranciersTotaal = ingredienten.reduce((sum, regel) => sum + Number(regel.prijs ?? 0), 0);
+    const receptTotaal = ingredienten.reduce((sum, regel) => sum + calculateEigenProductieKostenRecept(regel), 0);
+    const literPrijs = batchGrootte > 0 ? receptTotaal / batchGrootte : 0;
+    const batchesPossible = ingredienten.reduce((minValue: number | null, regel) => {
+      const verpakking = Number(regel.hoeveelheid ?? 0);
+      const nodig = Number(regel.benodigd_in_recept ?? 0);
+      if (!Number.isFinite(verpakking) || !Number.isFinite(nodig) || verpakking <= 0 || nodig <= 0) return minValue;
+      const batches = verpakking / nodig;
+      if (!Number.isFinite(batches) || batches <= 0) return minValue ?? 0;
+      if (minValue === null) return batches;
+      return Math.min(minValue, batches);
+    }, null);
+    const batchesLabel =
+      batchesPossible === null
+        ? "-"
+        : formatDecimalValue(Math.max(0, batchesPossible), 2);
+    const batchesNeedsAttention = (() => {
+      if (batchesPossible === null) return false;
+      if (!Number.isFinite(batchesPossible)) return false;
+      // Highlight whenever it is not (approximately) an integer. This nudges the user to consider
+      // optimizing recipe sizes/packaging so ingredients are used efficiently.
+      const rounded = Math.round(batchesPossible);
+      return Math.abs(batchesPossible - rounded) >= 0.01;
+    })();
+
     return (
       <div className="wizard-stack">
+        <div className="stats-grid wizard-stats-grid" style={{ marginBottom: 14 }}>
+          <div className="stat-card">
+            <div className="stat-label">Leveranciersprijzen</div>
+            <div className="stat-value small">{formatCurrencyDisplay(leveranciersTotaal)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Receptkosten</div>
+            <div className="stat-value small">{formatCurrencyDisplay(receptTotaal)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Batchgrootte (L)</div>
+            <div className="stat-value small">{batchGrootte > 0 ? formatDecimalValue(batchGrootte, 2) : "-"}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Literprijs</div>
+            <div className="stat-value small">{batchGrootte > 0 ? formatCurrencyDisplay(literPrijs) : "-"}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Batches mogelijk</div>
+            <div className={`stat-value small${batchesNeedsAttention ? " warning" : ""}`}>{batchesLabel}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Ingredienten</div>
+            <div className="stat-value small">{String(ingredienten.length)}</div>
+          </div>
+        </div>
+
         <div className="dataset-editor-scroll">
           <table className="dataset-editor-table wizard-table-compact">
             <thead>
@@ -1501,9 +1555,8 @@ export function BerekeningenWizard({
               {ingredienten.map((regel, index) => (
                 <tr key={String(regel.id ?? index)}>
                   <td>
-                    <input
-                      className="dataset-input wizard-unit-input"
-                      type="text"
+                    <select
+                      className="dataset-input wizard-unit-select"
                       value={getIngredientType(regel)}
                       onChange={(event) =>
                         updateCurrent((draft) => {
@@ -1513,7 +1566,19 @@ export function BerekeningenWizard({
                           regels[index]["ingredient"] = event.target.value;
                         })
                       }
-                    />
+                    >
+                      {(() => {
+                        const currentValue = getIngredientType(regel);
+                        const options = ingredientOptions.includes(currentValue)
+                          ? ingredientOptions
+                          : [currentValue, ...ingredientOptions];
+                        return options.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ));
+                      })()}
+                    </select>
                   </td>
                   <td>
                     <input
@@ -1995,7 +2060,23 @@ export function BerekeningenWizard({
   }
 
   function renderSummaryStep() {
-    const snapshot = buildResultaatSnapshot(current);
+    const storedSnapshotCandidate =
+      typeof (current as any).resultaat_snapshot === "object" && (current as any).resultaat_snapshot !== null
+        ? ((current as any).resultaat_snapshot as ResultaatSnapshot)
+        : null;
+
+    const storedBasis = Array.isArray(storedSnapshotCandidate?.producten?.basisproducten)
+      ? storedSnapshotCandidate?.producten?.basisproducten
+      : [];
+    const storedSamengesteld = Array.isArray(storedSnapshotCandidate?.producten?.samengestelde_producten)
+      ? storedSnapshotCandidate?.producten?.samengestelde_producten
+      : [];
+
+    // For definitive records we prefer the persisted snapshot as the single source of truth.
+    // The wizard can still recompute a preview after edits, but opening an existing dossier
+    // should show what was actually saved (e.g. year-activation or finalized calculations).
+    const snapshot =
+      storedBasis.length > 0 || storedSamengesteld.length > 0 ? storedSnapshotCandidate! : buildResultaatSnapshot(current);
     const basisproductenRows = snapshot.producten.basisproducten;
     const samengesteldeRows = snapshot.producten.samengestelde_producten;
     const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));

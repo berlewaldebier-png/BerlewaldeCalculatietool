@@ -181,7 +181,7 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM kostprijs_product_activations")
+            cur.execute("SELECT COUNT(*) FROM kostprijs_product_activations WHERE effectief_tot IS NULL")
             count_row = cur.fetchone()
             activation_count = int((count_row[0] if count_row else 0) or 0)
             if activation_count == 0:
@@ -192,6 +192,7 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
                 WITH activations AS (
                     SELECT bier_id, jaar, product_id, kostprijsversie_id
                     FROM kostprijs_product_activations
+                    WHERE effectief_tot IS NULL
                 ),
                 versions AS (
                     SELECT

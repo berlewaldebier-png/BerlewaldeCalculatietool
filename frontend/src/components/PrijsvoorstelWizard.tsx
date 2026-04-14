@@ -1149,19 +1149,28 @@ export function PrijsvoorstelWizard({
 
     const snapshotRows = [...basisRows, ...samengesteldRows].map((row) => {
       const verpakking = getSnapshotPackagingLabel(row);
-      const rowId = String(row.id ?? "");
-      const explicitSource = basisById.get(rowId) ?? samengesteldById.get(rowId);
+      // Normalized snapshot rows may carry both a stable row id and the actual product_id.
+      // For resolving definitions and matching activations we always want the real product id.
+      const productIdFromRow = String((row as any).product_id ?? (row as any).productId ?? row.id ?? "");
+      const explicitSource = basisById.get(productIdFromRow) ?? samengesteldById.get(productIdFromRow);
       const definitionByPackaging = resolveProductDefinition(
-        rowId || String(explicitSource?.id ?? ""),
-        basisById.has(rowId) ? "basis" : samengesteldById.has(rowId) ? "samengesteld" : "",
+        productIdFromRow || String(explicitSource?.id ?? ""),
+        basisById.has(productIdFromRow) ? "basis" : samengesteldById.has(productIdFromRow) ? "samengesteld" : "",
         verpakking
       );
-      const explicitKind = definitionByPackaging?.kind ?? "samengesteld";
+      const explicitKind: "basis" | "samengesteld" =
+        definitionByPackaging?.kind === "basis"
+          ? "basis"
+          : definitionByPackaging?.kind === "samengesteld"
+            ? "samengesteld"
+            : normalizeKey((row as any).product_type) === "basis"
+              ? "basis"
+              : "samengesteld";
       return {
         bierKey: bierId,
         biernaam,
         kostprijsversieId: String(berekening.id ?? ""),
-        productId: definitionByPackaging?.id ?? "",
+        productId: definitionByPackaging?.id ?? productIdFromRow ?? "",
         productType: explicitKind,
         productKey: `${explicitKind}|${normalizeKey(verpakking)}`,
         verpakking,
@@ -1238,6 +1247,11 @@ export function PrijsvoorstelWizard({
         snapshotRows.map((row) => [normalizeKey(row.verpakking), row])
       );
       const factuurRegels = getEnrichedInkoopFactuurregels(berekening).map(({ regel }) => regel);
+      if (factuurRegels.length === 0) {
+        // Year-over-year activated cost versions (and some manual inkoop calculations) can be definitive without
+        // any factuurregels yet. In that case we still want the UI to show the snapshot build-up.
+        return snapshotRows;
+      }
 
       const seenUnitIds = new Set<string>();
       const resultRows = new Map<string, ProductSnapshotRow>();
@@ -1333,6 +1347,9 @@ export function PrijsvoorstelWizard({
           }
         });
 
+      if (resultRows.size === 0) {
+        return snapshotRows;
+      }
       return [...resultRows.values()];
     }
 

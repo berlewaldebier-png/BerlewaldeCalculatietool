@@ -54,15 +54,25 @@ def ensure_schema() -> None:
                     product_type TEXT NOT NULL,
                     kostprijsversie_id TEXT NOT NULL,
                     effectief_vanaf TIMESTAMPTZ NULL,
+                    effectief_tot TIMESTAMPTZ NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 """
             )
+            # Add new columns on existing dev/test databases.
+            cur.execute(
+                "ALTER TABLE kostprijs_product_activations ADD COLUMN IF NOT EXISTS effectief_tot TIMESTAMPTZ NULL;"
+            )
+
+            # Replace the old "one row per scope" uniqueness with an "active row per scope" constraint.
+            # We keep history by allowing multiple rows per (bier, jaar, product), but enforce only one active (effectief_tot IS NULL).
+            cur.execute("DROP INDEX IF EXISTS ux_kostprijs_product_activation_scope;")
             cur.execute(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_kostprijs_product_activation_scope
-                ON kostprijs_product_activations (bier_id, jaar, product_id);
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_kostprijs_product_activation_active_scope
+                ON kostprijs_product_activations (bier_id, jaar, product_id)
+                WHERE effectief_tot IS NULL;
                 """
             )
             cur.execute(
@@ -81,6 +91,12 @@ def ensure_schema() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS ix_kostprijs_product_activation_version
                 ON kostprijs_product_activations (kostprijsversie_id);
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS ix_kostprijs_product_activation_active_year
+                ON kostprijs_product_activations (jaar, effectief_tot);
                 """
             )
             cur.execute(
@@ -105,10 +121,14 @@ def ensure_schema() -> None:
             # Migrate legacy TEXT timestamp columns (dev DBs) to TIMESTAMPTZ.
             # We use NULLIF(...,'') casts so old empty-string defaults won't break the type change.
             cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN effectief_vanaf DROP DEFAULT")
+            cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN effectief_tot DROP DEFAULT")
             cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN created_at DROP DEFAULT")
             cur.execute("ALTER TABLE kostprijs_product_activations ALTER COLUMN updated_at DROP DEFAULT")
             cur.execute(
                 "ALTER TABLE kostprijs_product_activations ALTER COLUMN effectief_vanaf TYPE TIMESTAMPTZ USING NULLIF(effectief_vanaf::text,'')::timestamptz"
+            )
+            cur.execute(
+                "ALTER TABLE kostprijs_product_activations ALTER COLUMN effectief_tot TYPE TIMESTAMPTZ USING NULLIF(effectief_tot::text,'')::timestamptz"
             )
             cur.execute(
                 "ALTER TABLE kostprijs_product_activations ALTER COLUMN created_at TYPE TIMESTAMPTZ USING NULLIF(created_at::text,'')::timestamptz"
@@ -178,6 +198,7 @@ def normalize_activation_record(record: dict[str, Any] | None) -> dict[str, Any]
     created_at = _as_iso(src.get("created_at")) or _now_iso()
     updated_at = _as_iso(src.get("updated_at")) or created_at
     effectief_vanaf = _as_iso(src.get("effectief_vanaf") or src.get("effective_from")) or ""
+    effectief_tot = _as_iso(src.get("effectief_tot") or src.get("effective_to")) or ""
     return {
         "id": str(src.get("id", "") or uuid4()),
         "bier_id": str(src.get("bier_id", "") or ""),
@@ -186,6 +207,7 @@ def normalize_activation_record(record: dict[str, Any] | None) -> dict[str, Any]
         "product_type": str(src.get("product_type", "") or ""),
         "kostprijsversie_id": str(src.get("kostprijsversie_id", "") or ""),
         "effectief_vanaf": effectief_vanaf,
+        "effectief_tot": effectief_tot,
         "created_at": created_at,
         "updated_at": updated_at,
     }
@@ -205,10 +227,11 @@ def load_activations() -> list[dict[str, Any]]:
                     product_type,
                     kostprijsversie_id,
                     effectief_vanaf,
+                    effectief_tot,
                     created_at,
                     updated_at
                 FROM kostprijs_product_activations
-                ORDER BY jaar, bier_id, product_id
+                ORDER BY jaar, bier_id, product_id, effectief_vanaf DESC NULLS LAST, created_at DESC
                 """
             )
             rows = cur.fetchall() or []
@@ -223,8 +246,9 @@ def load_activations() -> list[dict[str, Any]]:
                 "product_type": row[4],
                 "kostprijsversie_id": row[5],
                 "effectief_vanaf": row[6],
-                "created_at": row[7],
-                "updated_at": row[8],
+                "effectief_tot": row[7],
+                "created_at": row[8],
+                "updated_at": row[9],
             }
         )
         for row in rows
@@ -266,7 +290,7 @@ def upsert_activations(
                     """
                     SELECT id, kostprijsversie_id
                     FROM kostprijs_product_activations
-                    WHERE bier_id = %s AND jaar = %s AND product_id = %s
+                    WHERE bier_id = %s AND jaar = %s AND product_id = %s AND effectief_tot IS NULL
                     """,
                     (bier_id, jaar, product_id),
                 )
@@ -277,19 +301,22 @@ def upsert_activations(
                 updated_at = str(row.get("updated_at", "") or "") or now
                 effectief_vanaf = str(row.get("effectief_vanaf", "") or "") or ""
                 effectief_vanaf_ts = effectief_vanaf or None
+                effectief_tot = str(row.get("effectief_tot", "") or "") or ""
+                effectief_tot_ts = effectief_tot or None
 
                 cur.execute(
                     """
                     INSERT INTO kostprijs_product_activations (
                         id, bier_id, jaar, product_id, product_type, kostprijsversie_id,
-                        effectief_vanaf, created_at, updated_at
+                        effectief_vanaf, effectief_tot, created_at, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (bier_id, jaar, product_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (bier_id, jaar, product_id) WHERE effectief_tot IS NULL
                     DO UPDATE SET
                         product_type = EXCLUDED.product_type,
                         kostprijsversie_id = EXCLUDED.kostprijsversie_id,
                         effectief_vanaf = EXCLUDED.effectief_vanaf,
+                        effectief_tot = EXCLUDED.effectief_tot,
                         updated_at = EXCLUDED.updated_at
                     """,
                     (
@@ -300,6 +327,7 @@ def upsert_activations(
                         str(row.get("product_type", "") or ""),
                         str(row["kostprijsversie_id"]),
                         effectief_vanaf_ts,
+                        effectief_tot_ts,
                         created_at,
                         updated_at,
                     ),
@@ -396,14 +424,16 @@ def replace_activations(
                 updated_at = str(row.get("updated_at", "") or "") or now
                 effectief_vanaf = str(row.get("effectief_vanaf", "") or "") or ""
                 effectief_vanaf_ts = effectief_vanaf or None
+                effectief_tot = str(row.get("effectief_tot", "") or "") or ""
+                effectief_tot_ts = effectief_tot or None
 
                 cur.execute(
                     """
                     INSERT INTO kostprijs_product_activations (
                         id, bier_id, jaar, product_id, product_type, kostprijsversie_id,
-                        effectief_vanaf, created_at, updated_at
+                        effectief_vanaf, effectief_tot, created_at, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         str(row["id"]),
@@ -413,6 +443,7 @@ def replace_activations(
                         str(row.get("product_type", "") or ""),
                         str(row["kostprijsversie_id"]),
                         effectief_vanaf_ts,
+                        effectief_tot_ts,
                         created_at,
                         updated_at,
                     ),
@@ -463,6 +494,141 @@ def delete_activations_for_year(year: int) -> dict[str, int]:
             conn.commit()
 
     return {"activations_deleted": activations_count, "events_deleted": events_count}
+
+
+def activate_activations(
+    rows: list[dict[str, Any]],
+    *,
+    context: ActivationContext | None = None,
+) -> bool:
+    """Activation semantics:
+
+    - Close any active activation for the same (bier, jaar, product) by setting `effectief_tot = now()`.
+    - Insert a new active activation row with `effectief_vanaf = now()` and `effectief_tot = NULL`.
+
+    This preserves history while keeping a single active row per scope.
+    """
+    ensure_schema()
+    normalized_rows = [normalize_activation_record(row) for row in rows if isinstance(row, dict)]
+
+    # Deduplicate in-memory by scope; last write wins.
+    by_key: dict[tuple[str, int, str], dict[str, Any]] = {}
+    for row in normalized_rows:
+        key = (str(row["bier_id"]), int(row["jaar"]), str(row["product_id"]))
+        by_key[key] = row
+    normalized_rows = list(by_key.values())
+
+    for row in normalized_rows:
+        if not row["bier_id"] or not row["product_id"] or int(row["jaar"]) <= 0 or not row["kostprijsversie_id"]:
+            raise ValueError(
+                "Ongeldige kostprijsproductactivering: bier_id, jaar, product_id en kostprijsversie_id zijn verplicht."
+            )
+
+    ctx = context or ActivationContext()
+    now = _now_iso()
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            for row in normalized_rows:
+                bier_id = str(row["bier_id"])
+                jaar = int(row["jaar"])
+                product_id = str(row["product_id"])
+                new_version_id = str(row["kostprijsversie_id"])
+
+                cur.execute(
+                    """
+                    SELECT id, kostprijsversie_id
+                    FROM kostprijs_product_activations
+                    WHERE bier_id = %s AND jaar = %s AND product_id = %s AND effectief_tot IS NULL
+                    ORDER BY effectief_vanaf DESC NULLS LAST, created_at DESC
+                    LIMIT 1
+                    """,
+                    (bier_id, jaar, product_id),
+                )
+                existing = cur.fetchone()
+                existing_id = str(existing[0] or "") if existing else ""
+                previous_version_id = str(existing[1] or "") if existing else ""
+
+                # If the active activation already points at the requested version, we keep it as-is.
+                if existing_id and previous_version_id == new_version_id:
+                    cur.execute(
+                        "UPDATE kostprijs_product_activations SET updated_at = %s WHERE id = %s",
+                        (now, existing_id),
+                    )
+                    continue
+
+                if existing_id:
+                    cur.execute(
+                        """
+                        UPDATE kostprijs_product_activations
+                        SET effectief_tot = %s, updated_at = %s
+                        WHERE id = %s
+                        """,
+                        (now, now, existing_id),
+                    )
+
+                effectief_vanaf = str(row.get("effectief_vanaf", "") or "") or now
+                effectief_vanaf_ts = effectief_vanaf or None
+
+                cur.execute(
+                    """
+                    INSERT INTO kostprijs_product_activations (
+                        id, bier_id, jaar, product_id, product_type, kostprijsversie_id,
+                        effectief_vanaf, effectief_tot, created_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, %s, %s)
+                    """,
+                    (
+                        str(uuid4()),
+                        bier_id,
+                        jaar,
+                        product_id,
+                        str(row.get("product_type", "") or ""),
+                        new_version_id,
+                        effectief_vanaf_ts,
+                        now,
+                        now,
+                    ),
+                )
+
+                cur.execute(
+                    """
+                    INSERT INTO kostprijs_activation_events (
+                        id,
+                        created_at,
+                        run_id,
+                        actor,
+                        action,
+                        bier_id,
+                        jaar,
+                        product_id,
+                        product_type,
+                        previous_kostprijsversie_id,
+                        kostprijsversie_id,
+                        effectief_vanaf,
+                        metadata
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    """,
+                    (
+                        str(uuid4()),
+                        now,
+                        str(ctx.run_id or ""),
+                        str(ctx.actor or ""),
+                        str(ctx.action or ""),
+                        bier_id,
+                        jaar,
+                        product_id,
+                        str(row.get("product_type", "") or ""),
+                        previous_version_id,
+                        new_version_id,
+                        effectief_vanaf_ts,
+                        "{}",
+                    ),
+                )
+        conn.commit()
+
+    return True
 
 
 def list_activation_events(

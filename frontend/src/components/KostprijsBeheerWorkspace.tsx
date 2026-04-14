@@ -15,13 +15,12 @@ type KostprijsBeheerWorkspaceProps = {
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
+  packagingComponentPrices: GenericRecord[];
   initialMode?: string;
-  initialFilter?: string;
   initialFocus?: string;
 };
 
-type WorkspaceMode = "landing" | "select-existing" | "wizard-new" | "wizard-edit";
-type FilterMode = "all" | "concept" | "definitief";
+type WorkspaceMode = "landing" | "wizard-new" | "wizard-edit";
 
 export function KostprijsBeheerWorkspace({
   berekeningen,
@@ -32,20 +31,17 @@ export function KostprijsBeheerWorkspace({
   productie,
   vasteKosten,
   tarievenHeffingen,
+  packagingComponentPrices,
   initialMode,
-  initialFilter,
   initialFocus
 }: KostprijsBeheerWorkspaceProps) {
   const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(berekeningen);
   const normalizedInitialMode =
-    initialMode === "select-existing" || initialMode === "wizard-new" || initialMode === "wizard-edit"
+    initialMode === "wizard-new" || initialMode === "wizard-edit"
       ? (initialMode as WorkspaceMode)
       : "landing";
-  const normalizedInitialFilter =
-    initialFilter === "concept" || initialFilter === "definitief" ? (initialFilter as FilterMode) : "all";
 
   const [mode, setMode] = useState<WorkspaceMode>(normalizedInitialMode);
-  const [filterMode, setFilterMode] = useState<FilterMode>(normalizedInitialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeSort, setActiveSort] = useState<{
@@ -142,7 +138,7 @@ export function KostprijsBeheerWorkspace({
     if (statusLabel && statusLabel !== "definitief") {
       parts.push(statusLabel);
     }
-    return parts.join(" · ");
+    return parts.join(" - ");
   }
 
   function SortIcon({ direction }: { direction: "asc" | "desc" }) {
@@ -216,6 +212,7 @@ export function KostprijsBeheerWorkspace({
   }, [activationYears, productionYears]);
 
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
+  // Note: We intentionally do not expose a "dossiers/kostprijsversies" list here.
 
   const bierenById = useMemo(() => {
     const map = new Map<string, string>();
@@ -511,34 +508,6 @@ export function KostprijsBeheerWorkspace({
     );
   }
 
-  const counts = useMemo(() => {
-    const concept = currentBerekeningen.filter(
-      (row) => String(row.status ?? "").trim().toLowerCase() === "concept"
-    ).length;
-    const definitief = currentBerekeningen.filter(
-      (row) => String(row.status ?? "").trim().toLowerCase() === "definitief"
-    ).length;
-
-    return {
-      all: currentBerekeningen.length,
-      concept,
-      definitief
-    };
-  }, [currentBerekeningen]);
-
-  const filteredRows = useMemo(() => {
-    return currentBerekeningen.filter((row) => {
-      const status = String(row.status ?? "").trim().toLowerCase();
-      if (filterMode === "concept") {
-        return status === "concept";
-      }
-      if (filterMode === "definitief") {
-        return status === "definitief";
-      }
-      return true;
-    });
-  }, [currentBerekeningen, filterMode]);
-
   if (mode === "wizard-new") {
     return (
       <BerekeningenWizard
@@ -548,6 +517,7 @@ export function KostprijsBeheerWorkspace({
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
+        packagingComponentPrices={packagingComponentPrices}
         startWithNew
         onRowsChange={setCurrentBerekeningen}
         onFinish={() => setMode("landing")}
@@ -565,86 +535,12 @@ export function KostprijsBeheerWorkspace({
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
+        packagingComponentPrices={packagingComponentPrices}
         initialSelectedId={selectedId}
         onRowsChange={setCurrentBerekeningen}
         onFinish={() => setMode("landing")}
-        onBackToLanding={() => setMode("select-existing")}
+        onBackToLanding={() => setMode("landing")}
       />
-    );
-  }
-
-  if (mode === "select-existing") {
-    return (
-      <section className="module-card">
-        <div className="module-card-header">
-          <div className="module-card-title">Bestaande kostprijsversie aanpassen</div>
-          <div className="module-card-text">
-            Kies een concept of definitieve kostprijsversie en open daarna de wizard.
-          </div>
-        </div>
-
-        <div className="kostprijs-toolbar">
-          <div className="kostprijs-filter-tabs">
-            {[
-              ["all", `Alles (${counts.all})`],
-              ["concept", `Concept (${counts.concept})`],
-              ["definitief", `Definitief (${counts.definitief})`]
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`tab-button${filterMode === value ? " active" : ""}`}
-                onClick={() => setFilterMode(value as FilterMode)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() => setMode("landing")}
-          >
-            Terug
-          </button>
-        </div>
-
-        <div className="kostprijs-record-grid">
-          {filteredRows.map((row) => {
-            const basis = (row.basisgegevens as GenericRecord) ?? {};
-            const type = (row.soort_berekening as GenericRecord) ?? {};
-            return (
-              <button
-                key={String(row.id)}
-                type="button"
-                className="kostprijs-record-card"
-                onClick={() => {
-                  setSelectedId(String(row.id));
-                  setMode("wizard-edit");
-                }}
-              >
-                <div className="kostprijs-record-title">
-                  {String(basis.biernaam ?? "Onbekende berekening")}
-                </div>
-                <div className="kostprijs-record-meta">
-                  {String(basis.jaar ?? "-")} | {String(type.type ?? "-")} | {String(row.status ?? "-")}
-                  {Boolean(row.is_actief) ? " | actief" : ""}
-                  {Number(row.versie_nummer ?? 0) > 0 ? ` | v${Number(row.versie_nummer)}` : ""}
-                </div>
-                <div className="kostprijs-record-text">
-                  {String(basis.stijl ?? "Geen stijl opgegeven")}
-                </div>
-              </button>
-            );
-          })}
-          {filteredRows.length === 0 ? (
-            <div className="empty-state-card">
-              Geen berekeningen gevonden voor deze selectie.
-            </div>
-          ) : null}
-        </div>
-      </section>
     );
   }
 
@@ -653,7 +549,7 @@ export function KostprijsBeheerWorkspace({
         <div className="module-card-header">
           <div className="module-card-title">Kostprijs beheren</div>
           <div className="module-card-text">
-          Kies of je een nieuwe kostprijsversie wilt starten of een bestaande versie wilt aanpassen.
+          Start een nieuwe kostprijsberekening, en beheer welke versies actief zijn per bier/product/jaar.
           </div>
         </div>
 
@@ -666,17 +562,6 @@ export function KostprijsBeheerWorkspace({
           <div className="dashboard-quick-card-title">Nieuwe berekening</div>
           <div className="dashboard-quick-card-text">
             Start direct een nieuwe kostprijswizard voor een bier of productflow.
-          </div>
-        </button>
-
-        <button
-          type="button"
-          className="dashboard-quick-card kostprijs-choice-card"
-          onClick={() => setMode("select-existing")}
-        >
-          <div className="dashboard-quick-card-title">Bestaande aanpassen</div>
-          <div className="dashboard-quick-card-text">
-            Open een concept of definitieve kostprijsversie en werk deze verder uit in de wizard.
           </div>
         </button>
       </div>
@@ -740,6 +625,7 @@ export function KostprijsBeheerWorkspace({
                     <SortIcon direction={activeSort.direction} />
                   </span>
                 </th>
+                <th>Kostprijs</th>
                 <th />
                 <th />
               </tr>
@@ -755,6 +641,7 @@ export function KostprijsBeheerWorkspace({
                     </td>
                     <td>{row.effectiefVanaf || "-"}</td>
                     <td>{row.versieLabel}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.currentCost)}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       {row.hasUpdate ? (
                         <span style={{ display: "inline-flex", gap: 6 }}>
@@ -809,7 +696,7 @@ export function KostprijsBeheerWorkspace({
                 ))
               ) : (
                 <tr>
-                  <td className="dataset-empty" colSpan={6}>
+                  <td className="dataset-empty" colSpan={7}>
                     Geen actieve kostprijzen gevonden voor {selectedYear}.
                   </td>
                 </tr>
@@ -831,7 +718,7 @@ export function KostprijsBeheerWorkspace({
               </div>
               <div className="confirm-modal-text">
                 <strong>
-                  {pendingActivation.bierNaam} · {pendingActivation.productNaam} · {pendingActivation.jaar}
+                  {pendingActivation.bierNaam} - {pendingActivation.productNaam} - {pendingActivation.jaar}
                 </strong>
                 <div style={{ marginTop: 10 }} />
                 <div>

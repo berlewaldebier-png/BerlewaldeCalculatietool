@@ -1423,6 +1423,47 @@ def activate_kostprijzen_for_year(
         # Build snapshot product rows.
         basisproducten_snapshot: list[dict[str, Any]] = []
         samengestelde_snapshot: list[dict[str, Any]] = []
+
+        # Preserve enough "inputs" so the Kostprijs beheren wizard can show a meaningful dossier.
+        # The definitive target-year cost remains the resultaat_snapshot rows we store below.
+        invoer_payload: dict[str, Any] = {}
+        if soort == "inkoop":
+            # Represent the year-activation scenario as a 1-unit "factuurregel" per product.
+            # The wizard already derives liters and per-liter costs from `eenheid`.
+            factuurregels: list[dict[str, Any]] = []
+            for r in beer_rows:
+                product_id = str(r.get("product_id", "") or "").strip()
+                if not product_id:
+                    continue
+                source_primary = float(r.get("source_primary", 0.0) or 0.0)
+                scenario_primary = float(r.get("scenario_primary", source_primary) or source_primary)
+                factuurregels.append(
+                    {
+                        "id": str(uuid4()),
+                        "aantal": 1,
+                        "eenheid": product_id,
+                        "subfactuurbedrag": float(scenario_primary),
+                        "liters": None,
+                    }
+                )
+            invoer_payload = {
+                "ingredienten": {"regels": [], "notities": ""},
+                "inkoop": {
+                    "factuurnummer": f"Scenario jaarovergang {source_year}->{target_year}",
+                    "factuurdatum": "",
+                    "verzendkosten": 0.0,
+                    "overige_kosten": 0.0,
+                    "factuurregels": factuurregels,
+                    "facturen": [],
+                },
+            }
+        else:
+            # For productie: keep the recipe inputs from the source version as a starting point.
+            invoer_payload = (
+                source_version.get("invoer", {})
+                if isinstance(source_version.get("invoer", {}), dict)
+                else {}
+            )
         # Build per-liter summary values (these drive PrijsvoorstelWizard comparisons).
         per_liter_candidates: list[float] = []
         for r in beer_rows:
@@ -1507,6 +1548,8 @@ def activate_kostprijzen_for_year(
                 "bier_snapshot": bier_snapshot,
                 "status": "definitief",
                 "calculation_type": calc_type,
+                "soort_berekening": {"type": "Inkoop" if soort == "inkoop" else "Eigen productie"},
+                "invoer": invoer_payload,
                 "versie_nummer": int(next_num),
                 "kostprijs": float(integrale_kostprijs_per_liter_summary),
                 "calculation_variant": "jaarovergang",
