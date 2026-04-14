@@ -920,7 +920,8 @@ export function BerekeningenWizard({
     function registerProduct(product: any, productType: "basis" | "samengesteld") {
       const id = String(product?.id ?? "");
       if (!id) return;
-      const liters = includePackagingCosts ? litersPerUnit(id, productType, jaar) : 0;
+      // Liters are always required (even for inkoop) to allocate fixed costs and compute accijns.
+      const liters = litersPerUnit(id, productType, jaar);
       litersByProductId.set(id, Number.isFinite(liters) ? liters : 0);
       const packaging = includePackagingCosts ? packagingCost(id, productType, jaar) : 0;
       packagingByProductId.set(id, Number.isFinite(packaging) ? packaging : 0);
