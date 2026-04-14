@@ -2060,7 +2060,23 @@ export function BerekeningenWizard({
   }
 
   function renderSummaryStep() {
-    const snapshot = buildResultaatSnapshot(current);
+    const storedSnapshotCandidate =
+      typeof (current as any).resultaat_snapshot === "object" && (current as any).resultaat_snapshot !== null
+        ? ((current as any).resultaat_snapshot as ResultaatSnapshot)
+        : null;
+
+    const storedBasis = Array.isArray(storedSnapshotCandidate?.producten?.basisproducten)
+      ? storedSnapshotCandidate?.producten?.basisproducten
+      : [];
+    const storedSamengesteld = Array.isArray(storedSnapshotCandidate?.producten?.samengestelde_producten)
+      ? storedSnapshotCandidate?.producten?.samengestelde_producten
+      : [];
+
+    // For definitive records we prefer the persisted snapshot as the single source of truth.
+    // The wizard can still recompute a preview after edits, but opening an existing dossier
+    // should show what was actually saved (e.g. year-activation or finalized calculations).
+    const snapshot =
+      storedBasis.length > 0 || storedSamengesteld.length > 0 ? storedSnapshotCandidate! : buildResultaatSnapshot(current);
     const basisproductenRows = snapshot.producten.basisproducten;
     const samengesteldeRows = snapshot.producten.samengestelde_producten;
     const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));
