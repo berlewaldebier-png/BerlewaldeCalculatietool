@@ -1979,10 +1979,13 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
     kostprijs_scenario_inkoop_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
 
+    report: dict[str, Any] = {"ok": True, "validated": [], "already_valid": [], "missing": [], "failed": []}
     try:
-        product_registry_storage.rebuild_registry(validate_constraints=False)
-    except Exception:
-        pass
+        report["product_registry"] = product_registry_storage.rebuild_registry(validate_constraints=False)
+    except Exception as exc:
+        # No silent fallbacks: if we cannot build the registry, FK validation is unreliable.
+        report["ok"] = False
+        report["failed"].append({"constraint": "products_master", "table": "products_master", "error": str(exc)})
 
     targets: list[dict[str, str]] = [
         {"constraint": "fk_cost_version_rows_product", "table": "cost_version_product_rows"},
@@ -1990,8 +1993,6 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
         {"constraint": "fk_price_quote_lines_product", "table": "price_quote_lines"},
         {"constraint": "fk_kostprijs_activations_product", "table": "kostprijs_product_activations"},
     ]
-
-    report: dict[str, Any] = {"ok": True, "validated": [], "already_valid": [], "missing": [], "failed": []}
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             for target in targets:
@@ -2010,13 +2011,10 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
                 if is_validated and not validate_all:
                     report["already_valid"].append({"constraint": name, "table": table})
                     continue
-                if is_validated and validate_all:
-                    report["already_valid"].append({"constraint": name, "table": table})
-                    continue
 
                 try:
                     cur.execute(f"ALTER TABLE {table} VALIDATE CONSTRAINT {name}")
-                    report["validated"].append({"constraint": name, "table": table})
+                    report["validated"].append({"constraint": name, "table": table, "revalidated": bool(is_validated)})
                 except Exception as exc:
                     report["ok"] = False
                     report["failed"].append({"constraint": name, "table": table, "error": str(exc)})

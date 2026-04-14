@@ -256,6 +256,9 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
     report["maintenance"]["wrapped_payloads"] = dataset_store.migrate_wrapped_payloads(dry_run=False)
     report["maintenance"]["product_ids"] = dataset_store.migrate_product_ids(dry_run=False)
     report["maintenance"]["activations"] = dataset_store.generate_missing_activations(dry_run=False)
+    report["maintenance"]["phase_g_constraints"] = dataset_store.validate_phase_g_constraints(validate_all=False)
+    if not bool(report["maintenance"]["phase_g_constraints"].get("ok", False)):
+        raise ValueError("Seed import: Phase G FK constraints zijn niet valide. Zie maintenance.phase_g_constraints.")
 
     return report
 
