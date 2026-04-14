@@ -78,13 +78,13 @@ function buildAlertCards(summary: DashboardSummary): AlertCard[] {
       title: "Concept berekeningen",
       value: String(summary.concept_berekeningen).padStart(2, "0"),
       description: "Nog af te ronden kostprijsberekeningen",
-      href: "/nieuwe-kostprijsberekening?mode=select-existing&filter=concept"
+      href: "/nieuwe-kostprijsberekening?mode=landing"
     },
     {
       title: "Definitieve berekeningen",
       value: String(summary.definitieve_berekeningen),
       description: "Beschikbare basis voor verdere prijslogica",
-      href: "/nieuwe-kostprijsberekening?mode=select-existing&filter=definitief"
+      href: "/nieuwe-kostprijsberekening?mode=landing"
     },
     {
       title: "Concept prijsvoorstellen",

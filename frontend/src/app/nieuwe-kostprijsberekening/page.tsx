@@ -37,13 +37,12 @@ export default async function NieuweKostprijsberekeningPage({
   const packagingComponentPrices = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
 
   const mode = typeof resolvedSearchParams.mode === "string" ? resolvedSearchParams.mode : "";
-  const filter = typeof resolvedSearchParams.filter === "string" ? resolvedSearchParams.filter : "";
   const focus = typeof resolvedSearchParams.focus === "string" ? resolvedSearchParams.focus : "";
 
   return (
     <PageShell
       title="Kostprijs beheren"
-      subtitle="Start een nieuwe kostprijsversie of open een bestaand dossier en werk het verder uit in de wizard."
+      subtitle="Start een nieuwe kostprijsberekening en beheer welke versies actief zijn per bier/product/jaar."
       activePath="/nieuwe-kostprijsberekening"
       navigation={navigation}
     >
@@ -58,7 +57,6 @@ export default async function NieuweKostprijsberekeningPage({
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
         initialMode={mode}
-        initialFilter={filter}
         initialFocus={focus}
       />
     </PageShell>

@@ -17,12 +17,10 @@ type KostprijsBeheerWorkspaceProps = {
   tarievenHeffingen: GenericRecord[];
   packagingComponentPrices: GenericRecord[];
   initialMode?: string;
-  initialFilter?: string;
   initialFocus?: string;
 };
 
-type WorkspaceMode = "landing" | "select-existing" | "wizard-new" | "wizard-edit";
-type FilterMode = "all" | "concept" | "definitief";
+type WorkspaceMode = "landing" | "wizard-new" | "wizard-edit";
 
 export function KostprijsBeheerWorkspace({
   berekeningen,
@@ -35,19 +33,15 @@ export function KostprijsBeheerWorkspace({
   tarievenHeffingen,
   packagingComponentPrices,
   initialMode,
-  initialFilter,
   initialFocus
 }: KostprijsBeheerWorkspaceProps) {
   const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(berekeningen);
   const normalizedInitialMode =
-    initialMode === "select-existing" || initialMode === "wizard-new" || initialMode === "wizard-edit"
+    initialMode === "wizard-new" || initialMode === "wizard-edit"
       ? (initialMode as WorkspaceMode)
       : "landing";
-  const normalizedInitialFilter =
-    initialFilter === "concept" || initialFilter === "definitief" ? (initialFilter as FilterMode) : "all";
 
   const [mode, setMode] = useState<WorkspaceMode>(normalizedInitialMode);
-  const [filterMode, setFilterMode] = useState<FilterMode>(normalizedInitialFilter);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeSort, setActiveSort] = useState<{
@@ -218,11 +212,7 @@ export function KostprijsBeheerWorkspace({
   }, [activationYears, productionYears]);
 
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
-  const [selectedVersionsYear, setSelectedVersionsYear] = useState<number>(defaultYear);
-  const [versionsSearch, setVersionsSearch] = useState("");
-  const [showOnlyActiveVersions, setShowOnlyActiveVersions] = useState(true);
-
-  const versionsRef = useRef<HTMLDivElement | null>(null);
+  // Note: We intentionally do not expose a "dossiers/kostprijsversies" list here.
 
   const bierenById = useMemo(() => {
     const map = new Map<string, string>();
@@ -518,95 +508,6 @@ export function KostprijsBeheerWorkspace({
     );
   }
 
-  const counts = useMemo(() => {
-    const concept = currentBerekeningen.filter(
-      (row) => String(row.status ?? "").trim().toLowerCase() === "concept"
-    ).length;
-    const definitief = currentBerekeningen.filter(
-      (row) => String(row.status ?? "").trim().toLowerCase() === "definitief"
-    ).length;
-
-    return {
-      all: currentBerekeningen.length,
-      concept,
-      definitief
-    };
-  }, [currentBerekeningen]);
-
-  const filteredRows = useMemo(() => {
-    return currentBerekeningen.filter((row) => {
-      const status = String(row.status ?? "").trim().toLowerCase();
-      if (filterMode === "concept") {
-        return status === "concept";
-      }
-      if (filterMode === "definitief") {
-        return status === "definitief";
-      }
-      return true;
-    });
-  }, [currentBerekeningen, filterMode]);
-
-  const versionActivationCounts = useMemo(() => {
-    const countsByVersion = new Map<string, number>();
-    (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).forEach((row) => {
-      const versionId = String((row as any)?.kostprijsversie_id ?? "");
-      if (!versionId) return;
-      countsByVersion.set(versionId, (countsByVersion.get(versionId) ?? 0) + 1);
-    });
-    return countsByVersion;
-  }, [kostprijsproductactiveringen]);
-
-  const versionsTableRows = useMemo(() => {
-    const q = versionsSearch.trim().toLowerCase();
-    return filteredRows
-      .filter((row) => {
-        const year = Number((row as any)?.jaar ?? (row as any)?.basisgegevens?.jaar ?? 0) || 0;
-        if (year !== selectedVersionsYear) return false;
-        if (showOnlyActiveVersions) {
-          const versionId = String((row as any)?.id ?? "");
-          return (versionActivationCounts.get(versionId) ?? 0) > 0;
-        }
-        return true;
-      })
-      .map((row) => {
-        const id = String((row as any)?.id ?? "");
-        const basis = ((row as any)?.basisgegevens ?? {}) as GenericRecord;
-        const bierId = String((row as any)?.bier_id ?? "");
-        const bierNaam = String((basis as any)?.biernaam ?? bierenById.get(bierId) ?? bierId ?? "-");
-        const jaar = Number((row as any)?.jaar ?? (basis as any)?.jaar ?? 0) || 0;
-        const type = String((row as any)?.type ?? "");
-        const status = String((row as any)?.status ?? "");
-        const kostprijsPerLiter = Number((row as any)?.kostprijs ?? 0) || 0;
-        const activeForProducts = versionActivationCounts.get(id) ?? 0;
-        const ts = String((row as any)?.finalized_at ?? (row as any)?.updated_at ?? (row as any)?.created_at ?? "");
-        const style = String((basis as any)?.stijl ?? "");
-        const label = buildVersionLabel(row);
-
-        const searchHaystack = `${bierNaam} ${jaar} ${type} ${status} ${style} ${label}`.toLowerCase();
-        const matches = !q || searchHaystack.includes(q);
-        return {
-          id,
-          bierNaam,
-          jaar,
-          type,
-          status,
-          kostprijsPerLiter,
-          activeForProducts,
-          ts,
-          matches
-        };
-      })
-      .filter((row) => row.matches)
-      .sort((left, right) => String(right.ts).localeCompare(String(left.ts)));
-  }, [
-    filteredRows,
-    versionsSearch,
-    selectedVersionsYear,
-    showOnlyActiveVersions,
-    versionActivationCounts,
-    bierenById
-  ]);
-
   if (mode === "wizard-new") {
     return (
       <BerekeningenWizard
@@ -643,136 +544,12 @@ export function KostprijsBeheerWorkspace({
     );
   }
 
-  if (mode === "select-existing") {
-    return (
-      <section className="module-card">
-        <div className="module-card-header">
-          <div className="module-card-title">Kostprijsversies (dossiers)</div>
-          <div className="module-card-text">
-            Alle kostprijsversies voor het gekozen jaar. Alleen geactiveerde versies tellen mee in offertes en prijsvoorstellen.
-          </div>
-        </div>
-
-        <div className="wizard-form-grid" style={{ alignItems: "end" }}>
-          <label className="nested-field">
-            <span>Jaar</span>
-            <select
-              className="dataset-input"
-              value={String(selectedVersionsYear)}
-              onChange={(event) => setSelectedVersionsYear(Number(event.target.value))}
-            >
-              {yearOptions.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="nested-field">
-            <span>Zoeken</span>
-            <input
-              className="dataset-input"
-              value={versionsSearch}
-              onChange={(event) => setVersionsSearch(event.target.value)}
-              placeholder="Zoek bier, status of bron..."
-            />
-          </label>
-
-          <label className="nested-field" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ whiteSpace: "nowrap" }}>Alleen actief</span>
-            <input
-              type="checkbox"
-              checked={showOnlyActiveVersions}
-              onChange={(event) => setShowOnlyActiveVersions(event.target.checked)}
-            />
-          </label>
-
-          <div className="kostprijs-filter-tabs" style={{ justifyContent: "flex-start" }}>
-            {[
-              ["all", `Alles (${counts.all})`],
-              ["concept", `Concept (${counts.concept})`],
-              ["definitief", `Definitief (${counts.definitief})`]
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`tab-button${filterMode === value ? " active" : ""}`}
-                onClick={() => setFilterMode(value as FilterMode)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() => setMode("landing")}
-          >
-            Terug
-          </button>
-        </div>
-
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Jaar</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Kostprijs / L</th>
-                <th>Actief voor</th>
-                <th>Laatst gewijzigd</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {versionsTableRows.length > 0 ? (
-                versionsTableRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.bierNaam}</td>
-                    <td>{row.jaar || "-"}</td>
-                    <td>{row.type || "-"}</td>
-                    <td>{row.status || "-"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.kostprijsPerLiter)}</td>
-                    <td>{row.activeForProducts > 0 ? `${row.activeForProducts} producten` : "-"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{row.ts || "-"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      <button
-                        type="button"
-                        className="editor-button editor-button-secondary"
-                        onClick={() => {
-                          setSelectedId(row.id);
-                          setMode("wizard-edit");
-                        }}
-                      >
-                        Openen
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td className="dataset-empty" colSpan={8}>
-                    Geen kostprijsversies gevonden voor {selectedVersionsYear}.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section className="module-card">
         <div className="module-card-header">
           <div className="module-card-title">Kostprijs beheren</div>
           <div className="module-card-text">
-          Kies of je een nieuwe kostprijsversie wilt starten of een bestaande versie wilt aanpassen.
+          Start een nieuwe kostprijsberekening, en beheer welke versies actief zijn per bier/product/jaar.
           </div>
         </div>
 
@@ -785,17 +562,6 @@ export function KostprijsBeheerWorkspace({
           <div className="dashboard-quick-card-title">Nieuwe berekening</div>
           <div className="dashboard-quick-card-text">
             Start direct een nieuwe kostprijswizard voor een bier of productflow.
-          </div>
-        </button>
-
-        <button
-          type="button"
-          className="dashboard-quick-card kostprijs-choice-card"
-          onClick={() => versionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-        >
-          <div className="dashboard-quick-card-title">Bestaande aanpassen</div>
-          <div className="dashboard-quick-card-text">
-            Open een concept of definitieve kostprijsversie en werk deze verder uit in de wizard.
           </div>
         </button>
       </div>
@@ -1032,120 +798,6 @@ export function KostprijsBeheerWorkspace({
             </div>
           </div>
         ) : null}
-      </section>
-
-      <div style={{ marginTop: 18 }} ref={versionsRef} />
-
-      <section className="module-card">
-        <div className="module-card-header">
-          <div className="module-card-title">Kostprijsversies (dossiers)</div>
-          <div className="module-card-text">
-            Alle kostprijsversies voor het gekozen jaar. Alleen geactiveerde versies tellen mee in offertes en prijsvoorstellen.
-          </div>
-        </div>
-
-        <div className="wizard-form-grid" style={{ alignItems: "end" }}>
-          <label className="nested-field">
-            <span>Jaar</span>
-            <select
-              className="dataset-input"
-              value={String(selectedVersionsYear)}
-              onChange={(event) => setSelectedVersionsYear(Number(event.target.value))}
-            >
-              {yearOptions.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="nested-field">
-            <span>Zoeken</span>
-            <input
-              className="dataset-input"
-              value={versionsSearch}
-              onChange={(event) => setVersionsSearch(event.target.value)}
-              placeholder="Zoek bier, status of bron..."
-            />
-          </label>
-
-          <label className="nested-field" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ whiteSpace: "nowrap" }}>Alleen actief</span>
-            <input
-              type="checkbox"
-              checked={showOnlyActiveVersions}
-              onChange={(event) => setShowOnlyActiveVersions(event.target.checked)}
-            />
-          </label>
-
-          <div className="kostprijs-filter-tabs" style={{ justifyContent: "flex-start" }}>
-            {[
-              ["all", `Alles (${counts.all})`],
-              ["concept", `Concept (${counts.concept})`],
-              ["definitief", `Definitief (${counts.definitief})`]
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={`tab-button${filterMode === value ? " active" : ""}`}
-                onClick={() => setFilterMode(value as FilterMode)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Jaar</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Kostprijs / L</th>
-                <th>Actief voor</th>
-                <th>Laatst gewijzigd</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {versionsTableRows.length > 0 ? (
-                versionsTableRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.bierNaam}</td>
-                    <td>{row.jaar || "-"}</td>
-                    <td>{row.type || "-"}</td>
-                    <td>{row.status || "-"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.kostprijsPerLiter)}</td>
-                    <td>{row.activeForProducts > 0 ? `${row.activeForProducts} producten` : "-"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{row.ts || "-"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      <button
-                        type="button"
-                        className="editor-button editor-button-secondary"
-                        onClick={() => {
-                          setSelectedId(row.id);
-                          setMode("wizard-edit");
-                        }}
-                      >
-                        Openen
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td className="dataset-empty" colSpan={8}>
-                    Geen kostprijsversies gevonden voor {selectedVersionsYear}.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </section>
     </section>
   );
