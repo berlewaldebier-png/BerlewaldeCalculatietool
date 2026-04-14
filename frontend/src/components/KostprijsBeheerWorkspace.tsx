@@ -15,6 +15,7 @@ type KostprijsBeheerWorkspaceProps = {
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
+  packagingComponentPrices: GenericRecord[];
   initialMode?: string;
   initialFilter?: string;
   initialFocus?: string;
@@ -32,6 +33,7 @@ export function KostprijsBeheerWorkspace({
   productie,
   vasteKosten,
   tarievenHeffingen,
+  packagingComponentPrices,
   initialMode,
   initialFilter,
   initialFocus
@@ -548,6 +550,7 @@ export function KostprijsBeheerWorkspace({
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
+        packagingComponentPrices={packagingComponentPrices}
         startWithNew
         onRowsChange={setCurrentBerekeningen}
         onFinish={() => setMode("landing")}
@@ -565,6 +568,7 @@ export function KostprijsBeheerWorkspace({
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
+        packagingComponentPrices={packagingComponentPrices}
         initialSelectedId={selectedId}
         onRowsChange={setCurrentBerekeningen}
         onFinish={() => setMode("landing")}

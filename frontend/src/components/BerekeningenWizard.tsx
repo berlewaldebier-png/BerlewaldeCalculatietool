@@ -5,7 +5,12 @@ import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
 import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
-import { computeResultaatSnapshot, type ResultaatSnapshot } from "@/lib/kostprijsSnapshotEngine";
+import {
+  createPackagingResolvers,
+  computeResultaatSnapshot,
+  type ResultaatSnapshot,
+  type SummaryProductRow
+} from "@/lib/kostprijsSnapshotEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -24,6 +29,7 @@ type BerekeningenWizardProps = {
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
+  packagingComponentPrices: GenericRecord[];
   initialSelectedId?: string;
   startWithNew?: boolean;
   onBackToLanding?: () => void;
@@ -757,6 +763,7 @@ export function BerekeningenWizard({
   productie,
   vasteKosten,
   tarievenHeffingen,
+  packagingComponentPrices,
   initialSelectedId,
   startWithNew = false,
   onBackToLanding,
@@ -904,15 +911,18 @@ export function BerekeningenWizard({
     const packagingByProductId = new Map<string, number>();
     const litersByProductId = new Map<string, number>();
 
+    const { packagingCost, litersPerUnit } = createPackagingResolvers({
+      baseDefs: Array.isArray(basisproducten) ? (basisproducten as any[]) : [],
+      compositeDefs: Array.isArray(samengesteldeProducten) ? (samengesteldeProducten as any[]) : [],
+      packagingPrices: Array.isArray(packagingComponentPrices) ? (packagingComponentPrices as any[]) : []
+    });
+
     function registerProduct(product: any, productType: "basis" | "samengesteld") {
       const id = String(product?.id ?? "");
       if (!id) return;
-      const liters =
-        productType === "basis"
-          ? Number(product?.inhoud_per_eenheid_liter ?? product?.liters_per_product ?? 0)
-          : Number(product?.totale_inhoud_liter ?? product?.liters_per_product ?? 0);
+      const liters = includePackagingCosts ? litersPerUnit(id, productType, jaar) : 0;
       litersByProductId.set(id, Number.isFinite(liters) ? liters : 0);
-      const packaging = Number(product?.totale_verpakkingskosten ?? product?.verpakkingskosten ?? 0);
+      const packaging = includePackagingCosts ? packagingCost(id, productType, jaar) : 0;
       packagingByProductId.set(id, Number.isFinite(packaging) ? packaging : 0);
     }
 
