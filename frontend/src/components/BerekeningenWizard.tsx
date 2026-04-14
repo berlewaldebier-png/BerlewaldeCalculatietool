@@ -1487,8 +1487,14 @@ export function BerekeningenWizard({
       batchesPossible === null
         ? "-"
         : formatDecimalValue(Math.max(0, batchesPossible), 2);
-    const batchesNeedsAttention =
-      batchesPossible !== null && Number.isFinite(batchesPossible) && batchesPossible >= 1 && batchesPossible < 2;
+    const batchesNeedsAttention = (() => {
+      if (batchesPossible === null) return false;
+      if (!Number.isFinite(batchesPossible)) return false;
+      // Highlight whenever it is not (approximately) an integer. This nudges the user to consider
+      // optimizing recipe sizes/packaging so ingredients are used efficiently.
+      const rounded = Math.round(batchesPossible);
+      return Math.abs(batchesPossible - rounded) >= 0.01;
+    })();
 
     return (
       <div className="wizard-stack">
