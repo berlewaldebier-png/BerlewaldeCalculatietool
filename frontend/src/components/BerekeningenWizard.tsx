@@ -1430,8 +1430,90 @@ export function BerekeningenWizard({
     const ingredienten =
       ((((current.invoer as GenericRecord).ingredienten as GenericRecord).regels as GenericRecord[]) ??
         []);
+
+    const ingredientOptions = (() => {
+      const defaults = [
+        "Overig",
+        "Mout",
+        "Hop",
+        "Gist",
+        "Suiker",
+        "Water",
+        "Kruiden",
+        "Fruit",
+        "Hulpstof"
+      ];
+
+      const seen = new Set<string>();
+      const push = (value: unknown) => {
+        const text = String(value ?? "").trim();
+        if (!text) return;
+        const normalized = text;
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+      };
+
+      defaults.forEach((value) => push(value));
+
+      rows.forEach((row) => {
+        const regels =
+          ((((row.invoer as GenericRecord)?.ingredienten as GenericRecord)?.regels as GenericRecord[]) ?? []);
+        regels.forEach((regel) => push(getIngredientType(regel)));
+      });
+
+      const items = Array.from(seen);
+      const overig = items.find((v) => v.toLowerCase() === "overig");
+      const rest = items
+        .filter((v) => v.toLowerCase() !== "overig")
+        .sort((a, b) => a.localeCompare(b, "nl-NL"));
+      return overig ? [overig, ...rest] : rest;
+    })();
+
+    const year = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0) || 0);
+    const batchGrootte = Number(getYearProduction(year, productie).batchgrootte_eigen_productie_l ?? 0);
+    const leveranciersTotaal = ingredienten.reduce((sum, regel) => sum + Number(regel.prijs ?? 0), 0);
+    const receptTotaal = ingredienten.reduce((sum, regel) => sum + calculateEigenProductieKostenRecept(regel), 0);
+    const literPrijs = batchGrootte > 0 ? receptTotaal / batchGrootte : 0;
+    const batchesPossible = ingredienten.reduce((minValue: number | null, regel) => {
+      const verpakking = Number(regel.hoeveelheid ?? 0);
+      const nodig = Number(regel.benodigd_in_recept ?? 0);
+      if (!Number.isFinite(verpakking) || !Number.isFinite(nodig) || verpakking <= 0 || nodig <= 0) return minValue;
+      const batches = Math.floor(verpakking / nodig);
+      if (!Number.isFinite(batches) || batches <= 0) return minValue ?? 0;
+      if (minValue === null) return batches;
+      return Math.min(minValue, batches);
+    }, null);
+    const batchesLabel = batchesPossible === null ? "-" : String(Math.max(0, batchesPossible));
+
     return (
       <div className="wizard-stack">
+        <div className="stats-grid wizard-stats-grid" style={{ marginBottom: 14 }}>
+          <div className="stat-card">
+            <div className="stat-label">Leveranciersprijzen</div>
+            <div className="stat-value small">{formatCurrencyDisplay(leveranciersTotaal)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Receptkosten</div>
+            <div className="stat-value small">{formatCurrencyDisplay(receptTotaal)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Batchgrootte (L)</div>
+            <div className="stat-value small">{batchGrootte > 0 ? formatDecimalValue(batchGrootte, 2) : "-"}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Literprijs</div>
+            <div className="stat-value small">{batchGrootte > 0 ? formatCurrencyDisplay(literPrijs) : "-"}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Batches mogelijk</div>
+            <div className="stat-value small">{batchesLabel}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Ingredienten</div>
+            <div className="stat-value small">{String(ingredienten.length)}</div>
+          </div>
+        </div>
+
         <div className="dataset-editor-scroll">
           <table className="dataset-editor-table wizard-table-compact">
             <thead>
@@ -1451,9 +1533,8 @@ export function BerekeningenWizard({
               {ingredienten.map((regel, index) => (
                 <tr key={String(regel.id ?? index)}>
                   <td>
-                    <input
-                      className="dataset-input wizard-unit-input"
-                      type="text"
+                    <select
+                      className="dataset-input wizard-unit-select"
                       value={getIngredientType(regel)}
                       onChange={(event) =>
                         updateCurrent((draft) => {
@@ -1463,7 +1544,19 @@ export function BerekeningenWizard({
                           regels[index]["ingredient"] = event.target.value;
                         })
                       }
-                    />
+                    >
+                      {(() => {
+                        const currentValue = getIngredientType(regel);
+                        const options = ingredientOptions.includes(currentValue)
+                          ? ingredientOptions
+                          : [currentValue, ...ingredientOptions];
+                        return options.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ));
+                      })()}
+                    </select>
                   </td>
                   <td>
                     <input
