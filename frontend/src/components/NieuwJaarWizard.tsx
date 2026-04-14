@@ -481,9 +481,28 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   async function navigateToStep(nextIndex: number) {
     if (isRunning) return;
 
+    const nextStep = steps[nextIndex];
+    if (!nextStep) return;
+
     if (!conceptStarted) {
+      if (!isStepEnabled(nextStep.id)) {
+        setStatus(`Start eerst het concept voor ${targetYear} via stap 2 (Jaarset).`);
+        return;
+      }
       setActiveStep(nextIndex);
       return;
+    }
+
+    if (!isStepEnabled(nextStep.id)) {
+      // For prev/next navigation we skip disabled steps so the wizard never lands on a greyed-out step.
+      const direction: -1 | 1 = nextIndex > activeStep ? 1 : -1;
+      const nearest = findNearestEnabledStepIndex(nextIndex, direction);
+      const nearestStep = steps[nearest];
+      if (!nearestStep || !isStepEnabled(nearestStep.id)) {
+        setStatus(`Deze stap is uitgeschakeld omdat je hem in Jaarset niet hebt aangevinkt.`);
+        return;
+      }
+      nextIndex = nearest;
     }
 
     // Silent save: avoid noisy status updates while still persisting user work.
@@ -1683,29 +1702,32 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   );
 
   const currentStep = steps[activeStep] ?? steps[0];
+
+  function isStepEnabled(stepId: string) {
+    if (stepId === "basis" || stepId === "init") return true;
+    if (!conceptStarted) return false;
+    if (stepId === "productie") return copyProductie;
+    if (stepId === "tarieven") return copyTarieven;
+    if (stepId === "vaste-kosten") return copyVasteKosten;
+    if (stepId === "verpakking") return copyVerpakkingsonderdelen;
+    if (stepId === "verkoopstrategie") return copyVerkoopstrategie;
+    return true;
+  }
+
+  function findNearestEnabledStepIndex(fromIndex: number, direction: -1 | 1) {
+    let idx = fromIndex;
+    while (idx >= 0 && idx < steps.length) {
+      const step = steps[idx];
+      if (step && isStepEnabled(step.id)) return idx;
+      idx += direction;
+    }
+    return fromIndex;
+  }
   const wizardSidebar = useMemo(
     () => ({
       title: `Nieuw jaar ${targetYear} voorbereiden`,
       steps: steps.map((step) => {
-        const enabled =
-          step.id === "basis" || step.id === "init"
-            ? true
-            : !conceptStarted
-              ? false
-              : step.id === "productie"
-                ? copyProductie
-                : step.id === "tarieven"
-                  ? copyTarieven
-                  : step.id === "vaste-kosten"
-                    ? copyVasteKosten
-                    : step.id === "verpakking"
-                      ? copyVerpakkingsonderdelen
-                      : step.id === "kostprijs"
-                        ? true
-                      : step.id === "verkoopstrategie"
-                        ? copyVerkoopstrategie
-                        : true;
-        return { id: step.id, label: step.label, description: step.description, disabled: !enabled };
+        return { id: step.id, label: step.label, description: step.description, disabled: !isStepEnabled(step.id) };
       }),
       activeIndex: activeStep,
       onStepSelect: (nextIndex: number) => {
@@ -1719,21 +1741,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           setStatus(`Start eerst het concept voor ${targetYear} via stap 2 (Jaarset).`);
           return;
         }
-        const enabled =
-          nextStep.id === "productie"
-            ? copyProductie
-            : nextStep.id === "tarieven"
-              ? copyTarieven
-              : nextStep.id === "vaste-kosten"
-                ? copyVasteKosten
-                : nextStep.id === "verpakking"
-                  ? copyVerpakkingsonderdelen
-                  : nextStep.id === "kostprijs"
-                    ? true
-                  : nextStep.id === "verkoopstrategie"
-                    ? copyVerkoopstrategie
-                    : true;
-        if (!enabled) {
+        if (!isStepEnabled(nextStep.id)) {
           setStatus(`Deze stap is uitgeschakeld omdat je hem in Jaarset niet hebt aangevinkt.`);
           return;
         }
