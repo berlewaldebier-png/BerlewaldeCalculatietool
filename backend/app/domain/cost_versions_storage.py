@@ -187,7 +187,22 @@ def load_dataset(default_value: Any) -> Any:
     ensure_schema()
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, payload FROM cost_versions")
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    jaar,
+                    status,
+                    bier_id,
+                    versie_nummer,
+                    created_at,
+                    updated_at,
+                    finalized_at,
+                    payload
+                FROM cost_versions
+                ORDER BY jaar, bier_id, versie_nummer, id
+                """
+            )
             version_rows = cur.fetchall()
             cur.execute(
                 """
@@ -250,12 +265,31 @@ def load_dataset(default_value: Any) -> Any:
             basis_by_version.setdefault(str(version_id), []).append(payload)
 
     out: list[dict[str, Any]] = []
-    for version_id, payload in version_rows:
+    for (
+        version_id,
+        jaar,
+        status,
+        bier_id,
+        versie_nummer,
+        created_at,
+        updated_at,
+        finalized_at,
+        payload,
+    ) in version_rows:
         if isinstance(payload, str):
             payload = json.loads(payload)
         if not isinstance(payload, dict):
             continue
+        # Columns are canonical; payload is a view cache. Always override payload with column values.
         merged = dict(payload)
+        merged["id"] = str(version_id)
+        merged["jaar"] = int(jaar or 0)
+        merged["status"] = str(status or "")
+        merged["bier_id"] = str(bier_id or "")
+        merged["versie_nummer"] = int(versie_nummer or 0)
+        merged["created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else ""
+        merged["updated_at"] = updated_at.isoformat() if hasattr(updated_at, "isoformat") and updated_at else ""
+        merged["finalized_at"] = finalized_at.isoformat() if hasattr(finalized_at, "isoformat") and finalized_at else ""
         snapshot = merged.get("resultaat_snapshot")
         if not isinstance(snapshot, dict):
             snapshot = {}
@@ -311,6 +345,16 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     created_at = str(row.get("created_at", "") or "")
                     updated_at = str(row.get("updated_at", "") or "")
                     finalized_at = str(row.get("finalized_at", "") or "")
+                    # Payload is a view cache; force canonical column values into it.
+                    payload_obj = _strip_snapshot_sections(row)
+                    payload_obj["id"] = record_id
+                    payload_obj["jaar"] = jaar
+                    payload_obj["status"] = status
+                    payload_obj["bier_id"] = bier_id
+                    payload_obj["versie_nummer"] = versie_nummer
+                    payload_obj["created_at"] = created_at
+                    payload_obj["updated_at"] = updated_at
+                    payload_obj["finalized_at"] = finalized_at
                     params.append(
                         (
                             record_id,
@@ -321,7 +365,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                             created_at,
                             updated_at,
                             finalized_at,
-                            json.dumps(_strip_snapshot_sections(row), ensure_ascii=False),
+                            json.dumps(payload_obj, ensure_ascii=False),
                             now,
                         )
                     )

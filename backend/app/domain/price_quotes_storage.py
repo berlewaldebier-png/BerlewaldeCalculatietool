@@ -194,7 +194,21 @@ def load_dataset(default_value: Any) -> Any:
     ensure_schema()
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, payload FROM price_quotes ORDER BY updated_at_ts ASC")
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    jaar,
+                    status,
+                    verloopt_op,
+                    created_at,
+                    updated_at,
+                    finalized_at,
+                    payload
+                FROM price_quotes
+                ORDER BY updated_at_ts ASC, id
+                """
+            )
             quote_rows = cur.fetchall()
             cur.execute(
                 """
@@ -280,12 +294,29 @@ def load_dataset(default_value: Any) -> Any:
         )
 
     out: list[dict[str, Any]] = []
-    for quote_id, payload in quote_rows:
+    for (
+        quote_id,
+        jaar,
+        status,
+        verloopt_op,
+        created_at,
+        updated_at,
+        finalized_at,
+        payload,
+    ) in quote_rows:
         if isinstance(payload, str):
             payload = json.loads(payload)
         if not isinstance(payload, dict):
             continue
+        # Columns are canonical; payload is a view cache. Always override payload with column values.
         merged = dict(payload)
+        merged["id"] = str(quote_id)
+        merged["jaar"] = int(jaar or 0)
+        merged["status"] = str(status or "")
+        merged["verloopt_op"] = str(verloopt_op or "")
+        merged["created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else ""
+        merged["updated_at"] = updated_at.isoformat() if hasattr(updated_at, "isoformat") and updated_at else ""
+        merged["finalized_at"] = finalized_at.isoformat() if hasattr(finalized_at, "isoformat") and finalized_at else ""
         # Reattach detail sections.
         # Preserve the legacy record shape: product_rows + beer_rows are separate arrays.
         merged["product_rows"] = product_lines_by_quote.get(str(quote_id), [])
@@ -330,6 +361,15 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     created_at = str(row.get("created_at", "") or "")
                     updated_at = str(row.get("updated_at", "") or "")
                     finalized_at = str(row.get("finalized_at", "") or "")
+                    # Payload is a view cache; force canonical column values into it.
+                    payload_obj = _strip_detail_sections(row)
+                    payload_obj["id"] = record_id
+                    payload_obj["jaar"] = jaar
+                    payload_obj["status"] = status
+                    payload_obj["verloopt_op"] = verloopt_op
+                    payload_obj["created_at"] = created_at
+                    payload_obj["updated_at"] = updated_at
+                    payload_obj["finalized_at"] = finalized_at
                     params.append(
                         (
                             record_id,
@@ -339,7 +379,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                             created_at,
                             updated_at,
                             finalized_at,
-                            json.dumps(_strip_detail_sections(row), ensure_ascii=False),
+                            json.dumps(payload_obj, ensure_ascii=False),
                             now,
                         )
                     )
