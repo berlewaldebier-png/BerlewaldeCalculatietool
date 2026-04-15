@@ -116,10 +116,18 @@ export type NieuwJaarWizardProps = {
   initialPackagingComponents: GenericRecord[];
   initialPackagingComponentPrices: GenericRecord[];
   initialVerkoopprijzen: GenericRecord[];
+  initialAdviesprijzen: GenericRecord[];
   /** Optional: force the wizard to load/resume a specific target year draft (e.g. via /nieuw-jaar-voorbereiden?target_year=2026). */
   initialTargetYear?: number;
   /** Optional: force the initial source year in the wizard (rarely needed; draft load may override). */
   initialSourceYear?: number;
+};
+
+type AdviesprijsRow = {
+  id: string;
+  jaar: number;
+  channel_code: string;
+  opslag_pct: number;
 };
 
 function normalizeTariefRow(raw: GenericRecord): TariefRow {
@@ -194,6 +202,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     initialPackagingComponents,
     initialPackagingComponentPrices,
     initialVerkoopprijzen,
+    initialAdviesprijzen,
     initialTargetYear,
     initialSourceYear
   } = props;
@@ -219,12 +228,16 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     (Array.isArray(initialVerkoopprijzen) ? initialVerkoopprijzen : []).forEach((row) =>
       years.add(Number((row as any)?.jaar ?? 0))
     );
+    (Array.isArray(initialAdviesprijzen) ? initialAdviesprijzen : []).forEach((row) =>
+      years.add(Number((row as any)?.jaar ?? 0))
+    );
     (Array.isArray(initialBerekeningen) ? initialBerekeningen : []).forEach((row) =>
       years.add(Number(((row as any)?.basisgegevens ?? {})?.jaar ?? 0))
     );
     return Array.from(years).filter((year) => year > 0).sort((a, b) => a - b);
   }, [
     initialBerekeningen,
+    initialAdviesprijzen,
     initialPackagingComponentPrices,
     initialProductie,
     initialTarieven,
@@ -270,6 +283,16 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [currentVerkoopprijzen, setCurrentVerkoopprijzen] = useState<GenericRecord[]>(
     Array.isArray(initialVerkoopprijzen) ? initialVerkoopprijzen : []
   );
+  const [currentAdviesprijzen, setCurrentAdviesprijzen] = useState<AdviesprijsRow[]>(
+    (Array.isArray(initialAdviesprijzen) ? initialAdviesprijzen : [])
+      .filter((row) => row && typeof row === "object")
+      .map((row: any) => ({
+        id: String(row.id ?? ""),
+        jaar: Number(row.jaar ?? 0),
+        channel_code: String(row.channel_code ?? row.code ?? "").toLowerCase(),
+        opslag_pct: Number(row.opslag_pct ?? row.opslag ?? 0)
+      }))
+  );
 
   const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(
     Array.isArray(initialBerekeningen) ? initialBerekeningen : []
@@ -291,6 +314,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [draftVasteKostenTarget, setDraftVasteKostenTarget] = useState<VasteKostenUiRow[]>([]);
   const [draftPackagingPricesTarget, setDraftPackagingPricesTarget] = useState<PackagingPriceRow[]>([]);
   const [draftVerkoopstrategieTarget, setDraftVerkoopstrategieTarget] = useState<GenericRecord[]>([]);
+  const [draftAdviesprijzenTarget, setDraftAdviesprijzenTarget] = useState<AdviesprijsRow[]>([]);
+  const [adviesprijzenDraftInputs, setAdviesprijzenDraftInputs] = useState<Record<string, string>>({});
   const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
   const [draftStatus, setDraftStatus] = useState<"" | "idle" | "loading" | "saving" | "committing">("idle");
   const [commitConflict, setCommitConflict] = useState<string>("");
@@ -502,8 +527,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       },
       vaste_kosten_target: copyVasteKosten ? sanitizeVasteKostenTarget(draftVasteKostenTarget) : undefined,
       packaging_prices_target: copyVerpakkingsonderdelen ? packagingRows : undefined,
-      verkoopstrategie_target: copyVerkoopstrategie ? draftVerkoopstrategieTarget : undefined
-      ,
+      verkoopstrategie_target: copyVerkoopstrategie ? draftVerkoopstrategieTarget : undefined,
+      adviesprijzen_target: copyVerkoopstrategie ? draftAdviesprijzenTarget : undefined,
       // Scenario inkoop (primair) per bier+product. We store only explicit overrides; missing entries mean "use bronjaar".
       scenario_primary_costs: Object.fromEntries(
         Object.entries(scenarioPrimaryCosts).filter(([, value]) => Number.isFinite(Number(value)))
@@ -681,6 +706,19 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       if (Array.isArray(data?.verkoopstrategie_target)) {
         setDraftVerkoopstrategieTarget(data.verkoopstrategie_target as any);
       }
+      if (Array.isArray(data?.adviesprijzen_target)) {
+        const rows = (data.adviesprijzen_target as any[])
+          .filter((row) => row && typeof row === "object")
+          .map((row: any) => ({
+            id: String(row.id ?? ""),
+            jaar: effectiveTarget,
+            channel_code: String(row.channel_code ?? row.code ?? "").toLowerCase(),
+            opslag_pct: Number(row.opslag_pct ?? row.opslag ?? 0)
+          }))
+          .filter((row) => row.jaar > 0 && row.channel_code);
+        setDraftAdviesprijzenTarget(rows);
+        setAdviesprijzenDraftInputs(Object.fromEntries(rows.map((row) => [row.channel_code, String(row.opslag_pct ?? 0)])));
+      }
       if (data?.scenario_primary_costs && typeof data.scenario_primary_costs === "object") {
         const raw = data.scenario_primary_costs as Record<string, unknown>;
         const next: Record<string, number> = {};
@@ -772,6 +810,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           "tarieven-heffingen",
           "packaging-component-prices",
           "verkoopprijzen",
+          "adviesprijzen",
           "berekeningen",
           "kostprijsproductactiveringen"
         ].join(",")
@@ -791,6 +830,16 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         .filter((row) => row.verpakkingsonderdeel_id && row.jaar > 0)
     );
     setCurrentVerkoopprijzen(((datasets["verkoopprijzen"] as any[]) ?? []) as any[]);
+    setCurrentAdviesprijzen(
+      (((datasets["adviesprijzen"] as any[]) ?? []) as any[])
+        .filter((row) => row && typeof row === "object")
+        .map((row: any) => ({
+          id: String(row.id ?? ""),
+          jaar: Number(row.jaar ?? 0),
+          channel_code: String(row.channel_code ?? row.code ?? "").toLowerCase(),
+          opslag_pct: Number(row.opslag_pct ?? row.opslag ?? 0)
+        }))
+    );
     setCurrentBerekeningen(((datasets["berekeningen"] as any[]) ?? []) as any[]);
     setCurrentActivations(((datasets["kostprijsproductactiveringen"] as any[]) ?? []) as any[]);
   }
@@ -828,6 +877,24 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       setDraftPackagingPrices({});
       setDraftPackagingPricesTarget([]);
       setDraftVerkoopstrategieTarget([]);
+      setDraftAdviesprijzenTarget([]);
+      setAdviesprijzenDraftInputs({});
+
+      if (copyVerkoopstrategie) {
+        const existingTarget = currentAdviesprijzen.filter((row) => Number(row.jaar ?? 0) === targetYear);
+        const sourceRows = currentAdviesprijzen.filter((row) => Number(row.jaar ?? 0) === sourceYear);
+        const base = existingTarget.length > 0 ? existingTarget : sourceRows;
+        const nextRows = base
+          .filter((row) => row && row.channel_code)
+          .map((row) => ({
+            id: existingTarget.length > 0 ? String(row.id ?? "") : "",
+            jaar: targetYear,
+            channel_code: String(row.channel_code ?? "").toLowerCase(),
+            opslag_pct: Number(row.opslag_pct ?? 0)
+          }));
+        setDraftAdviesprijzenTarget(nextRows);
+        setAdviesprijzenDraftInputs(Object.fromEntries(nextRows.map((row) => [row.channel_code, String(row.opslag_pct ?? 0)])));
+      }
 
       setCompletedStepIds(["basis", "init"]);
       const ok = await saveDraftToServer(`Concept gestart: bronjaar ${sourceYear} -> doeljaar ${targetYear}.`);
@@ -876,6 +943,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       });
       setDraftVasteKostenTarget([]);
       setDraftVerkoopstrategieTarget([]);
+      setDraftAdviesprijzenTarget([]);
+      setAdviesprijzenDraftInputs({});
       setCommitConflict("");
       setStatus(`Concept verwijderd voor doeljaar ${targetYear}.`);
       setActiveStep(1);
@@ -1972,6 +2041,14 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         panelDescription: "Controleer en pas marges/prijzen aan voor het doeljaar."
       },
       {
+        id: "adviesprijzen",
+        label: "Adviesprijzen",
+        description: "Adviesopslag per kanaal (sell-out) voor het doeljaar",
+        panelTitle: `Adviesprijzen ${targetYear}`,
+        panelDescription:
+          "Vul per kanaal de opslag in waarmee een adviesverkoopprijs (sell-out) wordt afgeleid uit onze verkoopprijs."
+      },
+      {
         id: "preview",
         label: "Preview",
         description: "Bekijk de impact op kostprijzen en verkoopprijzen",
@@ -2001,6 +2078,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     if (stepId === "vaste-kosten") return copyVasteKosten;
     if (stepId === "verpakking") return copyVerpakkingsonderdelen;
     if (stepId === "verkoopstrategie") return copyVerkoopstrategie;
+    if (stepId === "adviesprijzen") return copyVerkoopstrategie;
     return true;
   }
 
@@ -3285,6 +3363,149 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           {activeStep === 10 ? (
             <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
+                Vul per kanaal een opslag in voor adviesprijzen (sell-out). We leiden hiermee een adviesverkoopprijs af uit onze
+                verkoopprijs. Bronjaar {sourceYear} is read-only; doeljaar {targetYear} kun je aanpassen.
+              </div>
+
+              <div className="dataset-editor-scroll">
+                <table className="dataset-editor-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "220px" }}>Kanaal</th>
+                      <th style={{ width: "180px" }}>Opslag {sourceYear} (%)</th>
+                      <th style={{ width: "180px" }}>Opslag {targetYear} (%)</th>
+                      <th style={{ width: "260px" }}>Advies Doos 24*33cl</th>
+                      <th style={{ width: "260px" }}>Advies Fust 20L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(
+                      [
+                        { code: "horeca", label: "Horeca" },
+                        { code: "retail", label: "Supermarkt" },
+                        { code: "slijterij", label: "Slijterij" },
+                        { code: "zakelijk", label: "Speciaalzaak" }
+                      ] as const
+                    ).map((channel) => {
+                      const sourceRow = currentAdviesprijzen.find(
+                        (row) => Number(row.jaar ?? 0) === sourceYear && row.channel_code === channel.code
+                      );
+                      const sourceOpslag = Number(sourceRow?.opslag_pct ?? 0);
+                      const draftValue = String(adviesprijzenDraftInputs[channel.code] ?? "");
+                      const parsed = Number(String(draftValue).replace(",", "."));
+                      const opslagPct = draftValue.trim() === "" || !Number.isFinite(parsed) ? sourceOpslag : parsed;
+
+                      const avgSellInDoos = previewRows
+                        .filter((row) => String(row.productLabel ?? "").includes("Doos 24*33cl"))
+                        .map((row) => Number((row.sellIn as any)?.[channel.code] ?? 0))
+                        .filter((n) => Number.isFinite(n) && n > 0);
+                      const avgSellInFust = previewRows
+                        .filter((row) => String(row.productLabel ?? "").includes("Fust 20L"))
+                        .map((row) => Number((row.sellIn as any)?.[channel.code] ?? 0))
+                        .filter((n) => Number.isFinite(n) && n > 0);
+                      const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+                      const sellInDoos = mean(avgSellInDoos);
+                      const sellInFust = mean(avgSellInFust);
+
+                      const advicePrice = (sellIn: number) => {
+                        const base = Number.isFinite(sellIn) ? sellIn : 0;
+                        return base * (1 + opslagPct / 100);
+                      };
+                      const rangeLabel = (base: number) => {
+                        if (!Number.isFinite(base) || base <= 0) return "-";
+                        const low = Math.max(0, base - 0.05);
+                        const high = base + 0.05;
+                        return `${formatEur(low)} - ${formatEur(high)}`;
+                      };
+
+                      const doosAdvice = advicePrice(sellInDoos);
+                      const fustAdvice = advicePrice(sellInFust);
+
+                      return (
+                        <tr key={channel.code}>
+                          <td>
+                            <strong>{channel.label}</strong>
+                          </td>
+                          <td>
+                            <input className="dataset-input dataset-input-readonly" value={String(sourceOpslag)} readOnly />
+                          </td>
+                          <td>
+                            <input
+                              className="dataset-input"
+                              type="number"
+                              value={draftValue}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setAdviesprijzenDraftInputs((current) => ({ ...current, [channel.code]: nextValue }));
+                                const nextParsed = Number(String(nextValue).replace(",", "."));
+                                if (!Number.isFinite(nextParsed)) return;
+                                setDraftAdviesprijzenTarget((current) => {
+                                  const rows = Array.isArray(current) ? [...current] : [];
+                                  const idx = rows.findIndex((row) => row.channel_code === channel.code && Number(row.jaar ?? 0) === targetYear);
+                                  const nextRow: AdviesprijsRow = {
+                                    id: idx >= 0 ? String(rows[idx].id ?? "") : "",
+                                    jaar: targetYear,
+                                    channel_code: channel.code,
+                                    opslag_pct: nextParsed
+                                  };
+                                  if (idx >= 0) rows[idx] = nextRow;
+                                  else rows.push(nextRow);
+                                  return rows;
+                                });
+                              }}
+                              onBlur={() => {
+                                if (draftValue.trim() !== "") return;
+                                setAdviesprijzenDraftInputs((current) => ({ ...current, [channel.code]: String(sourceOpslag) }));
+                                setDraftAdviesprijzenTarget((current) => {
+                                  const rows = Array.isArray(current) ? [...current] : [];
+                                  const idx = rows.findIndex((row) => row.channel_code === channel.code && Number(row.jaar ?? 0) === targetYear);
+                                  const nextRow: AdviesprijsRow = {
+                                    id: idx >= 0 ? String(rows[idx].id ?? "") : "",
+                                    jaar: targetYear,
+                                    channel_code: channel.code,
+                                    opslag_pct: sourceOpslag
+                                  };
+                                  if (idx >= 0) rows[idx] = nextRow;
+                                  else rows.push(nextRow);
+                                  return rows;
+                                });
+                              }}
+                              disabled={isRunning}
+                            />
+                          </td>
+                          <td>{rangeLabel(doosAdvice)}</td>
+                          <td>{rangeLabel(fustAdvice)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="editor-actions wizard-footer-actions">
+                <div className="editor-actions-group">
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => void navigateToStep(11)}
+                    disabled={isRunning}
+                  >
+                    Vorige
+                  </button>
+                </div>
+                <div className="editor-actions-group">
+                  {saveAndCloseButton}
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(11)} disabled={isRunning}>
+                    Volgende
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeStep === 11 ? (
+            <div>
+              <div className="editor-status" style={{ marginBottom: 14 }}>
                 Hieronder zie je de indicatieve kostprijzen voor het doeljaar {targetYear}. Pas als recepten of
                 inkoopfacturen aan producten worden gekoppeld en geactiveerd, is een kostprijs definitief. We rekenen hier
                 met de gegevens die je in deze wizard hebt ingevuld; de inkoopprijzen zijn een scenario totdat ze later via
@@ -3352,7 +3573,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   >
                     Opslaan
                   </button>
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(11)} disabled={isRunning}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(12)} disabled={isRunning}>
                     Volgende
                   </button>
                 </div>
@@ -3360,7 +3581,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
             </div>
           ) : null}
 
-          {activeStep === 11 ? (
+          {activeStep === 12 ? (
             <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
                 Klik op <strong>Afronden</strong> om het doeljaar {targetYear} definitief weg te schrijven. Totdat je afrondt,

@@ -55,6 +55,7 @@ from app.utils.storage import (
 from copy import deepcopy
 from datetime import UTC, datetime
 from uuid import uuid4
+from uuid import uuid4
 
 
 DATASET_DEFAULTS: dict[str, Any] = {
@@ -82,6 +83,7 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "berekeningen": [],
     "prijsvoorstellen": [],
     "verkoopprijzen": [],
+    "adviesprijzen": [],
     "variabele-kosten": {},
     "products": [],
     "product-years": [],
@@ -354,6 +356,8 @@ def load_dataset(name: str) -> Any:
         return load_kostprijsversies()
     if name == "kostprijsproductactiveringen":
         return load_kostprijsproductactiveringen()
+    if name == "adviesprijzen":
+        return postgres_storage.load_dataset("adviesprijzen", deepcopy(DATASET_DEFAULTS["adviesprijzen"]))
     payload = postgres_storage.load_dataset(name, default_value)
     if name == "prijsvoorstellen" and isinstance(payload, list):
         return [
@@ -691,6 +695,47 @@ def generate_missing_activations(*, dry_run: bool = False) -> dict[str, Any]:
     return report
 
 
+def duplicate_adviesprijzen_to_year(source_year: int, target_year: int, *, overwrite: bool = False) -> int:
+    """Copy advice channel pricing defaults from source_year to target_year.
+
+    Returns number of target rows written.
+    """
+    payload = load_dataset("adviesprijzen")
+    if not isinstance(payload, list):
+        payload = []
+
+    source_rows = [
+        row
+        for row in payload
+        if isinstance(row, dict) and int(row.get("jaar", 0) or 0) == int(source_year)
+    ]
+    if not source_rows:
+        return 0
+
+    has_target = any(isinstance(row, dict) and int(row.get("jaar", 0) or 0) == int(target_year) for row in payload)
+    if has_target and not overwrite:
+        return 0
+
+    kept = [row for row in payload if isinstance(row, dict) and int(row.get("jaar", 0) or 0) != int(target_year)]
+    copied = 0
+    for row in source_rows:
+        channel_code = str(row.get("channel_code", "") or "").strip().lower()
+        if not channel_code:
+            continue
+        copied += 1
+        kept.append(
+            {
+                "id": str(uuid4()),
+                "jaar": int(target_year),
+                "channel_code": channel_code,
+                "opslag_pct": float(row.get("opslag_pct", 0.0) or 0.0),
+            }
+        )
+
+    save_dataset("adviesprijzen", kept)
+    return int(copied)
+
+
 def prepare_new_year(
     *,
     source_year: int,
@@ -816,7 +861,13 @@ def prepare_new_year(
                 copied = duplicate_verkoopstrategie_verpakkingen_to_year(
                     source_year, target_year, overwrite=overwrite_existing
                 )
-                report["results"]["verkoopstrategie"] = {"copied_rows": int(copied)}
+                # Also copy advice channel pricing defaults (sell-out advisory).
+                advies_copied = 0
+                try:
+                    advies_copied = int(duplicate_adviesprijzen_to_year(source_year, target_year, overwrite=overwrite_existing) or 0)
+                except Exception:
+                    advies_copied = 0
+                report["results"]["verkoopstrategie"] = {"copied_rows": int(copied), "adviesprijzen_copied_rows": int(advies_copied)}
 
         if copy_berekeningen:
             records = [
@@ -1857,6 +1908,44 @@ def commit_new_year(
             kept.extend([row for row in verkoopstrategie_target if isinstance(row, dict)])
             saved = save_dataset("verkoopprijzen", kept)
             report["results"]["verkoopstrategie_override"] = {"saved": bool(saved), "rows": len(verkoopstrategie_target)}
+
+        adviesprijzen_target = draft_data.get("adviesprijzen_target")
+        if isinstance(adviesprijzen_target, list):
+            advies_payload = load_dataset("adviesprijzen")
+            if not isinstance(advies_payload, list):
+                advies_payload = []
+            kept: list[dict[str, Any]] = []
+            for row in advies_payload:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    row_year = int(row.get("jaar", 0) or 0)
+                except (TypeError, ValueError):
+                    row_year = 0
+                if row_year == int(target_year):
+                    continue
+                kept.append(row)
+            # Normalize target rows to the canonical schema (jaar + channel_code + opslag_pct).
+            for row in adviesprijzen_target:
+                if not isinstance(row, dict):
+                    continue
+                channel_code = str(row.get("channel_code", row.get("code", "")) or "").strip().lower()
+                if not channel_code:
+                    continue
+                try:
+                    opslag_pct = float(row.get("opslag_pct", row.get("opslag", 0)) or 0.0)
+                except (TypeError, ValueError):
+                    opslag_pct = 0.0
+                kept.append(
+                    {
+                        "id": str(row.get("id", "") or ""),
+                        "jaar": int(target_year),
+                        "channel_code": channel_code,
+                        "opslag_pct": float(opslag_pct),
+                    }
+                )
+            saved = save_dataset("adviesprijzen", kept)
+            report["results"]["adviesprijzen_override"] = {"saved": bool(saved), "rows": len(adviesprijzen_target)}
 
         # Persist scenario inkoop (primair) inputs for cost activation.
         scenario_map = draft_data.get("scenario_primary_costs")

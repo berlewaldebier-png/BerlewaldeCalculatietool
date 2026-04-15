@@ -21,7 +21,8 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
       "tarieven-heffingen",
       "packaging-components",
       "packaging-component-prices",
-      "verkoopprijzen"
+      "verkoopprijzen",
+      "adviesprijzen"
     ],
     true,
     "/nieuw-jaar-voorbereiden"
@@ -38,6 +39,7 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
   const packagingComponents = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
   const packagingComponentPrices = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
+  const adviesprijzen = (bootstrap.datasets["adviesprijzen"] as any[]) ?? [];
 
   const yearSet = new Set<number>();
   Object.keys(productie ?? {}).forEach((key) => {
@@ -51,6 +53,7 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
     yearSet.add(Number((row as any)?.jaar ?? 0))
   );
   (Array.isArray(verkoopprijzen) ? verkoopprijzen : []).forEach((row) => yearSet.add(Number((row as any)?.jaar ?? 0)));
+  (Array.isArray(adviesprijzen) ? adviesprijzen : []).forEach((row) => yearSet.add(Number((row as any)?.jaar ?? 0)));
   (Array.isArray(berekeningen) ? berekeningen : []).forEach((row) =>
     yearSet.add(Number((((row as any)?.basisgegevens ?? {}) as any)?.jaar ?? 0))
   );
@@ -78,6 +81,7 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
         initialPackagingComponents={packagingComponents}
         initialPackagingComponentPrices={packagingComponentPrices}
         initialVerkoopprijzen={verkoopprijzen}
+        initialAdviesprijzen={adviesprijzen}
         initialTargetYear={requestedTargetYear > 0 ? requestedTargetYear : undefined}
       />
     </PageShell>

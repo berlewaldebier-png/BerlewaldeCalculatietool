@@ -192,6 +192,10 @@ def _get_table_storage(name: str):
         from app.domain import sales_pricing_storage
 
         return sales_pricing_storage
+    if name == "adviesprijzen":
+        from app.domain import adviesprijzen_storage
+
+        return adviesprijzen_storage
     if name == "kostprijsversies":
         from app.domain import cost_versions_storage
 
