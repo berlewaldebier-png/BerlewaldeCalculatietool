@@ -40,6 +40,7 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
     "/recept-hercalculatie",
     "/inkoopfacturen",
     "/verkoopstrategie",
+    "/adviesprijzen",
     "/nieuw-jaar-voorbereiden",
     "/beheer"
   ];
@@ -243,6 +244,13 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                   <div className="dashboard-quick-card-title">Nieuw prijsvoorstel</div>
                   <div className="dashboard-quick-card-text">
                     Werk een voorstel uit op basis van producten, liters en kanaalkeuzes.
+                  </div>
+                </Link>
+
+                <Link href="/adviesprijzen" className="dashboard-quick-card">
+                  <div className="dashboard-quick-card-title">Adviesprijzen</div>
+                  <div className="dashboard-quick-card-text">
+                    Beheer de adviesopslag per kanaal (sell-out) voor een gekozen jaar.
                   </div>
                 </Link>
               </div>
