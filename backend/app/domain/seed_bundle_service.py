@@ -174,6 +174,7 @@ def _import_dataset_order(profile: SeedProfile) -> list[str]:
         "sales-strategy-years",
         "sales-strategy-products",
         "verkoopprijzen",
+        "adviesprijzen",
     ]
     if profile == "demo_full":
         return [
