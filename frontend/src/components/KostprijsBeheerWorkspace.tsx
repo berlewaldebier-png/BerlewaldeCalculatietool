@@ -21,6 +21,7 @@ type KostprijsBeheerWorkspaceProps = {
 };
 
 type WorkspaceMode = "landing" | "wizard-new" | "wizard-edit";
+type ExistingFilterMode = "all" | "concept" | "definitief";
 
 export function KostprijsBeheerWorkspace({
   berekeningen,
@@ -69,6 +70,7 @@ export function KostprijsBeheerWorkspace({
   // Lightweight "focus" hook for deep links from the dashboard (no UI changes, only initial scroll).
   const focusActivations = String(initialFocus ?? "") === "activations";
   const activeCostsRef = useRef<HTMLDivElement | null>(null);
+  const existingRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!focusActivations) {
@@ -212,7 +214,8 @@ export function KostprijsBeheerWorkspace({
   }, [activationYears, productionYears]);
 
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
-  // Note: We intentionally do not expose a "dossiers/kostprijsversies" list here.
+  const [existingFilterMode, setExistingFilterMode] = useState<ExistingFilterMode>("concept");
+  const [existingSearch, setExistingSearch] = useState("");
 
   const bierenById = useMemo(() => {
     const map = new Map<string, string>();
@@ -260,6 +263,46 @@ export function KostprijsBeheerWorkspace({
     });
     return map;
   }, [currentBerekeningen]);
+
+  const existingBerekeningenRows = useMemo(() => {
+    const q = existingSearch.trim().toLowerCase();
+    return currentBerekeningen
+      .filter((row) => {
+        const year = Number((row as any)?.jaar ?? (row as any)?.basisgegevens?.jaar ?? 0) || 0;
+        if (year !== selectedYear) return false;
+        const status = String((row as any)?.status ?? "").trim().toLowerCase();
+        if (existingFilterMode === "concept") return status === "concept";
+        if (existingFilterMode === "definitief") return status === "definitief";
+        return true;
+      })
+      .map((row) => {
+        const id = String((row as any)?.id ?? "");
+        const basis = ((row as any)?.basisgegevens ?? {}) as any;
+        const bierId = String((row as any)?.bier_id ?? "");
+        const bierNaam = String(
+          basis?.biernaam ?? (row as any)?.bier_snapshot?.biernaam ?? bierenById.get(bierId) ?? ""
+        );
+        const jaar = Number((row as any)?.jaar ?? basis?.jaar ?? 0) || 0;
+        const status = String((row as any)?.status ?? "");
+        const type = String((row as any)?.type ?? "");
+        const kostprijsPerLiter = Number((row as any)?.kostprijs ?? Number.NaN);
+        const ts = String((row as any)?.finalized_at ?? (row as any)?.updated_at ?? (row as any)?.created_at ?? "");
+        const label = buildVersionLabel(row);
+        const hay = `${bierNaam} ${jaar} ${status} ${type} ${label}`.toLowerCase();
+        return {
+          id,
+          bierNaam: bierNaam || "-",
+          jaar: jaar || null,
+          status,
+          type,
+          kostprijsPerLiter: Number.isFinite(kostprijsPerLiter) ? kostprijsPerLiter : null,
+          ts,
+          matches: !q || hay.includes(q)
+        };
+      })
+      .filter((row) => row.matches)
+      .sort((left, right) => parseSortTimestamp(right.ts) - parseSortTimestamp(left.ts));
+  }, [bierenById, currentBerekeningen, existingFilterMode, existingSearch, selectedYear]);
 
   const activeRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -564,6 +607,17 @@ export function KostprijsBeheerWorkspace({
             Start direct een nieuwe kostprijswizard voor een bier of productflow.
           </div>
         </button>
+
+        <button
+          type="button"
+          className="dashboard-quick-card kostprijs-choice-card"
+          onClick={() => existingRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        >
+          <div className="dashboard-quick-card-title">Bestaande aanpassen</div>
+          <div className="dashboard-quick-card-text">
+            Open een concept of definitieve kostprijsberekening en werk deze verder uit in de wizard.
+          </div>
+        </button>
       </div>
 
       <div style={{ marginTop: 18 }} />
@@ -746,7 +800,7 @@ export function KostprijsBeheerWorkspace({
                       <option key={option.id} value={option.id}>
                         {option.label}{" "}
                         {option.cost !== null
-                          ? `— ${formatEuro(option.cost)} (${formatEuro(option.deltaEuro)} / ${formatPct(option.deltaPct)})`
+                          ? `- ${formatEuro(option.cost)} (${formatEuro(option.deltaEuro)} / ${formatPct(option.deltaPct)})`
                           : ""}
                       </option>
                     ))}
@@ -798,6 +852,92 @@ export function KostprijsBeheerWorkspace({
             </div>
           </div>
         ) : null}
+      </section>
+
+      <div style={{ marginTop: 18 }} ref={existingRef} />
+
+      <section className="module-card">
+        <div className="module-card-header">
+          <div className="module-card-title">Bestaande kostprijsberekeningen</div>
+          <div className="module-card-text">Open een concept of definitieve berekening om deze te bewerken.</div>
+        </div>
+
+        <div className="wizard-form-grid" style={{ alignItems: "end" }}>
+          <label className="nested-field">
+            <span>Zoeken</span>
+            <input
+              className="dataset-input"
+              value={existingSearch}
+              onChange={(event) => setExistingSearch(event.target.value)}
+              placeholder="Zoek bier, status of type..."
+            />
+          </label>
+
+          <div className="kostprijs-filter-tabs" style={{ justifyContent: "flex-start" }}>
+            {[
+              ["concept", "Concept"],
+              ["definitief", "Definitief"],
+              ["all", "Alles"]
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`tab-button${existingFilterMode === value ? " active" : ""}`}
+                onClick={() => setExistingFilterMode(value as ExistingFilterMode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table">
+            <thead>
+              <tr>
+                <th>Bier</th>
+                <th>Jaar</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Kostprijs / L</th>
+                <th>Laatst gewijzigd</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {existingBerekeningenRows.length > 0 ? (
+                existingBerekeningenRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.bierNaam}</td>
+                    <td>{row.jaar || "-"}</td>
+                    <td>{row.status || "-"}</td>
+                    <td>{row.type || "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.kostprijsPerLiter)}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{row.ts || "-"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        type="button"
+                        className="editor-button editor-button-secondary"
+                        onClick={() => {
+                          setSelectedId(row.id);
+                          setMode("wizard-edit");
+                        }}
+                      >
+                        Openen
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="dataset-empty" colSpan={7}>
+                    Geen berekeningen gevonden voor {selectedYear}.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </section>
   );
