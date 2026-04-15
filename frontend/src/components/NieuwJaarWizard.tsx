@@ -65,6 +65,7 @@ type PreviewRow = {
   biernaam: string;
   productId: string;
   productType: "basis" | "samengesteld" | "";
+  calcType: "inkoop" | "eigen_productie";
   productLabel: string;
   sourcePrimaryCost: number;
   sourceCost: number;
@@ -1421,7 +1422,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const targetPackaging = packagingCost(productId, productType as any, targetYear);
       const packagingDelta = targetPackaging - basePackaging;
       const liters = litersPerUnit(productId, productType as any, targetYear);
-      const calcType = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
+      const calcTypeRaw = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
+      const calcType = calcTypeRaw === "inkoop" ? "inkoop" : "eigen_productie";
       const fixedPerLiterSource =
         calcType === "inkoop"
           ? computeIndirectFixedCostPerInkoopLiter(sourceYear)
@@ -1449,6 +1451,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         biernaam: bierNameById.get(bierId) ?? String(((record.basisgegevens ?? {}) as any)?.biernaam ?? bierId),
         productId,
         productType: productType === "basis" || productType === "samengesteld" ? (productType as any) : "",
+        calcType,
         productLabel: snap.productLabel,
         sourcePrimaryCost: sourcePrimary,
         sourceCost,
@@ -1480,6 +1483,31 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     sourceYear,
     targetYear
   ]);
+
+  const inkoopScenarioRows = useMemo(() => previewRows.filter((row) => row.calcType === "inkoop"), [previewRows]);
+
+  const eigenProductieBieren = useMemo(() => {
+    const out = new Map<string, { bierId: string; biernaam: string; stijl: string; alcoholpercentage: number }>();
+    (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((record: any) => {
+      const basis = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? record.basisgegevens : {};
+      const jaar = Number(record.jaar ?? basis.jaar ?? 0);
+      const statusVal = String(record.status ?? "").toLowerCase();
+      if (jaar !== sourceYear || statusVal !== "definitief") return;
+      const calcTypeRaw = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
+      if (calcTypeRaw === "inkoop") return;
+      const bierId = String(record.bier_id ?? basis.bier_id ?? "");
+      const biernaam = String(basis.biernaam ?? "");
+      if (!bierId || !biernaam) return;
+      if (out.has(bierId)) return;
+      out.set(bierId, {
+        bierId,
+        biernaam,
+        stijl: String(basis.stijl ?? ""),
+        alcoholpercentage: Number(basis.alcoholpercentage ?? 0)
+      });
+    });
+    return Array.from(out.values()).sort((a, b) => a.biernaam.localeCompare(b.biernaam, "nl-NL"));
+  }, [currentBerekeningen, sourceYear]);
 
   const kostprijsTargetRows = useMemo(() => {
     const baseDefs = (Array.isArray(initialBasisproducten) ? initialBasisproducten : [])
@@ -1666,6 +1694,14 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         panelTitle: `Inkoop scenario ${targetYear}`,
         panelDescription:
           "Vul scenario inkoopprijzen (primair/inkoopdeel) in om direct de impact op kostprijs en verkoopprijzen te zien. Deze waarden worden niet opgeslagen."
+      },
+      {
+        id: "recepten",
+        label: "Recepten",
+        description: "Eigen productie (recept en ingredienten)",
+        panelTitle: `Recepten ${targetYear}`,
+        panelDescription:
+          "Voor bieren met eigen productie kun je recept/ingredienten bijstellen. Dit doe je via Kostprijs beheren; de wizard toont hier alleen welke bieren dit betreft."
       },
       {
         id: "kostprijs",
@@ -2448,7 +2484,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {previewRows.map((row) => {
+                    {inkoopScenarioRows.map((row) => {
                       const scenarioKey = `${row.bierId}::${row.productId}`;
                       const scenarioValue = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
                         ? Number(scenarioPrimaryCosts[scenarioKey] ?? 0)
@@ -2485,10 +2521,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                         </tr>
                       );
                     })}
-                    {previewRows.length === 0 ? (
+                    {inkoopScenarioRows.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="muted">
-                          Geen preview-rijen beschikbaar (controleer of er actieve kostprijzen zijn voor {sourceYear}).
+                          Geen inkoop-bieren gevonden (controleer of er actieve inkoop-kostprijzen zijn voor {sourceYear}).
                         </td>
                       </tr>
                     ) : null}
@@ -2531,6 +2567,81 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           ) : null}
 
           {activeStep === 7 ? (
+            <div>
+              <div className="module-card compact-card" style={{ marginBottom: 14 }}>
+                <div className="module-card-title">Recepten {targetYear}</div>
+                <div className="module-card-text">
+                  Deze stap is relevant voor bieren met <strong>eigen productie</strong>. In deze wizard wijzigen we geen
+                  recepten; daarvoor gebruik je <strong>Kostprijs beheren</strong>. De preview en kostprijs-opbouw blijven
+                  voor eigen productie gebaseerd op de bestaande (definitieve) bronjaarberekening totdat je daar een nieuwe
+                  berekening voor {targetYear} maakt.
+                </div>
+              </div>
+
+              <div className="module-card compact-card" style={{ marginBottom: 14 }}>
+                <div className="module-card-title">Bieren met eigen productie</div>
+                <div className="data-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: "320px" }}>Bier</th>
+                        <th style={{ width: "200px" }}>Stijl</th>
+                        <th style={{ width: "180px" }}>Alcohol %</th>
+                        <th>Actie</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eigenProductieBieren.length === 0 ? (
+                        <tr>
+                          <td className="dataset-empty" colSpan={4}>
+                            Geen bieren met eigen productie gevonden in bronjaar {sourceYear}.
+                          </td>
+                        </tr>
+                      ) : null}
+                      {eigenProductieBieren.map((bier) => (
+                        <tr key={bier.bierId}>
+                          <td>{bier.biernaam}</td>
+                          <td>{bier.stijl || "-"}</td>
+                          <td>{bier.alcoholpercentage ? `${bier.alcoholpercentage}` : "-"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="editor-button editor-button-secondary"
+                              onClick={() => router.push(`/nieuwe-kostprijsberekening`)}
+                              disabled={isRunning}
+                            >
+                              Open Kostprijs beheren
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="editor-actions wizard-footer-actions">
+                <div className="editor-actions-group">
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => void navigateToStep(6)}
+                    disabled={isRunning}
+                  >
+                    Vorige
+                  </button>
+                </div>
+                <div className="editor-actions-group">
+                  {saveAndCloseButton}
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(8)} disabled={isRunning}>
+                    Volgende
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeStep === 8 ? (
             <div>
               <div className="module-card compact-card" style={{ marginBottom: 14 }}>
                 <div className="module-card-title">Kostprijs {targetYear}</div>
@@ -2592,7 +2703,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(6)}
+                    onClick={() => void navigateToStep(7)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -2603,7 +2714,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button"
-                    onClick={() => void navigateToStep(8)}
+                    onClick={() => void navigateToStep(9)}
                     disabled={isRunning}
                   >
                     Volgende
@@ -2613,7 +2724,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
             </div>
           ) : null}
 
-          {activeStep === 8 ? (
+          {activeStep === 9 ? (
             <div>
               <div className="placeholder-block" style={{ marginBottom: 14 }}>
                 <strong>Prijsstrategie (wizard)</strong>
@@ -2725,7 +2836,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(7)}
+                    onClick={() => void navigateToStep(8)}
                     disabled={isRunning}
                   >
                     Vorige
@@ -2746,7 +2857,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button"
-                    onClick={() => void navigateToStep(9)}
+                    onClick={() => void navigateToStep(10)}
                     disabled={isRunning}
                   >
                     Volgende
@@ -2826,7 +2937,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   >
                     Opslaan
                   </button>
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(10)} disabled={isRunning}>
+                  <button type="button" className="editor-button" onClick={() => void navigateToStep(11)} disabled={isRunning}>
                     Volgende
                   </button>
                 </div>
@@ -2834,7 +2945,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
             </div>
           ) : null}
 
-          {activeStep === 9 ? (
+          {activeStep === 11 ? (
             <div>
               <div className="editor-status" style={{ marginBottom: 14 }}>
                 Klik op <strong>Afronden</strong> om het doeljaar {targetYear} definitief weg te schrijven. Totdat je afrondt,
@@ -2879,7 +2990,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(8)}
+                    onClick={() => void navigateToStep(10)}
                     disabled={isRunning}
                   >
                     Vorige
