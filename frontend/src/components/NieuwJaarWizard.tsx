@@ -88,6 +88,22 @@ type KostprijsPreviewRow = {
 
 type PricingMode = "keep_price" | "scale_cost_ratio" | "keep_margin" | "free";
 
+type IngredientRule = {
+  id: string;
+  ingredient: string;
+  omschrijving: string;
+  hoeveelheid: number; // inhoud verpakking
+  eenheid: string;
+  prijs: number; // leveranciersprijs (totaal per verpakking)
+  benodigd_in_recept: number; // hoeveelheid gebruikt per batch
+};
+
+type EigenProductieOverride = {
+  alcoholpercentage: number;
+  tarief_accijns: "Hoog" | "Laag";
+  ingredienten: IngredientRule[];
+};
+
 export type NieuwJaarWizardProps = {
   initialBerekeningen: GenericRecord[];
   initialKostprijsproductactiveringen: GenericRecord[];
@@ -263,6 +279,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   );
 
   const [scenarioPrimaryCosts, setScenarioPrimaryCosts] = useState<Record<string, number>>({});
+  const [eigenProductieOverrides, setEigenProductieOverrides] = useState<Record<string, EigenProductieOverride>>({});
   const [pricingMode, setPricingMode] = useState<PricingMode>("scale_cost_ratio");
   const [verkoopstrategieSave, setVerkoopstrategieSave] = useState<null | (() => Promise<void>)>(null);
   const [draftPackagingPrices, setDraftPackagingPrices] = useState<Record<string, number>>({});
@@ -409,6 +426,60 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       }));
   }
 
+  function ensureEigenOverride(bierId: string): EigenProductieOverride {
+    const existing = eigenProductieOverrides[bierId];
+    if (existing) return existing;
+    return { alcoholpercentage: 0, tarief_accijns: "Hoog", ingredienten: [] };
+  }
+
+  function updateEigenOverride(bierId: string, patch: Partial<EigenProductieOverride>) {
+    if (!bierId) return;
+    setEigenProductieOverrides((current) => {
+      const base = current[bierId] ?? { alcoholpercentage: 0, tarief_accijns: "Hoog", ingredienten: [] };
+      return { ...current, [bierId]: { ...base, ...patch } };
+    });
+  }
+
+  function updateEigenIngredient(bierId: string, rowId: string, patch: Partial<IngredientRule>) {
+    if (!bierId || !rowId) return;
+    setEigenProductieOverrides((current) => {
+      const base = current[bierId] ?? { alcoholpercentage: 0, tarief_accijns: "Hoog", ingredienten: [] };
+      const nextRules = (Array.isArray(base.ingredienten) ? base.ingredienten : []).map((row) =>
+        row.id === rowId ? { ...row, ...patch } : row
+      );
+      return { ...current, [bierId]: { ...base, ingredienten: nextRules } };
+    });
+  }
+
+  function addEigenIngredient(bierId: string) {
+    if (!bierId) return;
+    setEigenProductieOverrides((current) => {
+      const base = current[bierId] ?? { alcoholpercentage: 0, tarief_accijns: "Hoog", ingredienten: [] };
+      const nextRules = [
+        ...(Array.isArray(base.ingredienten) ? base.ingredienten : []),
+        {
+          id: createUiId(),
+          ingredient: "",
+          omschrijving: "",
+          hoeveelheid: 0,
+          eenheid: "",
+          prijs: 0,
+          benodigd_in_recept: 0
+        }
+      ];
+      return { ...current, [bierId]: { ...base, ingredienten: nextRules } };
+    });
+  }
+
+  function deleteEigenIngredient(bierId: string, rowId: string) {
+    if (!bierId || !rowId) return;
+    setEigenProductieOverrides((current) => {
+      const base = current[bierId] ?? { alcoholpercentage: 0, tarief_accijns: "Hoog", ingredienten: [] };
+      const nextRules = (Array.isArray(base.ingredienten) ? base.ingredienten : []).filter((row) => row.id !== rowId);
+      return { ...current, [bierId]: { ...base, ingredienten: nextRules } };
+    });
+  }
+
   function buildDraftPayload() {
     const packagingRows: PackagingPriceRow[] = packagingComponents.map((component) => ({
       id: "",
@@ -436,6 +507,26 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       // Scenario inkoop (primair) per bier+product. We store only explicit overrides; missing entries mean "use bronjaar".
       scenario_primary_costs: Object.fromEntries(
         Object.entries(scenarioPrimaryCosts).filter(([, value]) => Number.isFinite(Number(value)))
+      ),
+      eigen_productie_overrides: Object.fromEntries(
+        Object.entries(eigenProductieOverrides)
+          .filter(([bierId]) => !!bierId)
+          .map(([bierId, override]) => [
+            bierId,
+            {
+              alcoholpercentage: Number(override?.alcoholpercentage ?? 0),
+              tarief_accijns: (override?.tarief_accijns === "Laag" ? "Laag" : "Hoog") as "Hoog" | "Laag",
+              ingredienten: (Array.isArray(override?.ingredienten) ? override.ingredienten : []).map((regel) => ({
+                id: String(regel.id ?? ""),
+                ingredient: String(regel.ingredient ?? ""),
+                omschrijving: String(regel.omschrijving ?? ""),
+                hoeveelheid: Number(regel.hoeveelheid ?? 0),
+                eenheid: String(regel.eenheid ?? ""),
+                prijs: Number(regel.prijs ?? 0),
+                benodigd_in_recept: Number(regel.benodigd_in_recept ?? 0)
+              }))
+            }
+          ])
       )
     };
     for (const [key, value] of Object.entries(data)) {
@@ -509,7 +600,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     // Silent save: avoid noisy status updates while still persisting user work.
     const ok = await saveDraftToServer("");
     if (!ok) return;
-    if (activeStep === 8 && nextIndex !== 8) {
+    if (activeStep === 9 && nextIndex !== 9) {
       // Avoid retaining a save callback tied to an unmounted VerkoopstrategieWorkspace.
       setVerkoopstrategieSave(null);
     }
@@ -600,13 +691,40 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         });
         setScenarioPrimaryCosts(next);
       }
+      if (data?.eigen_productie_overrides && typeof data.eigen_productie_overrides === "object") {
+        const raw = data.eigen_productie_overrides as Record<string, any>;
+        const next: Record<string, EigenProductieOverride> = {};
+        Object.entries(raw).forEach(([bierId, value]) => {
+          if (!bierId) return;
+          if (!value || typeof value !== "object") return;
+          const alcoholpercentage = Number((value as any).alcoholpercentage ?? 0);
+          const tarief = String((value as any).tarief_accijns ?? "Hoog");
+          const ingredienten = Array.isArray((value as any).ingredienten) ? ((value as any).ingredienten as any[]) : [];
+          next[bierId] = {
+            alcoholpercentage: Number.isFinite(alcoholpercentage) ? alcoholpercentage : 0,
+            tarief_accijns: tarief === "Laag" ? "Laag" : "Hoog",
+            ingredienten: ingredienten
+              .filter((row) => row && typeof row === "object")
+              .map((row) => ({
+                id: String((row as any).id ?? createUiId()),
+                ingredient: String((row as any).ingredient ?? ""),
+                omschrijving: String((row as any).omschrijving ?? ""),
+                hoeveelheid: Number((row as any).hoeveelheid ?? 0),
+                eenheid: String((row as any).eenheid ?? ""),
+                prijs: Number((row as any).prijs ?? 0),
+                benodigd_in_recept: Number((row as any).benodigd_in_recept ?? 0)
+              }))
+          };
+        });
+        setEigenProductieOverrides(next);
+      }
       if (Array.isArray(payload?.completed_step_ids)) {
         setCompletedStepIds(payload.completed_step_ids as any);
       }
       if (Number.isFinite(Number(payload?.active_step ?? 0))) {
         const parsed = Number(payload.active_step ?? 0);
         // Keep drafts resilient across wizard step inserts/reorders.
-        setActiveStep(Math.max(0, Math.min(10, Number.isFinite(parsed) ? parsed : 0)));
+        setActiveStep(Math.max(0, Math.min(steps.length - 1, Number.isFinite(parsed) ? parsed : 0)));
       }
 
       setStatus(`Concept geladen voor doeljaar ${effectiveTarget}.`);
@@ -1034,6 +1152,29 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     });
   }
 
+  function calculateEigenProductiePrijsPerEenheid(regel: Partial<IngredientRule>) {
+    const prijs = Number(regel.prijs ?? 0);
+    const hoeveelheid = Number(regel.hoeveelheid ?? 0);
+    if (!Number.isFinite(prijs) || !Number.isFinite(hoeveelheid) || hoeveelheid <= 0) return 0;
+    return prijs / hoeveelheid;
+  }
+
+  function calculateEigenProductieKostenRecept(regel: Partial<IngredientRule>) {
+    return calculateEigenProductiePrijsPerEenheid(regel) * Number(regel.benodigd_in_recept ?? 0);
+  }
+
+  function computeEigenProductieReceptTotals(override: EigenProductieOverride | null, batchGrootteLiters: number) {
+    const regels = override?.ingredienten ?? [];
+    const leveranciersTotaal = regels.reduce((sum, regel) => sum + Number(regel.prijs ?? 0), 0);
+    const receptTotaal = regels.reduce((sum, regel) => sum + calculateEigenProductieKostenRecept(regel), 0);
+    const literPrijs = batchGrootteLiters > 0 ? receptTotaal / batchGrootteLiters : 0;
+    return {
+      leveranciersTotaal,
+      receptTotaal,
+      literPrijs
+    };
+  }
+
   // NOTE: In verkoopstrategie we persist opslag% as the source of truth (legacy field name `sell_in_margins`).
   function computeSellInPrice(cost: number, opslagPct: number) {
     const c = clampNumber(cost, 0);
@@ -1413,10 +1554,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const sourcePrimary = Number(snap.primaireKosten ?? 0);
       const otherCost = sourceCost - sourcePrimary;
       const scenarioKey = `${bierId}::${productId}`;
-      const scenarioPrimary = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
+      const scenarioPrimaryRaw = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
         ? Number(scenarioPrimaryCosts[scenarioKey] ?? sourcePrimary)
         : sourcePrimary;
-      const scenarioBaseCost = Number.isFinite(scenarioPrimary) ? scenarioPrimary + otherCost : sourceCost;
+      const scenarioPrimary = Number.isFinite(scenarioPrimaryRaw) ? scenarioPrimaryRaw : sourcePrimary;
       const productType = String(snap.productType ?? "");
       const basePackaging = packagingCost(productId, productType as any, sourceYear);
       const targetPackaging = packagingCost(productId, productType as any, targetYear);
@@ -1434,11 +1575,40 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           : computeDirectFixedCostPerProductieLiter(targetYear);
       const fixedDelta = (fixedPerLiterTarget - fixedPerLiterSource) * Number(liters ?? 0);
 
-      const accijnsDelta =
-        computeAccijnsForLiters(targetYear, record, Number(liters ?? 0)) -
-        computeAccijnsForLiters(sourceYear, record, Number(liters ?? 0));
+      const litersValue = Number(liters ?? 0);
+      const override = eigenProductieOverrides[bierId] ?? null;
+      const recordTarget =
+        calcType === "eigen_productie" && override
+          ? {
+              ...record,
+              basisgegevens: {
+                ...(typeof record?.basisgegevens === "object" && record?.basisgegevens ? record.basisgegevens : {}),
+                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
+                tarief_accijns: override.tarief_accijns
+              },
+              bier_snapshot: {
+                ...(typeof record?.bier_snapshot === "object" && record?.bier_snapshot ? record.bier_snapshot : {}),
+                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
+                tarief_accijns: override.tarief_accijns
+              }
+            }
+          : record;
 
-      const estimatedTargetCost = scenarioBaseCost + packagingDelta + fixedDelta + accijnsDelta;
+      const accijnsSource = computeAccijnsForLiters(sourceYear, record, litersValue);
+      const accijnsTarget = computeAccijnsForLiters(targetYear, recordTarget, litersValue);
+
+      let estimatedTargetCost = 0;
+      if (calcType === "inkoop") {
+        const scenarioBaseCost = scenarioPrimary + otherCost;
+        const accijnsDelta = accijnsTarget - accijnsSource;
+        estimatedTargetCost = scenarioBaseCost + packagingDelta + fixedDelta + accijnsDelta;
+      } else {
+        const batchGrootte = Number(getProductieForYear(targetYear)?.batchgrootte_eigen_productie_l ?? 0);
+        const totals = override ? computeEigenProductieReceptTotals(override, batchGrootte) : null;
+        const primaireTarget = totals ? totals.literPrijs * litersValue : sourcePrimary;
+        const vasteTarget = fixedPerLiterTarget * litersValue;
+        estimatedTargetCost = primaireTarget + targetPackaging + vasteTarget + accijnsTarget;
+      }
       const sellIn = Object.fromEntries(
         channels.map((channel) => {
           const margin = effectiveMargin(targetYear, bierId, productId, productType, channel.code, channel.defaultMargin);
@@ -1479,6 +1649,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     initialBasisproducten,
     initialBieren,
     initialSamengesteldeProducten,
+    eigenProductieOverrides,
     scenarioPrimaryCosts,
     sourceYear,
     targetYear
@@ -1508,6 +1679,66 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     });
     return Array.from(out.values()).sort((a, b) => a.biernaam.localeCompare(b.biernaam, "nl-NL"));
   }, [currentBerekeningen, sourceYear]);
+
+  const sourceEigenProductieVersionByBierId = useMemo(() => {
+    const out = new Map<string, any>();
+    (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((record: any) => {
+      const basis = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? record.basisgegevens : {};
+      const jaar = Number(record.jaar ?? basis.jaar ?? 0);
+      const statusVal = String(record.status ?? "").toLowerCase();
+      if (jaar !== sourceYear || statusVal !== "definitief") return;
+      const calcTypeRaw = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
+      if (calcTypeRaw === "inkoop") return;
+      const bierId = String(record.bier_id ?? basis.bier_id ?? "");
+      if (!bierId) return;
+      if (out.has(bierId)) return;
+      out.set(bierId, record);
+    });
+    return out;
+  }, [currentBerekeningen, sourceYear]);
+
+  // Initialize missing overrides from the bronjaar recipes so the user can tweak right away.
+  useEffect(() => {
+    if (!conceptStarted) return;
+    if (!copyProductie) return;
+    const batch = Number(draftProductieTarget.batchgrootte_eigen_productie_l ?? 0);
+    if (!Number.isFinite(batch)) return;
+    setEigenProductieOverrides((current) => {
+      let changed = false;
+      const next = { ...current };
+      eigenProductieBieren.forEach((bier) => {
+        const bierId = bier.bierId;
+        if (!bierId || next[bierId]) return;
+        const sourceVersion = sourceEigenProductieVersionByBierId.get(bierId);
+        const basis = typeof sourceVersion?.basisgegevens === "object" && sourceVersion?.basisgegevens ? sourceVersion.basisgegevens : {};
+        const invoer = typeof sourceVersion?.invoer === "object" && sourceVersion?.invoer ? sourceVersion.invoer : {};
+        const ingredienten = (((invoer as any).ingredienten ?? {}) as any).regels;
+        next[bierId] = {
+          alcoholpercentage: Number(basis.alcoholpercentage ?? bier.alcoholpercentage ?? 0) || 0,
+          tarief_accijns: String(basis.tarief_accijns ?? "Hoog") === "Laag" ? "Laag" : "Hoog",
+          ingredienten: (Array.isArray(ingredienten) ? ingredienten : [])
+            .filter((row) => row && typeof row === "object")
+            .map((row: any) => ({
+              id: String(row.id ?? createUiId()),
+              ingredient: String(row.ingredient ?? ""),
+              omschrijving: String(row.omschrijving ?? ""),
+              hoeveelheid: Number(row.hoeveelheid ?? 0),
+              eenheid: String(row.eenheid ?? ""),
+              prijs: Number(row.prijs ?? 0),
+              benodigd_in_recept: Number(row.benodigd_in_recept ?? 0)
+            }))
+        };
+        changed = true;
+      });
+      return changed ? next : current;
+    });
+  }, [
+    conceptStarted,
+    copyProductie,
+    draftProductieTarget.batchgrootte_eigen_productie_l,
+    eigenProductieBieren,
+    sourceEigenProductieVersionByBierId
+  ]);
 
   const kostprijsTargetRows = useMemo(() => {
     const baseDefs = (Array.isArray(initialBasisproducten) ? initialBasisproducten : [])
@@ -1581,7 +1812,29 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       const scenarioPrimary = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
         ? Number(scenarioPrimaryCosts[scenarioKey] ?? sourcePrimary)
         : sourcePrimary;
-      const primaireKosten = Number.isFinite(scenarioPrimary) ? scenarioPrimary : sourcePrimary;
+      let primaireKosten = Number.isFinite(scenarioPrimary) ? scenarioPrimary : sourcePrimary;
+      const override = eigenProductieOverrides[bierId] ?? null;
+      const recordTarget =
+        calcType !== "inkoop" && override
+          ? {
+              ...record,
+              basisgegevens: {
+                ...(typeof record?.basisgegevens === "object" && record?.basisgegevens ? record.basisgegevens : {}),
+                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
+                tarief_accijns: override.tarief_accijns
+              },
+              bier_snapshot: {
+                ...(typeof record?.bier_snapshot === "object" && record?.bier_snapshot ? record.bier_snapshot : {}),
+                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
+                tarief_accijns: override.tarief_accijns
+              }
+            }
+          : record;
+      if (calcType !== "inkoop" && override) {
+        const batchGrootte = Number(getProductieForYear(targetYear)?.batchgrootte_eigen_productie_l ?? 0);
+        const totals = computeEigenProductieReceptTotals(override, batchGrootte);
+        primaireKosten = totals.literPrijs * liters;
+      }
 
       const verpakkingskosten = calcType === "inkoop" ? 0 : packagingCost(productId, productType as any, targetYear);
       const vastePerLiter = computeFixedCostPerLiterEngine({
@@ -1591,7 +1844,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         vasteKostenRows: fixedCostRowsForYear(targetYear) as any
       });
       const vasteKosten = vastePerLiter * liters;
-      const accijns = computeAccijnsForLiters(targetYear, record, liters);
+      const accijns = computeAccijnsForLiters(targetYear, recordTarget, liters);
       const kostprijs = primaireKosten + verpakkingskosten + vasteKosten + accijns;
 
       const row: KostprijsPreviewRow = {
@@ -1637,6 +1890,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     initialBasisproducten,
     initialBieren,
     initialSamengesteldeProducten,
+    eigenProductieOverrides,
     scenarioPrimaryCosts,
     sourceYear,
     targetYear
@@ -2571,54 +2825,215 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               <div className="module-card compact-card" style={{ marginBottom: 14 }}>
                 <div className="module-card-title">Recepten {targetYear}</div>
                 <div className="module-card-text">
-                  Deze stap is relevant voor bieren met <strong>eigen productie</strong>. In deze wizard wijzigen we geen
-                  recepten; daarvoor gebruik je <strong>Kostprijs beheren</strong>. De preview en kostprijs-opbouw blijven
-                  voor eigen productie gebaseerd op de bestaande (definitieve) bronjaarberekening totdat je daar een nieuwe
-                  berekening voor {targetYear} maakt.
+                  Pas hier voor bieren met <strong>eigen productie</strong> de doeljaar-gegevens aan. Bij afronden en daarna
+                  activeren worden deze instellingen de nieuwe waarheid voor {targetYear} (oude activaties voor {targetYear}
+                  worden dan gedeactiveerd).
                 </div>
               </div>
 
-              <div className="module-card compact-card" style={{ marginBottom: 14 }}>
-                <div className="module-card-title">Bieren met eigen productie</div>
-                <div className="data-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{ width: "320px" }}>Bier</th>
-                        <th style={{ width: "200px" }}>Stijl</th>
-                        <th style={{ width: "180px" }}>Alcohol %</th>
-                        <th>Actie</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {eigenProductieBieren.length === 0 ? (
-                        <tr>
-                          <td className="dataset-empty" colSpan={4}>
-                            Geen bieren met eigen productie gevonden in bronjaar {sourceYear}.
-                          </td>
-                        </tr>
-                      ) : null}
-                      {eigenProductieBieren.map((bier) => (
-                        <tr key={bier.bierId}>
-                          <td>{bier.biernaam}</td>
-                          <td>{bier.stijl || "-"}</td>
-                          <td>{bier.alcoholpercentage ? `${bier.alcoholpercentage}` : "-"}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="editor-button editor-button-secondary"
-                              onClick={() => router.push(`/nieuwe-kostprijsberekening`)}
-                              disabled={isRunning}
-                            >
-                              Open Kostprijs beheren
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {eigenProductieBieren.length === 0 ? (
+                <div className="editor-status" style={{ marginBottom: 14 }}>
+                  Geen bieren met eigen productie gevonden in bronjaar {sourceYear}.
                 </div>
-              </div>
+              ) : null}
+
+              {eigenProductieBieren.map((bier) => {
+                const bierId = bier.bierId;
+                const sourceVersion = sourceEigenProductieVersionByBierId.get(bierId);
+                const sourceBasis =
+                  typeof sourceVersion?.basisgegevens === "object" && sourceVersion?.basisgegevens
+                    ? sourceVersion.basisgegevens
+                    : {};
+                const sourceAlcohol = Number(sourceBasis?.alcoholpercentage ?? bier.alcoholpercentage ?? 0) || 0;
+                const sourceTarief = String(sourceBasis?.tarief_accijns ?? "Hoog") === "Laag" ? "Laag" : "Hoog";
+
+                const override = ensureEigenOverride(bierId);
+                const batchGrootte = Number(getProductieForYear(targetYear)?.batchgrootte_eigen_productie_l ?? 0);
+                const totals = computeEigenProductieReceptTotals(override, batchGrootte);
+
+                return (
+                  <div key={bierId} className="module-card compact-card" style={{ marginBottom: 14 }}>
+                    <div className="module-card-title">{bier.biernaam}</div>
+                    <div className="module-card-text">
+                      {bier.stijl ? `${bier.stijl} · ` : ""}
+                      bronjaar {sourceYear} (read-only) links, doeljaar {targetYear} rechts.
+                    </div>
+
+                    <div className="data-table" style={{ marginTop: 12 }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style={{ width: "280px" }}>Veld</th>
+                            <th style={{ width: "220px" }}>Bronjaar {sourceYear}</th>
+                            <th style={{ width: "220px" }}>Doeljaar {targetYear}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>Alcoholpercentage</td>
+                            <td>
+                              <input className="dataset-input dataset-input-readonly" type="number" value={String(sourceAlcohol)} readOnly />
+                            </td>
+                            <td>
+                              <input
+                                className="dataset-input"
+                                type="number"
+                                value={String(Number(override.alcoholpercentage ?? 0))}
+                                onChange={(event) => updateEigenOverride(bierId, { alcoholpercentage: Number(event.target.value) })}
+                              />
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>Accijnstarief</td>
+                            <td>
+                              <input className="dataset-input dataset-input-readonly" type="text" value={sourceTarief} readOnly />
+                            </td>
+                            <td>
+                              <select
+                                className="dataset-input"
+                                value={override.tarief_accijns}
+                                onChange={(event) =>
+                                  updateEigenOverride(bierId, { tarief_accijns: event.target.value === "Laag" ? "Laag" : "Hoog" })
+                                }
+                              >
+                                <option value="Hoog">Hoog</option>
+                                <option value="Laag">Laag</option>
+                              </select>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="stats-grid wizard-stats-grid" style={{ marginTop: 14, marginBottom: 14 }}>
+                      <div className="stat-card">
+                        <div className="stat-label">Leveranciersprijzen</div>
+                        <div className="stat-value small">{formatEur(totals.leveranciersTotaal)}</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-label">Receptkosten</div>
+                        <div className="stat-value small">{formatEur(totals.receptTotaal)}</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-label">Batchgrootte (L)</div>
+                        <div className="stat-value small">{batchGrootte > 0 ? String(batchGrootte) : "-"}</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-label">Literprijs</div>
+                        <div className="stat-value small">{batchGrootte > 0 ? formatEur(totals.literPrijs) : "-"}</div>
+                      </div>
+                      <div className="stat-card">
+                        <div className="stat-label">Ingredienten</div>
+                        <div className="stat-value small">{String((override.ingredienten ?? []).length)}</div>
+                      </div>
+                    </div>
+
+                    <div className="dataset-editor-scroll">
+                      <table className="dataset-editor-table wizard-table-compact">
+                        <thead>
+                          <tr>
+                            <th>Ingredient</th>
+                            <th>Omschrijving</th>
+                            <th>Inhoud verpakking</th>
+                            <th>Eenheid</th>
+                            <th>Leveranciersprijs</th>
+                            <th>Hoeveel in recept</th>
+                            <th>Kosten recept</th>
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(override.ingredienten ?? []).length === 0 ? (
+                            <tr>
+                              <td className="dataset-empty" colSpan={8}>
+                                Nog geen ingredienten. Voeg een regel toe.
+                              </td>
+                            </tr>
+                          ) : null}
+                          {(override.ingredienten ?? []).map((regel) => (
+                            <tr key={regel.id}>
+                              <td>
+                                <input
+                                  className="dataset-input"
+                                  value={regel.ingredient ?? ""}
+                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { ingredient: event.target.value })}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="dataset-input"
+                                  value={regel.omschrijving ?? ""}
+                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { omschrijving: event.target.value })}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="dataset-input"
+                                  type="number"
+                                  value={String(Number(regel.hoeveelheid ?? 0))}
+                                  onChange={(event) =>
+                                    updateEigenIngredient(bierId, regel.id, { hoeveelheid: Number(event.target.value) })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="dataset-input"
+                                  value={regel.eenheid ?? ""}
+                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { eenheid: event.target.value })}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="dataset-input"
+                                  type="number"
+                                  value={String(Number(regel.prijs ?? 0))}
+                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { prijs: Number(event.target.value) })}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  className="dataset-input"
+                                  type="number"
+                                  value={String(Number(regel.benodigd_in_recept ?? 0))}
+                                  onChange={(event) =>
+                                    updateEigenIngredient(bierId, regel.id, { benodigd_in_recept: Number(event.target.value) })
+                                  }
+                                />
+                              </td>
+                              <td>{formatEur(calculateEigenProductieKostenRecept(regel))}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="editor-button editor-button-secondary"
+                                  onClick={() => deleteEigenIngredient(bierId, regel.id)}
+                                  disabled={isRunning}
+                                >
+                                  Verwijderen
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="editor-actions" style={{ marginTop: 10 }}>
+                      <div className="editor-actions-group">
+                        <button
+                          type="button"
+                          className="editor-button editor-button-secondary"
+                          onClick={() => addEigenIngredient(bierId)}
+                          disabled={isRunning}
+                        >
+                          Ingrediënt toevoegen
+                        </button>
+                      </div>
+                      <div className="editor-actions-group" />
+                    </div>
+                  </div>
+                );
+              })}
 
               <div className="editor-actions wizard-footer-actions">
                 <div className="editor-actions-group">

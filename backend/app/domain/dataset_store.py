@@ -1203,6 +1203,54 @@ def _upsert_scenario_primary_costs_for_year(*, target_year: int, overrides: dict
     return created
 
 
+def _compute_eigen_productie_liter_prijs_from_override(*, override: dict[str, Any], target_year: int) -> float:
+    """Compute ingredient cost per liter from an override payload (best-effort, fail-soft to 0.0).
+
+    This mirrors the frontend BerekeningenWizard logic:
+    - kosten_recept = sum((prijs / inhoud_verpakking) * benodigd_in_recept)
+    - liter_prijs = kosten_recept / batchgrootte_eigen_productie_l
+    """
+    if not isinstance(override, dict):
+        return 0.0
+    productie = production_storage.load_productie()
+    year_row: dict[str, Any] = {}
+    if isinstance(productie, dict):
+        year_row = productie.get(str(target_year), {}) or productie.get(int(target_year), {}) or {}
+    if not isinstance(year_row, dict):
+        year_row = {}
+    try:
+        batch = float(year_row.get("batchgrootte_eigen_productie_l", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        batch = 0.0
+    if batch <= 0:
+        return 0.0
+    regels = override.get("ingredienten")
+    if not isinstance(regels, list):
+        return 0.0
+    recept_totaal = 0.0
+    for regel in regels:
+        if not isinstance(regel, dict):
+            continue
+        try:
+            prijs = float(regel.get("prijs", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            prijs = 0.0
+        try:
+            inhoud = float(regel.get("hoeveelheid", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            inhoud = 0.0
+        try:
+            nodig = float(regel.get("benodigd_in_recept", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            nodig = 0.0
+        if inhoud <= 0 or nodig <= 0:
+            continue
+        recept_totaal += (prijs / inhoud) * nodig
+    if recept_totaal <= 0:
+        return 0.0
+    return float(recept_totaal / batch)
+
+
 def _compute_target_product_components(
     *,
     product_type: str,
@@ -1260,6 +1308,14 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
     if not isinstance(draft_overrides, dict):
         draft_overrides = {}
 
+    # Eigen productie overrides come from the nieuw-jaar wizard draft (same owner+target_year).
+    new_year_draft = load_new_year_draft(owner=str(owner or ""), target_year=int(target_year))
+    ny_payload = (new_year_draft or {}).get("payload") if isinstance(new_year_draft, dict) else {}
+    ny_data = (ny_payload or {}).get("data") if isinstance(ny_payload, dict) else {}
+    eigen_overrides = (ny_data or {}).get("eigen_productie_overrides") if isinstance(ny_data, dict) else {}
+    if not isinstance(eigen_overrides, dict):
+        eigen_overrides = {}
+
     rows: list[dict[str, Any]] = []
     for activation in activations:
         bier_id = str(activation.get("bier_id", "") or "").strip()
@@ -1283,6 +1339,13 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
         bier_alcohol = float(bier_snapshot.get("alcoholpercentage", basis.get("alcoholpercentage", 0.0)) or 0.0)
         bier_tarief_accijns = str(bier_snapshot.get("tarief_accijns", basis.get("tarief_accijns", "Hoog")) or "Hoog")
         bier_belastingsoort = str(bier_snapshot.get("belastingsoort", basis.get("belastingsoort", "Accijns")) or "Accijns")
+        eigen_override = eigen_overrides.get(bier_id) if soort != "inkoop" else None
+        if isinstance(eigen_override, dict):
+            try:
+                bier_alcohol = float(eigen_override.get("alcoholpercentage", bier_alcohol) or bier_alcohol)
+            except (TypeError, ValueError):
+                bier_alcohol = bier_alcohol
+            bier_tarief_accijns = str(eigen_override.get("tarief_accijns", bier_tarief_accijns) or bier_tarief_accijns)
 
         key = f"{bier_id}::{product_id}"
         scenario_primary = scenario_by_key.get(key, source_primary)
@@ -1299,6 +1362,10 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
         # The legacy snapshots and the UI both expect verpakkingskosten = 0.0 for inkoop rows.
         if soort == "inkoop":
             packaging_cost = 0.0
+        if soort != "inkoop" and isinstance(eigen_override, dict):
+            liter_prijs = _compute_eigen_productie_liter_prijs_from_override(override=eigen_override, target_year=target_year)
+            if liter_prijs > 0 and float(liters) > 0:
+                scenario_primary = float(liter_prijs) * float(liters)
         if soort == "inkoop":
             vaste_kosten_per_liter = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
         else:
@@ -1387,6 +1454,13 @@ def activate_kostprijzen_for_year(
     version_by_id = {str(row.get("id", "") or ""): row for row in versions}
     now = datetime.now(UTC).isoformat()
 
+    new_year_draft = load_new_year_draft(owner=str(owner or ""), target_year=int(target_year))
+    ny_payload = (new_year_draft or {}).get("payload") if isinstance(new_year_draft, dict) else {}
+    ny_data = (ny_payload or {}).get("data") if isinstance(ny_payload, dict) else {}
+    eigen_overrides = (ny_data or {}).get("eigen_productie_overrides") if isinstance(ny_data, dict) else {}
+    if not isinstance(eigen_overrides, dict):
+        eigen_overrides = {}
+
     created_versions = 0
     activated_scopes = 0
     created_version_ids: list[str] = []
@@ -1412,12 +1486,24 @@ def activate_kostprijzen_for_year(
         basis_target = {**basis, "jaar": int(target_year)}
         soort = str(source_version.get("type", "") or "").strip().lower()
         calc_type = "Inkoop" if soort == "inkoop" else "Productie"
-        bier_alcohol = float(bier_snapshot.get("alcoholpercentage", basis_target.get("alcoholpercentage", 0.0)) or 0.0)
+        eigen_override = eigen_overrides.get(bier_id) if soort != "inkoop" else None
+        if isinstance(eigen_override, dict):
+            try:
+                basis_target["alcoholpercentage"] = float(eigen_override.get("alcoholpercentage", basis_target.get("alcoholpercentage", 0.0)) or 0.0)
+            except (TypeError, ValueError):
+                pass
+            basis_target["tarief_accijns"] = str(eigen_override.get("tarief_accijns", basis_target.get("tarief_accijns", "Hoog")) or "Hoog")
+        bier_snapshot_target = dict(bier_snapshot) if isinstance(bier_snapshot, dict) else {}
+        if isinstance(eigen_override, dict):
+            bier_snapshot_target["alcoholpercentage"] = float(basis_target.get("alcoholpercentage", 0.0) or 0.0)
+            bier_snapshot_target["tarief_accijns"] = str(basis_target.get("tarief_accijns", "Hoog") or "Hoog")
+
+        bier_alcohol = float(bier_snapshot_target.get("alcoholpercentage", basis_target.get("alcoholpercentage", 0.0)) or 0.0)
         bier_tarief_accijns = str(
-            bier_snapshot.get("tarief_accijns", basis_target.get("tarief_accijns", "Hoog")) or "Hoog"
+            bier_snapshot_target.get("tarief_accijns", basis_target.get("tarief_accijns", "Hoog")) or "Hoog"
         )
         bier_belastingsoort = str(
-            bier_snapshot.get("belastingsoort", basis_target.get("belastingsoort", "Accijns")) or "Accijns"
+            bier_snapshot_target.get("belastingsoort", basis_target.get("belastingsoort", "Accijns")) or "Accijns"
         )
 
         # Build snapshot product rows.
@@ -1460,10 +1546,18 @@ def activate_kostprijzen_for_year(
         else:
             # For productie: keep the recipe inputs from the source version as a starting point.
             invoer_payload = (
-                source_version.get("invoer", {})
+                deepcopy(source_version.get("invoer", {}))
                 if isinstance(source_version.get("invoer", {}), dict)
                 else {}
             )
+            if isinstance(eigen_override, dict) and isinstance(eigen_override.get("ingredienten"), list):
+                ingredienten = invoer_payload.get("ingredienten") if isinstance(invoer_payload, dict) else {}
+                if not isinstance(ingredienten, dict):
+                    ingredienten = {}
+                ingredienten = dict(ingredienten)
+                ingredienten["regels"] = [row for row in eigen_override.get("ingredienten", []) if isinstance(row, dict)]
+                invoer_payload = dict(invoer_payload)
+                invoer_payload["ingredienten"] = ingredienten
         # Build per-liter summary values (these drive PrijsvoorstelWizard comparisons).
         per_liter_candidates: list[float] = []
         for r in beer_rows:
@@ -1545,7 +1639,7 @@ def activate_kostprijzen_for_year(
                 "id": new_id,
                 "bier_id": bier_id,
                 "basisgegevens": basis_target,
-                "bier_snapshot": bier_snapshot,
+                "bier_snapshot": bier_snapshot_target,
                 "status": "definitief",
                 "calculation_type": calc_type,
                 "soort_berekening": {"type": "Inkoop" if soort == "inkoop" else "Eigen productie"},
