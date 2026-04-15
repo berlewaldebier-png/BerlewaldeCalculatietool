@@ -254,6 +254,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "basisproducten",
         "samengestelde-producten",
         "bieren",
+        "adviesprijzen",
         "kostprijs-scenario-inkoop",
         "kostprijs-activatie-drafts",
         "berekeningen",
