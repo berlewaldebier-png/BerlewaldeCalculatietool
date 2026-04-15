@@ -177,6 +177,23 @@ def ensure_schema() -> None:
                 END $$;
                 """
             )
+
+            # Some older dev databases had a FK on bier_id -> beers(id). In the current architecture,
+            # beer master data lives in the `bieren` dataset (and not in a normalized `beers` table),
+            # so enforcing that FK breaks legitimate writes (e.g. afronden/activeren).
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_constraint WHERE conname = 'fk_kostprijs_activations_beer'
+                    ) THEN
+                        ALTER TABLE kostprijs_product_activations
+                        DROP CONSTRAINT fk_kostprijs_activations_beer;
+                    END IF;
+                END $$;
+                """
+            )
         conn.commit()
 
     _SCHEMA_READY = True
