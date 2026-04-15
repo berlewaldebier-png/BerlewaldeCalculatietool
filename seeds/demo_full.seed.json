@@ -6,25 +6,25 @@
                                               "channel_code":  "horeca",
                                               "id":  "c6bb0b7f-64d0-45f6-b0a7-77d4a43d7ec9",
                                               "jaar":  2025,
-                                              "opslag_pct":  0.0
+                                              "opslag_pct":  25.0
                                           },
                                           {
                                               "channel_code":  "retail",
                                               "id":  "db2ad3ce-1cb3-4f95-8e20-ecac74fe09ff",
                                               "jaar":  2025,
-                                              "opslag_pct":  0.0
+                                              "opslag_pct":  25.0
                                           },
                                           {
                                               "channel_code":  "slijterij",
                                               "id":  "5595a414-fd0a-49e2-8bfd-827de3dce0f5",
                                               "jaar":  2025,
-                                              "opslag_pct":  0.0
+                                              "opslag_pct":  40.0
                                           },
                                           {
                                               "channel_code":  "zakelijk",
                                               "id":  "c06b3c5d-043a-4237-b94e-9e5d60bf9c4b",
                                               "jaar":  2025,
-                                              "opslag_pct":  0.0
+                                              "opslag_pct":  45.0
                                           }
                                       ],
                      "base-product-masters":  [
