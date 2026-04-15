@@ -5910,15 +5910,18 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
     if not saved:
         return False
 
-    # Phase E: auto-activate only on explicit "afronden" (status transition to definitief),
-    # and only when the product scope has never been activated before.
+    # Phase E: auto-activate on write for any definitive record.
+    #
+    # We intentionally do this on write (not on read) to avoid hidden side effects, but we also
+    # don't rely solely on the status transition. If an earlier finalize attempt saved the
+    # record but failed before writing activations, a later save should still heal the missing
+    # first-time scopes.
     for record in normalized_records:
         record_id = str(record.get("id", "") or "").strip()
         if not record_id:
             continue
-        previous_status = previous_status_by_id.get(record_id, "")
         new_status = str(record.get("status", "") or "").strip().lower()
-        if previous_status != "definitief" and new_status == "definitief":
+        if new_status == "definitief":
             _auto_activate_first_time_products(record)
 
     return True
