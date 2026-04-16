@@ -9,6 +9,7 @@ type Channel = {
   naam: string;
   actief: boolean;
   volgorde: number;
+  default_marge_pct: number;
 };
 
 type AdviesprijsRow = {
@@ -20,16 +21,97 @@ type AdviesprijsRow = {
 
 type ProductieMap = Record<string, any>;
 
+type VerkoopprijzenRow = Record<string, unknown>;
+type KostprijsversieRow = Record<string, unknown>;
+type KostprijsActivationRow = Record<string, unknown>;
+type BierRow = Record<string, unknown>;
+
+type ProductCostRow = {
+  bierId: string;
+  biernaam: string;
+  btwPct: number;
+  kostprijsversieId: string;
+  productId: string;
+  productType: "basis" | "samengesteld";
+  verpakking: string;
+  kostprijsEx: number;
+};
+
 function clampNumber(value: unknown, fallback: number) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return parsed;
 }
 
+function parseBtwPct(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  const match = text.match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (!match) return 0;
+  const parsed = Number(String(match[1]).replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function money(value: number) {
+  const safe = Number.isFinite(value) ? value : 0;
+  return safe.toLocaleString("nl-NL", { style: "currency", currency: "EUR" });
+}
+
+function round2(value: number) {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
+function roundDownTo5Cents(value: number) {
+  const safe = Number.isFinite(value) ? value : 0;
+  // 0.05 increments => 20 steps per euro. Add epsilon to avoid float artifacts like 3.599999999.
+  return Math.floor((safe + 1e-9) * 20) / 20;
+}
+
+function normalizeChannelMap(raw: unknown) {
+  const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const out: Record<string, number | ""> = {};
+  Object.entries(src).forEach(([key, value]) => {
+    const code = String(key ?? "").toLowerCase().trim();
+    if (!code) return;
+    if (value === "" || value === null || value === undefined) {
+      out[code] = "";
+      return;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    out[code] = parsed;
+  });
+  return out;
+}
+
+function getChannelOpslag(row: VerkoopprijzenRow | null | undefined, channelCode: string) {
+  if (!row) return null;
+  const margins = normalizeChannelMap((row as any).sell_in_margins ?? (row as any).kanaalmarges ?? {});
+  const value = margins[channelCode];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getChannelSellInPriceOverride(row: VerkoopprijzenRow | null | undefined, channelCode: string) {
+  if (!row) return null;
+  const prices = normalizeChannelMap((row as any).sell_in_prices ?? (row as any).kanaalprijzen ?? {});
+  const value = prices[channelCode];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function calcSellInFromOpslag(costEx: number, opslagPct: number) {
+  const cost = Number.isFinite(costEx) ? costEx : 0;
+  const opslag = Number.isFinite(opslagPct) ? opslagPct : 0;
+  return cost * (1 + opslag / 100);
+}
+
 export function AdviesprijzenWorkspace(props: {
   initialChannels: any[];
   initialAdviesprijzen: any[];
   initialProductie: ProductieMap;
+  initialVerkoopprijzen: VerkoopprijzenRow[];
+  initialBieren: BierRow[];
+  initialKostprijsversies: KostprijsversieRow[];
+  initialKostprijsproductactiveringen: KostprijsActivationRow[];
 }) {
   const channels = useMemo<Channel[]>(() => {
     return (Array.isArray(props.initialChannels) ? props.initialChannels : [])
@@ -38,7 +120,8 @@ export function AdviesprijzenWorkspace(props: {
         code: String(row.code ?? row.id ?? "").toLowerCase(),
         naam: String(row.naam ?? row.label ?? row.code ?? ""),
         actief: Boolean(row.actief ?? true),
-        volgorde: Number(row.volgorde ?? 0)
+        volgorde: Number(row.volgorde ?? 0),
+        default_marge_pct: Number(row.default_marge_pct ?? row.default_marge ?? 0) || 0
       }))
       .filter((row) => row.code)
       .sort((a, b) => (a.volgorde || 0) - (b.volgorde || 0));
@@ -76,6 +159,164 @@ export function AdviesprijzenWorkspace(props: {
   const [isSaving, setIsSaving] = useState(false);
 
   const activeChannels = useMemo(() => channels.filter((c) => c.actief), [channels]);
+  const channelCodes = useMemo(() => activeChannels.map((c) => c.code), [activeChannels]);
+  const [openChannelCodes, setOpenChannelCodes] = useState<string[]>(() => activeChannels.map((c) => c.code));
+
+  const adviesOpslagByChannel = useMemo(() => {
+    const map = new Map<string, number>();
+    rows
+      .filter((row) => Number(row.jaar ?? 0) === selectedYear)
+      .forEach((row) => map.set(row.channel_code, Number(row.opslag_pct ?? 0) || 0));
+    return map;
+  }, [rows, selectedYear]);
+
+  const verkoopprijzenRows = useMemo(() => (Array.isArray(props.initialVerkoopprijzen) ? props.initialVerkoopprijzen : []), [props.initialVerkoopprijzen]);
+  const kostprijsversies = useMemo(() => (Array.isArray(props.initialKostprijsversies) ? props.initialKostprijsversies : []), [props.initialKostprijsversies]);
+  const activations = useMemo(() => (Array.isArray(props.initialKostprijsproductactiveringen) ? props.initialKostprijsproductactiveringen : []), [props.initialKostprijsproductactiveringen]);
+  const bieren = useMemo(() => (Array.isArray(props.initialBieren) ? props.initialBieren : []), [props.initialBieren]);
+
+  const beerById = useMemo(() => {
+    const map = new Map<string, { biernaam: string; btwPct: number }>();
+    bieren.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      const id = String((row as any).id ?? "");
+      if (!id) return;
+      const biernaam = String((row as any).biernaam ?? (row as any).naam ?? "");
+      const btwPct = parseBtwPct((row as any).btw_tarief ?? (row as any).btw ?? "");
+      map.set(id, { biernaam, btwPct });
+    });
+    return map;
+  }, [bieren]);
+
+  const kostprijsversieById = useMemo(() => {
+    const map = new Map<string, KostprijsversieRow>();
+    kostprijsversies.forEach((row) => {
+      const id = String((row as any).id ?? "");
+      if (!id) return;
+      map.set(id, row);
+    });
+    return map;
+  }, [kostprijsversies]);
+
+  const activeActivationsForYear = useMemo(() => {
+    return activations.filter((row) => {
+      if (!row || typeof row !== "object") return false;
+      const y = Number((row as any).jaar ?? 0);
+      if (y !== selectedYear) return false;
+      const tot = String((row as any).effectief_tot ?? "");
+      return !tot;
+    });
+  }, [activations, selectedYear]);
+
+  const productCostRows = useMemo<ProductCostRow[]>(() => {
+    const out: ProductCostRow[] = [];
+    for (const act of activeActivationsForYear) {
+      const bierId = String((act as any).bier_id ?? "");
+      const bierSnapshot = beerById.get(bierId);
+      const biernaam = bierSnapshot?.biernaam || bierId;
+      const versionId = String((act as any).kostprijsversie_id ?? "");
+      const version = kostprijsversieById.get(versionId);
+      if (!version) continue;
+      const btwPct = parseBtwPct(((version as any).basisgegevens ?? {}).btw_tarief ?? bierSnapshot?.btwPct ?? "");
+
+      const products = ((version as any).resultaat_snapshot ?? (version as any).resultaatSnapshot ?? {}).producten ?? {};
+      const basis = Array.isArray(products.basisproducten) ? products.basisproducten : [];
+      const sameng = Array.isArray(products.samengestelde_producten) ? products.samengestelde_producten : [];
+      for (const row of basis) {
+        const productId = String((row as any).product_id ?? "");
+        if (!productId) continue;
+        out.push({
+          bierId,
+          biernaam,
+          btwPct,
+          kostprijsversieId: versionId,
+          productId,
+          productType: "basis",
+          verpakking: String((row as any).verpakking ?? (row as any).verpakkingseenheid ?? ""),
+          kostprijsEx: Number((row as any).kostprijs ?? 0) || 0
+        });
+      }
+      for (const row of sameng) {
+        const productId = String((row as any).product_id ?? "");
+        if (!productId) continue;
+        out.push({
+          bierId,
+          biernaam,
+          btwPct,
+          kostprijsversieId: versionId,
+          productId,
+          productType: "samengesteld",
+          verpakking: String((row as any).verpakking ?? (row as any).verpakkingseenheid ?? ""),
+          kostprijsEx: Number((row as any).kostprijs ?? 0) || 0
+        });
+      }
+    }
+
+    // Stable ordering: beer -> productType -> verpakking
+    return out.sort((a, b) => {
+      const bn = a.biernaam.localeCompare(b.biernaam);
+      if (bn !== 0) return bn;
+      const pt = a.productType.localeCompare(b.productType);
+      if (pt !== 0) return pt;
+      return a.verpakking.localeCompare(b.verpakking);
+    });
+  }, [activeActivationsForYear, beerById, kostprijsversieById]);
+
+  const yearStrategy = useMemo(() => {
+    return (
+      verkoopprijzenRows.find((row) => String((row as any).record_type ?? "") === "jaarstrategie" && Number((row as any).jaar ?? 0) === selectedYear) ??
+      null
+    );
+  }, [verkoopprijzenRows, selectedYear]);
+
+  const verpakkingOverrideByProduct = useMemo(() => {
+    const map = new Map<string, VerkoopprijzenRow>();
+    verkoopprijzenRows
+      .filter((row) => String((row as any).record_type ?? "") === "verkoopstrategie_verpakking" && Number((row as any).jaar ?? 0) === selectedYear)
+      .forEach((row) => {
+        const productId = String((row as any).product_id ?? "");
+        if (productId) map.set(productId, row);
+      });
+    return map;
+  }, [verkoopprijzenRows, selectedYear]);
+
+  const productOverrideByScope = useMemo(() => {
+    const map = new Map<string, VerkoopprijzenRow>();
+    verkoopprijzenRows
+      .filter((row) => String((row as any).record_type ?? "") === "verkoopstrategie_product" && Number((row as any).jaar ?? 0) === selectedYear)
+      .forEach((row) => {
+        const bierId = String((row as any).bier_id ?? "");
+        const productId = String((row as any).product_id ?? "");
+        if (bierId && productId) map.set(`${bierId}:${productId}`, row);
+      });
+    return map;
+  }, [verkoopprijzenRows, selectedYear]);
+
+  const channelDefaultOpslag = useMemo(() => {
+    const map = new Map<string, number>();
+    activeChannels.forEach((c) => map.set(c.code, Number((c as any).default_marge_pct ?? 0) || 0));
+    return map;
+  }, [activeChannels]);
+
+  function getSellInPriceEx(row: ProductCostRow, channelCode: string) {
+    const productOverride = productOverrideByScope.get(`${row.bierId}:${row.productId}`) ?? null;
+    const verpakkingOverride = verpakkingOverrideByProduct.get(row.productId) ?? null;
+
+    const priceOverride =
+      getChannelSellInPriceOverride(productOverride, channelCode) ??
+      getChannelSellInPriceOverride(verpakkingOverride, channelCode);
+    if (priceOverride !== null) {
+      return { sellInEx: priceOverride, opslagPct: row.kostprijsEx > 0 ? ((priceOverride / row.kostprijsEx) - 1) * 100 : 0, source: "prijs" as const };
+    }
+
+    const opslagOverride =
+      getChannelOpslag(productOverride, channelCode) ??
+      getChannelOpslag(verpakkingOverride, channelCode) ??
+      getChannelOpslag(yearStrategy, channelCode) ??
+      channelDefaultOpslag.get(channelCode) ??
+      0;
+    return { sellInEx: calcSellInFromOpslag(row.kostprijsEx, opslagOverride), opslagPct: opslagOverride, source: "opslag" as const };
+  }
 
   const yearRows = useMemo(() => {
     const byCode = new Map<string, AdviesprijsRow>();
@@ -209,6 +450,108 @@ export function AdviesprijzenWorkspace(props: {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="editor-actions" style={{ marginTop: "0.85rem" }}>
+        <div className="editor-actions-group">
+          <button
+            type="button"
+            className="editor-button editor-button-secondary"
+            onClick={() => setOpenChannelCodes(channelCodes)}
+            disabled={isSaving}
+          >
+            Alles uitklappen
+          </button>
+          <button
+            type="button"
+            className="editor-button editor-button-secondary"
+            onClick={() => setOpenChannelCodes([])}
+            disabled={isSaving}
+          >
+            Alles inklappen
+          </button>
+        </div>
+        <div className="editor-actions-group" />
+      </div>
+
+      <div style={{ marginTop: "1rem" }}>
+        {activeChannels.map((channel) => {
+          const code = channel.code;
+          const open = openChannelCodes.includes(code);
+          const adviesOpslag = adviesOpslagByChannel.get(code) ?? 0;
+          return (
+            <details
+              key={code}
+              open={open}
+              className="module-card compact-card"
+              style={{ marginBottom: "0.9rem" }}
+              onToggle={(event) => {
+                const nextOpen = (event.currentTarget as HTMLDetailsElement).open;
+                setOpenChannelCodes((current) => {
+                  const exists = current.includes(code);
+                  if (nextOpen && !exists) return [...current, code];
+                  if (!nextOpen && exists) return current.filter((c) => c !== code);
+                  return current;
+                });
+              }}
+            >
+              <summary className="module-card-title" style={{ cursor: "pointer", display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span>{channel.naam}</span>
+                <span className="muted">Opslag: {round2(adviesOpslag).toLocaleString("nl-NL")}%</span>
+              </summary>
+              <div className="module-card-text" style={{ marginTop: "0.4rem" }}>
+                Read-only overzicht: kostprijs en verkoopprijs excl. BTW, adviesprijs (incl. BTW) wordt berekend en afgerond op 5 cent (altijd naar beneden).
+              </div>
+
+              <div className="data-table" style={{ marginTop: "0.8rem" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: "220px" }}>Bier</th>
+                      <th style={{ width: "200px" }}>Product</th>
+                      <th style={{ width: "160px" }}>Kostprijs (ex)</th>
+                      <th style={{ width: "160px" }}>Verkoopprijs (ex)</th>
+                      <th style={{ width: "240px" }}>Adviesprijs (incl)</th>
+                      <th style={{ width: "140px" }}>Opslag</th>
+                      <th style={{ width: "140px" }}>Marge klant</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productCostRows.map((row) => {
+                      const { sellInEx } = getSellInPriceEx(row, code);
+                      const btwPct = Number.isFinite(row.btwPct) ? row.btwPct : 0;
+                      const adviesExRaw = sellInEx * (1 + (adviesOpslag || 0) / 100);
+                      const adviesInclRaw = adviesExRaw * (1 + btwPct / 100);
+                      const adviesInclRounded = roundDownTo5Cents(adviesInclRaw);
+                      const adviesMin = Math.max(0, adviesInclRounded - 0.05);
+                      const adviesMax = adviesInclRounded + 0.05;
+
+                      const adviesExRounded = (1 + btwPct / 100) > 0 ? adviesInclRounded / (1 + btwPct / 100) : adviesExRaw;
+                      const margePct = adviesExRounded > 0 ? ((adviesExRounded - sellInEx) / adviesExRounded) * 100 : 0;
+                      return (
+                        <tr key={`${code}:${row.bierId}:${row.productType}:${row.productId}:${row.verpakking}`}>
+                          <td>
+                            <strong>{row.biernaam}</strong>
+                            <div className="muted">{row.productType}</div>
+                          </td>
+                          <td>{row.verpakking}</td>
+                          <td>{money(row.kostprijsEx)}</td>
+                          <td>{money(sellInEx)}</td>
+                          <td>
+                            {money(adviesMin)} - {money(adviesMax)}
+                            <div className="muted">BTW {round2(btwPct)}%</div>
+                          </td>
+                          <td>{round2(adviesOpslag).toLocaleString("nl-NL")}%</td>
+                          <td>{round2(margePct).toLocaleString("nl-NL")}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          );
+        })}
       </div>
 
       <div className="editor-actions wizard-footer-actions">
