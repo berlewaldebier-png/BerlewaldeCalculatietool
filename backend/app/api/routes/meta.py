@@ -90,6 +90,13 @@ def get_navigation() -> list[NavigationItem]:
             section="Verkoop",
         ),
         NavigationItem(
+            key="adviesprijzen",
+            label="Adviesprijzen",
+            description="Beheer adviesopslag per kanaal (sell-out).",
+            href="/adviesprijzen",
+            section="Verkoop",
+        ),
+        NavigationItem(
             key="prijsvoorstel",
             label="Prijsvoorstel maken",
             description="Maak prijsvoorstellen op basis van liters of producten.",

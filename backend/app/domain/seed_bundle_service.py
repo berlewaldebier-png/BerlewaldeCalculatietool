@@ -36,6 +36,7 @@ def _foundation_dataset_names() -> list[str]:
         "sales-strategy-years",
         "sales-strategy-products",
         "verkoopprijzen",
+        "adviesprijzen",
     ]
 
 
@@ -173,6 +174,7 @@ def _import_dataset_order(profile: SeedProfile) -> list[str]:
         "sales-strategy-years",
         "sales-strategy-products",
         "verkoopprijzen",
+        "adviesprijzen",
     ]
     if profile == "demo_full":
         return [
@@ -301,6 +303,7 @@ def audit_live_data(*, expected_year: int) -> dict[str, Any]:
         "sales-strategy-years",
         "sales-strategy-products",
         "verkoopprijzen",
+        "adviesprijzen",
         "kostprijsversies",
         "kostprijsproductactiveringen",
         "bieren",
