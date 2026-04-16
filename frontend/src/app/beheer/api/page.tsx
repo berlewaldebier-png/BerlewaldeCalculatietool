@@ -38,7 +38,9 @@ export default async function ApiIntegratiesPage() {
   const calls = [
     { name: "Connect", method: "GET", path: "/api/integrations/douano/connect", note: "Start OAuth2 authorization code flow." },
     { name: "Callback", method: "GET", path: "/api/integrations/douano/callback", note: "Ontvangt code en wisselt token(s) om." },
-    { name: "Status", method: "GET", path: "/api/integrations/douano/status", note: "Toont verbinding en token-metadata (zonder tokens)." }
+    { name: "Status", method: "GET", path: "/api/integrations/douano/status", note: "Toont verbinding en token-metadata (zonder tokens)." },
+    { name: "Companies (discover)", method: "GET", path: "/api/integrations/douano/discover-companies", note: "Probeert bekende paden om customers endpoint te vinden." },
+    { name: "HTTP debug", method: "GET", path: "/api/integrations/douano/debug?path=/api", note: "Debug helper om te zien of je een HTML pagina of API JSON raakt." }
   ];
 
   const datasets = [

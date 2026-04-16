@@ -117,6 +117,57 @@ def _probe_url(url: str, method: str) -> dict[str, Any]:
         return {"ok": False, "status": None, "url": url, "error": str(exc)}
 
 
+def _require_douano_tokens() -> dict[str, Any]:
+    tokens = douano_oauth_storage.get_tokens("douano") or {}
+    if not tokens:
+        raise HTTPException(status_code=400, detail="Douano is niet gekoppeld.")
+    access = str(tokens.get("access_token", "") or "")
+    if not access:
+        raise HTTPException(status_code=400, detail="Douano access_token ontbreekt.")
+    return tokens
+
+
+def _douano_api_base_url(tokens: dict[str, Any]) -> str:
+    # Default: reuse OAuth base_url; allow override for setups where API host differs.
+    explicit = os.getenv("DOUANO_API_BASE_URL", "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    return str(tokens.get("base_url", "") or "").strip().rstrip("/") or _douano_base_url()
+
+
+def _douano_request(
+    *,
+    tokens: dict[str, Any],
+    method: str,
+    url: str,
+    form: dict[str, str] | None = None,
+) -> tuple[int, dict[str, str], str]:
+    opener = urllib.request.build_opener(_NoRedirect())
+    body = None
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "calculatietool/0.1 (+http://localhost)",
+        "Authorization": f"Bearer {tokens.get('access_token','')}",
+    }
+    if form is not None:
+        body = urllib.parse.urlencode(form).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers)
+    try:
+        with opener.open(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return int(getattr(resp, "status", 200) or 200), dict(resp.headers.items()), raw
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            raw = ""
+        hdrs = getattr(exc, "headers", None)
+        return int(getattr(exc, "code", 0) or 0), (dict(hdrs.items()) if hdrs else {}), raw
+    except Exception as exc:
+        return 0, {}, str(exc)
+
+
 def _set_state_cookie(response: Response, state: str) -> None:
     response.set_cookie(
         "douano_oauth_state",
@@ -176,6 +227,77 @@ def get_douano_probe() -> dict[str, Any]:
         "token_url": _douano_token_url(),
         "candidates": results,
         "hint": "Kies de token endpoint die POST accepteert (status 200/400/401). 405 betekent fout endpoint/method.",
+    }
+
+
+@router.get("/douano/debug")
+def get_douano_debug(
+    path: str = Query("/api", description="Path on Douano host, e.g. /api/public/v1/core/companies"),
+    query: str = Query("", description="Raw query string without ?, e.g. filter_by_is_customer=true"),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    base = _douano_api_base_url(tokens)
+    p = (path or "").strip()
+    if not p.startswith("/"):
+        p = "/" + p
+    url = f"{base}{p}"
+    if query.strip():
+        url = f"{url}?{query.strip().lstrip('?')}"
+    status, headers, raw = _douano_request(tokens=tokens, method="GET", url=url)
+    snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+    if len(snippet) > 800:
+        snippet = snippet[:800] + "…"
+    return {
+        "api_base_url": base,
+        "url": url,
+        "status": status,
+        "content_type": headers.get("Content-Type", ""),
+        "server": headers.get("Server", ""),
+        "body_snippet": snippet,
+        "hint": "404 betekent meestal verkeerd pad/host. 401 betekent token ok maar scope/permissions missen. 200 + HTML betekent webpagina i.p.v. API.",
+    }
+
+
+@router.get("/douano/discover-companies")
+def get_douano_discover_companies() -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    base = _douano_api_base_url(tokens)
+
+    candidates = [
+        "/api/public/v1/core/companies",
+        "/api/public/v1/companies",
+        "/api/v1/core/companies",
+        "/api/v1/companies",
+        "/api/core/companies",
+        "/api/companies",
+        "/public/v1/core/companies",
+        "/public/v1/companies",
+        "/v1/core/companies",
+        "/v1/companies",
+        "/core/companies",
+        "/companies",
+    ]
+    query = "filter_by_is_customer=true&filter_by_is_active=true"
+
+    results: list[dict[str, Any]] = []
+    first_non_404 = ""
+    for p in candidates:
+        url = f"{base}{p}?{query}"
+        status, headers, raw = _douano_request(tokens=tokens, method="GET", url=url)
+        ct = headers.get("Content-Type", "")
+        short = raw.strip().replace("\r", " ").replace("\n", " ")
+        if len(short) > 220:
+            short = short[:220] + "…"
+        results.append({"path": p, "status": status, "content_type": ct, "body_snippet": short})
+        if not first_non_404 and status and status != 404:
+            first_non_404 = p
+
+    return {
+        "api_base_url": base,
+        "query": query,
+        "best_guess_path": first_non_404,
+        "results": results,
+        "note": "Als alles 404 is, dan zit de companies resource op een ander prefix of aparte API host. Stel dan DOUANO_API_BASE_URL in.",
     }
 
 
@@ -303,6 +425,7 @@ def get_douano_status() -> dict[str, Any]:
         "connected": True,
         "provider": tokens.get("provider", "douano"),
         "base_url": tokens.get("base_url", ""),
+        "api_base_url": os.getenv("DOUANO_API_BASE_URL", "").strip() or "",
         "token_type": tokens.get("token_type", ""),
         "scope": tokens.get("scope", ""),
         "expires_at": tokens.get("expires_at", ""),
