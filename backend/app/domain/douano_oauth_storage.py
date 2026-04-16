@@ -117,7 +117,7 @@ def get_tokens(provider: str = "douano") -> dict[str, Any] | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT base_url, access_token, refresh_token, token_type, scope, expires_at, raw_payload
+                SELECT base_url, access_token, refresh_token, token_type, scope, expires_at, raw_payload, created_at, updated_at
                 FROM douano_oauth_tokens
                 WHERE provider = %s
                 """,
@@ -126,7 +126,7 @@ def get_tokens(provider: str = "douano") -> dict[str, Any] | None:
             row = cur.fetchone()
     if not row:
         return None
-    base_url, access_token, refresh_token, token_type, scope, expires_at, raw = row
+    base_url, access_token, refresh_token, token_type, scope, expires_at, raw, created_at, updated_at = row
     raw_payload: Any = raw
     if isinstance(raw_payload, str):
         try:
@@ -141,6 +141,8 @@ def get_tokens(provider: str = "douano") -> dict[str, Any] | None:
         "token_type": str(token_type or ""),
         "scope": str(scope or ""),
         "expires_at": expires_at.isoformat() if hasattr(expires_at, "isoformat") and expires_at else "",
+        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else "",
+        "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") and updated_at else "",
         "raw_payload": raw_payload if isinstance(raw_payload, dict) else {},
     }
 

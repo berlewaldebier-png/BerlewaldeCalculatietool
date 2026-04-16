@@ -295,5 +295,18 @@ def get_douano_callback(
 @router.get("/douano/status")
 def get_douano_status() -> dict[str, Any]:
     tokens = douano_oauth_storage.get_tokens("douano")
-    return {"connected": bool(tokens), "tokens": tokens or {}}
+    if not tokens:
+        return {"connected": False}
+
+    # Never expose raw tokens in UI responses.
+    return {
+        "connected": True,
+        "provider": tokens.get("provider", "douano"),
+        "base_url": tokens.get("base_url", ""),
+        "token_type": tokens.get("token_type", ""),
+        "scope": tokens.get("scope", ""),
+        "expires_at": tokens.get("expires_at", ""),
+        "created_at": tokens.get("created_at", ""),
+        "updated_at": tokens.get("updated_at", ""),
+    }
 
