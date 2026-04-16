@@ -29,7 +29,7 @@ app.add_middleware(
 app.include_router(meta_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
-app.include_router(integrations_router)
+app.include_router(integrations_router, prefix="/api")
 
 
 @app.middleware("http")
