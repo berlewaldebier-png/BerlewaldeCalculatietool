@@ -81,6 +81,42 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _probe_url(url: str, method: str) -> dict[str, Any]:
+    opener = urllib.request.build_opener(_NoRedirect())
+    req = urllib.request.Request(
+        url,
+        data=(b"x=1" if method.upper() == "POST" else None),
+        method=method.upper(),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "calculatietool/0.1 (+http://localhost)",
+        },
+    )
+    try:
+        with opener.open(req, timeout=10) as resp:
+            return {
+                "ok": True,
+                "status": getattr(resp, "status", None),
+                "url": getattr(resp, "url", url),
+                "server": resp.headers.get("Server", ""),
+                "allow": resp.headers.get("Allow", ""),
+                "location": resp.headers.get("Location", ""),
+            }
+    except urllib.error.HTTPError as exc:
+        headers = getattr(exc, "headers", None)
+        return {
+            "ok": False,
+            "status": getattr(exc, "code", None),
+            "url": getattr(exc, "geturl", lambda: url)() or url,
+            "server": (headers.get("Server", "") if headers else ""),
+            "allow": (headers.get("Allow", "") if headers else ""),
+            "location": (headers.get("Location", "") if headers else ""),
+        }
+    except Exception as exc:
+        return {"ok": False, "status": None, "url": url, "error": str(exc)}
+
+
 def _set_state_cookie(response: Response, state: str) -> None:
     response.set_cookie(
         "douano_oauth_state",
@@ -109,6 +145,38 @@ def get_douano_connect() -> RedirectResponse:
     resp = RedirectResponse(url=url, status_code=302)
     _set_state_cookie(resp, state)
     return resp
+
+
+@router.get("/douano/probe")
+def get_douano_probe() -> dict[str, Any]:
+    base = _douano_base_url()
+    candidates = [
+        _douano_token_url(),
+        f"{base}/oauth/token",
+        f"{base}/oauth/token/",
+        f"{base}/api/oauth/token",
+        f"{base}/api/oauth/token/",
+    ]
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for u in candidates:
+        u2 = (u or "").strip()
+        if not u2 or u2 in seen:
+            continue
+        seen.add(u2)
+        uniq.append(u2)
+
+    results: list[dict[str, Any]] = []
+    for u in uniq:
+        results.append({"url": u, "options": _probe_url(u, "OPTIONS"), "post": _probe_url(u, "POST"), "get": _probe_url(u, "GET")})
+
+    return {
+        "base_url": base,
+        "authorize_url": _douano_authorize_url(),
+        "token_url": _douano_token_url(),
+        "candidates": results,
+        "hint": "Kies de token endpoint die POST accepteert (status 200/400/401). 405 betekent fout endpoint/method.",
+    }
 
 
 @router.get("/douano/callback")
