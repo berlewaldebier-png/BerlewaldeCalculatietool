@@ -55,6 +55,32 @@ def _douano_scopes() -> str:
     return os.getenv("DOUANO_SCOPES", "").strip()
 
 
+def _douano_authorize_url() -> str:
+    # Allow overriding exact endpoint since SaaS setups sometimes differ.
+    url = os.getenv("DOUANO_AUTHORIZE_URL", "").strip().rstrip("/")
+    if url:
+        return url
+    path = os.getenv("DOUANO_AUTHORIZE_PATH", "/authorize").strip() or "/authorize"
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"{_douano_base_url()}{path}"
+
+
+def _douano_token_url() -> str:
+    url = os.getenv("DOUANO_TOKEN_URL", "").strip().rstrip("/")
+    if url:
+        return url
+    path = os.getenv("DOUANO_TOKEN_PATH", "/oauth/token").strip() or "/oauth/token"
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"{_douano_base_url()}{path}"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
 def _set_state_cookie(response: Response, state: str) -> None:
     response.set_cookie(
         "douano_oauth_state",
@@ -79,7 +105,7 @@ def get_douano_connect() -> RedirectResponse:
     scopes = _douano_scopes()
     if scopes:
         params["scope"] = scopes
-    url = f"{_douano_base_url()}/authorize?{urllib.parse.urlencode(params)}"
+    url = f"{_douano_authorize_url()}?{urllib.parse.urlencode(params)}"
     resp = RedirectResponse(url=url, status_code=302)
     _set_state_cookie(resp, state)
     return resp
@@ -97,7 +123,7 @@ def get_douano_callback(
     if not expected_state or not state or state != expected_state:
         raise HTTPException(status_code=400, detail="Douano callback state mismatch.")
 
-    token_url = f"{_douano_base_url()}/oauth/token"
+    token_url = _douano_token_url()
     form = {
         "grant_type": "authorization_code",
         "client_id": _douano_client_id(),
@@ -118,7 +144,8 @@ def get_douano_callback(
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        opener = urllib.request.build_opener(_NoRedirect())
+        with opener.open(req, timeout=20) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         # Include response body + Allow header when present; 405 usually means wrong method/endpoint.
@@ -127,12 +154,24 @@ def get_douano_callback(
         except Exception:
             body_text = ""
         allow = ""
+        location = ""
+        final_url = ""
         try:
             allow = str(exc.headers.get("Allow", "") or "")
+            location = str(exc.headers.get("Location", "") or "")
         except Exception:
             allow = ""
+            location = ""
+        try:
+            final_url = str(exc.geturl() or "")
+        except Exception:
+            final_url = ""
         msg = f"HTTP {getattr(exc, 'code', '?')} {getattr(exc, 'reason', '')}".strip()
         extra = []
+        if final_url:
+            extra.append(f"URL={final_url}")
+        if location:
+            extra.append(f"Location={location}")
         if allow:
             extra.append(f"Allow={allow}")
         if body_text:
