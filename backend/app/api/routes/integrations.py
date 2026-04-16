@@ -5,6 +5,7 @@ import os
 import secrets
 import urllib.parse
 import urllib.request
+import urllib.error
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -112,11 +113,38 @@ def get_douano_callback(
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
+            # Some providers behave oddly without a UA. Keep it explicit for debugging.
+            "User-Agent": "calculatietool/0.1 (+http://localhost)",
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        # Include response body + Allow header when present; 405 usually means wrong method/endpoint.
+        try:
+            body_text = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body_text = ""
+        allow = ""
+        try:
+            allow = str(exc.headers.get("Allow", "") or "")
+        except Exception:
+            allow = ""
+        msg = f"HTTP {getattr(exc, 'code', '?')} {getattr(exc, 'reason', '')}".strip()
+        extra = []
+        if allow:
+            extra.append(f"Allow={allow}")
+        if body_text:
+            # Keep it short; Douano can return HTML.
+            snippet = body_text.strip().replace("\r", " ").replace("\n", " ")
+            if len(snippet) > 500:
+                snippet = snippet[:500] + "…"
+            extra.append(f"Body={snippet}")
+        detail = f"Douano token exchange mislukt: {msg}"
+        if extra:
+            detail += f" ({'; '.join(extra)})"
+        raise HTTPException(status_code=400, detail=detail) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Douano token exchange mislukt: {exc}") from exc
 
