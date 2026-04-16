@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.data import router as data_router
+from app.api.routes.integrations import router as integrations_router
 from app.api.routes.meta import router as meta_router
 from app.domain import postgres_storage
 
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(meta_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(integrations_router)
 
 
 @app.middleware("http")
