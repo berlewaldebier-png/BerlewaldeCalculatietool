@@ -52,6 +52,11 @@ function money(value: number) {
   return safe.toLocaleString("nl-NL", { style: "currency", currency: "EUR" });
 }
 
+function formatLiters(value: number) {
+  const safe = Number.isFinite(value) ? value : 0;
+  return safe.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function IconButton({
   label,
   title,
@@ -69,7 +74,19 @@ function IconButton({
       title={title}
       onClick={onClick}
     >
-      X
+      {label === "Bewerken" ? (
+        <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 20h4l10-10-4-4L4 16v4Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="m12 6 4 4" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 7V5h6v2" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 7l1 12h8l1-12" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v5M14 11v5" />
+        </svg>
+      )}
     </button>
   );
 }
@@ -207,11 +224,13 @@ export function VerkoopbareArtikelenEditor(props: {
     return Array.from(set).filter((y) => y > 0).sort((a, b) => a - b);
   }, [productionYears, packagingPrices]);
 
-  const [selectedYear, setSelectedYear] = useState<number>(() => years[years.length - 1] ?? new Date().getFullYear());
+  const selectedYear = useMemo(() => years[years.length - 1] ?? new Date().getFullYear(), [years]);
 
   const packagingPriceById = useMemo(() => {
     const map = new Map<string, number>();
-    packagingPrices.filter((row) => row.jaar === selectedYear).forEach((row) => map.set(row.verpakkingsonderdeel_id, row.prijs_per_stuk));
+    packagingPrices
+      .filter((row) => row.jaar === selectedYear)
+      .forEach((row) => map.set(row.verpakkingsonderdeel_id, row.prijs_per_stuk));
     return map;
   }, [packagingPrices, selectedYear]);
 
@@ -404,9 +423,20 @@ export function VerkoopbareArtikelenEditor(props: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(stripUiFields(rows))
       });
-      if (!response.ok) throw new Error("Opslaan mislukt");
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Opslaan mislukt");
+      }
+      // Re-fetch canonical rows from the server so the UI always shows what is persisted.
+      const fresh = await fetch(`${API_BASE_URL}/data/dataset/catalog-products`, { method: "GET" });
+      if (fresh.ok) {
+        const nextPayload = (await fresh.json()) as GenericRecord[];
+        const normalized = (Array.isArray(nextPayload) ? nextPayload : [])
+          .filter((row) => row && typeof row === "object")
+          .map((row) => normalizeCatalogProduct(row as any));
+        setRows(normalized);
+      }
       setStatus("Opgeslagen.");
-      router.refresh();
     } catch {
       setStatus("Opslaan mislukt.");
     } finally {
@@ -419,28 +449,13 @@ export function VerkoopbareArtikelenEditor(props: {
       <div className="module-card-header">
         <div className="module-card-title">Verkoopbare artikelen</div>
         <div className="module-card-text">
-          Regels: type, onderdeel, omschrijving, aantal en kostprijs. Bier/onderdeel-kostprijzen zijn readonly en komen uit actieve kostprijzen ({selectedYear}).
+          Regels: onderdeel, omschrijving, aantal en kostprijs. Bier/onderdeel-kostprijzen zijn readonly en komen uit actieve kostprijzen ({selectedYear}).
         </div>
       </div>
 
       <div className="editor-toolbar">
         <div className="editor-toolbar-meta">
           <span className="editor-pill">{rows.length} artikelen</span>
-        </div>
-        <div className="editor-toolbar-actions">
-          <label className="inline-field">
-            <span>Jaar</span>
-            <select className="dataset-input" value={String(selectedYear)} onChange={(e) => setSelectedYear(Number(e.target.value))}>
-              {years.map((y) => (
-                <option key={y} value={String(y)}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" className="editor-button editor-button-secondary" onClick={addCatalogProduct}>
-            Artikel toevoegen
-          </button>
         </div>
       </div>
 
@@ -449,9 +464,9 @@ export function VerkoopbareArtikelenEditor(props: {
           <thead>
             <tr>
               <th>Naam</th>
-              <th>Type</th>
-              <th>Actief</th>
-              <th>Regels</th>
+              <th style={{ width: "140px" }}>Inhoud (L)</th>
+              <th style={{ width: "160px" }}>Kostprijs (ex)</th>
+              <th style={{ width: "110px" }}>Regels</th>
               <th />
             </tr>
           </thead>
@@ -483,19 +498,15 @@ export function VerkoopbareArtikelenEditor(props: {
                         }
                       />
                     </td>
-                    <td>{row.kind}</td>
-                    <td>{row.actief ? "ja" : "nee"}</td>
+                    <td>{formatLiters(totals.liters)}</td>
+                    <td>{money(totals.cost)}</td>
                     <td>{totals.lineCount}</td>
                     <td style={{ textAlign: "right" }}>
-                      <button
-                        type="button"
-                        className="icon-button-table"
-                        aria-label="Bewerken"
+                      <IconButton
+                        label="Bewerken"
                         title="Bewerken"
                         onClick={() => setExpandedId((cur) => (cur === row.id ? null : row.id))}
-                      >
-                        Edit
-                      </button>
+                      />
                       <IconButton
                         label="Artikel verwijderen"
                         title="Artikel verwijderen"
@@ -516,7 +527,7 @@ export function VerkoopbareArtikelenEditor(props: {
                           </label>
                           <label className="nested-field">
                             <span>Inhoud (liter)</span>
-                            <input className="dataset-input dataset-input-readonly" value={totals.liters.toFixed(2)} readOnly />
+                            <input className="dataset-input dataset-input-readonly" value={formatLiters(totals.liters)} readOnly />
                           </label>
                           <label className="nested-field">
                             <span>Kostprijs (ex)</span>
@@ -531,9 +542,6 @@ export function VerkoopbareArtikelenEditor(props: {
                         <div className="nested-subsection" style={{ marginTop: "1rem" }}>
                           <div className="nested-subsection-header">
                             <div className="nested-subsection-title">Regels</div>
-                            <button type="button" className="editor-button editor-button-secondary" onClick={() => addLine(row.id)}>
-                              Regel toevoegen
-                            </button>
                           </div>
 
                           <div className="dataset-editor-scroll" style={{ borderRadius: "12px" }}>
@@ -659,6 +667,12 @@ export function VerkoopbareArtikelenEditor(props: {
                               </tbody>
                             </table>
                           </div>
+
+                          <div style={{ marginTop: "0.75rem" }}>
+                            <button type="button" className="editor-button editor-button-secondary" onClick={() => addLine(row.id)}>
+                              Regel toevoegen
+                            </button>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -671,6 +685,9 @@ export function VerkoopbareArtikelenEditor(props: {
       </div>
 
       <div className="editor-actions">
+        <button type="button" className="editor-button editor-button-secondary" onClick={addCatalogProduct}>
+          Artikel toevoegen
+        </button>
         <button type="button" className="editor-button editor-button-primary" onClick={handleSave} disabled={isSaving}>
           {isSaving ? "Opslaan..." : "Opslaan"}
         </button>
