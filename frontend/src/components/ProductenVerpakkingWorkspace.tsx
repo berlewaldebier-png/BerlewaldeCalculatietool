@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { NestedCollectionEditor } from "@/components/NestedCollectionEditor";
+import { VerkoopbareArtikelenEditor } from "@/components/VerkoopbareArtikelenEditor";
 import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
@@ -16,6 +17,9 @@ type ProductenVerpakkingWorkspaceProps = {
   catalogusproducten: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
   bieren: GenericRecord[];
+  productie?: Record<string, any>;
+  kostprijsversies?: GenericRecord[];
+  kostprijsproductactiveringen?: GenericRecord[];
 };
 
 type SortDirection = "asc" | "desc";
@@ -147,7 +151,10 @@ export function ProductenVerpakkingWorkspace({
   samengesteldeProducten,
   catalogusproducten,
   verpakkingsonderdeelPrijzen,
-  bieren
+  bieren,
+  productie,
+  kostprijsversies,
+  kostprijsproductactiveringen
 }: ProductenVerpakkingWorkspaceProps) {
   const router = useRouter();
   const verpakkingsonderdelenRows = Array.isArray(verpakkingsonderdelen) ? verpakkingsonderdelen : [];
@@ -160,6 +167,9 @@ export function ProductenVerpakkingWorkspace({
     ? verpakkingsonderdeelPrijzen
     : [];
   const bierenRows = Array.isArray(bieren) ? bieren : [];
+  const productieMap = (productie && typeof productie === "object" ? (productie as Record<string, any>) : {}) ?? {};
+  const kostprijsversieRows = Array.isArray(kostprijsversies) ? kostprijsversies : [];
+  const kostprijsActivationRows = Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [];
 
   const [activeTab, setActiveTab] = useState<
     "onderdelen" | "basis" | "samengesteld" | "catalogus" | "jaarprijzen" | "kostenoverzicht"
@@ -232,21 +242,7 @@ export function ProductenVerpakkingWorkspace({
     [basisproductenRows, verpakkingsonderdelenRows]
   );
 
-  const bierOptions = useMemo(
-    () =>
-      bierenRows
-        .filter((row) => row && typeof row === "object")
-        .map((row) => {
-          const id = String((row as any).id ?? "");
-          return {
-            value: id,
-            label: String((row as any).biernaam ?? (row as any).naam ?? id),
-            payload: { bier_id: id }
-          };
-        })
-        .filter((row) => row.value),
-    [bierenRows]
-  );
+  // Beer options are now resolved via kostprijs activeringen inside VerkoopbareArtikelenEditor.
 
   const usageByComponentId = useMemo(() => {
     const usage = new Map<string, number>();
@@ -867,129 +863,16 @@ export function ProductenVerpakkingWorkspace({
       ) : null}
 
       {activeTab === "catalogus" ? (
-        <NestedCollectionEditor
-          endpoint="/data/dataset/catalog-products"
+        <VerkoopbareArtikelenEditor
           initialRows={catalogusproductenRows}
-          addRowTemplate={{
-            id: "",
-            code: "",
-            naam: "",
-            kind: "giftpack",
-            actief: true,
-            bom_lines: [],
-          }}
-          fields={[
-            { key: "naam", label: "Naam" },
-            { key: "code", label: "Code" },
-            {
-              key: "kind",
-              label: "Type",
-              type: "select",
-              options: [
-                { value: "giftpack", label: "Geschenkverpakking" },
-                { value: "dienst", label: "Dienst" },
-                { value: "catalog", label: "Overig" },
-              ],
-            },
-            { key: "actief", label: "Actief", type: "checkbox" },
-          ]}
-          nestedKey="bom_lines"
-          nestedLabel="Regels"
-          nestedRowTemplate={{
-            id: "",
-            line_kind: "beer",
-            quantity: 1,
-            bier_id: "",
-            product_id: "",
-            product_type: "basis",
-            packaging_component_id: "",
-            omschrijving: "",
-            unit_cost_ex: null,
-          }}
-          nestedFields={[
-            {
-              key: "line_kind",
-              label: "Soort",
-              type: "select",
-              options: [
-                { value: "beer", label: "Bier" },
-                { value: "packaging_component", label: "Verpakkingsonderdeel" },
-                { value: "labor", label: "Loon" },
-                { value: "other", label: "Overig" },
-              ],
-              resetOnSelect: true,
-              preserveOnSelect: ["quantity"],
-            },
-            {
-              key: "beer_choice",
-              label: "Onderdeel",
-              type: "select",
-              visible: ({ nestedRow }) => String((nestedRow as any).line_kind ?? "") === "beer",
-              options: () => {
-                const packagingOptions: { id: string; label: string; product_type: "basis" | "samengesteld" }[] = [
-                  ...basisproductenRows.map((row) => ({
-                    id: String((row as any).id ?? ""),
-                    label: String((row as any).omschrijving ?? ""),
-                    product_type: "basis" as const
-                  })),
-                  ...samengesteldeProductenRows.map((row) => ({
-                    id: String((row as any).id ?? ""),
-                    label: String((row as any).omschrijving ?? ""),
-                    product_type: "samengesteld" as const
-                  }))
-                ].filter((row) => row.id && row.label);
-
-                const out: any[] = [];
-                for (const b of bierOptions) {
-                  for (const p of packagingOptions) {
-                    out.push({
-                      value: `${b.value}|${p.product_type}|${p.id}`,
-                      label: `${b.label} - ${p.label}`,
-                      payload: {
-                        bier_id: b.value,
-                        product_type: p.product_type,
-                        product_id: p.id
-                      }
-                    });
-                  }
-                }
-                return out;
-              },
-            },
-            {
-              key: "packaging_component_id",
-              label: "Onderdeel",
-              type: "select",
-              visible: ({ nestedRow }) => String((nestedRow as any).line_kind ?? "") === "packaging_component",
-              options: () => packagingComponentOptions,
-            },
-            {
-              key: "omschrijving",
-              label: "Omschrijving",
-              type: "text",
-              visible: ({ nestedRow }) => {
-                const kind = String((nestedRow as any).line_kind ?? "");
-                return kind === "labor" || kind === "other";
-              },
-            },
-            {
-              key: "unit_cost_ex",
-              label: "Kostprijs (ex)",
-              type: "number",
-              visible: ({ nestedRow }) => {
-                const kind = String((nestedRow as any).line_kind ?? "");
-                return kind === "labor" || kind === "other";
-              },
-            },
-            { key: "quantity", label: "Aantal", type: "number" },
-          ]}
-          compactSummaryColumns={[
-            { key: "naam", label: "Naam" },
-            { key: "kind", label: "Type" },
-            { key: "bom_lines", label: "Regels", type: "count" },
-          ]}
-          title="Verkoopbare artikelen"
-          description="Verkoopbare artikelen zoals giftpacks en diensten. Voeg regels toe (bier, verpakkingsonderdeel, loon, overig)."
+          basisproducten={basisproductenRows}
+          samengesteldeProducten={samengesteldeProductenRows}
+          verpakkingsonderdelen={verpakkingsonderdelenRows}
+          verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijsRows}
+          productie={productieMap}
+          bieren={bierenRows}
+          kostprijsversies={kostprijsversieRows}
+          kostprijsproductactiveringen={kostprijsActivationRows}
         />
       ) : null}
 

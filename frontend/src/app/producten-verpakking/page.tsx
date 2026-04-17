@@ -10,7 +10,10 @@ export default async function ProductenVerpakkingPage() {
       "composite-product-masters",
       "catalog-products",
       "packaging-component-prices",
-      "bieren"
+      "bieren",
+      "productie",
+      "kostprijsversies",
+      "kostprijsproductactiveringen"
     ],
     true,
     "/producten-verpakking"
@@ -23,6 +26,9 @@ export default async function ProductenVerpakkingPage() {
   const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
   const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
+  const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
+  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
 
   return (
     <PageShell
@@ -37,6 +43,10 @@ export default async function ProductenVerpakkingPage() {
         samengesteldeProducten={samengestelde}
         catalogusproducten={catalogusproducten}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
+        bieren={bieren}
+        productie={productie}
+        kostprijsversies={kostprijsversies}
+        kostprijsproductactiveringen={kostprijsproductactiveringen}
       />
     </PageShell>
   );
