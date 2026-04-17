@@ -14,6 +14,9 @@ type PrijsvoorstelWorkspaceProps = {
   verkoopprijzen: GenericRecord[];
   channels: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
+  catalogusproducten: GenericRecord[];
+  verpakkingsonderdelen: GenericRecord[];
+  verpakkingsonderdeelPrijzen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   initialMode?: string;
@@ -32,6 +35,9 @@ export function PrijsvoorstelWorkspace({
   verkoopprijzen,
   channels,
   kostprijsproductactiveringen,
+  catalogusproducten,
+  verpakkingsonderdelen,
+  verpakkingsonderdeelPrijzen,
   basisproducten,
   samengesteldeProducten,
   initialMode,
@@ -111,6 +117,9 @@ export function PrijsvoorstelWorkspace({
         verkoopprijzen={verkoopprijzen}
         channels={channels}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
+        catalogusproducten={catalogusproducten}
+        verpakkingsonderdelen={verpakkingsonderdelen}
+        verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         startWithNew
@@ -131,6 +140,9 @@ export function PrijsvoorstelWorkspace({
         verkoopprijzen={verkoopprijzen}
         channels={channels}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
+        catalogusproducten={catalogusproducten}
+        verpakkingsonderdelen={verpakkingsonderdelen}
+        verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         initialSelectedId={selectedId}

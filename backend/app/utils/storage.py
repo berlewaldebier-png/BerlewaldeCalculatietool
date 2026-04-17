@@ -5341,12 +5341,45 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    catalog_product_rows_source = record.get("catalog_product_rows", [])
+    if not isinstance(catalog_product_rows_source, list):
+        catalog_product_rows_source = []
+    catalog_product_rows: list[dict[str, Any]] = []
+    for row in catalog_product_rows_source:
+        if not isinstance(row, dict):
+            continue
+        catalog_product_rows.append(
+            {
+                "id": str(row.get("id", "") or uuid4()),
+                "catalog_product_id": str(row.get("catalog_product_id", "") or ""),
+                "naam": str(row.get("naam", "") or ""),
+                "aantal": _float_value(row.get("aantal")),
+                "korting_pct": _float_value(row.get("korting_pct")),
+                "included": bool(row.get("included", True)),
+                "cost_at_quote": _float_value(row.get("cost_at_quote")),
+                "sales_price_at_quote": _float_value(row.get("sales_price_at_quote")),
+                "revenue_at_quote": _float_value(row.get("revenue_at_quote")),
+                "margin_at_quote": _float_value(row.get("margin_at_quote")),
+                "target_margin_pct_at_quote": _float_value(row.get("target_margin_pct_at_quote")),
+                "channel_at_quote": str(row.get("channel_at_quote", "") or ""),
+            }
+        )
+
     selected_bier_ids_source = record.get("selected_bier_ids", [])
     if not isinstance(selected_bier_ids_source, list):
         selected_bier_ids_source = []
     selected_bier_ids = [
         str(value or "")
         for value in selected_bier_ids_source
+        if str(value or "").strip()
+    ]
+
+    selected_catalog_product_ids_source = record.get("selected_catalog_product_ids", [])
+    if not isinstance(selected_catalog_product_ids_source, list):
+        selected_catalog_product_ids_source = []
+    selected_catalog_product_ids = [
+        str(value or "")
+        for value in selected_catalog_product_ids_source
         if str(value or "").strip()
     ]
     selected_kanalen_source = record.get("selected_kanalen", [])
@@ -5455,11 +5488,13 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         "offer_level": str(record.get("offer_level", "samengesteld") or "samengesteld"),
         "bier_id": str(record.get("bier_id", "") or ""),
         "selected_bier_ids": selected_bier_ids,
+        "selected_catalog_product_ids": selected_catalog_product_ids,
         "kostprijsversie_ids": kostprijsversie_ids,
         "deleted_product_refs": deleted_product_refs,
         "staffels": staffels,
         "product_rows": product_rows,
         "beer_rows": beer_rows,
+        "catalog_product_rows": catalog_product_rows,
         "last_step": int(record.get("last_step", 1) or 1),
         "created_at": created_at,
         "updated_at": updated_at,
