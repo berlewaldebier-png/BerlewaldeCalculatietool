@@ -16,6 +16,9 @@ type PrijsvoorstelWizardProps = {
   verkoopprijzen: GenericRecord[];
   channels: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
+  catalogusproducten: GenericRecord[];
+  verpakkingsonderdelen: GenericRecord[];
+  verpakkingsonderdeelPrijzen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   initialSelectedId?: string;
@@ -105,7 +108,7 @@ type ProductDisplayRow = {
   kostprijsversieId: string;
   included: boolean;
   productId: string;
-  productType: "basis" | "samengesteld";
+  productType: "basis" | "samengesteld" | "catalog";
   productKey: string;
   verpakking: string;
   aantal: number;
@@ -433,6 +436,9 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
     selected_bier_ids: Array.isArray(raw.selected_bier_ids)
       ? raw.selected_bier_ids.map((value) => String(value ?? ""))
       : [],
+    selected_catalog_product_ids: Array.isArray(raw.selected_catalog_product_ids)
+      ? raw.selected_catalog_product_ids.map((value) => String(value ?? "")).filter(Boolean)
+      : [],
     kostprijsversie_ids: Array.isArray(raw.kostprijsversie_ids)
       ? raw.kostprijsversie_ids.map((value) => String(value ?? "")).filter(Boolean)
       : [],
@@ -440,6 +446,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
     staffels: Array.isArray(raw.staffels) ? raw.staffels : [],
     product_rows: normalizeProductRows,
     beer_rows: normalizeBeerRows,
+    catalog_product_rows: Array.isArray(raw.catalog_product_rows) ? raw.catalog_product_rows : [],
     last_step: Number(raw.last_step ?? 1),
     finalized_at: String(raw.finalized_at ?? "")
   };
@@ -469,11 +476,13 @@ function createEmptyPrijsvoorstel(defaultYear?: number): GenericRecord {
     reference_channels: [],
     bier_id: "",
     selected_bier_ids: [],
+    selected_catalog_product_ids: [],
     kostprijsversie_ids: [],
     deleted_product_refs: [],
     staffels: [],
     product_rows: [],
     beer_rows: [],
+    catalog_product_rows: [],
     last_step: 1,
     finalized_at: ""
   });
@@ -504,6 +513,9 @@ export function PrijsvoorstelWizard({
   verkoopprijzen,
   channels,
   kostprijsproductactiveringen,
+  catalogusproducten,
+  verpakkingsonderdelen,
+  verpakkingsonderdeelPrijzen,
   basisproducten,
   samengesteldeProducten,
   initialSelectedId,
@@ -765,6 +777,100 @@ export function PrijsvoorstelWizard({
 
     return options.sort((left, right) => left.label.localeCompare(right.label, "nl-NL"));
   }, [actieveKostprijsversiesCurrentYear, bierNameMap, current.bier_id, current.selected_bier_ids]);
+
+  const catalogProductOptionMap = useMemo(() => {
+    const map = new Map<string, { id: string; naam: string; actief: boolean; bom_lines: GenericRecord[] }>();
+    for (const raw of Array.isArray(catalogusproducten) ? catalogusproducten : []) {
+      if (!raw || typeof raw !== "object") continue;
+      const id = String((raw as any).id ?? "");
+      if (!id) continue;
+      const naam = String((raw as any).naam ?? (raw as any).name ?? "").trim();
+      const actief = Boolean((raw as any).actief ?? (raw as any).active ?? true);
+      const bom_lines = Array.isArray((raw as any).bom_lines) ? ((raw as any).bom_lines as GenericRecord[]) : [];
+      map.set(id, { id, naam, actief, bom_lines });
+    }
+    return map;
+  }, [catalogusproducten]);
+
+  const catalogProductOptions = useMemo<SelectOption[]>(() => {
+    const options: SelectOption[] = [];
+    for (const row of catalogProductOptionMap.values()) {
+      if (!row.actief) continue;
+      if (!row.naam) continue;
+      options.push({ value: row.id, label: row.naam });
+    }
+    return options.sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [catalogProductOptionMap]);
+
+  const packagingPriceById = useMemo(() => {
+    const map = new Map<string, number>();
+    const prices = Array.isArray(verpakkingsonderdeelPrijzen) ? verpakkingsonderdeelPrijzen : [];
+    for (const raw of prices) {
+      if (!raw || typeof raw !== "object") continue;
+      const jaar = toNumber((raw as any).jaar ?? 0, 0);
+      if (jaar !== currentYear) continue;
+      const id = String((raw as any).verpakkingsonderdeel_id ?? (raw as any).packaging_component_id ?? "");
+      if (!id) continue;
+      const prijs = toNumber((raw as any).prijs_per_stuk ?? (raw as any).price_per_piece ?? 0, 0);
+      map.set(id, prijs);
+    }
+    return map;
+  }, [verpakkingsonderdeelPrijzen, currentYear]);
+
+  const activeBeerCostByKey = useMemo(() => {
+    const beerIds = new Set<string>();
+    for (const row of kostprijsproductActiveringenCurrentYear) {
+      const bierId = String((row as any).bier_id ?? "");
+      if (bierId) beerIds.add(bierId);
+    }
+    const map = new Map<string, number>();
+    for (const bierId of beerIds) {
+      for (const snapshotRow of getSnapshotProductRowsForBier(bierId)) {
+        map.set(`${bierId}|${snapshotRow.productType}|${snapshotRow.productId}`, snapshotRow.costPerPiece);
+      }
+    }
+    return map;
+  }, [
+    kostprijsproductActiveringenCurrentYear,
+    actieveKostprijsversiesCurrentYear,
+    definitieveKostprijsversiesCurrentYear,
+    currentYear,
+    bierNameMap,
+    productDefinitionMap
+  ]);
+
+  const catalogProductCostById = useMemo(() => {
+    const out = new Map<string, number>();
+
+    for (const product of catalogProductOptionMap.values()) {
+      if (!product.actief) continue;
+      let total = 0;
+      for (const line of product.bom_lines) {
+        if (!line || typeof line !== "object") continue;
+        const lineKind = String((line as any).line_kind ?? (line as any).type ?? "").trim().toLowerCase();
+        const qty = toNumber((line as any).quantity ?? (line as any).aantal ?? 0, 0);
+        if (qty <= 0) continue;
+
+        let unitCost = 0;
+        if (lineKind === "beer") {
+          const bierId = String((line as any).bier_id ?? "");
+          const productId = String((line as any).product_id ?? "");
+          const productType = String((line as any).product_type ?? "basis").trim().toLowerCase();
+          unitCost = activeBeerCostByKey.get(`${bierId}|${productType}|${productId}`) ?? 0;
+        } else if (lineKind === "packaging_component") {
+          const pcId = String((line as any).packaging_component_id ?? (line as any).verpakkingsonderdeel_id ?? "");
+          unitCost = packagingPriceById.get(pcId) ?? 0;
+        } else if (lineKind === "labor" || lineKind === "other") {
+          unitCost = toNumber((line as any).unit_cost_ex ?? 0, 0);
+        }
+
+        total += qty * unitCost;
+      }
+      out.set(product.id, total);
+    }
+
+    return out;
+  }, [activeBeerCostByKey, catalogProductOptionMap, packagingPriceById]);
 
   const verkoopstrategieWindow = useMemo(
     () => verkoopprijzen.filter((row) => Number(row.jaar ?? 0) <= currentYear),
@@ -1658,6 +1764,25 @@ export function PrijsvoorstelWizard({
     );
   }
 
+  function syncCatalogProductRows(selectedIds: string[], existingRows: GenericRecord[]) {
+    const existingMap = new Map<string, GenericRecord>(
+      existingRows.map((row) => [String((row as any).catalog_product_id ?? ""), row])
+    );
+
+    return selectedIds.map((catalogProductId) => {
+      const existing = existingMap.get(catalogProductId);
+      const naam = catalogProductOptionMap.get(catalogProductId)?.naam ?? String((existing as any)?.naam ?? "");
+      return {
+        id: String((existing as any)?.id ?? createId()),
+        catalog_product_id: catalogProductId,
+        naam,
+        aantal: toNumber((existing as any)?.aantal, 0),
+        korting_pct: toNumber((existing as any)?.korting_pct, 0),
+        included: isIncluded((existing as any)?.included)
+      };
+    });
+  }
+
   const litersDisplayRows = useMemo<LitersDisplayRow[]>(() => {
     const currentBeerRows = Array.isArray(current.beer_rows) ? (current.beer_rows as GenericRecord[]) : [];
 
@@ -1913,7 +2038,7 @@ export function PrijsvoorstelWizard({
   const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
     const currentProductRows = Array.isArray(current.product_rows) ? (current.product_rows as GenericRecord[]) : [];
 
-    return currentProductRows.map((row) => {
+    const beerProductRows = currentProductRows.map((row) => {
       const bierId = String(row.bier_id ?? "");
       const fixedKostprijsversieId = String(row.kostprijsversie_id ?? "");
       const snapshotRowsForBier = getSnapshotProductRowsForBier(bierId, fixedKostprijsversieId);
@@ -2034,7 +2159,75 @@ export function PrijsvoorstelWizard({
         margePct: calculateMarginPercentage(omzet, kosten)
       };
     });
-  }, [current.product_rows, bierNameMap, currentKanaal, productDefinitionMap, selectedChannelOptions, verkoopstrategieWindow]);
+
+    const currentCatalogRows = Array.isArray((current as any).catalog_product_rows)
+      ? (((current as any).catalog_product_rows as GenericRecord[]) ?? [])
+      : [];
+    const catalogRows = currentCatalogRows.map((row) => {
+      const catalogProductId = String((row as any).catalog_product_id ?? "");
+      const naam =
+        String((row as any).naam ?? "") ||
+        catalogProductOptionMap.get(catalogProductId)?.naam ||
+        catalogProductId ||
+        "-";
+      const kostprijsPerStuk = catalogProductCostById.get(catalogProductId) ?? 0;
+
+      const pricingByChannel = Object.fromEntries(
+        selectedChannelOptions.map((option) => [
+          option.value,
+          buildPricingForChannel(kostprijsPerStuk, "", `catalog:${catalogProductId}`, "catalog", naam, option.value)
+        ])
+      ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+      const pricing = pricingByChannel[currentKanaal];
+
+      const offerPrijs = pricing.offerPrice;
+      const kortingPct = toNumber((row as any).korting_pct, 0);
+      const aantal = toNumber((row as any).aantal, 0);
+      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
+      const omzet = aantal * verkoopprijs;
+      const kosten = aantal * kostprijsPerStuk;
+      const kortingEur = aantal * Math.max(0, offerPrijs - verkoopprijs);
+      const margeEur = omzet - kosten;
+
+      return {
+        id: String((row as any).id ?? ""),
+        bierKey: "",
+        biernaam: "Artikel",
+        kostprijsversieId: "",
+        included: isIncluded((row as any).included),
+        productId: `catalog:${catalogProductId}`,
+        productType: "catalog" as const,
+        productKey: `catalog|${catalogProductId}`,
+        verpakking: naam,
+        aantal,
+        kortingPct,
+        kostprijsPerStuk,
+        offerPrijs,
+        sellInPrijs: pricing.sellInPrice,
+        sellInMargePct: pricing.sellInMarginPct,
+        offerByChannel: Object.fromEntries(
+          selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])
+        ),
+        omzet,
+        kosten,
+        kortingEur,
+        margeEur,
+        margePct: calculateMarginPercentage(omzet, kosten)
+      };
+    });
+
+    return [...beerProductRows, ...catalogRows];
+  }, [
+    current.product_rows,
+    (current as any).catalog_product_rows,
+    bierNameMap,
+    currentKanaal,
+    productDefinitionMap,
+    selectedChannelOptions,
+    verkoopstrategieWindow,
+    catalogProductOptionMap,
+    catalogProductCostById
+  ]);
 
   const productTotals = useMemo(
     () =>
@@ -2052,7 +2245,7 @@ export function PrijsvoorstelWizard({
 
   const offerteProductRows = useMemo(() => {
     if (offerLevel === "basis") {
-      return productDisplayRows.filter((row) => row.productType === "basis");
+      return productDisplayRows.filter((row) => row.productType === "basis" || row.productType === "catalog");
     }
     const compositeRows = productDisplayRows.filter((row) => row.productType === "samengesteld");
     if (compositeRows.length === 0) {
@@ -2077,6 +2270,9 @@ export function PrijsvoorstelWizard({
     }
 
     return productDisplayRows.filter((row) => {
+      if (row.productType === "catalog") {
+        return true;
+      }
       if (row.productType === "samengesteld") {
         return true;
       }
@@ -2195,6 +2391,26 @@ export function PrijsvoorstelWizard({
         };
       }
     );
+
+    (next as any).catalog_product_rows = (Array.isArray((next as any).catalog_product_rows)
+      ? ((next as any).catalog_product_rows as GenericRecord[])
+      : []).map((item) => {
+      const display = productDisplayMap.get(String((item as any).id ?? ""));
+      if (!display || display.productType !== "catalog") {
+        return item;
+      }
+      return {
+        ...item,
+        included: display.included,
+        naam: display.verpakking,
+        cost_at_quote: display.kostprijsPerStuk,
+        sales_price_at_quote: display.offerPrijs,
+        revenue_at_quote: display.omzet,
+        margin_at_quote: display.margeEur,
+        target_margin_pct_at_quote: display.sellInMargePct,
+        channel_at_quote: currentKanaal
+      };
+    });
 
     next.beer_rows = (Array.isArray(next.beer_rows) ? (next.beer_rows as GenericRecord[]) : []).map((item) => {
       const display = litersDisplayMap.get(String(item.id ?? ""));
@@ -2332,6 +2548,18 @@ export function PrijsvoorstelWizard({
     });
   }
 
+  function handleCatalogMultiSelection(selectedCatalogIds: string[]) {
+    updateCurrent((draft) => {
+      (draft as any).selected_catalog_product_ids = selectedCatalogIds;
+      (draft as any).catalog_product_rows = selectedCatalogIds.length
+        ? syncCatalogProductRows(
+            selectedCatalogIds,
+            Array.isArray((draft as any).catalog_product_rows) ? ((draft as any).catalog_product_rows as GenericRecord[]) : []
+          )
+        : [];
+    });
+  }
+
   function handleHighestOverallSetup() {
     updateCurrent((draft) => {
       draft.bier_id = "";
@@ -2371,6 +2599,24 @@ export function PrijsvoorstelWizard({
       }
       nextRows[index] = { ...nextRows[index], [field]: value };
       draft.product_rows = nextRows;
+    });
+  }
+
+  function updateCatalogProductRow(
+    rowId: string,
+    field: "aantal" | "korting_pct" | "included",
+    value: number | boolean
+  ) {
+    updateCurrent((draft) => {
+      const nextRows = Array.isArray((draft as any).catalog_product_rows)
+        ? [...((draft as any).catalog_product_rows as GenericRecord[])]
+        : [];
+      const index = nextRows.findIndex((row) => String(row.id ?? "") === rowId);
+      if (index < 0) {
+        return;
+      }
+      nextRows[index] = { ...nextRows[index], [field]: value };
+      (draft as any).catalog_product_rows = nextRows;
     });
   }
 
@@ -2511,6 +2757,38 @@ export function PrijsvoorstelWizard({
     litersBasis
   ]);
 
+  useEffect(() => {
+    if (isLitersMode) {
+      return;
+    }
+    const selectedCatalogIds = Array.isArray((current as any).selected_catalog_product_ids)
+      ? ((current as any).selected_catalog_product_ids as string[]).filter(Boolean)
+      : [];
+    const desiredRows = selectedCatalogIds.length
+      ? syncCatalogProductRows(
+          selectedCatalogIds,
+          Array.isArray((current as any).catalog_product_rows) ? ((current as any).catalog_product_rows as GenericRecord[]) : []
+        )
+      : [];
+
+    const currentSignature = JSON.stringify(
+      (Array.isArray((current as any).catalog_product_rows) ? ((current as any).catalog_product_rows as GenericRecord[]) : []).map((row) => ({
+        catalog_product_id: String((row as any).catalog_product_id ?? "")
+      }))
+    );
+    const desiredSignature = JSON.stringify(
+      desiredRows.map((row) => ({
+        catalog_product_id: String((row as any).catalog_product_id ?? "")
+      }))
+    );
+
+    if (currentSignature !== desiredSignature) {
+      updateCurrent((draft) => {
+        (draft as any).catalog_product_rows = desiredRows;
+      });
+    }
+  }, [current.selected_catalog_product_ids, current.catalog_product_rows, isLitersMode, catalogProductOptionMap]);
+
   function renderBasisStep() {
     const offerteDatum = getDateInputValue(current.datum_text);
     const verloopOp = getDateInputValue(current.verloopt_op);
@@ -2630,6 +2908,20 @@ export function PrijsvoorstelWizard({
       <SearchableMultiSelect
         label="Bieren"
         options={bierOptions}
+        selectedValues={selectedValues}
+        onChange={onToggle}
+      />
+    );
+  }
+
+  function renderCatalogSelectionList(
+    selectedValues: string[],
+    onToggle: (nextValues: string[]) => void
+  ) {
+    return (
+      <SearchableMultiSelect
+        label="Verkoopbare artikelen"
+        options={catalogProductOptions}
         selectedValues={selectedValues}
         onChange={onToggle}
       />
@@ -2900,18 +3192,30 @@ export function PrijsvoorstelWizard({
     const selectedBeerIds = Array.isArray(current.selected_bier_ids)
       ? (current.selected_bier_ids as string[]).filter(Boolean)
       : [];
+    const selectedCatalogIds = Array.isArray((current as any).selected_catalog_product_ids)
+      ? (((current as any).selected_catalog_product_ids as string[]) ?? []).filter(Boolean)
+      : [];
     const kanaalLabel = currentKanaalLabel;
     const totalMargePct = calculateMarginPercentage(offerteProductTotals.omzet, offerteProductTotals.kosten);
 
     return (
       <div className="wizard-stack">
         <div className="module-card compact-card">
-          <div className="module-card-title">Bieren voor dit voorstel</div>
+          <div className="module-card-title">Selectie</div>
           <div className="module-card-text">
             Kies één of meer bieren met een actieve kostprijsversie. De app haalt daarna automatisch de gekoppelde
             producten en kostprijzen op uit de actieve kostprijsversies.
           </div>
           {renderBeerSelectionList(selectedBeerIds, handleBeerMultiSelection)}
+          <div className="module-card-text" style={{ marginTop: "0.75rem" }}>
+            Optioneel: voeg verkoopbare artikelen toe (bijv. geschenkverpakkingen). De kostprijs wordt live afgeleid uit
+            de onderliggende regels (bieren en verpakkingsonderdelen) voor {currentYear}.
+          </div>
+          {catalogProductOptions.length > 0 ? (
+            renderCatalogSelectionList(selectedCatalogIds, handleCatalogMultiSelection)
+          ) : (
+            <div className="dataset-empty">Nog geen verkoopbare artikelen beschikbaar.</div>
+          )}
         </div>
 
         <div className="stats-grid wizard-stats-grid prijs-info-grid">
@@ -2979,7 +3283,11 @@ export function PrijsvoorstelWizard({
                       style={{ minWidth: "8rem" }}
                       value={String(row.aantal)}
                       onChange={(event) =>
-                        updateProductRow(row.id, "aantal", Number(event.target.value || 0))
+                        (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                          row.id,
+                          "aantal",
+                          Number(event.target.value || 0)
+                        )
                       }
                     />
                   </td>
@@ -2992,7 +3300,11 @@ export function PrijsvoorstelWizard({
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
                       onChange={(event) =>
-                        updateProductRow(row.id, "korting_pct", Number(event.target.value || 0))
+                        (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                          row.id,
+                          "korting_pct",
+                          Number(event.target.value || 0)
+                        )
                       }
                     />
                   </td>
@@ -3022,7 +3334,12 @@ export function PrijsvoorstelWizard({
                   <td>
                     {renderIncludeToggle(
                       row.included,
-                      () => updateProductRow(row.id, "included", !row.included),
+                      () =>
+                        (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                          row.id,
+                          "included",
+                          !row.included
+                        ),
                       row.included ? "Niet meenemen in offerte" : "Wel meenemen in offerte"
                     )}
                   </td>

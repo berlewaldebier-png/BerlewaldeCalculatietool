@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { NestedCollectionEditor } from "@/components/NestedCollectionEditor";
+import { VerkoopbareArtikelenEditor } from "@/components/VerkoopbareArtikelenEditor";
 import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
@@ -13,7 +14,12 @@ type ProductenVerpakkingWorkspaceProps = {
   verpakkingsonderdelen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
+  catalogusproducten: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
+  bieren: GenericRecord[];
+  productie?: Record<string, any>;
+  kostprijsversies?: GenericRecord[];
+  kostprijsproductactiveringen?: GenericRecord[];
 };
 
 type SortDirection = "asc" | "desc";
@@ -143,7 +149,12 @@ export function ProductenVerpakkingWorkspace({
   verpakkingsonderdelen,
   basisproducten,
   samengesteldeProducten,
-  verpakkingsonderdeelPrijzen
+  catalogusproducten,
+  verpakkingsonderdeelPrijzen,
+  bieren,
+  productie,
+  kostprijsversies,
+  kostprijsproductactiveringen
 }: ProductenVerpakkingWorkspaceProps) {
   const router = useRouter();
   const verpakkingsonderdelenRows = Array.isArray(verpakkingsonderdelen) ? verpakkingsonderdelen : [];
@@ -151,12 +162,17 @@ export function ProductenVerpakkingWorkspace({
   const samengesteldeProductenRows = Array.isArray(samengesteldeProducten)
     ? samengesteldeProducten
     : [];
+  const catalogusproductenRows = Array.isArray(catalogusproducten) ? catalogusproducten : [];
   const verpakkingsonderdeelPrijsRows = Array.isArray(verpakkingsonderdeelPrijzen)
     ? verpakkingsonderdeelPrijzen
     : [];
+  const bierenRows = Array.isArray(bieren) ? bieren : [];
+  const productieMap = (productie && typeof productie === "object" ? (productie as Record<string, any>) : {}) ?? {};
+  const kostprijsversieRows = Array.isArray(kostprijsversies) ? kostprijsversies : [];
+  const kostprijsActivationRows = Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [];
 
   const [activeTab, setActiveTab] = useState<
-    "onderdelen" | "basis" | "samengesteld" | "jaarprijzen" | "kostenoverzicht"
+    "onderdelen" | "basis" | "samengesteld" | "catalogus" | "jaarprijzen" | "kostenoverzicht"
   >("onderdelen");
   const [priceStatus, setPriceStatus] = useState("");
   const [isSavingPrices, setIsSavingPrices] = useState(false);
@@ -221,10 +237,12 @@ export function ProductenVerpakkingWorkspace({
               inhoud_per_eenheid_liter: 0
             }
           };
-        })
+      })
     ],
     [basisproductenRows, verpakkingsonderdelenRows]
   );
+
+  // Beer options are now resolved via kostprijs activeringen inside VerkoopbareArtikelenEditor.
 
   const usageByComponentId = useMemo(() => {
     const usage = new Map<string, number>();
@@ -625,14 +643,21 @@ export function ProductenVerpakkingWorkspace({
             className={`tab-button ${activeTab === "basis" ? "active" : ""}`}
             onClick={() => setActiveTab("basis")}
           >
-            Basisproducten
+            Afvuleenheden
           </button>
           <button
             type="button"
             className={`tab-button ${activeTab === "samengesteld" ? "active" : ""}`}
             onClick={() => setActiveTab("samengesteld")}
           >
-            Samengestelde producten
+            Afvulsamenstellingen
+          </button>
+          <button
+            type="button"
+            className={`tab-button ${activeTab === "catalogus" ? "active" : ""}`}
+            onClick={() => setActiveTab("catalogus")}
+          >
+            Verkoopbare artikelen
           </button>
           <button
             type="button"
@@ -747,7 +772,7 @@ export function ProductenVerpakkingWorkspace({
             { key: "onderdelen", label: "Onderdelen", type: "count" }
           ]}
           title="Basisproducten"
-          description="Stamgegevens van basisproducten met unieke verpakkingsonderdelen per product."
+          description="Afvuleenheden met unieke verpakkingsonderdelen per eenheid."
         />
       ) : null}
 
@@ -832,8 +857,22 @@ export function ProductenVerpakkingWorkspace({
             { key: "totale_inhoud_liter", label: "Liter", type: "number" },
             { key: "basisproducten", label: "Onderdelen", type: "count" }
           ]}
-          title="Samengestelde producten"
-          description="Stamgegevens van samengestelde producten opgebouwd uit basisproducten en bouwstenen."
+          title="Afvulsamenstellingen"
+          description="Afvulsamenstellingen (dozen/combi's) opgebouwd uit afvuleenheden en eventueel bouwstenen."
+        />
+      ) : null}
+
+      {activeTab === "catalogus" ? (
+        <VerkoopbareArtikelenEditor
+          initialRows={catalogusproductenRows}
+          basisproducten={basisproductenRows}
+          samengesteldeProducten={samengesteldeProductenRows}
+          verpakkingsonderdelen={verpakkingsonderdelenRows}
+          verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijsRows}
+          productie={productieMap}
+          bieren={bierenRows}
+          kostprijsversies={kostprijsversieRows}
+          kostprijsproductactiveringen={kostprijsActivationRows}
         />
       ) : null}
 

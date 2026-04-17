@@ -25,6 +25,7 @@ PACKAGING_COMPONENT_PRICES_FILE = DATA_DIR / "packaging_component_prices.json"
 PACKAGING_COMPONENT_PRICE_VERSIONS_FILE = DATA_DIR / "packaging_component_price_versions.json"
 BASISPRODUCTEN_FILE = DATA_DIR / "basisproducten.json"
 SAMENGESTELDE_PRODUCTEN_FILE = DATA_DIR / "samengestelde_producten.json"
+CATALOG_PRODUCTS_FILE = DATA_DIR / "catalog_products.json"
 SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX = "verpakkingsonderdeel:"
 DEFAULT_BELASTINGSOORT = "Accijns"
 DEFAULT_TARIEF_ACCIJNS = "Hoog"
@@ -47,6 +48,42 @@ def _get_kostprijs_activation_storage_module():
     return kostprijs_activation_storage
 
 
+def _get_catalog_products_storage_module():
+    try:
+        from app.domain import catalog_products_storage  # type: ignore
+    except ImportError:
+        return None
+    return catalog_products_storage
+
+
+def load_catalog_products() -> list[dict[str, Any]]:
+    data = _load_postgres_first_list("catalog-products", CATALOG_PRODUCTS_FILE)
+    normalized: list[dict[str, Any]] = []
+    for row in data if isinstance(data, list) else []:
+        if not isinstance(row, dict):
+            continue
+        cleaned = dict(row)
+        cleaned["id"] = str(cleaned.get("id", "") or "")
+        cleaned["naam"] = str(cleaned.get("naam", cleaned.get("name", "")) or "")
+        cleaned["kind"] = str(cleaned.get("kind", "catalog") or "catalog").strip().lower()
+        cleaned["actief"] = bool(cleaned.get("actief", cleaned.get("active", True)))
+        cleaned["bom_lines"] = cleaned.get("bom_lines", []) if isinstance(cleaned.get("bom_lines", []), list) else []
+        if cleaned["id"]:
+            normalized.append(cleaned)
+    return normalized
+
+
+def save_catalog_products(data: list[dict[str, Any]]) -> bool:
+    """Slaat catalogusproducten (giftpacks/diensten/etc) op."""
+    postgres_storage = _get_postgres_storage_module()
+    catalog_storage = _get_catalog_products_storage_module()
+    if postgres_storage is None or catalog_storage is None:
+        raise RuntimeError("Catalog products storage is niet beschikbaar.")
+    if not postgres_storage.uses_postgres():
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+    return bool(catalog_storage.save_dataset([row for row in data if isinstance(row, dict)], overwrite=True))
+
+
 def _load_postgres_dataset(dataset_name: str) -> Any | None:
     postgres_storage = _get_postgres_storage_module()
     if postgres_storage is None or not postgres_storage.uses_postgres():
@@ -63,6 +100,10 @@ def _load_postgres_dataset(dataset_name: str) -> Any | None:
         from app.domain import fixed_costs_storage  # type: ignore
 
         return fixed_costs_storage.load_grouped_by_year()
+    if dataset_name == "catalog-products":
+        from app.domain import catalog_products_storage  # type: ignore
+
+        return catalog_products_storage.load_dataset([])
 
     payload = postgres_storage.load_dataset(dataset_name, None)
     _fail_if_wrapped_payload(dataset_name, payload)
@@ -113,6 +154,12 @@ def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
         if not isinstance(data, dict):
             raise ValueError("Ongeldig payload voor 'vaste-kosten': verwacht dict.")
         return bool(fixed_costs_storage.save_grouped_by_year(data))
+    if dataset_name == "catalog-products":
+        from app.domain import catalog_products_storage  # type: ignore
+
+        if not isinstance(data, list):
+            raise ValueError("Ongeldig payload voor 'catalog-products': verwacht list.")
+        return bool(catalog_products_storage.save_dataset([row for row in data if isinstance(row, dict)], overwrite=True))
 
     return postgres_storage.save_dataset(dataset_name, data, overwrite=True)
 
@@ -5294,12 +5341,45 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    catalog_product_rows_source = record.get("catalog_product_rows", [])
+    if not isinstance(catalog_product_rows_source, list):
+        catalog_product_rows_source = []
+    catalog_product_rows: list[dict[str, Any]] = []
+    for row in catalog_product_rows_source:
+        if not isinstance(row, dict):
+            continue
+        catalog_product_rows.append(
+            {
+                "id": str(row.get("id", "") or uuid4()),
+                "catalog_product_id": str(row.get("catalog_product_id", "") or ""),
+                "naam": str(row.get("naam", "") or ""),
+                "aantal": _float_value(row.get("aantal")),
+                "korting_pct": _float_value(row.get("korting_pct")),
+                "included": bool(row.get("included", True)),
+                "cost_at_quote": _float_value(row.get("cost_at_quote")),
+                "sales_price_at_quote": _float_value(row.get("sales_price_at_quote")),
+                "revenue_at_quote": _float_value(row.get("revenue_at_quote")),
+                "margin_at_quote": _float_value(row.get("margin_at_quote")),
+                "target_margin_pct_at_quote": _float_value(row.get("target_margin_pct_at_quote")),
+                "channel_at_quote": str(row.get("channel_at_quote", "") or ""),
+            }
+        )
+
     selected_bier_ids_source = record.get("selected_bier_ids", [])
     if not isinstance(selected_bier_ids_source, list):
         selected_bier_ids_source = []
     selected_bier_ids = [
         str(value or "")
         for value in selected_bier_ids_source
+        if str(value or "").strip()
+    ]
+
+    selected_catalog_product_ids_source = record.get("selected_catalog_product_ids", [])
+    if not isinstance(selected_catalog_product_ids_source, list):
+        selected_catalog_product_ids_source = []
+    selected_catalog_product_ids = [
+        str(value or "")
+        for value in selected_catalog_product_ids_source
         if str(value or "").strip()
     ]
     selected_kanalen_source = record.get("selected_kanalen", [])
@@ -5408,11 +5488,13 @@ def normalize_prijsvoorstel_record(record: dict[str, Any]) -> dict[str, Any]:
         "offer_level": str(record.get("offer_level", "samengesteld") or "samengesteld"),
         "bier_id": str(record.get("bier_id", "") or ""),
         "selected_bier_ids": selected_bier_ids,
+        "selected_catalog_product_ids": selected_catalog_product_ids,
         "kostprijsversie_ids": kostprijsversie_ids,
         "deleted_product_refs": deleted_product_refs,
         "staffels": staffels,
         "product_rows": product_rows,
         "beer_rows": beer_rows,
+        "catalog_product_rows": catalog_product_rows,
         "last_step": int(record.get("last_step", 1) or 1),
         "created_at": created_at,
         "updated_at": updated_at,
@@ -6976,12 +7058,48 @@ def _build_model_a_product_maps() -> tuple[
                 }
             )
 
+    for catalog_product in load_catalog_products():
+        name = str(catalog_product.get("naam", catalog_product.get("name", "")) or "").strip()
+        if not name:
+            continue
+        product_id = str(catalog_product.get("id", "") or "").strip()
+        if not product_id:
+            raise ValueError("Catalogusproduct mist id: product ids moeten canoniek zijn.")
+        if product_id not in product_seen:
+            products.append(
+                {
+                    "id": product_id,
+                    "name": name,
+                    "kind": str(catalog_product.get("kind", "catalog") or "catalog"),
+                    "default_content_liter": 0.0,
+                    "active": bool(catalog_product.get("actief", catalog_product.get("active", True))),
+                }
+            )
+            product_seen.add(product_id)
+
+        for year in source_years:
+            product_year_id = _model_a_id("product-year", product_id, year)
+            if product_year_id not in product_year_seen:
+                product_years.append(
+                    {
+                        "id": product_year_id,
+                        "product_id": product_id,
+                        "year": year,
+                        "content_liter": 0.0,
+                        "total_packaging_cost": 0.0,
+                        "available_for_sale": True,
+                        "available_for_composite": True,
+                    }
+                )
+                product_year_seen.add(product_year_id)
+
     return (
         products,
         product_years,
         product_year_components,
         product_components,
     )
+
 
 
 def build_model_a_canonical_datasets() -> dict[str, list[dict[str, Any]]]:

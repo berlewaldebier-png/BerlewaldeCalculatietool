@@ -19,6 +19,9 @@ export default async function PrijsvoorstelPage({
       "verkoopprijzen",
       "channels",
       "kostprijsproductactiveringen",
+      "catalog-products",
+      "packaging-components",
+      "packaging-component-prices",
       "basisproducten",
       "samengestelde-producten"
     ],
@@ -33,6 +36,9 @@ export default async function PrijsvoorstelPage({
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
   const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
+  const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
+  const verpakkingsonderdelen = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
+  const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
   const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
 
@@ -60,6 +66,9 @@ export default async function PrijsvoorstelPage({
         verkoopprijzen={verkoopprijzen}
         channels={channels}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
+        catalogusproducten={catalogusproducten}
+        verpakkingsonderdelen={verpakkingsonderdelen}
+        verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         initialMode={mode}

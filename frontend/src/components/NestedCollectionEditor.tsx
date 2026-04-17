@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
 
-type FieldType = "text" | "number";
+type FieldType = "text" | "number" | "checkbox";
 type NestedFieldType = FieldType | "select";
 
 type FieldDefinition = {
@@ -13,6 +13,7 @@ type FieldDefinition = {
   label: string;
   type?: FieldType;
   readOnly?: boolean;
+  visible?: (args: { row: InternalRow }) => boolean;
 };
 
 type NestedOption = {
@@ -36,6 +37,7 @@ type NestedFieldDefinition = {
   options?: NestedOption[] | ((args: NestedOptionResolverArgs) => NestedOption[]);
   resetOnSelect?: boolean;
   preserveOnSelect?: string[];
+  visible?: (args: NestedOptionResolverArgs) => boolean;
 };
 
 type NestedComputedField = {
@@ -343,27 +345,39 @@ export function NestedCollectionEditor({
     return (
       <>
         <div className="nested-editor-grid">
-          {fields.map((field) => (
+          {fields
+            .filter((field) => (field.visible ? field.visible({ row }) : true))
+            .map((field) => (
             <label key={field.key} className="nested-field">
               <span>{field.label}</span>
-              <input
-                className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
-                type={field.type === "number" ? "number" : "text"}
-                step={field.type === "number" ? "any" : undefined}
-                value={
-                  row[field.key] === null || row[field.key] === undefined ? "" : String(row[field.key])
-                }
-                readOnly={field.readOnly}
-                onChange={(event) => {
-                  const nextValue =
-                    field.type === "number"
-                      ? event.target.value === ""
-                        ? null
-                        : Number(event.target.value)
-                      : event.target.value;
-                  updateField(row._uiId, field.key, nextValue);
-                }}
-              />
+              {field.type === "checkbox" ? (
+                <input
+                  className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                  type="checkbox"
+                  checked={Boolean(row[field.key])}
+                  disabled={field.readOnly}
+                  onChange={(event) => updateField(row._uiId, field.key, event.target.checked)}
+                />
+              ) : (
+                <input
+                  className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                  type={field.type === "number" ? "number" : "text"}
+                  step={field.type === "number" ? "any" : undefined}
+                  value={
+                    row[field.key] === null || row[field.key] === undefined ? "" : String(row[field.key])
+                  }
+                  readOnly={field.readOnly}
+                  onChange={(event) => {
+                    const nextValue =
+                      field.type === "number"
+                        ? event.target.value === ""
+                          ? null
+                          : Number(event.target.value)
+                        : event.target.value;
+                    updateField(row._uiId, field.key, nextValue);
+                  }}
+                />
+              )}
             </label>
           ))}
         </div>
@@ -387,7 +401,18 @@ export function NestedCollectionEditor({
               {nestedRows.map((nestedRow, nestedIndex) => (
                 <div key={`${row._uiId}-${nestedIndex}`} className="nested-row-card">
                   <div className="nested-row-grid">
-                    {nestedFields.map((field) => {
+                    {nestedFields
+                      .filter((field) =>
+                        field.visible
+                          ? field.visible({
+                              row,
+                              nestedRows,
+                              nestedIndex,
+                              nestedRow
+                            })
+                          : true
+                      )
+                      .map((field) => {
                       const fieldValue =
                         nestedRow[field.key] === null || nestedRow[field.key] === undefined
                           ? ""

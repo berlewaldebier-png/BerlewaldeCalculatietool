@@ -11,7 +11,10 @@ export default async function AdviesprijzenPage() {
       "verkoopprijzen",
       "bieren",
       "kostprijsversies",
-      "kostprijsproductactiveringen"
+      "kostprijsproductactiveringen",
+      "catalog-products",
+      "packaging-components",
+      "packaging-component-price-versions"
     ],
     true,
     "/adviesprijzen"
@@ -24,6 +27,9 @@ export default async function AdviesprijzenPage() {
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
   const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
+  const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
+  const verpakkingscomponenten = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
+  const verpakkingscomponentPrijsversies = (bootstrap.datasets["packaging-component-price-versions"] as any[]) ?? [];
 
   return (
     <PageShell
@@ -40,6 +46,9 @@ export default async function AdviesprijzenPage() {
         initialBieren={bieren}
         initialKostprijsversies={kostprijsversies}
         initialKostprijsproductactiveringen={kostprijsproductactiveringen}
+        initialCatalogusproducten={catalogusproducten}
+        initialPackagingComponents={verpakkingscomponenten}
+        initialPackagingComponentPriceVersions={verpakkingscomponentPrijsversies}
       />
     </PageShell>
   );

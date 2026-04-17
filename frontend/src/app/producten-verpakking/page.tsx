@@ -8,7 +8,12 @@ export default async function ProductenVerpakkingPage() {
       "packaging-components",
       "base-product-masters",
       "composite-product-masters",
-      "packaging-component-prices"
+      "catalog-products",
+      "packaging-component-prices",
+      "bieren",
+      "productie",
+      "kostprijsversies",
+      "kostprijsproductactiveringen"
     ],
     true,
     "/producten-verpakking"
@@ -18,12 +23,17 @@ export default async function ProductenVerpakkingPage() {
   const verpakkingsonderdelen = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
   const basisproducten = (bootstrap.datasets["base-product-masters"] as any[]) ?? [];
   const samengestelde = (bootstrap.datasets["composite-product-masters"] as any[]) ?? [];
+  const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
   const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
+  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
+  const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
+  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
 
   return (
     <PageShell
       title="Producten & verpakking"
-      subtitle="Beheer verpakkingsonderdelen, basisproducten en samengestelde producten als stamdata in één overzichtelijke workspace."
+      subtitle="Beheer verpakkingsonderdelen, basisproducten en samengestelde producten als stamdata in een overzichtelijke workspace."
       activePath="/producten-verpakking"
       navigation={navigation}
     >
@@ -31,7 +41,12 @@ export default async function ProductenVerpakkingPage() {
         verpakkingsonderdelen={verpakkingsonderdelen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengestelde}
+        catalogusproducten={catalogusproducten}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
+        bieren={bieren}
+        productie={productie}
+        kostprijsversies={kostprijsversies}
+        kostprijsproductactiveringen={kostprijsproductactiveringen}
       />
     </PageShell>
   );

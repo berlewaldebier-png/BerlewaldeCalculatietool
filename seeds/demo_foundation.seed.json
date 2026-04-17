@@ -27,6 +27,23 @@
                                               "opslag_pct":  45.0
                                           }
                                       ],
+                     "catalog-products":  [
+                                            {
+                                              "actief":  true,
+                                              "code":  "GIFT-4",
+                                              "id":  "c8e2f9ab-2f13-4f34-8b1d-6d2b42e3d4f5",
+                                              "kind":  "giftpack",
+                                              "naam":  "Giftpack 4 flessen (template)",
+                                              "bom_lines":  [
+                                                             {
+                                                               "id":  "b8c54c4d-2aa5-4bfe-9f44-7cf1d0a0f90a",
+                                                               "line_kind":  "packaging_component",
+                                                               "packaging_component_id":  "7172e3e9-5215-498e-9dac-dcc42ab07099",
+                                                               "quantity":  1.0
+                                                             }
+                                                           ]
+                                            }
+                                          ],
                      "base-product-masters":  [
                                                   {
                                                       "id":  "17f56ea1-9847-5d85-a507-82fd951c02ca",
