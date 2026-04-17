@@ -104,7 +104,7 @@ function normalizeCatalogProduct(raw: GenericRecord): CatalogProduct {
       .filter((row) => row && typeof row === "object")
       .map((row: any) => ({
         id: String(row.id ?? "") || createLocalId(),
-        line_kind: String(row.line_kind ?? "beer") as CatalogProductLineKind,
+        line_kind: (String(row.line_kind ?? "beer") === "beer_product" ? "beer" : String(row.line_kind ?? "beer")) as CatalogProductLineKind,
         quantity: toNumber(row.quantity ?? 1, 1),
         bier_id: String(row.bier_id ?? ""),
         product_id: String(row.product_id ?? ""),
@@ -114,6 +114,18 @@ function normalizeCatalogProduct(raw: GenericRecord): CatalogProduct {
         unit_cost_ex:
           row.unit_cost_ex === null || row.unit_cost_ex === undefined ? null : toNumber(row.unit_cost_ex, 0)
       }))
+      .map((line) => {
+        // Rehydrate the UI-only select value so the "Onderdeel" dropdown shows the saved choice.
+        if (line.line_kind === "beer") {
+          const bierId = String(line.bier_id ?? "");
+          const productType = String(line.product_type ?? "basis");
+          const productId = String(line.product_id ?? "");
+          if (bierId && productId) {
+            return { ...line, beer_choice: `${bierId}|${productType}|${productId}` };
+          }
+        }
+        return line;
+      })
   };
 }
 
