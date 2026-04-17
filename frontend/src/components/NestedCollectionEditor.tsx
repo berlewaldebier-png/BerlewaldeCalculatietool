@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
 
-type FieldType = "text" | "number";
+type FieldType = "text" | "number" | "checkbox";
 type NestedFieldType = FieldType | "select";
 
 type FieldDefinition = {
@@ -346,24 +346,34 @@ export function NestedCollectionEditor({
           {fields.map((field) => (
             <label key={field.key} className="nested-field">
               <span>{field.label}</span>
-              <input
-                className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
-                type={field.type === "number" ? "number" : "text"}
-                step={field.type === "number" ? "any" : undefined}
-                value={
-                  row[field.key] === null || row[field.key] === undefined ? "" : String(row[field.key])
-                }
-                readOnly={field.readOnly}
-                onChange={(event) => {
-                  const nextValue =
-                    field.type === "number"
-                      ? event.target.value === ""
-                        ? null
-                        : Number(event.target.value)
-                      : event.target.value;
-                  updateField(row._uiId, field.key, nextValue);
-                }}
-              />
+              {field.type === "checkbox" ? (
+                <input
+                  className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                  type="checkbox"
+                  checked={Boolean(row[field.key])}
+                  disabled={field.readOnly}
+                  onChange={(event) => updateField(row._uiId, field.key, event.target.checked)}
+                />
+              ) : (
+                <input
+                  className={`dataset-input ${field.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                  type={field.type === "number" ? "number" : "text"}
+                  step={field.type === "number" ? "any" : undefined}
+                  value={
+                    row[field.key] === null || row[field.key] === undefined ? "" : String(row[field.key])
+                  }
+                  readOnly={field.readOnly}
+                  onChange={(event) => {
+                    const nextValue =
+                      field.type === "number"
+                        ? event.target.value === ""
+                          ? null
+                          : Number(event.target.value)
+                        : event.target.value;
+                    updateField(row._uiId, field.key, nextValue);
+                  }}
+                />
+              )}
             </label>
           ))}
         </div>

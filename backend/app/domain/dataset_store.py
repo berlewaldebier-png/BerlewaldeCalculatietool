@@ -28,6 +28,7 @@ from app.utils.storage import (
     load_packaging_component_prices,
     load_packaging_component_price_versions,
     load_samengestelde_producten,
+    load_catalog_products,
     load_verpakkingsonderdelen,
     load_all_verkoop_records,
     normalize_any_verkoop_record,
@@ -50,11 +51,10 @@ from app.utils.storage import (
     save_verpakkingsonderdelen,
     save_prijsvoorstellen,
     save_samengestelde_producten,
+    save_catalog_products,
 )
 
-from copy import deepcopy
 from datetime import UTC, datetime
-from uuid import uuid4
 from uuid import uuid4
 
 
@@ -84,6 +84,7 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "prijsvoorstellen": [],
     "verkoopprijzen": [],
     "adviesprijzen": [],
+    "catalog-products": [],
     "variabele-kosten": {},
     "products": [],
     "product-years": [],
@@ -255,6 +256,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "samengestelde-producten",
         "bieren",
         "adviesprijzen",
+        "catalog-products",
         "kostprijs-scenario-inkoop",
         "kostprijs-activatie-drafts",
         "berekeningen",
@@ -344,6 +346,8 @@ def load_dataset(name: str) -> Any:
         return load_basisproducten()
     if name == "composite-product-masters":
         return load_samengestelde_producten()
+    if name == "catalog-products":
+        return load_catalog_products()
     if name == "verpakkingsonderdelen":
         # Legacy projection expanded prices for every year; too heavy for interactive UIs.
         return load_verpakkingsonderdelen()
@@ -405,6 +409,12 @@ def save_dataset(name: str, data: Any) -> bool:
     if name == "composite-product-masters" and isinstance(data, list):
         payload = [row for row in data if isinstance(row, dict)]
         return save_samengestelde_producten(payload)
+    if name == "catalog-products" and isinstance(data, list):
+        payload = [row for row in data if isinstance(row, dict)]
+        saved = save_catalog_products(payload)
+        if saved:
+            dashboard_service.invalidate_dashboard_summary_cache()
+        return bool(saved)
     if name == "basisproducten" and isinstance(data, list):
         payload = [row for row in data if isinstance(row, dict)]
         return save_basisproducten(payload)

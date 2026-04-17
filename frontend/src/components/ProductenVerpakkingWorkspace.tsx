@@ -13,7 +13,9 @@ type ProductenVerpakkingWorkspaceProps = {
   verpakkingsonderdelen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
+  catalogusproducten: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
+  bieren: GenericRecord[];
 };
 
 type SortDirection = "asc" | "desc";
@@ -143,7 +145,9 @@ export function ProductenVerpakkingWorkspace({
   verpakkingsonderdelen,
   basisproducten,
   samengesteldeProducten,
-  verpakkingsonderdeelPrijzen
+  catalogusproducten,
+  verpakkingsonderdeelPrijzen,
+  bieren
 }: ProductenVerpakkingWorkspaceProps) {
   const router = useRouter();
   const verpakkingsonderdelenRows = Array.isArray(verpakkingsonderdelen) ? verpakkingsonderdelen : [];
@@ -151,12 +155,14 @@ export function ProductenVerpakkingWorkspace({
   const samengesteldeProductenRows = Array.isArray(samengesteldeProducten)
     ? samengesteldeProducten
     : [];
+  const catalogusproductenRows = Array.isArray(catalogusproducten) ? catalogusproducten : [];
   const verpakkingsonderdeelPrijsRows = Array.isArray(verpakkingsonderdeelPrijzen)
     ? verpakkingsonderdeelPrijzen
     : [];
+  const bierenRows = Array.isArray(bieren) ? bieren : [];
 
   const [activeTab, setActiveTab] = useState<
-    "onderdelen" | "basis" | "samengesteld" | "jaarprijzen" | "kostenoverzicht"
+    "onderdelen" | "basis" | "samengesteld" | "catalogus" | "jaarprijzen" | "kostenoverzicht"
   >("onderdelen");
   const [priceStatus, setPriceStatus] = useState("");
   const [isSavingPrices, setIsSavingPrices] = useState(false);
@@ -221,9 +227,25 @@ export function ProductenVerpakkingWorkspace({
               inhoud_per_eenheid_liter: 0
             }
           };
-        })
+      })
     ],
     [basisproductenRows, verpakkingsonderdelenRows]
+  );
+
+  const bierOptions = useMemo(
+    () =>
+      bierenRows
+        .filter((row) => row && typeof row === "object")
+        .map((row) => {
+          const id = String((row as any).id ?? "");
+          return {
+            value: id,
+            label: String((row as any).biernaam ?? (row as any).naam ?? id),
+            payload: { bier_id: id }
+          };
+        })
+        .filter((row) => row.value),
+    [bierenRows]
   );
 
   const usageByComponentId = useMemo(() => {
@@ -636,6 +658,13 @@ export function ProductenVerpakkingWorkspace({
           </button>
           <button
             type="button"
+            className={`tab-button ${activeTab === "catalogus" ? "active" : ""}`}
+            onClick={() => setActiveTab("catalogus")}
+          >
+            Catalogusproducten
+          </button>
+          <button
+            type="button"
             className={`tab-button ${activeTab === "jaarprijzen" ? "active" : ""}`}
             onClick={() => setActiveTab("jaarprijzen")}
           >
@@ -834,6 +863,95 @@ export function ProductenVerpakkingWorkspace({
           ]}
           title="Samengestelde producten"
           description="Stamgegevens van samengestelde producten opgebouwd uit basisproducten en bouwstenen."
+        />
+      ) : null}
+
+      {activeTab === "catalogus" ? (
+        <NestedCollectionEditor
+          endpoint="/data/dataset/catalog-products"
+          initialRows={catalogusproductenRows}
+          addRowTemplate={{
+            id: "",
+            code: "",
+            naam: "",
+            kind: "giftpack",
+            actief: true,
+            bom_lines: [],
+          }}
+          fields={[
+            { key: "naam", label: "Naam" },
+            { key: "code", label: "Code" },
+            {
+              key: "kind",
+              label: "Type",
+              type: "select",
+              options: [
+                { value: "giftpack", label: "Geschenkverpakking" },
+                { value: "dienst", label: "Dienst" },
+                { value: "catalog", label: "Overig" },
+              ],
+            },
+            { key: "actief", label: "Actief", type: "checkbox" },
+          ]}
+          nestedKey="bom_lines"
+          nestedLabel="BOM regels"
+          nestedRowTemplate={{
+            id: "",
+            line_kind: "beer_product",
+            quantity: 1,
+            bier_id: "",
+            product_id: "",
+            product_type: "basis",
+            packaging_component_id: "",
+          }}
+          nestedFields={[
+            {
+              key: "line_kind",
+              label: "Soort",
+              type: "select",
+              options: [
+                { value: "beer_product", label: "Bier + verpakking" },
+                { value: "packaging_component", label: "Verpakking/overhead" },
+              ],
+              resetOnSelect: true,
+              preserveOnSelect: ["quantity"],
+            },
+            { key: "quantity", label: "Aantal", type: "number" },
+            {
+              key: "bier_id",
+              label: "Bier",
+              type: "select",
+              options: () => bierOptions,
+            },
+            {
+              key: "product_id",
+              label: "Verpakking (product)",
+              type: "select",
+              options: () => basisproductOptions,
+            },
+            {
+              key: "product_type",
+              label: "Product type",
+              type: "select",
+              options: [
+                { value: "basis", label: "Basis" },
+                { value: "samengesteld", label: "Samengesteld" },
+              ],
+            },
+            {
+              key: "packaging_component_id",
+              label: "Onderdeel/overhead",
+              type: "select",
+              options: () => packagingComponentOptions,
+            },
+          ]}
+          compactSummaryColumns={[
+            { key: "naam", label: "Naam" },
+            { key: "kind", label: "Type" },
+            { key: "bom_lines", label: "Regels", type: "count" },
+          ]}
+          title="Catalogusproducten"
+          description="Af te offreren producten die samengesteld kunnen zijn uit meerdere bieren/producten + verpakkingsonderdelen/overhead."
         />
       ) : null}
 

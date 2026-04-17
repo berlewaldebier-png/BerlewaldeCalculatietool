@@ -27,6 +27,7 @@ DATASET_FILES: dict[str, str] = {
     "verkoopprijzen": "verkoopprijzen.json",
     "prijsvoorstellen": "prijsvoorstellen.json",
     "variabele-kosten": "variabele_kosten.json",
+    "catalog-products": "catalog_products.json",
 }
 
 DATASET_DEFAULTS: dict[str, Any] = {
@@ -43,6 +44,7 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "verkoopprijzen": [],
     "prijsvoorstellen": [],
     "variabele-kosten": {},
+    "catalog-products": [],
 }
 
 
@@ -84,4 +86,3 @@ def load_dataset(name: str) -> Any:
     if isinstance(default, list):
         return parsed if isinstance(parsed, list) else default
     return parsed
-

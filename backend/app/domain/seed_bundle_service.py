@@ -32,6 +32,7 @@ def _foundation_dataset_names() -> list[str]:
         "packaging-component-price-versions",
         "base-product-masters",
         "composite-product-masters",
+        "catalog-products",
         "products",
         "sales-strategy-years",
         "sales-strategy-products",

@@ -25,6 +25,9 @@ type VerkoopprijzenRow = Record<string, unknown>;
 type KostprijsversieRow = Record<string, unknown>;
 type KostprijsActivationRow = Record<string, unknown>;
 type BierRow = Record<string, unknown>;
+type CatalogProductRow = Record<string, unknown>;
+type PackagingComponentRow = Record<string, unknown>;
+type PackagingComponentPriceVersionRow = Record<string, unknown>;
 
 type ProductCostRow = {
   bierId: string;
@@ -32,7 +35,7 @@ type ProductCostRow = {
   btwPct: number;
   kostprijsversieId: string;
   productId: string;
-  productType: "basis" | "samengesteld";
+  productType: "basis" | "samengesteld" | "catalog";
   verpakking: string;
   kostprijsEx: number;
 };
@@ -112,6 +115,9 @@ export function AdviesprijzenWorkspace(props: {
   initialBieren: BierRow[];
   initialKostprijsversies: KostprijsversieRow[];
   initialKostprijsproductactiveringen: KostprijsActivationRow[];
+  initialCatalogusproducten: CatalogProductRow[];
+  initialPackagingComponents: PackagingComponentRow[];
+  initialPackagingComponentPriceVersions: PackagingComponentPriceVersionRow[];
 }) {
   const channels = useMemo<Channel[]>(() => {
     return (Array.isArray(props.initialChannels) ? props.initialChannels : [])
@@ -174,6 +180,21 @@ export function AdviesprijzenWorkspace(props: {
   const kostprijsversies = useMemo(() => (Array.isArray(props.initialKostprijsversies) ? props.initialKostprijsversies : []), [props.initialKostprijsversies]);
   const activations = useMemo(() => (Array.isArray(props.initialKostprijsproductactiveringen) ? props.initialKostprijsproductactiveringen : []), [props.initialKostprijsproductactiveringen]);
   const bieren = useMemo(() => (Array.isArray(props.initialBieren) ? props.initialBieren : []), [props.initialBieren]);
+  const catalogusproducten = useMemo(
+    () => (Array.isArray(props.initialCatalogusproducten) ? props.initialCatalogusproducten : []),
+    [props.initialCatalogusproducten]
+  );
+  const packagingComponents = useMemo(
+    () => (Array.isArray(props.initialPackagingComponents) ? props.initialPackagingComponents : []),
+    [props.initialPackagingComponents]
+  );
+  const packagingComponentPriceVersions = useMemo(
+    () =>
+      (Array.isArray(props.initialPackagingComponentPriceVersions)
+        ? props.initialPackagingComponentPriceVersions
+        : []),
+    [props.initialPackagingComponentPriceVersions]
+  );
 
   const beerById = useMemo(() => {
     const map = new Map<string, { biernaam: string; btwPct: number }>();
@@ -187,6 +208,32 @@ export function AdviesprijzenWorkspace(props: {
     });
     return map;
   }, [bieren]);
+
+  const packagingComponentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    packagingComponents.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      const id = String((row as any).id ?? "");
+      if (!id) return;
+      map.set(id, String((row as any).omschrijving ?? (row as any).name ?? id));
+    });
+    return map;
+  }, [packagingComponents]);
+
+  const activePackagingComponentPriceById = useMemo(() => {
+    const map = new Map<string, number>();
+    packagingComponentPriceVersions.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      const jaar = Number((row as any).jaar ?? 0);
+      if (jaar !== selectedYear) return;
+      const id = String((row as any).verpakkingsonderdeel_id ?? (row as any).packaging_component_id ?? "");
+      if (!id) return;
+      const isActief = Boolean((row as any).is_actief ?? (row as any).is_active ?? false);
+      if (!isActief) return;
+      map.set(id, Number((row as any).prijs_per_stuk ?? 0) || 0);
+    });
+    return map;
+  }, [packagingComponentPriceVersions, selectedYear]);
 
   const kostprijsversieById = useMemo(() => {
     const map = new Map<string, KostprijsversieRow>();
@@ -277,6 +324,61 @@ export function AdviesprijzenWorkspace(props: {
       });
     }
 
+    const costByBeerProductKey = new Map<string, { cost: number; btwPct: number }>();
+    out.forEach((row) => {
+      if (!row.bierId) return;
+      costByBeerProductKey.set(`${row.bierId}:${row.productType}:${row.productId}`, {
+        cost: row.kostprijsEx,
+        btwPct: row.btwPct,
+      });
+    });
+
+    catalogusproducten.forEach((cp) => {
+      if (!cp || typeof cp !== "object") return;
+      const id = String((cp as any).id ?? "");
+      const naam = String((cp as any).naam ?? (cp as any).name ?? "");
+      if (!id || !naam) return;
+      const bom = Array.isArray((cp as any).bom_lines) ? ((cp as any).bom_lines as any[]) : [];
+
+      let costEx = 0;
+      let btwPct = parseBtwPct((cp as any).btw_tarief ?? (cp as any).btw ?? "21%");
+      for (const line of bom) {
+        if (!line || typeof line !== "object") continue;
+        const kind = String((line as any).line_kind ?? "").toLowerCase();
+        const qty = Number((line as any).quantity ?? 0) || 0;
+        if (qty <= 0) continue;
+        if (kind === "beer_product") {
+          const bierId = String((line as any).bier_id ?? "");
+          const productId = String((line as any).product_id ?? "");
+          const productType = String((line as any).product_type ?? "basis").toLowerCase();
+          const key = `${bierId}:${productType}:${productId}`;
+          const found = costByBeerProductKey.get(key);
+          if (found) {
+            costEx += qty * found.cost;
+            if (!btwPct) btwPct = found.btwPct;
+          }
+          continue;
+        }
+        if (kind === "packaging_component") {
+          const componentId = String((line as any).packaging_component_id ?? "");
+          if (!componentId) continue;
+          const price = activePackagingComponentPriceById.get(componentId) ?? 0;
+          costEx += qty * price;
+        }
+      }
+
+      out.push({
+        bierId: "",
+        biernaam: naam,
+        btwPct,
+        kostprijsversieId: "",
+        productId: id,
+        productType: "catalog",
+        verpakking: naam,
+        kostprijsEx: costEx,
+      });
+    });
+
     // Stable ordering: beer -> productType -> verpakking
     return out.sort((a, b) => {
       const bn = a.biernaam.localeCompare(b.biernaam);
@@ -285,7 +387,7 @@ export function AdviesprijzenWorkspace(props: {
       if (pt !== 0) return pt;
       return a.verpakking.localeCompare(b.verpakking);
     });
-  }, [activeActivationsForYear, beerById, kostprijsversieById]);
+  }, [activeActivationsForYear, beerById, kostprijsversieById, catalogusproducten, activePackagingComponentPriceById]);
 
   const yearStrategy = useMemo(() => {
     return (
