@@ -13,6 +13,7 @@ type FieldDefinition = {
   label: string;
   type?: FieldType;
   readOnly?: boolean;
+  visible?: (args: { row: InternalRow }) => boolean;
 };
 
 type NestedOption = {
@@ -36,6 +37,7 @@ type NestedFieldDefinition = {
   options?: NestedOption[] | ((args: NestedOptionResolverArgs) => NestedOption[]);
   resetOnSelect?: boolean;
   preserveOnSelect?: string[];
+  visible?: (args: NestedOptionResolverArgs) => boolean;
 };
 
 type NestedComputedField = {
@@ -343,7 +345,9 @@ export function NestedCollectionEditor({
     return (
       <>
         <div className="nested-editor-grid">
-          {fields.map((field) => (
+          {fields
+            .filter((field) => (field.visible ? field.visible({ row }) : true))
+            .map((field) => (
             <label key={field.key} className="nested-field">
               <span>{field.label}</span>
               {field.type === "checkbox" ? (
@@ -397,7 +401,18 @@ export function NestedCollectionEditor({
               {nestedRows.map((nestedRow, nestedIndex) => (
                 <div key={`${row._uiId}-${nestedIndex}`} className="nested-row-card">
                   <div className="nested-row-grid">
-                    {nestedFields.map((field) => {
+                    {nestedFields
+                      .filter((field) =>
+                        field.visible
+                          ? field.visible({
+                              row,
+                              nestedRows,
+                              nestedIndex,
+                              nestedRow
+                            })
+                          : true
+                      )
+                      .map((field) => {
                       const fieldValue =
                         nestedRow[field.key] === null || nestedRow[field.key] === undefined
                           ? ""

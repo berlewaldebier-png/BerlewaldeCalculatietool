@@ -347,7 +347,7 @@ export function AdviesprijzenWorkspace(props: {
         const kind = String((line as any).line_kind ?? "").toLowerCase();
         const qty = Number((line as any).quantity ?? 0) || 0;
         if (qty <= 0) continue;
-        if (kind === "beer_product") {
+        if (kind === "beer" || kind === "beer_product") {
           const bierId = String((line as any).bier_id ?? "");
           const productId = String((line as any).product_id ?? "");
           const productType = String((line as any).product_type ?? "basis").toLowerCase();
@@ -364,6 +364,11 @@ export function AdviesprijzenWorkspace(props: {
           if (!componentId) continue;
           const price = activePackagingComponentPriceById.get(componentId) ?? 0;
           costEx += qty * price;
+          continue;
+        }
+        if (kind === "labor" || kind === "other") {
+          const unitCost = Number((line as any).unit_cost_ex ?? (line as any).kostprijs_ex ?? 0) || 0;
+          costEx += qty * unitCost;
         }
       }
 

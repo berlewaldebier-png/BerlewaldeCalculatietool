@@ -647,21 +647,21 @@ export function ProductenVerpakkingWorkspace({
             className={`tab-button ${activeTab === "basis" ? "active" : ""}`}
             onClick={() => setActiveTab("basis")}
           >
-            Basisproducten
+            Afvuleenheden
           </button>
           <button
             type="button"
             className={`tab-button ${activeTab === "samengesteld" ? "active" : ""}`}
             onClick={() => setActiveTab("samengesteld")}
           >
-            Samengestelde producten
+            Afvulsamenstellingen
           </button>
           <button
             type="button"
             className={`tab-button ${activeTab === "catalogus" ? "active" : ""}`}
             onClick={() => setActiveTab("catalogus")}
           >
-            Catalogusproducten
+            Verkoopbare artikelen
           </button>
           <button
             type="button"
@@ -776,7 +776,7 @@ export function ProductenVerpakkingWorkspace({
             { key: "onderdelen", label: "Onderdelen", type: "count" }
           ]}
           title="Basisproducten"
-          description="Stamgegevens van basisproducten met unieke verpakkingsonderdelen per product."
+          description="Afvuleenheden met unieke verpakkingsonderdelen per eenheid."
         />
       ) : null}
 
@@ -861,8 +861,8 @@ export function ProductenVerpakkingWorkspace({
             { key: "totale_inhoud_liter", label: "Liter", type: "number" },
             { key: "basisproducten", label: "Onderdelen", type: "count" }
           ]}
-          title="Samengestelde producten"
-          description="Stamgegevens van samengestelde producten opgebouwd uit basisproducten en bouwstenen."
+          title="Afvulsamenstellingen"
+          description="Afvulsamenstellingen (dozen/combi's) opgebouwd uit afvuleenheden en eventueel bouwstenen."
         />
       ) : null}
 
@@ -894,15 +894,17 @@ export function ProductenVerpakkingWorkspace({
             { key: "actief", label: "Actief", type: "checkbox" },
           ]}
           nestedKey="bom_lines"
-          nestedLabel="BOM regels"
+          nestedLabel="Regels"
           nestedRowTemplate={{
             id: "",
-            line_kind: "beer_product",
+            line_kind: "beer",
             quantity: 1,
             bier_id: "",
             product_id: "",
             product_type: "basis",
             packaging_component_id: "",
+            omschrijving: "",
+            unit_cost_ex: null,
           }}
           nestedFields={[
             {
@@ -910,48 +912,84 @@ export function ProductenVerpakkingWorkspace({
               label: "Soort",
               type: "select",
               options: [
-                { value: "beer_product", label: "Bier + verpakking" },
-                { value: "packaging_component", label: "Verpakking/overhead" },
+                { value: "beer", label: "Bier" },
+                { value: "packaging_component", label: "Verpakkingsonderdeel" },
+                { value: "labor", label: "Loon" },
+                { value: "other", label: "Overig" },
               ],
               resetOnSelect: true,
               preserveOnSelect: ["quantity"],
             },
-            { key: "quantity", label: "Aantal", type: "number" },
             {
-              key: "bier_id",
-              label: "Bier",
+              key: "beer_choice",
+              label: "Onderdeel",
               type: "select",
-              options: () => bierOptions,
-            },
-            {
-              key: "product_id",
-              label: "Verpakking (product)",
-              type: "select",
-              options: () => basisproductOptions,
-            },
-            {
-              key: "product_type",
-              label: "Product type",
-              type: "select",
-              options: [
-                { value: "basis", label: "Basis" },
-                { value: "samengesteld", label: "Samengesteld" },
-              ],
+              visible: ({ nestedRow }) => String((nestedRow as any).line_kind ?? "") === "beer",
+              options: () => {
+                const packagingOptions: { id: string; label: string; product_type: "basis" | "samengesteld" }[] = [
+                  ...basisproductenRows.map((row) => ({
+                    id: String((row as any).id ?? ""),
+                    label: String((row as any).omschrijving ?? ""),
+                    product_type: "basis" as const
+                  })),
+                  ...samengesteldeProductenRows.map((row) => ({
+                    id: String((row as any).id ?? ""),
+                    label: String((row as any).omschrijving ?? ""),
+                    product_type: "samengesteld" as const
+                  }))
+                ].filter((row) => row.id && row.label);
+
+                const out: any[] = [];
+                for (const b of bierOptions) {
+                  for (const p of packagingOptions) {
+                    out.push({
+                      value: `${b.value}|${p.product_type}|${p.id}`,
+                      label: `${b.label} - ${p.label}`,
+                      payload: {
+                        bier_id: b.value,
+                        product_type: p.product_type,
+                        product_id: p.id
+                      }
+                    });
+                  }
+                }
+                return out;
+              },
             },
             {
               key: "packaging_component_id",
-              label: "Onderdeel/overhead",
+              label: "Onderdeel",
               type: "select",
+              visible: ({ nestedRow }) => String((nestedRow as any).line_kind ?? "") === "packaging_component",
               options: () => packagingComponentOptions,
             },
+            {
+              key: "omschrijving",
+              label: "Omschrijving",
+              type: "text",
+              visible: ({ nestedRow }) => {
+                const kind = String((nestedRow as any).line_kind ?? "");
+                return kind === "labor" || kind === "other";
+              },
+            },
+            {
+              key: "unit_cost_ex",
+              label: "Kostprijs (ex)",
+              type: "number",
+              visible: ({ nestedRow }) => {
+                const kind = String((nestedRow as any).line_kind ?? "");
+                return kind === "labor" || kind === "other";
+              },
+            },
+            { key: "quantity", label: "Aantal", type: "number" },
           ]}
           compactSummaryColumns={[
             { key: "naam", label: "Naam" },
             { key: "kind", label: "Type" },
             { key: "bom_lines", label: "Regels", type: "count" },
           ]}
-          title="Catalogusproducten"
-          description="Af te offreren producten die samengesteld kunnen zijn uit meerdere bieren/producten + verpakkingsonderdelen/overhead."
+          title="Verkoopbare artikelen"
+          description="Verkoopbare artikelen zoals giftpacks en diensten. Voeg regels toe (bier, verpakkingsonderdeel, loon, overig)."
         />
       ) : null}
 
