@@ -677,7 +677,8 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                         period_index = 0
                                     if period_index not in (1, 2):
                                         continue
-                                    period_id = str(p.get("id", "") or "").strip() or f"{variant_id}:p{period_index}"
+                                    # Always namespace to the variant to avoid collisions when cloning scenarios.
+                                    period_id = f"{variant_id}:p{period_index}"
                                     variant_period_params.append(
                                         (
                                             period_id,
