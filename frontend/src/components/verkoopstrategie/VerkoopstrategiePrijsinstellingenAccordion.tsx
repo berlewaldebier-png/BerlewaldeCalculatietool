@@ -177,8 +177,9 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                   style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <span className="muted">Standaard:</span>
-                  <span className="muted">+</span>
+                  <span className="muted" style={{ fontWeight: 650 }}>
+                    Opslag:
+                  </span>
                   <input
                     className="dataset-input"
                     type="number"
@@ -213,7 +214,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                       }
                       setDraft(opslagKey, String(parsed));
                     }}
-                    style={{ width: 96 }}
+                    style={{ width: 96, textAlign: "right" }}
                   />
                   <span className="muted">%</span>
                 </span>
