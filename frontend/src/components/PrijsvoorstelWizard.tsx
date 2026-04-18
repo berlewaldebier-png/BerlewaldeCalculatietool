@@ -10,6 +10,44 @@ import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcSellInExFromOpsl
 
 type GenericRecord = Record<string, unknown>;
 
+type QuoteLineRow = GenericRecord & {
+  id: string;
+  kostprijsversie_id: string;
+  included: boolean;
+  cost_at_quote: number;
+  sales_price_at_quote: number;
+  revenue_at_quote: number;
+  margin_at_quote: number;
+  target_margin_pct_at_quote: number;
+  channel_at_quote: string;
+  verpakking_label: string;
+  korting_pct: number;
+  korting_pct_p1?: number;
+  korting_pct_p2?: number;
+  sell_in_price_override_p1?: number;
+  sell_in_price_override_p2?: number;
+};
+
+type QuoteVariantPeriod = {
+  id: string;
+  period_index: 1 | 2;
+  label: string;
+  start_date: string;
+  end_date: string;
+};
+
+type QuoteVariant = {
+  id: string;
+  name: string;
+  channel_code: string;
+  return_pct: number;
+  sort_index: number;
+  periods: QuoteVariantPeriod[];
+  product_rows: QuoteLineRow[];
+  beer_rows: QuoteLineRow[];
+  staffels: GenericRecord[];
+};
+
 type PrijsvoorstelWizardProps = {
   initialRows: GenericRecord[];
   yearOptions: number[];
@@ -363,8 +401,108 @@ function pickLatestKnownProductRows(rows: GenericRecord[], targetYear: number) {
 
 // Pricing math is centralized in `lib/pricingEngine.ts`.
 
+function toPeriodIndex(value: unknown, fallback: 1 | 2): 1 | 2 {
+  const numeric = Number(value);
+  return numeric === 1 || numeric === 2 ? numeric : fallback;
+}
+
+function ensureVariantPeriods(raw: unknown): QuoteVariantPeriod[] {
+  const periods = Array.isArray(raw) ? (raw as GenericRecord[]) : [];
+  const normalized = periods
+    .filter((row) => typeof row === "object" && row !== null)
+    .map((row) => ({
+      id: String((row as any).id ?? createId()),
+      period_index: toPeriodIndex((row as any).period_index, 1),
+      label: String((row as any).label ?? ""),
+      start_date: String((row as any).start_date ?? ""),
+      end_date: String((row as any).end_date ?? "")
+    }))
+    .filter((row) => row.period_index === 1 || row.period_index === 2);
+
+  const byIndex = new Map<1 | 2, QuoteVariantPeriod>();
+  normalized.forEach((row) => {
+    if (!byIndex.has(row.period_index)) {
+      byIndex.set(row.period_index, row);
+    }
+  });
+
+  const p1 = byIndex.get(1) ?? { id: createId(), period_index: 1, label: "Introductie", start_date: "", end_date: "" };
+  const p2 = byIndex.get(2) ?? { id: createId(), period_index: 2, label: "Standaard", start_date: "", end_date: "" };
+  return [p1, p2];
+}
+
+function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
+  const rows = Array.isArray(raw) ? (raw as GenericRecord[]) : [];
+  return rows
+    .filter((row) => typeof row === "object" && row !== null)
+    .map((row) => {
+      const kortingPct = toNumber((row as any).korting_pct, 0);
+      return {
+        ...row,
+        id: String((row as any).id ?? createId()),
+        kostprijsversie_id: String((row as any).kostprijsversie_id ?? ""),
+        included: isIncluded((row as any).included),
+        cost_at_quote: toNumber((row as any).cost_at_quote, 0),
+        sales_price_at_quote: toNumber((row as any).sales_price_at_quote, 0),
+        revenue_at_quote: toNumber((row as any).revenue_at_quote, 0),
+        margin_at_quote: toNumber((row as any).margin_at_quote, 0),
+        target_margin_pct_at_quote: toNumber((row as any).target_margin_pct_at_quote, 0),
+        channel_at_quote: String((row as any).channel_at_quote ?? ""),
+        verpakking_label: String((row as any).verpakking_label ?? ""),
+        // Base korting_pct is the active-period view; period fields hold the truth.
+        korting_pct: kortingPct,
+        korting_pct_p1: toNumber((row as any).korting_pct_p1, kortingPct),
+        korting_pct_p2: toNumber((row as any).korting_pct_p2, kortingPct),
+        sell_in_price_override_p1: toNumber((row as any).sell_in_price_override_p1, 0),
+        sell_in_price_override_p2: toNumber((row as any).sell_in_price_override_p2, 0)
+      } as QuoteLineRow;
+    });
+}
+
+function normalizeQuoteVariant(raw: GenericRecord, fallbackChannel: string): QuoteVariant {
+  return {
+    id: String(raw.id ?? createId()),
+    name: String(raw.name ?? "Scenario"),
+    channel_code: normalizeKey(raw.channel_code) || fallbackChannel,
+    return_pct: toNumber(raw.return_pct, 0),
+    sort_index: Number(raw.sort_index ?? 0) || 0,
+    periods: ensureVariantPeriods(raw.periods),
+    product_rows: normalizeVariantLineRows(raw.product_rows),
+    beer_rows: normalizeVariantLineRows(raw.beer_rows),
+    staffels: Array.isArray(raw.staffels) ? (raw.staffels as GenericRecord[]) : []
+  };
+}
+
+function buildDefaultVariantFromLegacy(quote: GenericRecord, pricingChannel: string): QuoteVariant {
+  const quoteId = String(quote.id ?? createId());
+  const variantId = `${quoteId}:v1`;
+  return {
+    id: variantId,
+    name: "Scenario A",
+    channel_code: pricingChannel,
+    return_pct: 0,
+    sort_index: 0,
+    periods: [
+      { id: `${variantId}:p1`, period_index: 1, label: "Introductie", start_date: "", end_date: "" },
+      { id: `${variantId}:p2`, period_index: 2, label: "Standaard", start_date: "", end_date: "" }
+    ],
+    product_rows: normalizeVariantLineRows(quote.product_rows),
+    beer_rows: normalizeVariantLineRows(quote.beer_rows),
+    staffels: Array.isArray(quote.staffels) ? (quote.staffels as GenericRecord[]) : []
+  };
+}
+
+function applyVariantPeriodToWorkingRows<T extends GenericRecord>(rows: T[], periodIndex: 1 | 2): T[] {
+  return rows.map((row) => {
+    const p1 = toNumber((row as any).korting_pct_p1, toNumber((row as any).korting_pct, 0));
+    const p2 = toNumber((row as any).korting_pct_p2, toNumber((row as any).korting_pct, 0));
+    const nextKorting = periodIndex === 1 ? p1 : p2;
+    return { ...row, korting_pct: nextKorting } as T;
+  }) as T[];
+}
+
 function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
-  const normalizeProductRows = Array.isArray(raw.product_rows)
+  const normalizeProductRows: QuoteLineRow[] = Array.isArray(raw.product_rows)
     ? (raw.product_rows as GenericRecord[]).map((row) => ({
         ...row,
         kostprijsversie_id: String(row.kostprijsversie_id ?? ""),
@@ -376,9 +514,9 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
         target_margin_pct_at_quote: toNumber(row.target_margin_pct_at_quote, 0),
         channel_at_quote: String(row.channel_at_quote ?? ""),
         verpakking_label: String(row.verpakking_label ?? "")
-      }))
+      })) as QuoteLineRow[]
     : [];
-  const normalizeBeerRows = Array.isArray(raw.beer_rows)
+  const normalizeBeerRows: QuoteLineRow[] = Array.isArray(raw.beer_rows)
     ? (raw.beer_rows as GenericRecord[]).map((row) => ({
         ...row,
         kostprijsversie_id: String(row.kostprijsversie_id ?? ""),
@@ -390,7 +528,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
         target_margin_pct_at_quote: toNumber(row.target_margin_pct_at_quote, 0),
         channel_at_quote: String(row.channel_at_quote ?? ""),
         verpakking_label: String(row.verpakking_label ?? "")
-      }))
+      })) as QuoteLineRow[]
     : [];
 
   const nowYear = new Date().getFullYear();
@@ -399,7 +537,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
   const kanaal = normalizeKey(raw.kanaal) || "horeca";
   const pricingChannel = normalizeKey(raw.pricing_channel) || kanaal;
 
-  return {
+  const base = {
     ...cloneRecord(raw),
     id: String(raw.id ?? createId()),
     offertenummer: String(raw.offertenummer ?? ""),
@@ -437,9 +575,37 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
     product_rows: normalizeProductRows,
     beer_rows: normalizeBeerRows,
     catalog_product_rows: Array.isArray(raw.catalog_product_rows) ? raw.catalog_product_rows : [],
+    variants: Array.isArray((raw as any).variants)
+      ? ((raw as any).variants as GenericRecord[])
+          .filter((row) => typeof row === "object" && row !== null)
+          .map((row) => normalizeQuoteVariant(row, pricingChannel))
+      : [],
+    active_variant_id: String((raw as any).active_variant_id ?? ""),
+    active_period_index: toPeriodIndex((raw as any).active_period_index, 2),
     last_step: Number(raw.last_step ?? 1),
     finalized_at: String(raw.finalized_at ?? "")
   };
+
+  // Ensure at least one scenario exists; if not present, derive one from legacy rows.
+  const variants = (base as any).variants as QuoteVariant[];
+  if (variants.length === 0) {
+    variants.push(buildDefaultVariantFromLegacy(base, pricingChannel));
+  }
+
+  const activeVariantId = String((base as any).active_variant_id ?? "").trim() || String(variants[0]?.id ?? "");
+  (base as any).active_variant_id = activeVariantId;
+
+  // Materialize the active scenario into the legacy working rows (so existing wizard logic stays intact).
+  const activePeriod = toPeriodIndex((base as any).active_period_index, 2);
+  const activeVariant = variants.find((row) => String(row.id) === activeVariantId) ?? variants[0];
+  if (activeVariant) {
+    base.product_rows = applyVariantPeriodToWorkingRows(activeVariant.product_rows, activePeriod);
+    base.beer_rows = applyVariantPeriodToWorkingRows(activeVariant.beer_rows, activePeriod);
+    base.staffels = Array.isArray(activeVariant.staffels) ? activeVariant.staffels : [];
+  }
+
+  (base as any).variants = variants;
+  return base;
 }
 
 function createEmptyPrijsvoorstel(defaultYear?: number): GenericRecord {
@@ -609,6 +775,21 @@ export function PrijsvoorstelWizard({
   const isLitersMode = String(current.voorsteltype ?? "") === "Op basis van liters";
   const offerLevel = String(current.offer_level ?? "samengesteld");
   const litersBasis = String(current.liters_basis ?? "een_bier");
+  const variants = useMemo(() => {
+    const raw = (current as any).variants;
+    return Array.isArray(raw) ? (raw as QuoteVariant[]) : [];
+  }, [current]);
+  const activeVariantId = String((current as any).active_variant_id ?? "").trim() || String(variants[0]?.id ?? "");
+  const activePeriodIndex = toPeriodIndex((current as any).active_period_index, 2);
+  const activeVariant = useMemo(() => {
+    return variants.find((row) => String(row.id) === activeVariantId) ?? variants[0] ?? null;
+  }, [activeVariantId, variants]);
+  const activePeriod = useMemo(() => {
+    if (!activeVariant) return null;
+    const periods = Array.isArray(activeVariant.periods) ? activeVariant.periods : [];
+    const match = periods.find((row) => row.period_index === activePeriodIndex);
+    return match ?? periods[activePeriodIndex === 1 ? 0 : 1] ?? null;
+  }, [activePeriodIndex, activeVariant]);
 
   const bierNameMap = useMemo(() => {
     const fromMaster = new Map<string, string>();
@@ -2346,6 +2527,187 @@ export function PrijsvoorstelWizard({
 
   usePageShellWizardSidebar(wizardSidebar);
 
+  function syncActiveVariantFromWorkingRows(next: GenericRecord) {
+    const nextVariants = Array.isArray((next as any).variants) ? (((next as any).variants as unknown[]) as QuoteVariant[]) : [];
+    if (nextVariants.length === 0) {
+      nextVariants.push(buildDefaultVariantFromLegacy(next, normalizeKey(next.pricing_channel) || normalizeKey(next.kanaal) || defaultKanaal));
+    }
+
+    const nextActiveVariantId =
+      String((next as any).active_variant_id ?? "").trim() || String(nextVariants[0]?.id ?? "");
+    const nextPeriodIndex = toPeriodIndex((next as any).active_period_index, 2);
+
+    let active = nextVariants.find((row) => String(row.id) === nextActiveVariantId);
+    if (!active) {
+      active = nextVariants[0];
+      (next as any).active_variant_id = String(active?.id ?? "");
+    }
+
+    const mergeRows = (working: unknown, existing: unknown): QuoteLineRow[] => {
+      const workingRows = Array.isArray(working) ? (working as GenericRecord[]) : [];
+      const existingRows = Array.isArray(existing) ? (existing as GenericRecord[]) : [];
+      const byId = new Map(existingRows.map((row) => [String((row as any).id ?? ""), row]));
+
+      return workingRows
+        .filter((row) => typeof row === "object" && row !== null)
+        .map((row) => {
+          const id = String((row as any).id ?? "");
+          const prev = byId.get(id) ?? {};
+          const kortingNow = toNumber((row as any).korting_pct, 0);
+
+          const fallbackKorting = toNumber((prev as any).korting_pct, kortingNow);
+          let p1 = toNumber((prev as any).korting_pct_p1, toNumber((row as any).korting_pct_p1, fallbackKorting));
+          let p2 = toNumber((prev as any).korting_pct_p2, toNumber((row as any).korting_pct_p2, fallbackKorting));
+          if (nextPeriodIndex === 1) {
+            p1 = kortingNow;
+          } else {
+            p2 = kortingNow;
+          }
+
+          return {
+            ...prev,
+            ...row,
+            id: id || String((prev as any).id ?? createId()),
+            included: isIncluded((row as any).included),
+            verpakking_label: String((row as any).verpakking_label ?? ""),
+            kostprijsversie_id: String((row as any).kostprijsversie_id ?? ""),
+            cost_at_quote: toNumber((row as any).cost_at_quote, toNumber((prev as any).cost_at_quote, 0)),
+            sales_price_at_quote: toNumber((row as any).sales_price_at_quote, toNumber((prev as any).sales_price_at_quote, 0)),
+            revenue_at_quote: toNumber((row as any).revenue_at_quote, toNumber((prev as any).revenue_at_quote, 0)),
+            margin_at_quote: toNumber((row as any).margin_at_quote, toNumber((prev as any).margin_at_quote, 0)),
+            target_margin_pct_at_quote: toNumber(
+              (row as any).target_margin_pct_at_quote,
+              toNumber((prev as any).target_margin_pct_at_quote, 0)
+            ),
+            channel_at_quote: String((row as any).channel_at_quote ?? (prev as any).channel_at_quote ?? ""),
+            korting_pct: kortingNow,
+            korting_pct_p1: p1,
+            korting_pct_p2: p2,
+            sell_in_price_override_p1: toNumber((prev as any).sell_in_price_override_p1, toNumber((row as any).sell_in_price_override_p1, 0)),
+            sell_in_price_override_p2: toNumber((prev as any).sell_in_price_override_p2, toNumber((row as any).sell_in_price_override_p2, 0))
+          } as QuoteLineRow;
+        });
+    };
+
+    if (active) {
+      active.product_rows = mergeRows((next as any).product_rows, (active as any).product_rows);
+      active.beer_rows = mergeRows((next as any).beer_rows, (active as any).beer_rows);
+      active.staffels = Array.isArray((next as any).staffels) ? ((next as any).staffels as GenericRecord[]) : [];
+      active.channel_code = normalizeKey((active as any).channel_code) || normalizeKey((next as any).pricing_channel) || normalizeKey((next as any).kanaal) || defaultKanaal;
+      active.periods = ensureVariantPeriods((active as any).periods);
+    }
+
+    (next as any).variants = nextVariants;
+    (next as any).active_variant_id = nextActiveVariantId;
+    (next as any).active_period_index = nextPeriodIndex;
+  }
+
+  function selectVariant(variantId: string) {
+    updateCurrent((draft) => {
+      const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+      const target = list.find((row) => String(row.id) === String(variantId));
+      if (!target) {
+        return;
+      }
+      (draft as any).active_variant_id = String(target.id);
+      const periodIndex = toPeriodIndex((draft as any).active_period_index, 2);
+      draft.product_rows = applyVariantPeriodToWorkingRows(target.product_rows, periodIndex);
+      draft.beer_rows = applyVariantPeriodToWorkingRows(target.beer_rows, periodIndex);
+      draft.staffels = Array.isArray(target.staffels) ? target.staffels : [];
+      draft.pricing_channel = normalizeKey(target.channel_code) || normalizeKey(draft.pricing_channel) || normalizeKey(draft.kanaal) || defaultKanaal;
+    });
+  }
+
+  function selectPeriod(periodIndex: 1 | 2) {
+    updateCurrent((draft) => {
+      (draft as any).active_period_index = periodIndex;
+      draft.product_rows = applyVariantPeriodToWorkingRows(
+        Array.isArray(draft.product_rows) ? (draft.product_rows as GenericRecord[]) : [],
+        periodIndex
+      );
+      draft.beer_rows = applyVariantPeriodToWorkingRows(
+        Array.isArray(draft.beer_rows) ? (draft.beer_rows as GenericRecord[]) : [],
+        periodIndex
+      );
+    });
+  }
+
+  function addScenarioFromActive() {
+    updateCurrent((draft) => {
+      const quoteId = String(draft.id ?? createId());
+      const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+      const existing = list.map((row) => String(row.id));
+      const usedNumbers = existing
+        .map((id) => {
+          const match = id.match(/:v(\d+)$/);
+          return match ? Number(match[1]) : NaN;
+        })
+        .filter((value) => Number.isFinite(value)) as number[];
+      const nextNumber = usedNumbers.length ? Math.max(...usedNumbers) + 1 : list.length + 1;
+      const nextId = `${quoteId}:v${nextNumber}`;
+
+      const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+      const source = list.find((row) => String(row.id) === activeId) ?? list[0] ?? buildDefaultVariantFromLegacy(draft, normalizeKey(draft.pricing_channel) || defaultKanaal);
+      const nextName = `Scenario ${String.fromCharCode(64 + Math.min(26, nextNumber))}`; // A,B,C...
+
+      const cloned: QuoteVariant = {
+        id: nextId,
+        name: nextName,
+        channel_code: normalizeKey(source.channel_code) || normalizeKey(draft.pricing_channel) || defaultKanaal,
+        return_pct: toNumber(source.return_pct, 0),
+        sort_index: nextNumber - 1,
+        periods: ensureVariantPeriods(source.periods),
+        product_rows: normalizeVariantLineRows(source.product_rows),
+        beer_rows: normalizeVariantLineRows(source.beer_rows),
+        staffels: Array.isArray(source.staffels) ? (source.staffels as GenericRecord[]) : []
+      };
+
+      const nextList = [...list, cloned].sort((a, b) => (a.sort_index ?? 0) - (b.sort_index ?? 0));
+      (draft as any).variants = nextList;
+      (draft as any).active_variant_id = nextId;
+
+      const periodIndex = toPeriodIndex((draft as any).active_period_index, 2);
+      draft.product_rows = applyVariantPeriodToWorkingRows(cloned.product_rows, periodIndex);
+      draft.beer_rows = applyVariantPeriodToWorkingRows(cloned.beer_rows, periodIndex);
+      draft.staffels = cloned.staffels;
+    });
+  }
+
+  function deleteActiveScenario() {
+    updateCurrent((draft) => {
+      const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+      if (list.length <= 1) {
+        return;
+      }
+      const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+      const nextList = list.filter((row) => String(row.id) !== activeId);
+      (draft as any).variants = nextList;
+      const nextActive = nextList[0];
+      (draft as any).active_variant_id = String(nextActive?.id ?? "");
+      const periodIndex = toPeriodIndex((draft as any).active_period_index, 2);
+      if (nextActive) {
+        draft.product_rows = applyVariantPeriodToWorkingRows(nextActive.product_rows, periodIndex);
+        draft.beer_rows = applyVariantPeriodToWorkingRows(nextActive.beer_rows, periodIndex);
+        draft.staffels = Array.isArray(nextActive.staffels) ? nextActive.staffels : [];
+      }
+    });
+  }
+
+  function updateActiveVariantMeta(field: "name" | "channel_code", value: string) {
+    updateCurrent((draft) => {
+      const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+      const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+      const index = list.findIndex((row) => String(row.id) === activeId);
+      if (index < 0) return;
+      const next = [...list];
+      next[index] = { ...next[index], [field]: value };
+      (draft as any).variants = next;
+      if (field === "channel_code") {
+        draft.pricing_channel = normalizeKey(value) || normalizeKey(draft.pricing_channel) || normalizeKey(draft.kanaal) || defaultKanaal;
+      }
+    });
+  }
+
   function updateCurrent(updater: (draft: GenericRecord) => void) {
     setRows((currentRows) =>
       currentRows.map((row) => {
@@ -2354,6 +2716,7 @@ export function PrijsvoorstelWizard({
         }
         const next = cloneRecord(row);
         updater(next);
+        syncActiveVariantFromWorkingRows(next);
         next.last_step = activeStepIndex + 1;
         return next;
       })
@@ -2585,7 +2948,11 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      nextRows[index] = { ...nextRows[index], [field]: value };
+      const nextRow = { ...nextRows[index], [field]: value };
+      if (field === "korting_pct") {
+        (nextRow as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = value;
+      }
+      nextRows[index] = nextRow;
       draft.beer_rows = nextRows;
     });
   }
@@ -2601,7 +2968,11 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      nextRows[index] = { ...nextRows[index], [field]: value };
+      const nextRow = { ...nextRows[index], [field]: value };
+      if (field === "korting_pct") {
+        (nextRow as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = value;
+      }
+      nextRows[index] = nextRow;
       draft.product_rows = nextRows;
     });
   }
@@ -2619,7 +2990,11 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      nextRows[index] = { ...nextRows[index], [field]: value };
+      const nextRow = { ...nextRows[index], [field]: value };
+      if (field === "korting_pct") {
+        (nextRow as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = value;
+      }
+      nextRows[index] = nextRow;
       (draft as any).catalog_product_rows = nextRows;
     });
   }
@@ -3376,8 +3751,139 @@ export function PrijsvoorstelWizard({
   }
 
   function renderOfferteStep() {
+    const canDeleteScenario = variants.length > 1;
+    const periodLabel = activePeriod?.label || (activePeriodIndex === 1 ? "Introductie" : "Standaard");
+
     return (
       <div className="wizard-stack">
+        <div className="module-card compact-card">
+          <div className="module-card-title">Scenario & periode</div>
+          <div className="module-card-text">
+            Maak scenario's (sub-offertes) en bepaal kortingspercentages per periode. De berekening hieronder toont nu: <strong>{periodLabel}</strong>.
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginTop: "0.75rem" }}>
+            <div>
+              <div className="field-label">Scenario</div>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <select
+                  className="input"
+                  value={activeVariantId}
+                  onChange={(event) => selectVariant(event.target.value)}
+                  style={{ flex: 1 }}
+                >
+                  {variants.map((variant) => (
+                    <option key={variant.id} value={variant.id}>
+                      {variant.name || variant.id}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="btn" onClick={addScenarioFromActive}>
+                  Scenario toevoegen
+                </button>
+                <button type="button" className="btn" onClick={deleteActiveScenario} disabled={!canDeleteScenario}>
+                  Verwijderen
+                </button>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginTop: "0.75rem" }}>
+                <div>
+                  <div className="field-label">Naam</div>
+                  <input
+                    className="input"
+                    value={activeVariant?.name ?? ""}
+                    onChange={(event) => updateActiveVariantMeta("name", event.target.value)}
+                    placeholder="Scenario naam..."
+                  />
+                </div>
+                <div>
+                  <div className="field-label">Kanaal</div>
+                  <select
+                    className="input"
+                    value={normalizeKey(activeVariant?.channel_code) || currentKanaal}
+                    onChange={(event) => updateActiveVariantMeta("channel_code", event.target.value)}
+                  >
+                    {channelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="field-label">Periode</div>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className={activePeriodIndex === 1 ? "btn btn-primary" : "btn"}
+                  onClick={() => selectPeriod(1)}
+                >
+                  Introductie
+                </button>
+                <button
+                  type="button"
+                  className={activePeriodIndex === 2 ? "btn btn-primary" : "btn"}
+                  onClick={() => selectPeriod(2)}
+                >
+                  Standaard
+                </button>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginTop: "0.75rem" }}>
+                <div>
+                  <div className="field-label">Startdatum</div>
+                  <input
+                    className="input"
+                    type="date"
+                    value={getDateInputValue(activePeriod?.start_date)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      updateCurrent((draft) => {
+                        const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+                        const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                        const index = list.findIndex((row) => String(row.id) === activeId);
+                        if (index < 0) return;
+                        const next = [...list];
+                        const periods = ensureVariantPeriods(next[index].periods).map((p) =>
+                          p.period_index === activePeriodIndex ? { ...p, start_date: value } : p
+                        );
+                        next[index] = { ...next[index], periods };
+                        (draft as any).variants = next;
+                      });
+                    }}
+                  />
+                </div>
+                <div>
+                  <div className="field-label">Einddatum</div>
+                  <input
+                    className="input"
+                    type="date"
+                    value={getDateInputValue(activePeriod?.end_date)}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      updateCurrent((draft) => {
+                        const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+                        const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                        const index = list.findIndex((row) => String(row.id) === activeId);
+                        if (index < 0) return;
+                        const next = [...list];
+                        const periods = ensureVariantPeriods(next[index].periods).map((p) =>
+                          p.period_index === activePeriodIndex ? { ...p, end_date: value } : p
+                        );
+                        next[index] = { ...next[index], periods };
+                        (draft as any).variants = next;
+                      });
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {isLitersMode ? renderLitersOfferte() : renderProductOfferte()}
       </div>
     );
@@ -3529,6 +4035,8 @@ export function PrijsvoorstelWizard({
 
   function renderSamenvattingStep() {
     const gekozenKanaal = currentKanaalLabel;
+    const scenarioLabel = activeVariant?.name || "Scenario";
+    const periodLabel = activePeriod?.label || (activePeriodIndex === 1 ? "Introductie" : "Standaard");
 
     return (
       <div className="wizard-stack">
@@ -3544,6 +4052,14 @@ export function PrijsvoorstelWizard({
           <div className="stat-card">
             <div className="stat-label">{isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
             <div className="stat-value small">{gekozenKanaal}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Scenario</div>
+            <div className="stat-value small">{scenarioLabel}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Periode</div>
+            <div className="stat-value small">{periodLabel}</div>
           </div>
         </div>
 
