@@ -157,6 +157,9 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                 type="button"
                 className="editor-button editor-button-secondary"
                 style={{
+                  display: "flex",
+                  flexDirection: "row",
+                  alignItems: "center",
                   justifyContent: "space-between",
                   gap: "0.75rem",
                   padding: "0.9rem 1rem",
