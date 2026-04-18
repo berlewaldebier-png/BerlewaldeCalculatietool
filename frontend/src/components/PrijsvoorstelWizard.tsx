@@ -28,6 +28,17 @@ type QuoteLineRow = GenericRecord & {
   sell_in_price_override_p2?: number;
 };
 
+type QuoteStaffelRow = GenericRecord & {
+  id: string;
+  liters: number;
+  product_id?: string;
+  product_type?: string;
+  korting_pct: number;
+  korting_pct_p1?: number;
+  korting_pct_p2?: number;
+  sort_index?: number;
+};
+
 type QuoteVariantPeriod = {
   id: string;
   period_index: 1 | 2;
@@ -45,7 +56,7 @@ type QuoteVariant = {
   periods: QuoteVariantPeriod[];
   product_rows: QuoteLineRow[];
   beer_rows: QuoteLineRow[];
-  staffels: GenericRecord[];
+  staffels: QuoteStaffelRow[];
 };
 
 type PrijsvoorstelWizardProps = {
@@ -459,6 +470,27 @@ function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
     });
 }
 
+function normalizeVariantStaffels(raw: unknown): QuoteStaffelRow[] {
+  const rows = Array.isArray(raw) ? (raw as GenericRecord[]) : [];
+  return rows
+    .filter((row) => typeof row === "object" && row !== null)
+    .map((row, index) => {
+      const kortingPct = toNumber((row as any).korting_pct, 0);
+      return {
+        ...row,
+        id: String((row as any).id ?? createId()),
+        liters: toNumber((row as any).liters, 0),
+        product_id: String((row as any).product_id ?? ""),
+        product_type: String((row as any).product_type ?? ""),
+        korting_pct: kortingPct,
+        korting_pct_p1: toNumber((row as any).korting_pct_p1, kortingPct),
+        korting_pct_p2: toNumber((row as any).korting_pct_p2, kortingPct),
+        sort_index: Number((row as any).sort_index ?? index) || index
+      } as QuoteStaffelRow;
+    })
+    .sort((a, b) => toNumber(a.liters, 0) - toNumber(b.liters, 0));
+}
+
 function normalizeQuoteVariant(raw: GenericRecord, fallbackChannel: string): QuoteVariant {
   return {
     id: String(raw.id ?? createId()),
@@ -469,7 +501,7 @@ function normalizeQuoteVariant(raw: GenericRecord, fallbackChannel: string): Quo
     periods: ensureVariantPeriods(raw.periods),
     product_rows: normalizeVariantLineRows(raw.product_rows),
     beer_rows: normalizeVariantLineRows(raw.beer_rows),
-    staffels: Array.isArray(raw.staffels) ? (raw.staffels as GenericRecord[]) : []
+    staffels: normalizeVariantStaffels(raw.staffels)
   };
 }
 
@@ -488,7 +520,7 @@ function buildDefaultVariantFromLegacy(quote: GenericRecord, pricingChannel: str
     ],
     product_rows: normalizeVariantLineRows(quote.product_rows),
     beer_rows: normalizeVariantLineRows(quote.beer_rows),
-    staffels: Array.isArray(quote.staffels) ? (quote.staffels as GenericRecord[]) : []
+    staffels: normalizeVariantStaffels(quote.staffels)
   };
 }
 
@@ -499,6 +531,16 @@ function applyVariantPeriodToWorkingRows<T extends GenericRecord>(rows: T[], per
     const nextKorting = periodIndex === 1 ? p1 : p2;
     return { ...row, korting_pct: nextKorting } as T;
   }) as T[];
+}
+
+function applyVariantPeriodToWorkingStaffels(rows: QuoteStaffelRow[], periodIndex: 1 | 2): QuoteStaffelRow[] {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.map((row) => {
+    const p1 = toNumber((row as any).korting_pct_p1, toNumber((row as any).korting_pct, 0));
+    const p2 = toNumber((row as any).korting_pct_p2, toNumber((row as any).korting_pct, 0));
+    const nextKorting = periodIndex === 1 ? p1 : p2;
+    return { ...row, korting_pct: nextKorting } as QuoteStaffelRow;
+  });
 }
 
 function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
@@ -571,7 +613,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
       ? raw.kostprijsversie_ids.map((value) => String(value ?? "")).filter(Boolean)
       : [],
     deleted_product_refs: Array.isArray(raw.deleted_product_refs) ? raw.deleted_product_refs : [],
-    staffels: Array.isArray(raw.staffels) ? raw.staffels : [],
+    staffels: normalizeVariantStaffels(raw.staffels),
     product_rows: normalizeProductRows,
     beer_rows: normalizeBeerRows,
     catalog_product_rows: Array.isArray(raw.catalog_product_rows) ? raw.catalog_product_rows : [],
@@ -601,7 +643,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
   if (activeVariant) {
     base.product_rows = applyVariantPeriodToWorkingRows(activeVariant.product_rows, activePeriod);
     base.beer_rows = applyVariantPeriodToWorkingRows(activeVariant.beer_rows, activePeriod);
-    base.staffels = Array.isArray(activeVariant.staffels) ? activeVariant.staffels : [];
+    base.staffels = applyVariantPeriodToWorkingStaffels(activeVariant.staffels, activePeriod);
   }
 
   (base as any).variants = variants;
@@ -814,6 +856,34 @@ export function PrijsvoorstelWizard({
     () => effectiveSelectedKanaalValues.map((value) => channelOptionMap.get(value)).filter((value): value is ChannelOption => Boolean(value)),
     [channelOptionMap, effectiveSelectedKanaalValues]
   );
+
+  const staffelProductOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string; productId: string; productType: "basis" | "samengesteld" }> = [];
+
+    for (const row of pickLatestKnownProductRows(basisproducten, currentYear)) {
+      const id = String(row.id ?? "");
+      if (!id) continue;
+      options.push({
+        value: `basis|${id}`,
+        label: String(row.omschrijving ?? id),
+        productId: id,
+        productType: "basis"
+      });
+    }
+    for (const row of pickLatestKnownProductRows(samengesteldeProducten, currentYear)) {
+      const id = String(row.id ?? "");
+      if (!id) continue;
+      options.push({
+        value: `samengesteld|${id}`,
+        label: String(row.omschrijving ?? id),
+        productId: id,
+        productType: "samengesteld"
+      });
+    }
+
+    options.sort((a, b) => a.label.localeCompare(b.label, "nl"));
+    return options;
+  }, [basisproducten, currentYear, samengesteldeProducten]);
 
   const productDefinitionMap = useMemo(() => {
     const map = new Map<string, ProductDefinition>();
@@ -2592,7 +2662,43 @@ export function PrijsvoorstelWizard({
     if (active) {
       active.product_rows = mergeRows((next as any).product_rows, (active as any).product_rows);
       active.beer_rows = mergeRows((next as any).beer_rows, (active as any).beer_rows);
-      active.staffels = Array.isArray((next as any).staffels) ? ((next as any).staffels as GenericRecord[]) : [];
+      const mergeStaffels = (working: unknown, existing: unknown): QuoteStaffelRow[] => {
+        const workingRows = Array.isArray(working) ? (working as GenericRecord[]) : [];
+        const existingRows = Array.isArray(existing) ? (existing as GenericRecord[]) : [];
+        const byId = new Map(existingRows.map((row) => [String((row as any).id ?? ""), row]));
+
+        return workingRows
+          .filter((row) => typeof row === "object" && row !== null)
+          .map((row) => {
+            const id = String((row as any).id ?? "");
+            const prev = byId.get(id) ?? {};
+            const kortingNow = toNumber((row as any).korting_pct, 0);
+
+            const fallbackKorting = toNumber((prev as any).korting_pct, kortingNow);
+            let p1 = toNumber((prev as any).korting_pct_p1, toNumber((row as any).korting_pct_p1, fallbackKorting));
+            let p2 = toNumber((prev as any).korting_pct_p2, toNumber((row as any).korting_pct_p2, fallbackKorting));
+            if (nextPeriodIndex === 1) {
+              p1 = kortingNow;
+            } else {
+              p2 = kortingNow;
+            }
+
+            return {
+              ...prev,
+              ...row,
+              id: id || String((prev as any).id ?? createId()),
+              liters: toNumber((row as any).liters, toNumber((prev as any).liters, 0)),
+              product_id: String((row as any).product_id ?? (prev as any).product_id ?? ""),
+              product_type: String((row as any).product_type ?? (prev as any).product_type ?? ""),
+              korting_pct: kortingNow,
+              korting_pct_p1: p1,
+              korting_pct_p2: p2,
+              sort_index: Number((row as any).sort_index ?? (prev as any).sort_index ?? 0) || 0
+            } as QuoteStaffelRow;
+          })
+          .sort((a, b) => toNumber((a as any).liters, 0) - toNumber((b as any).liters, 0));
+      };
+      active.staffels = mergeStaffels((next as any).staffels, (active as any).staffels);
       active.channel_code = normalizeKey((active as any).channel_code) || normalizeKey((next as any).pricing_channel) || normalizeKey((next as any).kanaal) || defaultKanaal;
       active.periods = ensureVariantPeriods((active as any).periods);
     }
@@ -2613,7 +2719,7 @@ export function PrijsvoorstelWizard({
       const periodIndex = toPeriodIndex((draft as any).active_period_index, 2);
       draft.product_rows = applyVariantPeriodToWorkingRows(target.product_rows, periodIndex);
       draft.beer_rows = applyVariantPeriodToWorkingRows(target.beer_rows, periodIndex);
-      draft.staffels = Array.isArray(target.staffels) ? target.staffels : [];
+      draft.staffels = applyVariantPeriodToWorkingStaffels(target.staffels, periodIndex);
       draft.pricing_channel = normalizeKey(target.channel_code) || normalizeKey(draft.pricing_channel) || normalizeKey(draft.kanaal) || defaultKanaal;
     });
   }
@@ -2627,6 +2733,10 @@ export function PrijsvoorstelWizard({
       );
       draft.beer_rows = applyVariantPeriodToWorkingRows(
         Array.isArray(draft.beer_rows) ? (draft.beer_rows as GenericRecord[]) : [],
+        periodIndex
+      );
+      draft.staffels = applyVariantPeriodToWorkingStaffels(
+        Array.isArray(draft.staffels) ? (draft.staffels as QuoteStaffelRow[]) : [],
         periodIndex
       );
     });
@@ -2659,7 +2769,7 @@ export function PrijsvoorstelWizard({
         periods: ensureVariantPeriods(source.periods),
         product_rows: normalizeVariantLineRows(source.product_rows),
         beer_rows: normalizeVariantLineRows(source.beer_rows),
-        staffels: Array.isArray(source.staffels) ? (source.staffels as GenericRecord[]) : []
+        staffels: normalizeVariantStaffels(source.staffels)
       };
 
       const nextList = [...list, cloned].sort((a, b) => (a.sort_index ?? 0) - (b.sort_index ?? 0));
@@ -2669,7 +2779,7 @@ export function PrijsvoorstelWizard({
       const periodIndex = toPeriodIndex((draft as any).active_period_index, 2);
       draft.product_rows = applyVariantPeriodToWorkingRows(cloned.product_rows, periodIndex);
       draft.beer_rows = applyVariantPeriodToWorkingRows(cloned.beer_rows, periodIndex);
-      draft.staffels = cloned.staffels;
+      draft.staffels = applyVariantPeriodToWorkingStaffels(cloned.staffels, periodIndex);
     });
   }
 
@@ -2688,7 +2798,7 @@ export function PrijsvoorstelWizard({
       if (nextActive) {
         draft.product_rows = applyVariantPeriodToWorkingRows(nextActive.product_rows, periodIndex);
         draft.beer_rows = applyVariantPeriodToWorkingRows(nextActive.beer_rows, periodIndex);
-        draft.staffels = Array.isArray(nextActive.staffels) ? nextActive.staffels : [];
+        draft.staffels = applyVariantPeriodToWorkingStaffels(nextActive.staffels, periodIndex);
       }
     });
   }
@@ -2999,6 +3109,139 @@ export function PrijsvoorstelWizard({
       }
       nextRows[index] = nextRow;
       (draft as any).catalog_product_rows = nextRows;
+    });
+  }
+
+  function addStaffelRow() {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? ([...(draft.staffels as QuoteStaffelRow[])] as QuoteStaffelRow[]) : [];
+      const next: QuoteStaffelRow = {
+        id: createId(),
+        liters: 0,
+        product_id: "",
+        product_type: "",
+        korting_pct: 0,
+        korting_pct_p1: 0,
+        korting_pct_p2: 0,
+        sort_index: staffels.length
+      };
+      staffels.push(next);
+      draft.staffels = staffels;
+    });
+  }
+
+  function updateStaffelRow(
+    rowId: string,
+    field: "liters" | "korting_pct" | "product_ref",
+    value: number | string
+  ) {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? [...(draft.staffels as QuoteStaffelRow[])] : [];
+      const index = staffels.findIndex((row) => String(row.id ?? "") === rowId);
+      if (index < 0) return;
+
+      const prev = staffels[index];
+      const next = { ...prev };
+
+      if (field === "liters") {
+        next.liters = Number(value) || 0;
+      } else if (field === "korting_pct") {
+        const korting = Number(value) || 0;
+        next.korting_pct = korting;
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+      } else {
+        const ref = String(value ?? "");
+        if (!ref) {
+          next.product_id = "";
+          next.product_type = "";
+        } else {
+          const pipe = ref.indexOf("|");
+          const kind = pipe >= 0 ? ref.slice(0, pipe) : "";
+          const id = pipe >= 0 ? ref.slice(pipe + 1) : ref;
+          next.product_id = id;
+          next.product_type = kind === "samengesteld" ? "samengesteld" : "basis";
+        }
+      }
+
+      staffels[index] = next;
+      staffels.sort((a, b) => toNumber(a.liters, 0) - toNumber(b.liters, 0));
+      staffels.forEach((row, idx) => {
+        row.sort_index = idx;
+      });
+      draft.staffels = staffels;
+    });
+  }
+
+  function removeStaffelRow(rowId: string) {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? (draft.staffels as QuoteStaffelRow[]) : [];
+      draft.staffels = staffels.filter((row) => String(row.id ?? "") !== rowId);
+    });
+  }
+
+  function applyStaffelsToKorting() {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? (draft.staffels as QuoteStaffelRow[]) : [];
+      if (staffels.length === 0) return;
+
+      const sorted = [...staffels].sort((a, b) => toNumber(a.liters, 0) - toNumber(b.liters, 0));
+
+      const resolveKorting = (row: GenericRecord): number | null => {
+        const liters = toNumber((row as any).liters, 0);
+        if (liters <= 0) return null;
+        const productId = String((row as any).product_id ?? "");
+        const productType = normalizeKey((row as any).product_type ?? "");
+
+        const candidates = sorted.filter((staffel) => {
+          const staffelProductId = String((staffel as any).product_id ?? "");
+          if (!staffelProductId) {
+            return true;
+          }
+          if (staffelProductId !== productId) return false;
+          const staffelType = normalizeKey((staffel as any).product_type ?? "");
+          return staffelType ? staffelType === productType : true;
+        });
+
+        const match = candidates
+          .filter((staffel) => toNumber((staffel as any).liters, 0) <= liters)
+          .sort((a, b) => toNumber((a as any).liters, 0) - toNumber((b as any).liters, 0))
+          .pop();
+
+        if (!match) return null;
+        return toNumber((match as any).korting_pct, 0);
+      };
+
+      const nextBeerRows = Array.isArray(draft.beer_rows) ? [...(draft.beer_rows as GenericRecord[])] : [];
+      nextBeerRows.forEach((row, index) => {
+        const korting = resolveKorting(row);
+        if (korting === null) return;
+        const next = { ...row, korting_pct: korting };
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+        nextBeerRows[index] = next;
+      });
+      draft.beer_rows = nextBeerRows;
+
+      const nextProductRows = Array.isArray(draft.product_rows) ? [...(draft.product_rows as GenericRecord[])] : [];
+      nextProductRows.forEach((row, index) => {
+        const korting = resolveKorting(row);
+        if (korting === null) return;
+        const next = { ...row, korting_pct: korting };
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+        nextProductRows[index] = next;
+      });
+      draft.product_rows = nextProductRows;
+
+      const nextCatalogRows = Array.isArray((draft as any).catalog_product_rows)
+        ? [...((draft as any).catalog_product_rows as GenericRecord[])]
+        : [];
+      nextCatalogRows.forEach((row, index) => {
+        const korting = resolveKorting(row);
+        if (korting === null) return;
+        const next = { ...row, korting_pct: korting };
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+        nextCatalogRows[index] = next;
+      });
+      (draft as any).catalog_product_rows = nextCatalogRows;
     });
   }
 
@@ -3889,6 +4132,98 @@ export function PrijsvoorstelWizard({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div className="module-card compact-card">
+          <div className="module-card-title">Staffels</div>
+          <div className="module-card-text">
+            Definieer optionele kortingsstaffels voor dit scenario. Staffels gelden per periode (Introductie/Standaard) en kunnen
+            worden toegepast op de regels hieronder.
+          </div>
+          <div className="editor-actions-group" style={{ marginTop: "0.75rem" }}>
+            <button type="button" className="editor-button editor-button-secondary" onClick={addStaffelRow}>
+              Staffel toevoegen
+            </button>
+            <button type="button" className="editor-button" onClick={applyStaffelsToKorting}>
+              Kortingen invullen
+            </button>
+          </div>
+
+          <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+            <table className="dataset-editor-table wizard-table-compact">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Liters vanaf</th>
+                  <th>Korting %</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(Array.isArray(current.staffels) ? (current.staffels as QuoteStaffelRow[]) : []).map((row) => {
+                  const productValue = row.product_id
+                    ? `${normalizeKey(row.product_type) === "samengesteld" ? "samengesteld" : "basis"}|${row.product_id}`
+                    : "";
+                  return (
+                    <tr key={row.id}>
+                      <td style={{ minWidth: "18rem" }}>
+                        <select
+                          className="dataset-input"
+                          value={productValue}
+                          onChange={(event) => updateStaffelRow(row.id, "product_ref", event.target.value)}
+                        >
+                          <option value="">Alle producten</option>
+                          {staffelProductOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={String(toNumber(row.liters, 0))}
+                          onChange={(event) => updateStaffelRow(row.id, "liters", Number(event.target.value || 0))}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          value={String(toNumber(row.korting_pct, 0))}
+                          onChange={(event) => updateStaffelRow(row.id, "korting_pct", Number(event.target.value || 0))}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="editor-icon-button"
+                          aria-label="Staffel verwijderen"
+                          title="Staffel verwijderen"
+                          onClick={() => removeStaffelRow(row.id)}
+                        >
+                          X
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {(Array.isArray(current.staffels) ? (current.staffels as QuoteStaffelRow[]) : []).length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="prijs-empty-cell">
+                      Nog geen staffels toegevoegd.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </div>
 

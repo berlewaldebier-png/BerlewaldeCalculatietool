@@ -226,12 +226,21 @@ def ensure_schema() -> None:
                         product_type TEXT NOT NULL DEFAULT '',
                         liters NUMERIC NOT NULL DEFAULT 0,
                         korting_pct NUMERIC NOT NULL DEFAULT 0,
+                        korting_pct_p1 NUMERIC NOT NULL DEFAULT 0,
+                        korting_pct_p2 NUMERIC NOT NULL DEFAULT 0,
                         sort_index INTEGER NOT NULL DEFAULT 0
                     );
                     """
                 )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS ix_price_quote_variant_staffels_variant ON price_quote_variant_staffels(variant_id)"
+                )
+                # Backfill schema for older installs (columns added after initial rollout).
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_staffels ADD COLUMN IF NOT EXISTS korting_pct_p1 NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_staffels ADD COLUMN IF NOT EXISTS korting_pct_p2 NUMERIC NOT NULL DEFAULT 0"
                 )
                 cur.execute(
                     """
@@ -340,7 +349,7 @@ def load_dataset(default_value: Any) -> Any:
             cur.execute(
                 """
                 SELECT
-                    id, variant_id, product_id, product_type, liters, korting_pct, sort_index
+                    id, variant_id, product_id, product_type, liters, korting_pct, korting_pct_p1, korting_pct_p2, sort_index
                 FROM price_quote_variant_staffels
                 ORDER BY variant_id, sort_index, id
                 """
@@ -463,14 +472,17 @@ def load_dataset(default_value: Any) -> Any:
             product_lines_by_variant.setdefault(str(variant_id), []).append(payload)
 
     staffels_by_variant: dict[str, list[dict[str, Any]]] = {}
-    for staffel_id, variant_id, product_id, product_type, liters, korting_pct, _sort_index in variant_staffel_rows:
+    for staffel_id, variant_id, product_id, product_type, liters, korting_pct, korting_pct_p1, korting_pct_p2, _sort_index in variant_staffel_rows:
         staffels_by_variant.setdefault(str(variant_id), []).append(
             {
                 "id": str(staffel_id),
                 "product_id": str(product_id or ""),
                 "product_type": str(product_type or ""),
                 "liters": float(liters or 0),
+                # Keep legacy field but also provide period-specific korting.
                 "korting_pct": float(korting_pct or 0),
+                "korting_pct_p1": float(korting_pct_p1 or 0),
+                "korting_pct_p2": float(korting_pct_p2 or 0),
             }
         )
 
@@ -761,6 +773,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 if not base_id:
                                     continue
                                 staffel_id = f"{variant_id}:{base_id}"
+                                korting_single = float(item.get("korting_pct", 0) or 0)
                                 variant_staffel_params.append(
                                     (
                                         staffel_id,
@@ -768,7 +781,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                         str(item.get("product_id", "") or ""),
                                         str(item.get("product_type", "") or ""),
                                         float(item.get("liters", 0) or 0),
-                                        float(item.get("korting_pct", 0) or 0),
+                                        float(item.get("korting_pct", korting_single) or 0),
+                                        float(item.get("korting_pct_p1", korting_single) or 0),
+                                        float(item.get("korting_pct_p2", korting_single) or 0),
                                         int(item.get("sort_index", staffel_index) or staffel_index),
                                     )
                                 )
@@ -892,6 +907,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         staffel_id = str(item.get("id", "") or "").strip()
                         if not staffel_id:
                             continue
+                        korting = float(item.get("korting_pct", 0) or 0)
                         staffel_params.append(
                             (
                                 staffel_id,
@@ -899,7 +915,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 str(item.get("product_id", "") or ""),
                                 str(item.get("product_type", "") or ""),
                                 float(item.get("liters", 0) or 0),
-                                float(item.get("korting_pct", 0) or 0),
+                                korting,
                                 int(staffel_index),
                             )
                         )
@@ -910,7 +926,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 str(item.get("product_id", "") or ""),
                                 str(item.get("product_type", "") or ""),
                                 float(item.get("liters", 0) or 0),
-                                float(item.get("korting_pct", 0) or 0),
+                                korting,
+                                korting,
+                                korting,
                                 int(staffel_index),
                             )
                         )
@@ -956,9 +974,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     cur.executemany(
                         """
                         INSERT INTO price_quote_variant_staffels (
-                            id, variant_id, product_id, product_type, liters, korting_pct, sort_index
+                            id, variant_id, product_id, product_type, liters, korting_pct, korting_pct_p1, korting_pct_p2, sort_index
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         variant_staffel_params,
                     )
