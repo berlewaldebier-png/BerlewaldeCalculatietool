@@ -652,8 +652,128 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     if not quote_id:
                         continue
 
-                    # Deterministic single-variant seed (Scenario A).
-                    # Later UI batches will create multiple variants + manage periods/rules.
+                    variants_payload = row.get("variants")
+                    if isinstance(variants_payload, list) and any(isinstance(v, dict) for v in variants_payload):
+                        # Persist variants provided by the UI.
+                        for i, variant in enumerate([v for v in variants_payload if isinstance(v, dict)]):
+                            variant_id = str(variant.get("id", "") or "").strip() or f"{quote_id}:v{i+1}"
+                            channel_code = str(
+                                variant.get("channel_code", "")
+                                or row.get("pricing_channel", "")
+                                or row.get("kanaal", "")
+                                or ""
+                            ).strip().lower()
+                            name = str(variant.get("name", "") or "").strip() or f"Scenario {i+1}"
+                            return_pct = float(variant.get("return_pct", 0) or 0)
+                            sort_index = int(variant.get("sort_index", i) or i)
+                            variant_params.append((variant_id, quote_id, name, channel_code, return_pct, sort_index, now, now))
+
+                            periods_payload = variant.get("periods")
+                            if isinstance(periods_payload, list) and any(isinstance(p, dict) for p in periods_payload):
+                                for p in [x for x in periods_payload if isinstance(x, dict)]:
+                                    try:
+                                        period_index = int(p.get("period_index", 0) or 0)
+                                    except (TypeError, ValueError):
+                                        period_index = 0
+                                    if period_index not in (1, 2):
+                                        continue
+                                    period_id = str(p.get("id", "") or "").strip() or f"{variant_id}:p{period_index}"
+                                    variant_period_params.append(
+                                        (
+                                            period_id,
+                                            variant_id,
+                                            period_index,
+                                            str(p.get("label", "") or ""),
+                                            str(p.get("start_date", "") or ""),
+                                            str(p.get("end_date", "") or ""),
+                                        )
+                                    )
+                            else:
+                                variant_period_params.append((f"{variant_id}:p1", variant_id, 1, "Introductie", "", ""))
+                                variant_period_params.append((f"{variant_id}:p2", variant_id, 2, "Standaard", "", ""))
+
+                            sort_index_lines = 0
+                            for item in variant.get("product_rows", []) if isinstance(variant.get("product_rows", []), list) else []:
+                                if not isinstance(item, dict):
+                                    continue
+                                base_id = str(item.get("id", "") or "").strip()
+                                if not base_id:
+                                    continue
+                                line_id = f"{variant_id}:{base_id}"
+                                korting_single = float(item.get("korting_pct", 0) or 0)
+                                variant_line_params.append(
+                                    (
+                                        line_id,
+                                        variant_id,
+                                        "product",
+                                        str(item.get("bier_id", "") or ""),
+                                        str(item.get("kostprijsversie_id", "") or ""),
+                                        str(item.get("product_id", "") or ""),
+                                        str(item.get("product_type", "") or ""),
+                                        str(item.get("verpakking_label", "") or ""),
+                                        float(item.get("liters", 0) or 0),
+                                        float(item.get("aantal", 0) or 0),
+                                        bool(item.get("included", True)),
+                                        float(item.get("korting_pct_p1", korting_single) or 0),
+                                        float(item.get("korting_pct_p2", korting_single) or 0),
+                                        float(item.get("sell_in_price_override_p1", 0) or 0),
+                                        float(item.get("sell_in_price_override_p2", 0) or 0),
+                                        int(item.get("sort_index", sort_index_lines) or sort_index_lines),
+                                    )
+                                )
+                                sort_index_lines += 1
+                            for item in variant.get("beer_rows", []) if isinstance(variant.get("beer_rows", []), list) else []:
+                                if not isinstance(item, dict):
+                                    continue
+                                base_id = str(item.get("id", "") or "").strip()
+                                if not base_id:
+                                    continue
+                                line_id = f"{variant_id}:{base_id}"
+                                korting_single = float(item.get("korting_pct", 0) or 0)
+                                variant_line_params.append(
+                                    (
+                                        line_id,
+                                        variant_id,
+                                        "beer",
+                                        str(item.get("bier_id", "") or ""),
+                                        str(item.get("kostprijsversie_id", "") or ""),
+                                        str(item.get("product_id", "") or ""),
+                                        str(item.get("product_type", "") or ""),
+                                        str(item.get("verpakking_label", "") or ""),
+                                        float(item.get("liters", 0) or 0),
+                                        0.0,
+                                        bool(item.get("included", True)),
+                                        float(item.get("korting_pct_p1", korting_single) or 0),
+                                        float(item.get("korting_pct_p2", korting_single) or 0),
+                                        float(item.get("sell_in_price_override_p1", 0) or 0),
+                                        float(item.get("sell_in_price_override_p2", 0) or 0),
+                                        int(item.get("sort_index", sort_index_lines) or sort_index_lines),
+                                    )
+                                )
+                                sort_index_lines += 1
+                            staffel_index = 0
+                            for item in variant.get("staffels", []) if isinstance(variant.get("staffels", []), list) else []:
+                                if not isinstance(item, dict):
+                                    continue
+                                base_id = str(item.get("id", "") or "").strip()
+                                if not base_id:
+                                    continue
+                                staffel_id = f"{variant_id}:{base_id}"
+                                variant_staffel_params.append(
+                                    (
+                                        staffel_id,
+                                        variant_id,
+                                        str(item.get("product_id", "") or ""),
+                                        str(item.get("product_type", "") or ""),
+                                        float(item.get("liters", 0) or 0),
+                                        float(item.get("korting_pct", 0) or 0),
+                                        int(item.get("sort_index", staffel_index) or staffel_index),
+                                    )
+                                )
+                                staffel_index += 1
+                        continue
+
+                    # Default: deterministic single-variant seed (Scenario A).
                     variant_id = f"{quote_id}:v1"
                     channel_code = str(row.get("pricing_channel", "") or row.get("kanaal", "") or "").strip().lower()
                     variant_params.append((variant_id, quote_id, "Scenario A", channel_code, 0.0, 0, now, now))
@@ -693,7 +813,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         korting = float(item.get("korting_pct", 0) or 0)
                         variant_line_params.append(
                             (
-                                line_id,
+                                f"{variant_id}:{line_id}",
                                 variant_id,
                                 "product",
                                 str(item.get("bier_id", "") or ""),
@@ -744,7 +864,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         korting = float(item.get("korting_pct", 0) or 0)
                         variant_line_params.append(
                             (
-                                line_id,
+                                f"{variant_id}:{line_id}",
                                 variant_id,
                                 "beer",
                                 str(item.get("bier_id", "") or ""),
@@ -783,7 +903,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         )
                         variant_staffel_params.append(
                             (
-                                staffel_id,
+                                f"{variant_id}:{staffel_id}",
                                 variant_id,
                                 str(item.get("product_id", "") or ""),
                                 str(item.get("product_type", "") or ""),

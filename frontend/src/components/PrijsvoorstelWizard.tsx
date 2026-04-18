@@ -2826,6 +2826,9 @@ export function PrijsvoorstelWizard({
           frozen.status = finalize ? "definitief" : "concept";
           frozen.finalized_at = finalize ? new Date().toISOString() : "";
         }
+        // Ensure variants/period values are persisted (not just the legacy working rows).
+        // This makes scenario switching stable after save + refresh.
+        syncActiveVariantFromWorkingRows(frozen);
         return frozen;
       });
 
@@ -3753,6 +3756,8 @@ export function PrijsvoorstelWizard({
   function renderOfferteStep() {
     const canDeleteScenario = variants.length > 1;
     const periodLabel = activePeriod?.label || (activePeriodIndex === 1 ? "Introductie" : "Standaard");
+    const scenarioLabel = activeVariant?.name || "Scenario";
+    const activeKanaalLabel = channelOptionMap.get(normalizeKey(activeVariant?.channel_code) || currentKanaal)?.label ?? currentKanaalLabel;
 
     return (
       <div className="wizard-stack">
@@ -3760,6 +3765,9 @@ export function PrijsvoorstelWizard({
           <div className="module-card-title">Scenario & periode</div>
           <div className="module-card-text">
             Maak scenario's (sub-offertes) en bepaal kortingspercentages per periode. De berekening hieronder toont nu: <strong>{periodLabel}</strong>.
+          </div>
+          <div className="module-card-text" style={{ marginTop: "0.35rem" }}>
+            Actief: <strong>{scenarioLabel}</strong> · <strong>{periodLabel}</strong> · <strong>{activeKanaalLabel}</strong>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginTop: "0.75rem" }}>
