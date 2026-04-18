@@ -7,7 +7,7 @@ import {
   calcSellPriceFromOpslagPct,
   parseNumberLoose,
   round2
-} from "@/lib/verkoopstrategieMath";
+} from "@/lib/pricingEngine";
 import { VerkoopstrategiePrijsinstellingenAccordion } from "@/components/verkoopstrategie/VerkoopstrategiePrijsinstellingenAccordion";
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
 import type { BeerViewRow, ProductViewRow } from "@/components/verkoopstrategie/verkoopstrategieTypes";
@@ -62,7 +62,7 @@ const DEFAULT_CHANNELS: ChannelRow[] = [
 ];
 
 const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
-// Pricing helpers are shared with the nieuw-jaar wizard via `lib/verkoopstrategieMath.ts`.
+// Pricing helpers are shared across screens via `lib/pricingEngine.ts`.
 const normalizeLabel = (value: unknown) => String(value ?? "").trim().toLowerCase();
 function computeDraftSignature(records: GenericRecord[], channelCodes: string[]) {
   const mapToSortedPairs = (raw: unknown) => {

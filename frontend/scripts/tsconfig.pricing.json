@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "outDir": "../.tmp/pricing-tests",
+    "rootDir": "..",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["./pricingEngine.contracttest.ts", "../src/lib/pricingEngine.ts"]
+}

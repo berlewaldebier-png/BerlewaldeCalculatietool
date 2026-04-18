@@ -6,7 +6,7 @@ import {
   calcSellPriceFromOpslagPct,
   parseNumberLoose,
   round2
-} from "@/lib/verkoopstrategieMath";
+} from "@/lib/pricingEngine";
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
 import { SourceBadge, ResetToParentButton } from "@/components/ui/Overrides";
 import type {

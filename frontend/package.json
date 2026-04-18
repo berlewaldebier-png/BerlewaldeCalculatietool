@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:pricing": "node ./node_modules/typescript/bin/tsc -p ./scripts/tsconfig.pricing.json && node ./.tmp/pricing-tests/scripts/pricingEngine.contracttest.js"
   },
   "dependencies": {
     "next": "15.3.0",
