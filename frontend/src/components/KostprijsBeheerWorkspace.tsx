@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { BerekeningenWizard } from "@/components/BerekeningenWizard";
+import { formatMoneyEUR, formatPercent0to2 } from "@/lib/formatters";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -87,22 +88,15 @@ export function KostprijsBeheerWorkspace({
     if (value === null || !Number.isFinite(value)) {
       return "-";
     }
-    return new Intl.NumberFormat("nl-NL", {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(value);
+    return formatMoneyEUR(value);
   }
 
   function formatPct(value: number | null) {
     if (value === null || !Number.isFinite(value)) {
       return "-";
     }
-    return `${new Intl.NumberFormat("nl-NL", {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1
-    }).format(value)}%`;
+    // Keep one-decimal formatting stable by rounding first; output still follows shared formatters.
+    return formatPercent0to2(Math.round(value * 10) / 10);
   }
 
   function getSnapshotPackagingLabel(row: GenericRecord) {

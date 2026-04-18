@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
+import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -272,23 +273,23 @@ function getEnrichedInkoopFactuurregels(berekening: GenericRecord) {
 }
 
 function formatEuro(value: unknown) {
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(toNumber(value, 0));
+  return formatMoneyEUR(toFiniteNumber(value, 0));
 }
 
 function formatNumber(value: unknown, digits = 2) {
-  return new Intl.NumberFormat("nl-NL", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  }).format(toNumber(value, 0));
+  if (digits === 2) {
+    // Keep existing behaviour, but ensure consistent formatting with other tables.
+    return formatNumber0to2(toFiniteNumber(value, 0));
+  }
+  return new Intl.NumberFormat("nl-NL", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(
+    toFiniteNumber(value, 0)
+  );
 }
 
 function formatPercentage(value: unknown) {
-  return `${formatNumber(value, 1)}%`;
+  // Keep one-decimal output as before, but use shared percent formatting rules.
+  const rounded = Math.round(toFiniteNumber(value, 0) * 10) / 10;
+  return formatPercent0to2(rounded);
 }
 
 function isIncluded(value: unknown) {

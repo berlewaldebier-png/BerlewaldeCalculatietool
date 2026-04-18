@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { formatMoneyEUR, roundTo, toFiniteNumber } from "@/lib/formatters";
 
 const API_BASE_URL = "/api";
 
@@ -56,12 +57,11 @@ function parseBtwPct(value: unknown) {
 }
 
 function money(value: number) {
-  const safe = Number.isFinite(value) ? value : 0;
-  return safe.toLocaleString("nl-NL", { style: "currency", currency: "EUR" });
+  return formatMoneyEUR(toFiniteNumber(value, 0));
 }
 
 function round2(value: number) {
-  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+  return roundTo(value, 2);
 }
 
 function roundDownTo5Cents(value: number) {
