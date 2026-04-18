@@ -157,6 +157,82 @@ def ensure_schema() -> None:
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS ix_price_quote_staffels_quote ON price_quote_staffels(quote_id)"
                 )
+
+                # Phase: variants/scenarios (sub-offertes) + 2 periods (intro + standaard).
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS price_quote_variants (
+                        id TEXT PRIMARY KEY,
+                        quote_id TEXT NOT NULL REFERENCES price_quotes(id) ON DELETE CASCADE,
+                        name TEXT NOT NULL DEFAULT '',
+                        channel_code TEXT NOT NULL DEFAULT '',
+                        return_pct NUMERIC NOT NULL DEFAULT 0,
+                        sort_index INTEGER NOT NULL DEFAULT 0,
+                        created_at TIMESTAMPTZ NULL,
+                        updated_at TIMESTAMPTZ NULL
+                    );
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_price_quote_variants_quote ON price_quote_variants(quote_id)"
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS price_quote_variant_periods (
+                        id TEXT PRIMARY KEY,
+                        variant_id TEXT NOT NULL REFERENCES price_quote_variants(id) ON DELETE CASCADE,
+                        period_index INTEGER NOT NULL,
+                        label TEXT NOT NULL DEFAULT '',
+                        start_date TEXT NOT NULL DEFAULT '',
+                        end_date TEXT NOT NULL DEFAULT '',
+                        UNIQUE(variant_id, period_index)
+                    );
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_price_quote_variant_periods_variant ON price_quote_variant_periods(variant_id)"
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS price_quote_variant_lines (
+                        id TEXT PRIMARY KEY,
+                        variant_id TEXT NOT NULL REFERENCES price_quote_variants(id) ON DELETE CASCADE,
+                        line_kind TEXT NOT NULL,
+                        bier_id TEXT NOT NULL DEFAULT '',
+                        kostprijsversie_id TEXT NOT NULL DEFAULT '',
+                        product_id TEXT NOT NULL DEFAULT '',
+                        product_type TEXT NOT NULL DEFAULT '',
+                        verpakking_label TEXT NOT NULL DEFAULT '',
+                        liters NUMERIC NOT NULL DEFAULT 0,
+                        aantal NUMERIC NOT NULL DEFAULT 0,
+                        included BOOLEAN NOT NULL DEFAULT TRUE,
+                        korting_pct_p1 NUMERIC NOT NULL DEFAULT 0,
+                        korting_pct_p2 NUMERIC NOT NULL DEFAULT 0,
+                        sell_in_price_override_p1 NUMERIC NOT NULL DEFAULT 0,
+                        sell_in_price_override_p2 NUMERIC NOT NULL DEFAULT 0,
+                        sort_index INTEGER NOT NULL DEFAULT 0
+                    );
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_price_quote_variant_lines_variant ON price_quote_variant_lines(variant_id)"
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS price_quote_variant_staffels (
+                        id TEXT PRIMARY KEY,
+                        variant_id TEXT NOT NULL REFERENCES price_quote_variants(id) ON DELETE CASCADE,
+                        product_id TEXT NOT NULL DEFAULT '',
+                        product_type TEXT NOT NULL DEFAULT '',
+                        liters NUMERIC NOT NULL DEFAULT 0,
+                        korting_pct NUMERIC NOT NULL DEFAULT 0,
+                        sort_index INTEGER NOT NULL DEFAULT 0
+                    );
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_price_quote_variant_staffels_variant ON price_quote_variant_staffels(variant_id)"
+                )
                 cur.execute(
                     """
                     CREATE INDEX IF NOT EXISTS ix_price_quotes_year
@@ -230,6 +306,46 @@ def load_dataset(default_value: Any) -> Any:
                 """
             )
             staffel_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT
+                    id, quote_id, name, channel_code, return_pct, sort_index, created_at, updated_at
+                FROM price_quote_variants
+                ORDER BY quote_id, sort_index, id
+                """
+            )
+            variant_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT
+                    id, variant_id, period_index, label, start_date, end_date
+                FROM price_quote_variant_periods
+                ORDER BY variant_id, period_index, id
+                """
+            )
+            variant_period_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT
+                    id, variant_id, line_kind, bier_id, kostprijsversie_id, product_id, product_type,
+                    verpakking_label, liters, aantal, included,
+                    korting_pct_p1, korting_pct_p2,
+                    sell_in_price_override_p1, sell_in_price_override_p2,
+                    sort_index
+                FROM price_quote_variant_lines
+                ORDER BY variant_id, sort_index, id
+                """
+            )
+            variant_line_rows = cur.fetchall()
+            cur.execute(
+                """
+                SELECT
+                    id, variant_id, product_id, product_type, liters, korting_pct, sort_index
+                FROM price_quote_variant_staffels
+                ORDER BY variant_id, sort_index, id
+                """
+            )
+            variant_staffel_rows = cur.fetchall()
 
     if not quote_rows:
         return default_value
@@ -293,6 +409,98 @@ def load_dataset(default_value: Any) -> Any:
             }
         )
 
+    variants_by_quote: dict[str, list[dict[str, Any]]] = {}
+    periods_by_variant: dict[str, list[dict[str, Any]]] = {}
+    for period_id, variant_id, period_index, label, start_date, end_date in variant_period_rows:
+        periods_by_variant.setdefault(str(variant_id), []).append(
+            {
+                "id": str(period_id),
+                "period_index": int(period_index or 0),
+                "label": str(label or ""),
+                "start_date": str(start_date or ""),
+                "end_date": str(end_date or ""),
+            }
+        )
+
+    product_lines_by_variant: dict[str, list[dict[str, Any]]] = {}
+    beer_lines_by_variant: dict[str, list[dict[str, Any]]] = {}
+    for (
+        line_id,
+        variant_id,
+        line_kind,
+        bier_id,
+        kostprijsversie_id,
+        product_id,
+        product_type,
+        verpakking_label,
+        liters,
+        aantal,
+        included,
+        korting_pct_p1,
+        korting_pct_p2,
+        sell_in_price_override_p1,
+        sell_in_price_override_p2,
+        _sort_index,
+    ) in variant_line_rows:
+        payload: dict[str, Any] = {
+            "id": str(line_id),
+            "bier_id": str(bier_id or ""),
+            "kostprijsversie_id": str(kostprijsversie_id or ""),
+            "product_id": str(product_id or ""),
+            "product_type": str(product_type or ""),
+            "verpakking_label": str(verpakking_label or ""),
+            "liters": float(liters or 0),
+            "aantal": float(aantal or 0),
+            "included": bool(included),
+            "korting_pct_p1": float(korting_pct_p1 or 0),
+            "korting_pct_p2": float(korting_pct_p2 or 0),
+            "sell_in_price_override_p1": float(sell_in_price_override_p1 or 0),
+            "sell_in_price_override_p2": float(sell_in_price_override_p2 or 0),
+        }
+        if str(line_kind or "") == "beer":
+            beer_lines_by_variant.setdefault(str(variant_id), []).append(payload)
+        else:
+            product_lines_by_variant.setdefault(str(variant_id), []).append(payload)
+
+    staffels_by_variant: dict[str, list[dict[str, Any]]] = {}
+    for staffel_id, variant_id, product_id, product_type, liters, korting_pct, _sort_index in variant_staffel_rows:
+        staffels_by_variant.setdefault(str(variant_id), []).append(
+            {
+                "id": str(staffel_id),
+                "product_id": str(product_id or ""),
+                "product_type": str(product_type or ""),
+                "liters": float(liters or 0),
+                "korting_pct": float(korting_pct or 0),
+            }
+        )
+
+    for (
+        variant_id,
+        quote_id,
+        name,
+        channel_code,
+        return_pct,
+        sort_index,
+        created_at,
+        updated_at,
+    ) in variant_rows:
+        vid = str(variant_id)
+        variants_by_quote.setdefault(str(quote_id), []).append(
+            {
+                "id": vid,
+                "name": str(name or ""),
+                "channel_code": str(channel_code or ""),
+                "return_pct": float(return_pct or 0),
+                "sort_index": int(sort_index or 0),
+                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else "",
+                "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") and updated_at else "",
+                "periods": periods_by_variant.get(vid, []),
+                "product_rows": product_lines_by_variant.get(vid, []),
+                "beer_rows": beer_lines_by_variant.get(vid, []),
+                "staffels": staffels_by_variant.get(vid, []),
+            }
+        )
+
     out: list[dict[str, Any]] = []
     for (
         quote_id,
@@ -322,6 +530,7 @@ def load_dataset(default_value: Any) -> Any:
         merged["product_rows"] = product_lines_by_quote.get(str(quote_id), [])
         merged["beer_rows"] = beer_lines_by_quote.get(str(quote_id), [])
         merged["staffels"] = staffels_by_quote.get(str(quote_id), [])
+        merged["variants"] = variants_by_quote.get(str(quote_id), [])
         out.append(merged)
 
     return out
@@ -423,6 +632,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                 )
                 line_params: list[tuple[Any, ...]] = []
                 staffel_params: list[tuple[Any, ...]] = []
+                variant_params: list[tuple[Any, ...]] = []
+                variant_period_params: list[tuple[Any, ...]] = []
+                variant_line_params: list[tuple[Any, ...]] = []
+                variant_staffel_params: list[tuple[Any, ...]] = []
 
                 # Replace-by-scope for quote details: per quote, clear old lines/staffels then insert the new truth.
                 # This avoids global deletes while keeping id semantics stable.
@@ -432,11 +645,21 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         continue
                     cur.execute("DELETE FROM price_quote_lines WHERE quote_id = %s", (quote_id,))
                     cur.execute("DELETE FROM price_quote_staffels WHERE quote_id = %s", (quote_id,))
+                    cur.execute("DELETE FROM price_quote_variants WHERE quote_id = %s", (quote_id,))
 
                 for row in records:
                     quote_id = str(row.get("id", "") or "").strip()
                     if not quote_id:
                         continue
+
+                    # Deterministic single-variant seed (Scenario A).
+                    # Later UI batches will create multiple variants + manage periods/rules.
+                    variant_id = f"{quote_id}:v1"
+                    channel_code = str(row.get("pricing_channel", "") or row.get("kanaal", "") or "").strip().lower()
+                    variant_params.append((variant_id, quote_id, "Scenario A", channel_code, 0.0, 0, now, now))
+                    variant_period_params.append((f"{variant_id}:p1", variant_id, 1, "Introductie", "", ""))
+                    variant_period_params.append((f"{variant_id}:p2", variant_id, 2, "Standaard", "", ""))
+
                     sort_index = 0
                     for item in row.get("product_rows", []) if isinstance(row.get("product_rows", []), list) else []:
                         if not isinstance(item, dict):
@@ -464,6 +687,27 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 float(item.get("margin_at_quote", 0) or 0),
                                 float(item.get("target_margin_pct_at_quote", 0) or 0),
                                 str(item.get("channel_at_quote", "") or ""),
+                                int(sort_index),
+                            )
+                        )
+                        korting = float(item.get("korting_pct", 0) or 0)
+                        variant_line_params.append(
+                            (
+                                line_id,
+                                variant_id,
+                                "product",
+                                str(item.get("bier_id", "") or ""),
+                                str(item.get("kostprijsversie_id", "") or ""),
+                                str(item.get("product_id", "") or ""),
+                                str(item.get("product_type", "") or ""),
+                                str(item.get("verpakking_label", "") or ""),
+                                float(item.get("liters", 0) or 0),
+                                float(item.get("aantal", 0) or 0),
+                                bool(item.get("included", True)),
+                                korting,
+                                korting,
+                                0.0,
+                                0.0,
                                 int(sort_index),
                             )
                         )
@@ -497,6 +741,27 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 int(sort_index),
                             )
                         )
+                        korting = float(item.get("korting_pct", 0) or 0)
+                        variant_line_params.append(
+                            (
+                                line_id,
+                                variant_id,
+                                "beer",
+                                str(item.get("bier_id", "") or ""),
+                                str(item.get("kostprijsversie_id", "") or ""),
+                                str(item.get("product_id", "") or ""),
+                                str(item.get("product_type", "") or ""),
+                                str(item.get("verpakking_label", "") or ""),
+                                float(item.get("liters", 0) or 0),
+                                0.0,
+                                bool(item.get("included", True)),
+                                korting,
+                                korting,
+                                0.0,
+                                0.0,
+                                int(sort_index),
+                            )
+                        )
                         sort_index += 1
                     staffel_index = 0
                     for item in row.get("staffels", []) if isinstance(row.get("staffels", []), list) else []:
@@ -516,7 +781,65 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 int(staffel_index),
                             )
                         )
+                        variant_staffel_params.append(
+                            (
+                                staffel_id,
+                                variant_id,
+                                str(item.get("product_id", "") or ""),
+                                str(item.get("product_type", "") or ""),
+                                float(item.get("liters", 0) or 0),
+                                float(item.get("korting_pct", 0) or 0),
+                                int(staffel_index),
+                            )
+                        )
                         staffel_index += 1
+
+                if variant_params:
+                    cur.executemany(
+                        """
+                        INSERT INTO price_quote_variants
+                            (id, quote_id, name, channel_code, return_pct, sort_index, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        variant_params,
+                    )
+                if variant_period_params:
+                    cur.executemany(
+                        """
+                        INSERT INTO price_quote_variant_periods
+                            (id, variant_id, period_index, label, start_date, end_date)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        variant_period_params,
+                    )
+                if variant_line_params:
+                    cur.executemany(
+                        """
+                        INSERT INTO price_quote_variant_lines (
+                            id, variant_id, line_kind, bier_id, kostprijsversie_id, product_id, product_type,
+                            verpakking_label, liters, aantal, included,
+                            korting_pct_p1, korting_pct_p2, sell_in_price_override_p1, sell_in_price_override_p2,
+                            sort_index
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s, %s, %s, %s,
+                            %s
+                        )
+                        """,
+                        variant_line_params,
+                    )
+                if variant_staffel_params:
+                    cur.executemany(
+                        """
+                        INSERT INTO price_quote_variant_staffels (
+                            id, variant_id, product_id, product_type, liters, korting_pct, sort_index
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        variant_staffel_params,
+                    )
 
                 if line_params:
                     cur.executemany(
