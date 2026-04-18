@@ -516,8 +516,10 @@ export function PrijsvoorstelWizard({
 }: PrijsvoorstelWizardProps) {
   const defaultYearOption = useMemo(() => {
     const years = Array.isArray(yearOptions) ? yearOptions : [];
-    const first = Number(years[0] ?? 0);
-    return Number.isFinite(first) && first > 0 ? first : new Date().getFullYear();
+    const parsed = years
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    return parsed.length ? Math.max(...parsed) : new Date().getFullYear();
   }, [yearOptions]);
 
   const emptyPrijsvoorstel = useMemo(() => createEmptyPrijsvoorstel(defaultYearOption), [defaultYearOption]);
@@ -589,10 +591,9 @@ export function PrijsvoorstelWizard({
   );
   const defaultKanaal = channelOptions[0]?.value ?? "horeca";
   const currentStep = wizardSteps[activeStepIndex] ?? wizardSteps[0];
-  const currentYear = (() => {
-    const parsed = toNumber(current.jaar, 0);
-    return parsed > 0 ? parsed : new Date().getFullYear();
-  })();
+  // Step 4 (Year as context): for pricing we always use the active year-set.
+  // A "jaar" selector here is a pseudo-choice; historical selection can be reintroduced later as an advanced mode.
+  const currentYear = defaultYearOption;
   const pricingChannel = normalizeKey(current.pricing_channel) || normalizeKey(current.kanaal) || defaultKanaal;
   const legacySelectedKanaalValues = Array.from(
     new Set(
@@ -2455,6 +2456,8 @@ export function PrijsvoorstelWizard({
         if (String(next.id ?? "").trim() === "") {
           next.id = createId();
         }
+        // Year is context-only: persist as the active year set.
+        next.jaar = currentYear;
         const frozen = withFrozenPricing(next);
         if (String(frozen.id ?? "") === String(current.id)) {
           frozen.status = finalize ? "definitief" : "concept";
@@ -2848,25 +2851,7 @@ export function PrijsvoorstelWizard({
         </label>
         <label className="nested-field">
           <span>Jaar</span>
-          <select
-            className="dataset-input"
-            value={String(current.jaar ?? "")}
-            onChange={(event) =>
-              updateCurrent((draft) => {
-                draft.jaar = Number(event.target.value || new Date().getFullYear());
-                draft.bier_id = "";
-                draft.selected_bier_ids = [];
-                draft.product_rows = [];
-                draft.beer_rows = [];
-              })
-            }
-          >
-            {yearOptions.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
+          <div className="dataset-input dataset-input-readonly">{String(currentYear)}</div>
         </label>
         <label className="nested-field">
           <span>Contactpersoon</span>
