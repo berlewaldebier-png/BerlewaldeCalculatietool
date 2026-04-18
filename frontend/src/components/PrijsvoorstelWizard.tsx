@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
+import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
+import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcSellInExFromOpslagPct } from "@/lib/pricingEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -272,23 +274,23 @@ function getEnrichedInkoopFactuurregels(berekening: GenericRecord) {
 }
 
 function formatEuro(value: unknown) {
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(toNumber(value, 0));
+  return formatMoneyEUR(toFiniteNumber(value, 0));
 }
 
 function formatNumber(value: unknown, digits = 2) {
-  return new Intl.NumberFormat("nl-NL", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  }).format(toNumber(value, 0));
+  if (digits === 2) {
+    // Keep existing behaviour, but ensure consistent formatting with other tables.
+    return formatNumber0to2(toFiniteNumber(value, 0));
+  }
+  return new Intl.NumberFormat("nl-NL", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(
+    toFiniteNumber(value, 0)
+  );
 }
 
 function formatPercentage(value: unknown) {
-  return `${formatNumber(value, 1)}%`;
+  // Keep one-decimal output as before, but use shared percent formatting rules.
+  const rounded = Math.round(toFiniteNumber(value, 0) * 10) / 10;
+  return formatPercent0to2(rounded);
 }
 
 function isIncluded(value: unknown) {
@@ -359,19 +361,7 @@ function pickLatestKnownProductRows(rows: GenericRecord[], targetYear: number) {
   return [...fallback.values()];
 }
 
-function calculatePriceFromMargin(cost: number, marginPct: number) {
-  if (marginPct >= 100) {
-    return cost;
-  }
-  return cost / (1 - marginPct / 100);
-}
-
-function calculateMarginPercentage(revenue: number, costs: number) {
-  if (revenue <= 0) {
-    return 0;
-  }
-  return ((revenue - costs) / revenue) * 100;
-}
+// Pricing math is centralized in `lib/pricingEngine.ts`.
 
 function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
   const normalizeProductRows = Array.isArray(raw.product_rows)
@@ -526,8 +516,10 @@ export function PrijsvoorstelWizard({
 }: PrijsvoorstelWizardProps) {
   const defaultYearOption = useMemo(() => {
     const years = Array.isArray(yearOptions) ? yearOptions : [];
-    const first = Number(years[0] ?? 0);
-    return Number.isFinite(first) && first > 0 ? first : new Date().getFullYear();
+    const parsed = years
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    return parsed.length ? Math.max(...parsed) : new Date().getFullYear();
   }, [yearOptions]);
 
   const emptyPrijsvoorstel = useMemo(() => createEmptyPrijsvoorstel(defaultYearOption), [defaultYearOption]);
@@ -599,10 +591,9 @@ export function PrijsvoorstelWizard({
   );
   const defaultKanaal = channelOptions[0]?.value ?? "horeca";
   const currentStep = wizardSteps[activeStepIndex] ?? wizardSteps[0];
-  const currentYear = (() => {
-    const parsed = toNumber(current.jaar, 0);
-    return parsed > 0 ? parsed : new Date().getFullYear();
-  })();
+  // Step 4 (Year as context): for pricing we always use the active year-set.
+  // A "jaar" selector here is a pseudo-choice; historical selection can be reintroduced later as an advanced mode.
+  const currentYear = defaultYearOption;
   const pricingChannel = normalizeKey(current.pricing_channel) || normalizeKey(current.kanaal) || defaultKanaal;
   const legacySelectedKanaalValues = Array.from(
     new Set(
@@ -1624,10 +1615,11 @@ export function PrijsvoorstelWizard({
     );
     const sellInMarginPct = getSellInMarginForChannel(strategy, channelCode);
     const explicitSellInPrice = getSellInPriceOverrideForChannel(strategy, channelCode);
+    // `sell_in_margins` is now opslag% (markup) as the source of truth.
     const sellInPrice =
       Number.isFinite(explicitSellInPrice) && explicitSellInPrice > 0
         ? explicitSellInPrice
-        : calculatePriceFromMargin(cost, sellInMarginPct);
+        : calcSellInExFromOpslagPct(cost, sellInMarginPct);
     const offerPrice = sellInPrice;
 
     return { sellInMarginPct, sellInPrice, offerPrice };
@@ -1843,10 +1835,12 @@ export function PrijsvoorstelWizard({
         const offerPrijs = pricing.offerPrice;
         const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
         const liters = toNumber(row.liters, 0);
-        const omzet = liters * verkoopprijs;
-        const kosten = liters * kostprijsPerLiter;
-        const kortingEur = liters * Math.max(0, offerPrijs - verkoopprijs);
-        const margeEur = omzet - kosten;
+        const totals = calcOfferLineTotals({
+          kostprijsEx: kostprijsPerLiter,
+          offerPriceEx: offerPrijs,
+          qty: liters,
+          kortingPct
+        });
         return {
           id: String(row.id ?? ""),
           bierKey: bierId,
@@ -1868,11 +1862,11 @@ export function PrijsvoorstelWizard({
           offerPrijs,
           sellInPrijs: pricing.sellInPrice,
           sellInMargePct: pricing.sellInMarginPct,
-          omzet,
-          kosten,
-          kortingEur,
-          margeEur,
-          margePct: calculateMarginPercentage(omzet, kosten)
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          margeEur: totals.winst,
+          margePct: totals.margePct
         };
       });
     }
@@ -1900,10 +1894,12 @@ export function PrijsvoorstelWizard({
         const offerPrijs = pricing.offerPrice;
         const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
         const liters = toNumber(row.liters, 0);
-        const omzet = liters * verkoopprijs;
-        const kosten = liters * highest.cost;
-        const kortingEur = liters * Math.max(0, offerPrijs - verkoopprijs);
-        const margeEur = omzet - kosten;
+        const totals = calcOfferLineTotals({
+          kostprijsEx: highest.cost,
+          offerPriceEx: offerPrijs,
+          qty: liters,
+          kortingPct
+        });
         return {
           id: String(row.id ?? ""),
           bierKey: bierId,
@@ -1919,11 +1915,11 @@ export function PrijsvoorstelWizard({
           offerPrijs,
           sellInPrijs: pricing.sellInPrice,
           sellInMargePct: pricing.sellInMarginPct,
-          omzet,
-          kosten,
-          kortingEur,
-          margeEur,
-          margePct: calculateMarginPercentage(omzet, kosten)
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          margeEur: totals.winst,
+          margePct: totals.margePct
         };
       });
     }
@@ -1954,10 +1950,12 @@ export function PrijsvoorstelWizard({
       const offerPrijs = pricing.offerPrice;
       const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const liters = toNumber(row.liters, 0);
-      const omzet = liters * verkoopprijs;
-      const kosten = liters * effectiveOverall.cost;
-      const kortingEur = liters * Math.max(0, offerPrijs - verkoopprijs);
-      const margeEur = omzet - kosten;
+      const totals = calcOfferLineTotals({
+        kostprijsEx: effectiveOverall.cost,
+        offerPriceEx: offerPrijs,
+        qty: liters,
+        kortingPct
+      });
       return {
           id: String(row.id ?? ""),
         bierKey: effectiveOverall.bierKey,
@@ -1973,11 +1971,11 @@ export function PrijsvoorstelWizard({
         offerPrijs,
         sellInPrijs: pricing.sellInPrice,
         sellInMargePct: pricing.sellInMarginPct,
-        omzet,
-        kosten,
-        kortingEur,
-        margeEur,
-        margePct: calculateMarginPercentage(omzet, kosten)
+        omzet: totals.omzet,
+        kosten: totals.kosten,
+        kortingEur: totals.kortingEur,
+        margeEur: totals.winst,
+        margePct: totals.margePct
       };
     });
   }, [
@@ -2131,10 +2129,12 @@ export function PrijsvoorstelWizard({
       const kortingPct = toNumber(row.korting_pct, 0);
       const aantal = toNumber(row.aantal, 0);
       const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
-      const omzet = aantal * verkoopprijs;
-      const kosten = aantal * kostprijsPerStuk;
-      const kortingEur = aantal * Math.max(0, offerPrijs - verkoopprijs);
-      const margeEur = omzet - kosten;
+      const totals = calcOfferLineTotals({
+        kostprijsEx: kostprijsPerStuk,
+        offerPriceEx: offerPrijs,
+        qty: aantal,
+        kortingPct
+      });
       return {
         id: String(row.id ?? ""),
         bierKey: bierId,
@@ -2152,11 +2152,11 @@ export function PrijsvoorstelWizard({
         sellInPrijs: pricing.sellInPrice,
         sellInMargePct: pricing.sellInMarginPct,
         offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
-        omzet,
-        kosten,
-        kortingEur,
-        margeEur,
-        margePct: calculateMarginPercentage(omzet, kosten)
+        omzet: totals.omzet,
+        kosten: totals.kosten,
+        kortingEur: totals.kortingEur,
+        margeEur: totals.winst,
+        margePct: totals.margePct
       };
     });
 
@@ -2184,10 +2184,12 @@ export function PrijsvoorstelWizard({
       const kortingPct = toNumber((row as any).korting_pct, 0);
       const aantal = toNumber((row as any).aantal, 0);
       const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
-      const omzet = aantal * verkoopprijs;
-      const kosten = aantal * kostprijsPerStuk;
-      const kortingEur = aantal * Math.max(0, offerPrijs - verkoopprijs);
-      const margeEur = omzet - kosten;
+      const totals = calcOfferLineTotals({
+        kostprijsEx: kostprijsPerStuk,
+        offerPriceEx: offerPrijs,
+        qty: aantal,
+        kortingPct
+      });
 
       return {
         id: String((row as any).id ?? ""),
@@ -2208,11 +2210,11 @@ export function PrijsvoorstelWizard({
         offerByChannel: Object.fromEntries(
           selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])
         ),
-        omzet,
-        kosten,
-        kortingEur,
-        margeEur,
-        margePct: calculateMarginPercentage(omzet, kosten)
+        omzet: totals.omzet,
+        kosten: totals.kosten,
+        kortingEur: totals.kortingEur,
+        margeEur: totals.winst,
+        margePct: totals.margePct
       };
     });
 
@@ -2454,6 +2456,8 @@ export function PrijsvoorstelWizard({
         if (String(next.id ?? "").trim() === "") {
           next.id = createId();
         }
+        // Year is context-only: persist as the active year set.
+        next.jaar = currentYear;
         const frozen = withFrozenPricing(next);
         if (String(frozen.id ?? "") === String(current.id)) {
           frozen.status = finalize ? "definitief" : "concept";
@@ -2847,25 +2851,7 @@ export function PrijsvoorstelWizard({
         </label>
         <label className="nested-field">
           <span>Jaar</span>
-          <select
-            className="dataset-input"
-            value={String(current.jaar ?? "")}
-            onChange={(event) =>
-              updateCurrent((draft) => {
-                draft.jaar = Number(event.target.value || new Date().getFullYear());
-                draft.bier_id = "";
-                draft.selected_bier_ids = [];
-                draft.product_rows = [];
-                draft.beer_rows = [];
-              })
-            }
-          >
-            {yearOptions.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
+          <div className="dataset-input dataset-input-readonly">{String(currentYear)}</div>
         </label>
         <label className="nested-field">
           <span>Contactpersoon</span>
@@ -2988,7 +2974,7 @@ export function PrijsvoorstelWizard({
       ? (current.selected_bier_ids as string[]).filter(Boolean)
       : [];
     const kanaalLabel = currentKanaalLabel;
-    const totalMargePct = calculateMarginPercentage(offerteLitersTotals.omzet, offerteLitersTotals.kosten);
+    const totalMargePct = calcMarginPctFromRevenueCost(offerteLitersTotals.omzet, offerteLitersTotals.kosten);
 
     return (
       <div className="wizard-stack">
@@ -3196,7 +3182,7 @@ export function PrijsvoorstelWizard({
       ? (((current as any).selected_catalog_product_ids as string[]) ?? []).filter(Boolean)
       : [];
     const kanaalLabel = currentKanaalLabel;
-    const totalMargePct = calculateMarginPercentage(offerteProductTotals.omzet, offerteProductTotals.kosten);
+    const totalMargePct = calcMarginPctFromRevenueCost(offerteProductTotals.omzet, offerteProductTotals.kosten);
 
     return (
       <div className="wizard-stack">

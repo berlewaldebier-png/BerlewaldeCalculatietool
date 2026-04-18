@@ -1,6 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { formatMoneyEUR } from "@/lib/formatters";
+import {
+  calcAdviesprijsInclBtwRange,
+  calcSellInExFromOpslagPct,
+  fromInclBtw,
+  round2,
+  toFiniteNumber,
+  toInclBtw
+} from "@/lib/pricingEngine";
+import { VatDisplayToggle, type VatDisplayMode } from "@/components/ui/VatDisplayToggle";
 
 const API_BASE_URL = "/api";
 
@@ -56,18 +66,7 @@ function parseBtwPct(value: unknown) {
 }
 
 function money(value: number) {
-  const safe = Number.isFinite(value) ? value : 0;
-  return safe.toLocaleString("nl-NL", { style: "currency", currency: "EUR" });
-}
-
-function round2(value: number) {
-  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
-}
-
-function roundDownTo5Cents(value: number) {
-  const safe = Number.isFinite(value) ? value : 0;
-  // 0.05 increments => 20 steps per euro. Add epsilon to avoid float artifacts like 3.599999999.
-  return Math.floor((safe + 1e-9) * 20) / 20;
+  return formatMoneyEUR(toFiniteNumber(value, 0));
 }
 
 function normalizeChannelMap(raw: unknown) {
@@ -101,11 +100,7 @@ function getChannelSellInPriceOverride(row: VerkoopprijzenRow | null | undefined
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function calcSellInFromOpslag(costEx: number, opslagPct: number) {
-  const cost = Number.isFinite(costEx) ? costEx : 0;
-  const opslag = Number.isFinite(opslagPct) ? opslagPct : 0;
-  return cost * (1 + opslag / 100);
-}
+// sell-in math lives in `lib/pricingEngine.ts`
 
 export function AdviesprijzenWorkspace(props: {
   initialChannels: any[];
@@ -119,6 +114,7 @@ export function AdviesprijzenWorkspace(props: {
   initialPackagingComponents: PackagingComponentRow[];
   initialPackagingComponentPriceVersions: PackagingComponentPriceVersionRow[];
 }) {
+  const [vatDisplay, setVatDisplay] = useState<VatDisplayMode>("excl");
   const channels = useMemo<Channel[]>(() => {
     return (Array.isArray(props.initialChannels) ? props.initialChannels : [])
       .filter((row) => row && typeof row === "object")
@@ -447,7 +443,7 @@ export function AdviesprijzenWorkspace(props: {
       getChannelOpslag(yearStrategy, channelCode) ??
       channelDefaultOpslag.get(channelCode) ??
       0;
-    return { sellInEx: calcSellInFromOpslag(row.kostprijsEx, opslagOverride), opslagPct: opslagOverride, source: "opslag" as const };
+    return { sellInEx: calcSellInExFromOpslagPct(row.kostprijsEx, opslagOverride), opslagPct: opslagOverride, source: "opslag" as const };
   }
 
   const yearRows = useMemo(() => {
@@ -536,6 +532,13 @@ export function AdviesprijzenWorkspace(props: {
             </select>
           </label>
         </div>
+      </div>
+
+      <div className="editor-actions" style={{ marginBottom: 14 }}>
+        <div className="editor-actions-group">
+          <VatDisplayToggle value={vatDisplay} onChange={setVatDisplay} disabled={isSaving} />
+        </div>
+        <div className="editor-actions-group" />
       </div>
 
       <div className="dataset-editor-scroll">
@@ -632,7 +635,7 @@ export function AdviesprijzenWorkspace(props: {
                 <span className="muted">Opslag: {round2(adviesOpslag).toLocaleString("nl-NL")}%</span>
               </summary>
               <div className="module-card-text" style={{ marginTop: "0.4rem" }}>
-                Read-only overzicht: kostprijs en verkoopprijs excl. BTW, adviesprijs (incl. BTW) wordt berekend en afgerond op 5 cent (altijd naar beneden).
+                Read-only overzicht: berekeningen blijven op excl. BTW; de weergave kan wisselen.
               </div>
 
               <div className="data-table" style={{ marginTop: "0.8rem" }}>
@@ -641,9 +644,9 @@ export function AdviesprijzenWorkspace(props: {
                     <tr>
                       <th style={{ width: "220px" }}>Bier</th>
                       <th style={{ width: "200px" }}>Product</th>
-                      <th style={{ width: "160px" }}>Kostprijs (ex)</th>
-                      <th style={{ width: "160px" }}>Verkoopprijs (ex)</th>
-                      <th style={{ width: "240px" }}>Adviesprijs (incl)</th>
+                      <th style={{ width: "160px" }}>Kostprijs ({vatDisplay === "incl" ? "incl" : "ex"})</th>
+                      <th style={{ width: "160px" }}>Verkoopprijs ({vatDisplay === "incl" ? "incl" : "ex"})</th>
+                      <th style={{ width: "240px" }}>Adviesprijs ({vatDisplay === "incl" ? "incl" : "ex"})</th>
                       <th style={{ width: "140px" }}>Opslag</th>
                       <th style={{ width: "140px" }}>Marge klant</th>
                     </tr>
@@ -652,14 +655,18 @@ export function AdviesprijzenWorkspace(props: {
                     {productCostRows.map((row) => {
                       const { sellInEx } = getSellInPriceEx(row, code);
                       const btwPct = Number.isFinite(row.btwPct) ? row.btwPct : 0;
-                      const adviesExRaw = sellInEx * (1 + (adviesOpslag || 0) / 100);
-                      const adviesInclRaw = adviesExRaw * (1 + btwPct / 100);
-                      const adviesInclRounded = roundDownTo5Cents(adviesInclRaw);
-                      const adviesMin = Math.max(0, adviesInclRounded - 0.05);
-                      const adviesMax = adviesInclRounded + 0.05;
+                      const { min: adviesMinIncl, max: adviesMaxIncl, margeKlantPct } = calcAdviesprijsInclBtwRange({
+                        kostprijsEx: row.kostprijsEx,
+                        sellInEx,
+                        adviesOpslagPct: adviesOpslag,
+                        btwPct
+                      });
 
-                      const adviesExRounded = (1 + btwPct / 100) > 0 ? adviesInclRounded / (1 + btwPct / 100) : adviesExRaw;
-                      const margePct = adviesExRounded > 0 ? ((adviesExRounded - sellInEx) / adviesExRounded) * 100 : 0;
+                      const kostprijsShown =
+                        vatDisplay === "incl" ? toInclBtw(row.kostprijsEx, btwPct) : row.kostprijsEx;
+                      const sellInShown = vatDisplay === "incl" ? toInclBtw(sellInEx, btwPct) : sellInEx;
+                      const adviesMinShown = vatDisplay === "incl" ? adviesMinIncl : fromInclBtw(adviesMinIncl, btwPct);
+                      const adviesMaxShown = vatDisplay === "incl" ? adviesMaxIncl : fromInclBtw(adviesMaxIncl, btwPct);
                       return (
                         <tr key={`${code}:${row.bierId}:${row.productType}:${row.productId}:${row.verpakking}`}>
                           <td>
@@ -667,14 +674,14 @@ export function AdviesprijzenWorkspace(props: {
                             <div className="muted">{row.productType}</div>
                           </td>
                           <td>{row.verpakking}</td>
-                          <td>{money(row.kostprijsEx)}</td>
-                          <td>{money(sellInEx)}</td>
+                          <td>{money(kostprijsShown)}</td>
+                          <td>{money(sellInShown)}</td>
                           <td>
-                            {money(adviesMin)} - {money(adviesMax)}
-                            <div className="muted">BTW {round2(btwPct)}%</div>
+                            {money(adviesMinShown)} - {money(adviesMaxShown)}
+                            <div className="muted">BTW {round2(btwPct)}% (afronding 5 cent incl, naar beneden)</div>
                           </td>
                           <td>{round2(adviesOpslag).toLocaleString("nl-NL")}%</td>
-                          <td>{round2(margePct).toLocaleString("nl-NL")}%</td>
+                          <td>{round2(margeKlantPct).toLocaleString("nl-NL")}%</td>
                         </tr>
                       );
                     })}
