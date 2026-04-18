@@ -8,6 +8,7 @@ import {
   round2
 } from "@/lib/verkoopstrategieMath";
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
+import { SourceBadge, ResetToParentButton } from "@/components/ui/Overrides";
 import type {
   BeerGroup,
   BeerViewRow,
@@ -281,14 +282,18 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                       (opslagDraftValue2 !== undefined && opslagDraftValue2 !== ""));
                                   if (showOnlyOverrides && !hasOverride) return [];
 
-                                  const inheritanceLabel = hasOverride ? "Override" : "Erft: Kanaal";
+                                  const badge = hasOverride ? (
+                                    <SourceBadge kind="override" source="Producttype" />
+                                  ) : (
+                                    <SourceBadge kind="inherit" source="Kanaal" />
+                                  );
 
                                   return (
                                     <tr key={`${row.productId}::${idx}`}>
                                       <td>
                                         <div style={{ fontWeight: 650 }}>{row.product}</div>
                                         {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
-                                        <div className="muted">{inheritanceLabel}</div>
+                                        <div style={{ marginTop: "0.25rem" }}>{badge}</div>
                                       </td>
                                       <td>
                                         <div className="stack" style={{ gap: "0.35rem" }}>
@@ -334,18 +339,14 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                       <td>{num(derivedMargin)}%</td>
                                       <td>
                                         {hasOverride && !row.isReadOnly ? (
-                                          <button
-                                            type="button"
-                                            className="editor-button editor-button-secondary"
+                                          <ResetToParentButton
                                             onClick={() => {
                                               if (!code) return;
                                               updateProductSellInPrice(row.productId, code, "");
                                               updateProductMargin(row.productId, code, "");
                                               clearDraft(opslagKey2);
                                             }}
-                                          >
-                                            Reset
-                                          </button>
+                                          />
                                         ) : null}
                                       </td>
                                     </tr>
@@ -409,9 +410,17 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                   const channelDefault = Number(channelYearDefaults[code]?.opslag ?? 0);
                                   const producttypeOpslag = Number(row.productOpslags?.[code] ?? channelDefault);
                                   const inheritsFromProducttype = Math.abs(producttypeOpslag - channelDefault) > 1e-9;
-                                  const inheritanceLabel = hasOverride
-                                    ? (hasPriceOverride ? "Override: Prijs" : "Override: Opslag")
-                                    : (inheritsFromProducttype ? "Erft: Producttype" : "Erft: Kanaal");
+                                  const badge = hasOverride ? (
+                                    <SourceBadge
+                                      kind="override"
+                                      source="Product"
+                                      note={hasPriceOverride ? "Prijs" : "Opslag"}
+                                    />
+                                  ) : inheritsFromProducttype ? (
+                                    <SourceBadge kind="inherit" source="Producttype" />
+                                  ) : (
+                                    <SourceBadge kind="inherit" source="Kanaal" />
+                                  );
                                   const opslagValue = !code ? "" : String(round2(derivedOpslag));
                                   const priceValue =
                                     row.isReadOnly || row.sellInPriceOverrides?.[code] === ""
@@ -424,7 +433,7 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                       <td>
                                         <div style={{ fontWeight: 650 }}>{row.product}</div>
                                         {row.isReadOnly ? <div className="muted">Volgt {row.followsProductLabel}</div> : null}
-                                        <div className="muted">{inheritanceLabel}</div>
+                                        <div style={{ marginTop: "0.25rem" }}>{badge}</div>
                                       </td>
                                       <td>{money(row.kostprijs ?? 0)}</td>
                                       <td>
@@ -493,18 +502,14 @@ export function VerkoopstrategiePrijsinstellingenAccordion(props: Props) {
                                       </td>
                                       <td>
                                         {hasOverride && !row.isReadOnly ? (
-                                          <button
-                                            type="button"
-                                            className="editor-button editor-button-secondary"
+                                          <ResetToParentButton
                                             onClick={() => {
                                               if (!code) return;
                                               updateBeerSellInPrice(row, code, "");
                                               updateBeerMargin(row, code, "");
                                               clearDraft(opslagKey3);
                                             }}
-                                          >
-                                            Reset
-                                          </button>
+                                          />
                                         ) : null}
                                       </td>
                                     </tr>
