@@ -4,6 +4,7 @@ import Link from "next/link";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { NavigationItem } from "@/lib/apiShared";
+import { DevGitBadge } from "@/components/DevGitBadge";
 
 type PageShellProps = {
   title: string;
@@ -131,8 +132,13 @@ export function PageShell({ title, subtitle, activePath, navigation, children }:
           </aside>
 
           <section className="content-card">
-            <h1 className="page-title">{pageHeader?.title ?? title}</h1>
-            <p className="page-text">{pageHeader?.subtitle ?? subtitle}</p>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+              <div style={{ minWidth: 0 }}>
+                <h1 className="page-title">{pageHeader?.title ?? title}</h1>
+                <p className="page-text">{pageHeader?.subtitle ?? subtitle}</p>
+              </div>
+              <DevGitBadge />
+            </div>
             {children}
           </section>
         </div>
