@@ -3187,7 +3187,16 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      const nextRow = { ...nextRows[index], [field]: value };
+      let nextValue: number | boolean = value;
+      if (typeof value === "number") {
+        // Guardrails: keep user input within expected bounds.
+        const raw = toNumber(value, 0);
+        if (field === "liters") nextValue = Math.max(0, raw);
+        else if (field === "fee_ex") nextValue = Math.max(0, raw);
+        else if (field === "korting_pct" || field === "retour_pct") nextValue = Math.min(100, Math.max(0, raw));
+        else nextValue = raw;
+      }
+      const nextRow = { ...nextRows[index], [field]: nextValue };
       if (field === "korting_pct" || field === "fee_ex" || field === "retour_pct") {
         const periodField =
           field === "korting_pct"
@@ -3195,7 +3204,7 @@ export function PrijsvoorstelWizard({
             : field === "fee_ex"
               ? activePeriodIndex === 1 ? "fee_ex_p1" : "fee_ex_p2"
               : activePeriodIndex === 1 ? "retour_pct_p1" : "retour_pct_p2";
-        (nextRow as any)[periodField] = value;
+        (nextRow as any)[periodField] = nextValue;
       }
       nextRows[index] = nextRow;
       draft.beer_rows = nextRows;
@@ -3213,7 +3222,15 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      const nextRow = { ...nextRows[index], [field]: value };
+      let nextValue: number | boolean = value;
+      if (typeof value === "number") {
+        const raw = toNumber(value, 0);
+        if (field === "aantal") nextValue = Math.max(0, raw);
+        else if (field === "fee_ex") nextValue = Math.max(0, raw);
+        else if (field === "korting_pct" || field === "retour_pct") nextValue = Math.min(100, Math.max(0, raw));
+        else nextValue = raw;
+      }
+      const nextRow = { ...nextRows[index], [field]: nextValue };
       if (field === "korting_pct" || field === "fee_ex" || field === "retour_pct") {
         const periodField =
           field === "korting_pct"
@@ -3221,7 +3238,7 @@ export function PrijsvoorstelWizard({
             : field === "fee_ex"
               ? activePeriodIndex === 1 ? "fee_ex_p1" : "fee_ex_p2"
               : activePeriodIndex === 1 ? "retour_pct_p1" : "retour_pct_p2";
-        (nextRow as any)[periodField] = value;
+        (nextRow as any)[periodField] = nextValue;
       }
       nextRows[index] = nextRow;
       draft.product_rows = nextRows;
@@ -3241,7 +3258,15 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      const nextRow = { ...nextRows[index], [field]: value };
+      let nextValue: number | boolean = value;
+      if (typeof value === "number") {
+        const raw = toNumber(value, 0);
+        if (field === "aantal") nextValue = Math.max(0, raw);
+        else if (field === "fee_ex") nextValue = Math.max(0, raw);
+        else if (field === "korting_pct" || field === "retour_pct") nextValue = Math.min(100, Math.max(0, raw));
+        else nextValue = raw;
+      }
+      const nextRow = { ...nextRows[index], [field]: nextValue };
       if (field === "korting_pct" || field === "fee_ex" || field === "retour_pct") {
         const periodField =
           field === "korting_pct"
@@ -3249,7 +3274,7 @@ export function PrijsvoorstelWizard({
             : field === "fee_ex"
               ? activePeriodIndex === 1 ? "fee_ex_p1" : "fee_ex_p2"
               : activePeriodIndex === 1 ? "retour_pct_p1" : "retour_pct_p2";
-        (nextRow as any)[periodField] = value;
+        (nextRow as any)[periodField] = nextValue;
       }
       nextRows[index] = nextRow;
       (draft as any).catalog_product_rows = nextRows;
@@ -3803,7 +3828,7 @@ export function PrijsvoorstelWizard({
             <div className="stat-value small">{formatEuro(offerteLitersTotals.kortingEur)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Totale fee</div>
+            <div className="stat-label">Totale fee (ex)</div>
             <div className="stat-value small">{formatEuro((offerteLitersTotals as any).feeEur ?? 0)}</div>
           </div>
           <div className="stat-card">
@@ -3811,11 +3836,14 @@ export function PrijsvoorstelWizard({
             <div className="stat-value small">{formatEuro((offerteLitersTotals as any).retourEur ?? 0)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Totale marge</div>
+            <div className="stat-label">Totale winst/marge</div>
             <div className="stat-value small">
               {formatEuro(offerteLitersTotals.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
+        </div>
+        <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+          Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid van omzet en kosten.
         </div>
 
         <div className="dataset-editor-scroll">
@@ -3825,9 +3853,9 @@ export function PrijsvoorstelWizard({
                 <th>Bier</th>
                 <th>Product</th>
                 <th>Liters</th>
-                <th>Korting %</th>
-                <th>Fee (EUR)</th>
-                <th>Retour %</th>
+                <th>Korting (%)</th>
+                <th>Fee (EUR, ex)</th>
+                <th>Retour (%)</th>
                 <th>{costPriceLabel}</th>
                 {isMultiKanaalMode
                   ? selectedChannelOptions.map((option) => (
@@ -3839,10 +3867,10 @@ export function PrijsvoorstelWizard({
                     <th>Omzet</th>
                     <th>Kosten</th>
                     <th>{discountAmountLabel}</th>
-                    <th>Fee</th>
-                    <th>Retour</th>
+                    <th>Fee (ex)</th>
+                    <th>Retour (EUR)</th>
                     <th>Winst</th>
-                    <th>Onze marge</th>
+                    <th>Marge (afgeleid)</th>
                   </>
                 ) : null}
                 <th></th>
@@ -3871,6 +3899,7 @@ export function PrijsvoorstelWizard({
                       className="dataset-input"
                       type="number"
                       min={0}
+                      max={100}
                       step="0.1"
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
@@ -4028,7 +4057,7 @@ export function PrijsvoorstelWizard({
             <div className="stat-value small">{formatEuro(offerteProductTotals.kortingEur)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Totale fee</div>
+            <div className="stat-label">Totale fee (ex)</div>
             <div className="stat-value small">{formatEuro((offerteProductTotals as any).feeEur ?? 0)}</div>
           </div>
           <div className="stat-card">
@@ -4036,11 +4065,14 @@ export function PrijsvoorstelWizard({
             <div className="stat-value small">{formatEuro((offerteProductTotals as any).retourEur ?? 0)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Totale marge</div>
+            <div className="stat-label">Totale winst/marge</div>
             <div className="stat-value small">
               {formatEuro(offerteProductTotals.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
+        </div>
+        <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+          Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid van omzet en kosten.
         </div>
 
         <div className="dataset-editor-scroll">
@@ -4050,9 +4082,9 @@ export function PrijsvoorstelWizard({
                 <th>Bier</th>
                 <th>Product</th>
                 <th>Aantal</th>
-                <th>Korting %</th>
-                <th>Fee (EUR)</th>
-                <th>Retour %</th>
+                <th>Korting (%)</th>
+                <th>Fee (EUR, ex)</th>
+                <th>Retour (%)</th>
                 <th>{costPriceLabel}</th>
                 {isMultiKanaalMode
                   ? selectedChannelOptions.map((option) => (
@@ -4064,10 +4096,10 @@ export function PrijsvoorstelWizard({
                     <th>Omzet</th>
                     <th>Kosten</th>
                     <th>{discountAmountLabel}</th>
-                    <th>Fee</th>
-                    <th>Retour</th>
+                    <th>Fee (ex)</th>
+                    <th>Retour (EUR)</th>
                     <th>Winst</th>
-                    <th>Onze marge</th>
+                    <th>Marge (afgeleid)</th>
                   </>
                 ) : null}
                 <th></th>
@@ -4100,6 +4132,7 @@ export function PrijsvoorstelWizard({
                       className="dataset-input"
                       type="number"
                       min={0}
+                      max={100}
                       step="0.1"
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
@@ -4390,7 +4423,7 @@ export function PrijsvoorstelWizard({
                 <tr>
                   <th>Product</th>
                   <th>Liters vanaf</th>
-                  <th>Korting %</th>
+                  <th>Korting (%)</th>
                   <th></th>
                 </tr>
               </thead>
@@ -4753,9 +4786,9 @@ export function PrijsvoorstelWizard({
                 <th>Bier</th>
                 <th>Product</th>
                 <th>{isLitersMode ? "Liters" : "Aantal"}</th>
-                <th>Korting %</th>
-                <th>Fee (EUR)</th>
-                <th>Retour %</th>
+                <th>Korting (%)</th>
+                <th>Fee (EUR, ex)</th>
+                <th>Retour (%)</th>
                 <th>{costPriceLabel}</th>
                 {channelHeaders}
               </tr>
@@ -4931,7 +4964,7 @@ export function PrijsvoorstelWizard({
     }
     const tableRowsP1 = buildTableRows(kortingMapP1, feeMapP1, retourMapP1);
     const tableRowsP2 = buildTableRows(kortingMapP2, feeMapP2, retourMapP2);
-    printWindow.document.write(`<!doctype html><html><head><title>Conceptofferte ${String(current.offertenummer || "")}</title><style>body{font-family:Segoe UI,sans-serif;padding:24px;color:#18223a}h1,h2,h3{margin:0 0 12px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #d7e1f4;padding:10px;text-align:left}th{background:#f3f7ff}</style></head><body><h1>Conceptofferte</h1><p><strong>Klant:</strong> ${String(current.klantnaam || "-")}<br/><strong>${isMultiKanaalMode ? "Kanalen" : "Kanaal"}:</strong> ${isMultiKanaalMode ? selectedKanaalLabels : currentKanaalLabel}<br/><strong>Jaar:</strong> ${currentYear}</p><h2>Overzicht</h2><h3>Introductie</h3><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Korting %</th><th>Fee (EUR)</th><th>Retour %</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRowsP1 || `<tr><td colspan="${isMultiKanaalMode ? 7 + selectedChannelOptions.length : 9}">Nog geen offertelijnen.</td></tr>`}</tbody></table><h3 style="margin-top:18px;">Standaard</h3><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Korting %</th><th>Fee (EUR)</th><th>Retour %</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRowsP2 || `<tr><td colspan="${isMultiKanaalMode ? 7 + selectedChannelOptions.length : 9}">Nog geen offertelijnen.</td></tr>`}</tbody></table><p style="margin-top:24px;"><strong>Opmerking:</strong><br/>${String(current.opmerking ?? "").replace(/\n/g, "<br/>") || "-"}</p></body></html>`);
+    printWindow.document.write(`<!doctype html><html><head><title>Conceptofferte ${String(current.offertenummer || "")}</title><style>body{font-family:Segoe UI,sans-serif;padding:24px;color:#18223a}h1,h2,h3{margin:0 0 12px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #d7e1f4;padding:10px;text-align:left}th{background:#f3f7ff}</style></head><body><h1>Conceptofferte</h1><p><strong>Klant:</strong> ${String(current.klantnaam || "-")}<br/><strong>${isMultiKanaalMode ? "Kanalen" : "Kanaal"}:</strong> ${isMultiKanaalMode ? selectedKanaalLabels : currentKanaalLabel}<br/><strong>Jaar:</strong> ${currentYear}</p><h2>Overzicht</h2><h3>Introductie</h3><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Korting (%)</th><th>Fee (EUR, ex)</th><th>Retour (%)</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRowsP1 || `<tr><td colspan="${isMultiKanaalMode ? 7 + selectedChannelOptions.length : 9}">Nog geen offertelijnen.</td></tr>`}</tbody></table><h3 style="margin-top:18px;">Standaard</h3><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Korting (%)</th><th>Fee (EUR, ex)</th><th>Retour (%)</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRowsP2 || `<tr><td colspan="${isMultiKanaalMode ? 7 + selectedChannelOptions.length : 9}">Nog geen offertelijnen.</td></tr>`}</tbody></table><p style="margin-top:24px;"><strong>Opmerking:</strong><br/>${String(current.opmerking ?? "").replace(/\n/g, "<br/>") || "-"}</p></body></html>`);
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
