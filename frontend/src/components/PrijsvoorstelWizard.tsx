@@ -2058,12 +2058,13 @@ export function PrijsvoorstelWizard({
     });
   }
 
-  function computeLitersDisplayRows(record: GenericRecord): LitersDisplayRow[] {
+  function computeLitersDisplayRows(record: GenericRecord, kanaalOverride?: string): LitersDisplayRow[] {
     const recordBeerRows = Array.isArray(record.beer_rows) ? (record.beer_rows as GenericRecord[]) : [];
 
     if (!isLitersMode) {
       return [];
     }
+    const effectiveKanaal = String(kanaalOverride ?? "").trim() || currentKanaal;
 
     if (litersBasis === "een_bier") {
       const bierId = String(record.bier_id ?? "");
@@ -2116,7 +2117,7 @@ export function PrijsvoorstelWizard({
             )
           ])
         ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-        const pricing = pricingByChannel[currentKanaal];
+        const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
         const offerPrijs = pricing.offerPrice;
         const liters = toNumber(row.liters, 0);
         const totals = calcOfferLineTotals({
@@ -2187,7 +2188,7 @@ export function PrijsvoorstelWizard({
             buildPricingForChannel(highest.cost, bierId, "", "", "liter", option.value)
           ])
         ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-        const pricing = pricingByChannel[currentKanaal];
+        const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
         const offerPrijs = pricing.offerPrice;
         const liters = toNumber(row.liters, 0);
         const totals = calcOfferLineTotals({
@@ -2262,7 +2263,7 @@ export function PrijsvoorstelWizard({
           )
         ])
       ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-      const pricing = pricingByChannel[currentKanaal];
+      const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
       const offerPrijs = pricing.offerPrice;
       const liters = toNumber(row.liters, 0);
       const totals = calcOfferLineTotals({
@@ -2364,10 +2365,11 @@ export function PrijsvoorstelWizard({
     return litersDisplayRows.filter((row) => row.productType === "basis");
   }, [isLitersMode, offerLevel, litersDisplayRows]);
 
-  const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
-    const currentProductRows = Array.isArray(current.product_rows) ? (current.product_rows as GenericRecord[]) : [];
+  function computeProductDisplayRows(record: GenericRecord, kanaalOverride?: string): ProductDisplayRow[] {
+    const effectiveKanaal = String(kanaalOverride ?? "").trim() || currentKanaal;
+    const recordProductRows = Array.isArray(record.product_rows) ? (record.product_rows as GenericRecord[]) : [];
 
-    const beerProductRows = currentProductRows.map((row) => {
+    const beerProductRows = recordProductRows.map((row) => {
       const bierId = String(row.bier_id ?? "");
       const fixedKostprijsversieId = String(row.kostprijsversie_id ?? "");
       const snapshotRowsForBier = getSnapshotProductRowsForBier(bierId, fixedKostprijsversieId);
@@ -2416,7 +2418,7 @@ export function PrijsvoorstelWizard({
         snapshot?.productType ?? rowProductType,
         verpakking
       );
-      let pricing = pricingByChannel[currentKanaal];
+      let pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
       const hasDirectStrategyPricing = pricing.sellInPrice > 0 || pricing.sellInMarginPct > 0;
 
       if (
@@ -2452,7 +2454,7 @@ export function PrijsvoorstelWizard({
               ];
             })
           ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-          pricing = pricingByChannel[currentKanaal];
+          pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
         }
       }
 
@@ -2461,7 +2463,6 @@ export function PrijsvoorstelWizard({
       const feeEx = toNumber((row as any).fee_ex, 0);
       const retourPct = toNumber((row as any).retour_pct, 0);
       const aantal = toNumber(row.aantal, 0);
-      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
@@ -2499,10 +2500,10 @@ export function PrijsvoorstelWizard({
       };
     });
 
-    const currentCatalogRows = Array.isArray((current as any).catalog_product_rows)
-      ? (((current as any).catalog_product_rows as GenericRecord[]) ?? [])
+    const recordCatalogRows = Array.isArray((record as any).catalog_product_rows)
+      ? ((((record as any).catalog_product_rows as GenericRecord[]) ?? []) as GenericRecord[])
       : [];
-    const catalogRows = currentCatalogRows.map((row) => {
+    const catalogRows = recordCatalogRows.map((row) => {
       const catalogProductId = String((row as any).catalog_product_id ?? "");
       const naam =
         String((row as any).naam ?? "") ||
@@ -2517,14 +2518,13 @@ export function PrijsvoorstelWizard({
           buildPricingForChannel(kostprijsPerStuk, "", `catalog:${catalogProductId}`, "catalog", naam, option.value)
         ])
       ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-      const pricing = pricingByChannel[currentKanaal];
+      const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
 
       const offerPrijs = pricing.offerPrice;
       const kortingPct = toNumber((row as any).korting_pct, 0);
       const feeEx = toNumber((row as any).fee_ex, 0);
       const retourPct = toNumber((row as any).retour_pct, 0);
       const aantal = toNumber((row as any).aantal, 0);
-      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
@@ -2566,6 +2566,10 @@ export function PrijsvoorstelWizard({
     });
 
     return [...beerProductRows, ...catalogRows];
+  }
+
+  const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
+    return computeProductDisplayRows(current);
   }, [
     current.product_rows,
     (current as any).catalog_product_rows,
@@ -4499,150 +4503,6 @@ export function PrijsvoorstelWizard({
     );
   }
 
-  function renderSummaryTable() {
-    if (isLitersMode) {
-      if (isMultiKanaalMode) {
-        return (
-          <div className="dataset-editor-scroll">
-            <table className="dataset-editor-table wizard-table-compact">
-              <thead>
-                <tr>
-                  <th>Bier</th>
-                  <th>Verpakking</th>
-                  <th>Liters</th>
-                  <th>{costPriceLabel}</th>
-                  {selectedChannelOptions.map((option) => (
-                    <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {offerteLitersRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.biernaam}</td>
-                    <td>{row.verpakking}</td>
-                    <td>{formatNumber(row.liters)}</td>
-                    <td>{formatEuro(row.kostprijsPerLiter)}</td>
-                    {selectedChannelOptions.map((option) => (
-                      <td key={`${row.id}-${option.value}-offer`}>{formatEuro(row.offerByChannel[option.value] ?? 0)}</td>
-                    ))}
-                  </tr>
-                ))}
-                {offerteLitersRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={4 + selectedChannelOptions.length} className="prijs-empty-cell">Nog geen liters-offerte opgebouwd.</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        );
-      }
-
-      return (
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table wizard-table-compact">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Verpakking</th>
-                <th>Liters</th>
-                <th>{costPriceLabel}</th>
-                <th>{offerPriceLabel} {currentKanaalLabel}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {offerteLitersRows.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.biernaam}</td>
-                  <td>{row.verpakking}</td>
-                  <td>{formatNumber(row.liters)}</td>
-                  <td>{formatEuro(row.kostprijsPerLiter)}</td>
-                  <td>{formatEuro(row.offerPrijs)}</td>
-                </tr>
-              ))}
-              {offerteLitersRows.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="prijs-empty-cell">Nog geen liters-offerte opgebouwd.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    if (isMultiKanaalMode) {
-      return (
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table wizard-table-compact">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Product</th>
-                <th>Aantal</th>
-                <th>{costPriceLabel}</th>
-                {selectedChannelOptions.map((option) => (
-                  <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {offerteProductRows.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.biernaam}</td>
-                  <td>{row.verpakking}</td>
-                  <td>{formatNumber(row.aantal, 0)}</td>
-                  <td>{formatEuro(row.kostprijsPerStuk)}</td>
-                  {selectedChannelOptions.map((option) => (
-                    <td key={`${row.id}-${option.value}-offer`}>{formatEuro(row.offerByChannel[option.value] ?? 0)}</td>
-                  ))}
-                </tr>
-              ))}
-              {offerteProductRows.length === 0 ? (
-                <tr>
-                  <td colSpan={4 + selectedChannelOptions.length} className="prijs-empty-cell">Nog geen productofferte opgebouwd.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    return (
-      <div className="dataset-editor-scroll">
-        <table className="dataset-editor-table wizard-table-compact">
-          <thead>
-            <tr>
-              <th>Bier</th>
-              <th>Product</th>
-              <th>Aantal</th>
-              <th>{costPriceLabel}</th>
-              <th>{offerPriceLabel} {currentKanaalLabel}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {offerteProductRows.map((row) => (
-              <tr key={row.id}>
-                <td>{row.biernaam}</td>
-                <td>{row.verpakking}</td>
-                <td>{formatNumber(row.aantal, 0)}</td>
-                <td>{formatEuro(row.kostprijsPerStuk)}</td>
-                <td>{formatEuro(row.offerPrijs)}</td>
-              </tr>
-            ))}
-            {offerteProductRows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="prijs-empty-cell">Nog geen productofferte opgebouwd.</td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
   function renderSamenvattingStep() {
     const gekozenKanaal = currentKanaalLabel;
     const scenarioLabel = activeVariant?.name || "Scenario";
@@ -4767,6 +4627,131 @@ export function PrijsvoorstelWizard({
         };
       });
 
+    type ScenarioCompareRow = {
+      scenarioId: string;
+      scenarioLabel: string;
+      kanaalCode: string;
+      kanaalLabel: string;
+      periodeIndex: 1 | 2;
+      periodeLabel: string;
+      omzet: number;
+      kosten: number;
+      kortingEur: number;
+      feeEur: number;
+      retourEur: number;
+      winst: number;
+      margePct: number;
+    };
+
+    const compareRows: ScenarioCompareRow[] = [];
+    for (const variant of variants) {
+      const kanaalCode = normalizeKey((variant as any).channel_code) || currentKanaal;
+      const kanaalLabel = channelOptionMap.get(kanaalCode)?.label ?? kanaalCode;
+      const recordForVariant: GenericRecord = {
+        ...current,
+        beer_rows: (variant as any).beer_rows ?? [],
+        product_rows: (variant as any).product_rows ?? []
+      };
+      const baseRows = isLitersMode
+        ? (computeLitersDisplayRows(recordForVariant, kanaalCode) as Array<LitersDisplayRow | ProductDisplayRow>)
+        : (computeProductDisplayRows(recordForVariant, kanaalCode) as Array<LitersDisplayRow | ProductDisplayRow>);
+
+      const variantKortingMapP1 = new Map<string, number>();
+      const variantKortingMapP2 = new Map<string, number>();
+      const variantFeeMapP1 = new Map<string, number>();
+      const variantFeeMapP2 = new Map<string, number>();
+      const variantRetourMapP1 = new Map<string, number>();
+      const variantRetourMapP2 = new Map<string, number>();
+      for (const row of [...((variant as any).beer_rows ?? []), ...((variant as any).product_rows ?? []), ...catalogRows]) {
+        const id = String((row as any).id ?? "").trim();
+        if (!id) continue;
+        variantKortingMapP1.set(id, resolvePeriodKortingPct(row as any, 1));
+        variantKortingMapP2.set(id, resolvePeriodKortingPct(row as any, 2));
+        variantFeeMapP1.set(id, resolvePeriodFeeEx(row as any, 1));
+        variantFeeMapP2.set(id, resolvePeriodFeeEx(row as any, 2));
+        variantRetourMapP1.set(id, resolvePeriodRetourPct(row as any, 1));
+        variantRetourMapP2.set(id, resolvePeriodRetourPct(row as any, 2));
+      }
+
+      const buildPeriodRows = (periodIndex: 1 | 2) => {
+        const kortingMap = periodIndex === 1 ? variantKortingMapP1 : variantKortingMapP2;
+        const feeMap = periodIndex === 1 ? variantFeeMapP1 : variantFeeMapP2;
+        const retourMap = periodIndex === 1 ? variantRetourMapP1 : variantRetourMapP2;
+        return isLitersMode
+          ? (applyPeriodToLitersRows(baseRows as LitersDisplayRow[], kortingMap, feeMap, retourMap) as Array<LitersDisplayRow | ProductDisplayRow>)
+          : (applyPeriodToProductRows(baseRows as ProductDisplayRow[], kortingMap, feeMap, retourMap) as Array<LitersDisplayRow | ProductDisplayRow>);
+      };
+
+      for (const periodIndex of [1, 2] as const) {
+        const rows = buildPeriodRows(periodIndex).filter((row) => (row as any).included);
+        const totals = rows.reduce(
+          (acc, row) => ({
+            omzet: acc.omzet + (row as any).omzet,
+            kosten: acc.kosten + (row as any).kosten,
+            kortingEur: acc.kortingEur + (row as any).kortingEur,
+            feeEur: acc.feeEur + ((row as any).feeEur ?? 0),
+            retourEur: acc.retourEur + ((row as any).retourEur ?? 0),
+            winst: acc.winst + (row as any).margeEur
+          }),
+          { omzet: 0, kosten: 0, kortingEur: 0, feeEur: 0, retourEur: 0, winst: 0 }
+        );
+        const margePct = calcMarginPctFromRevenueCost(totals.omzet, totals.kosten);
+        compareRows.push({
+          scenarioId: String((variant as any).id ?? ""),
+          scenarioLabel: String((variant as any).name ?? "") || "Scenario",
+          kanaalCode,
+          kanaalLabel,
+          periodeIndex: periodIndex,
+          periodeLabel: periodIndex === 1 ? "Introductie" : "Standaard",
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          feeEur: totals.feeEur,
+          retourEur: totals.retourEur,
+          winst: totals.winst,
+          margePct
+        });
+      }
+    }
+
+    function handleExportScenarioVergelijkingCsv() {
+      const header = [
+        "scenario",
+        "kanaal",
+        "periode",
+        "omzet_ex",
+        "kosten_ex",
+        "korting_eur",
+        "fee_ex_eur",
+        "retour_eur",
+        "winst",
+        "marge_pct"
+      ].join(",");
+      const lines = compareRows.map((row) =>
+        [
+          JSON.stringify(row.scenarioLabel),
+          JSON.stringify(row.kanaalLabel),
+          JSON.stringify(row.periodeLabel),
+          row.omzet.toFixed(2),
+          row.kosten.toFixed(2),
+          row.kortingEur.toFixed(2),
+          row.feeEur.toFixed(2),
+          row.retourEur.toFixed(2),
+          row.winst.toFixed(2),
+          row.margePct.toFixed(2)
+        ].join(",")
+      );
+      const blob = new Blob([`${header}\n${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `scenario-vergelijking-${String(current.offertenummer || current.id || "export")}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
     const summaryRowsP1 = isLitersMode
       ? applyPeriodToLitersRows(litersDisplayRows, kortingMapP1, feeMapP1, retourMapP1)
       : applyPeriodToProductRows(productDisplayRows, kortingMapP1, feeMapP1, retourMapP1);
@@ -4853,6 +4838,59 @@ export function PrijsvoorstelWizard({
           <div className="stat-card">
             <div className="stat-label">Periode</div>
             <div className="stat-value small">{periodLabel}</div>
+          </div>
+        </div>
+
+        <div className="module-card compact-card">
+          <div className="module-card-title">Scenario vergelijking</div>
+          <div className="module-card-text">
+            Vergelijk de scenario's (sub-offertes) op totaalniveau per periode. Omzet/kosten zijn exclusief BTW.
+            {isMultiKanaalMode ? " Let op: vergelijking gebruikt het kanaal van het scenario (of het eerste geselecteerde kanaal)." : ""}
+          </div>
+          <div className="editor-actions-group" style={{ marginTop: "0.75rem" }}>
+            <button type="button" className="editor-button editor-button-secondary" onClick={handleExportScenarioVergelijkingCsv}>
+              Export vergelijking (CSV)
+            </button>
+          </div>
+          <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+            <table className="dataset-editor-table wizard-table-compact">
+              <thead>
+                <tr>
+                  <th>Scenario</th>
+                  <th>Kanaal</th>
+                  <th>Periode</th>
+                  <th>Omzet</th>
+                  <th>Kosten</th>
+                  <th>Korting</th>
+                  <th>Fee (ex)</th>
+                  <th>Retour</th>
+                  <th>Winst</th>
+                  <th>Marge</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compareRows.length > 0 ? (
+                  compareRows.map((row) => (
+                    <tr key={`${row.scenarioId}-${row.periodeIndex}`}>
+                      <td>{row.scenarioLabel}</td>
+                      <td>{row.kanaalLabel}</td>
+                      <td>{row.periodeLabel}</td>
+                      <td>{formatEuro(row.omzet)}</td>
+                      <td>{formatEuro(row.kosten)}</td>
+                      <td>{formatEuro(row.kortingEur)}</td>
+                      <td>{formatEuro(row.feeEur)}</td>
+                      <td>{formatEuro(row.retourEur)}</td>
+                      <td>{formatEuro(row.winst)}</td>
+                      <td>{formatPercentage(row.margePct)}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={10} className="prijs-empty-cell">Nog geen scenario's om te vergelijken.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
