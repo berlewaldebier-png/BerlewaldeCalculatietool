@@ -2,6 +2,8 @@ import {
   calcAdviesprijsInclBtwRange,
   calcMarginPctFromOpslagPct,
   calcOfferLineTotals,
+  calcGratisTotalFreeQtyFromPaid,
+  computeGratisFreeByRefFromPaidRows,
   calcOpslagPctFromSellInEx,
   calcSellInExFromOpslagPct,
   roundDownTo5Cents
@@ -54,4 +56,25 @@ function assert(condition: unknown, message: string) {
 }
 
 console.log("pricingEngine contracttest OK");
+
+// 4) X+Y gratis (paid qty) contract
+{
+  // Paid-only interpretation: 4 paid unlocks 1 free, 8 paid unlocks 2 free.
+  approxEqual(calcGratisTotalFreeQtyFromPaid({ totalPaidQty: 0, requiredQty: 4, freeQty: 1 }), 0);
+  approxEqual(calcGratisTotalFreeQtyFromPaid({ totalPaidQty: 4, requiredQty: 4, freeQty: 1 }), 1);
+  approxEqual(calcGratisTotalFreeQtyFromPaid({ totalPaidQty: 7, requiredQty: 4, freeQty: 1 }), 1);
+  approxEqual(calcGratisTotalFreeQtyFromPaid({ totalPaidQty: 8, requiredQty: 4, freeQty: 1 }), 2);
+
+  const result = computeGratisFreeByRefFromPaidRows({
+    requiredQty: 4,
+    freeQty: 1,
+    eligibleRefs: [],
+    rows: [
+      { included: true, ref: "A", qtyPaid: 4, unitPriceEx: 10 },
+      { included: true, ref: "B", qtyPaid: 4, unitPriceEx: 5 } // cheapest
+    ]
+  });
+  approxEqual(result.totalFree, 2);
+  assert((result.freeByRef.get("B") ?? 0) === 2, "Expected freebies allocated to cheapest units first");
+}
 

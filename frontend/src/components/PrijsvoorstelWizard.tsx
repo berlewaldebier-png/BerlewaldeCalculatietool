@@ -6,7 +6,7 @@ import { usePageShellWizardSidebar } from "@/components/PageShell";
 import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
-import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, parseNumberLoose, round2 } from "@/lib/pricingEngine";
+import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, computeGratisFreeByRefFromPaidRows, parseNumberLoose, round2 } from "@/lib/pricingEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -591,45 +591,21 @@ function computeGratisUnitsByProductRef({
   freeQty: number;
   eligibleRefs: string[];
 }) {
-  const req = Math.max(1, Math.floor(requiredQty));
-  const free = Math.max(1, Math.floor(freeQty));
-  // Important: `aantal` is interpreted as PAID quantity. Free units are added on top of that.
-  // So for "4 + 1 gratis": if the customer orders 4 paid units, they receive 5 units delivered.
-  // Free units do not count towards unlocking more free units.
-  if (req <= 0 || free <= 0) return { freeByRef: new Map<string, number>(), totalFree: 0 };
-
-  const eligibleSet = new Set((eligibleRefs ?? []).filter(Boolean));
-  const units: Array<{ ref: string; unitPrice: number; qty: number }> = [];
-  let totalEligibleQty = 0;
-  for (const row of rows) {
-    if (!row.included) continue;
-    if (row.productType === "catalog") continue;
-    const qty = Math.max(0, Math.floor(toFiniteNumber(row.aantal, 0)));
-    if (qty <= 0) continue;
-    const ref = `${row.productType}|${row.productId}`;
-    if (eligibleSet.size > 0 && !eligibleSet.has(ref)) continue;
-    const unitPrice = Math.max(0, toFiniteNumber(row.offerPrijs, 0));
-    units.push({ ref, unitPrice, qty });
-    totalEligibleQty += qty;
-  }
-
-  const groups = Math.floor(totalEligibleQty / req);
-  const totalFree = groups * free;
-  if (totalFree <= 0) return { freeByRef: new Map<string, number>(), totalFree: 0 };
-
-  units.sort((a, b) => a.unitPrice - b.unitPrice);
-  const freeByRef = new Map<string, number>();
-  let remaining = totalFree;
-  for (const unit of units) {
-    if (remaining <= 0) break;
-    const take = Math.min(remaining, unit.qty);
-    if (take > 0) {
-      freeByRef.set(unit.ref, (freeByRef.get(unit.ref) ?? 0) + take);
-      remaining -= take;
-    }
-  }
-
-  return { freeByRef, totalFree };
+  const mapped = rows
+    .filter((row) => row.productType !== "catalog")
+    .map((row) => ({
+      included: row.included,
+      ref: `${row.productType}|${row.productId}`,
+      qtyPaid: row.aantal,
+      unitPriceEx: row.offerPrijs
+    }));
+  const result = computeGratisFreeByRefFromPaidRows({
+    rows: mapped,
+    requiredQty,
+    freeQty,
+    eligibleRefs
+  });
+  return { freeByRef: result.freeByRef, totalFree: result.totalFree };
 }
 
 function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
