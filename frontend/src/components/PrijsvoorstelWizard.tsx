@@ -59,7 +59,7 @@ type QuoteBuilderContext = {
 
 type QuoteBuilderBlock = {
   id: string;
-  type: "discount_pct" | "intro" | "staffel" | "xy_gratis" | "transport";
+  type: "discount_pct" | "intro" | "staffel" | "xy_gratis" | "transport" | "extras";
   // intro block config
   start_date?: string;
   end_date?: string;
@@ -76,6 +76,13 @@ type QuoteBuilderBlock = {
   threshold_amount_ex?: number; // if set: charge transport only when base omzet_ex < this threshold
   deliveries?: number;
   rate_ex?: number;
+  // extras / services (always 21% VAT for display; prices/costs are ex VAT)
+  extra_label?: string;
+  extra_qty?: number;
+  extra_unit_price_ex?: number;
+  extra_unit_cost_ex?: number;
+  extra_is_free?: boolean;
+  extra_threshold_amount_ex?: number; // optional: only apply when base omzet_ex >= threshold
 };
 
 type PrijsvoorstelWizardProps = {
@@ -482,6 +489,10 @@ function hasXyGratisBlock(quote: GenericRecord, variantId: string) {
 
 function hasTransportBlock(quote: GenericRecord, variantId: string) {
   return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "transport");
+}
+
+function hasExtrasBlock(quote: GenericRecord, variantId: string) {
+  return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "extras");
 }
 
 function isBlockActiveForPeriod(block: QuoteBuilderBlock, periodIndex: 1 | 2) {
@@ -970,6 +981,20 @@ export function PrijsvoorstelWizard({
   const [transportDraftThresholdEx, setTransportDraftThresholdEx] = useState(0);
   const [transportDraftDeliveries, setTransportDraftDeliveries] = useState(1);
   const [transportDraftRateEx, setTransportDraftRateEx] = useState(0);
+  const [extrasModalOpen, setExtrasModalOpen] = useState(false);
+  const [extrasDraftApplies, setExtrasDraftApplies] =
+    useState<NonNullable<QuoteBuilderBlock["applies_to_periods"]>>("both");
+  const [extrasDraftRows, setExtrasDraftRows] = useState<
+    Array<{
+      id: string;
+      label: string;
+      qty: number;
+      unitPriceEx: number;
+      unitCostEx: number;
+      isFree: boolean;
+      thresholdAmountEx: number;
+    }>
+  >([]);
 
   const effectiveSelectedId = useMemo(() => {
     if (rows.some((row) => String(row.id) === String(selectedId))) {
@@ -2921,6 +2946,47 @@ export function PrijsvoorstelWizard({
     };
   }, [activePeriodIndex, activeVariantId, current, isLitersMode, offerteLitersTotals.omzet, offerteProductTotals.omzet]);
 
+  const extrasEffects = useMemo(() => {
+    const blocks = getVariantBlocks(current, activeVariantId);
+    const introEnabled = hasIntroBlock(current, activeVariantId);
+    const effectivePeriod: 1 | 2 = introEnabled ? activePeriodIndex : 2;
+    const extraBlocks = blocks.filter(
+      (b) => String((b as any).type) === "extras" && isBlockActiveForPeriod(b as any, effectivePeriod)
+    ) as QuoteBuilderBlock[];
+
+    if (extraBlocks.length === 0) return [];
+
+    const baseOmzetEx = isLitersMode ? offerteLitersTotals.omzet : offerteProductTotals.omzet;
+
+    return extraBlocks
+      .map((block) => {
+        const label = normalizeText((block as any).extra_label ?? "Extra");
+        const qty = Math.max(0, toNumber((block as any).extra_qty ?? 1, 1));
+        const unitPriceEx = Math.max(0, toNumber((block as any).extra_unit_price_ex ?? 0, 0));
+        const unitCostEx = Math.max(0, toNumber((block as any).extra_unit_cost_ex ?? 0, 0));
+        const isFree = Boolean((block as any).extra_is_free ?? false);
+        const thresholdAmountEx = Math.max(0, toNumber((block as any).extra_threshold_amount_ex ?? 0, 0));
+        const meetsThreshold = thresholdAmountEx <= 0 || baseOmzetEx >= thresholdAmountEx;
+
+        const effectiveIsFree = isFree || !meetsThreshold;
+        const omzet = effectiveIsFree ? 0 : qty * unitPriceEx;
+        const kosten = qty * unitCostEx;
+        return {
+          id: String(block.id ?? createId()),
+          label,
+          qty,
+          unitPriceEx,
+          unitCostEx,
+          isFree: effectiveIsFree,
+          thresholdAmountEx,
+          meetsThreshold,
+          omzet,
+          kosten
+        };
+      })
+      .filter((row) => row.qty > 0 && (row.unitPriceEx > 0 || row.unitCostEx > 0 || row.isFree));
+  }, [activePeriodIndex, activeVariantId, current, isLitersMode, offerteLitersTotals.omzet, offerteProductTotals.omzet]);
+
   const derivedBasisRows = useMemo(() => {
     if (isLitersMode || offerLevel !== "samengesteld") {
       return [];
@@ -3868,15 +3934,24 @@ export function PrijsvoorstelWizard({
       : [];
     const kanaalLabel = currentKanaalLabel;
     const transportForStep = editPricing ? transportEffect : null;
-    const totalsWithTransport = transportForStep?.isValid
-      ? {
-          omzet: offerteLitersTotals.omzet + transportForStep.omzet,
-          kosten: offerteLitersTotals.kosten + transportForStep.kosten,
-          kortingEur: offerteLitersTotals.kortingEur,
-          margeEur: offerteLitersTotals.margeEur + (transportForStep.omzet - transportForStep.kosten)
-        }
-      : offerteLitersTotals;
-    const totalMargePct = calcMarginPctFromRevenueCost(totalsWithTransport.omzet, totalsWithTransport.kosten);
+    const extrasForStep = editPricing ? extrasEffects : [];
+    const extrasTotals = extrasForStep.reduce(
+      (totals, row) => ({
+        omzet: totals.omzet + row.omzet,
+        kosten: totals.kosten + row.kosten
+      }),
+      { omzet: 0, kosten: 0 }
+    );
+    const totalsWithAdjustments = {
+      omzet: offerteLitersTotals.omzet + (transportForStep?.isValid ? transportForStep.omzet : 0) + extrasTotals.omzet,
+      kosten: offerteLitersTotals.kosten + (transportForStep?.isValid ? transportForStep.kosten : 0) + extrasTotals.kosten,
+      kortingEur: offerteLitersTotals.kortingEur,
+      margeEur:
+        offerteLitersTotals.margeEur +
+        (transportForStep?.isValid ? transportForStep.omzet - transportForStep.kosten : 0) +
+        (extrasTotals.omzet - extrasTotals.kosten)
+    };
+    const totalMargePct = calcMarginPctFromRevenueCost(totalsWithAdjustments.omzet, totalsWithAdjustments.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
     const pricingRuleActive = activeBlocks.some((block) =>
       ["discount_pct", "staffel", "xy_gratis"].includes(String((block as any).type))
@@ -3933,20 +4008,20 @@ export function PrijsvoorstelWizard({
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(totalsWithTransport.omzet)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithAdjustments.omzet)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(totalsWithTransport.kosten)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kosten)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(totalsWithTransport.kortingEur)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale marge</div>
             <div className="stat-value small">
-              {formatEuro(totalsWithTransport.margeEur)} ({formatPercentage(totalMargePct)})
+              {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
         </div>
@@ -4089,6 +4164,51 @@ export function PrijsvoorstelWizard({
                   </tr>
                 )
               ) : null}
+              {editPricing && !isMultiKanaalMode
+                ? extrasEffects.map((extra) => (
+                    <tr key={`extra-${extra.id}`} className="is-derived-row">
+                      <td style={{ color: "var(--muted-text)" }}>-</td>
+                      <td style={{ fontWeight: 600 }}>
+                        {extra.label}{" "}
+                        <span style={{ color: "var(--muted-text)", fontWeight: 400 }}>
+                          (extra{extra.isFree ? ", gratis" : ""})
+                        </span>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">-</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">-</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(extra.unitCostEx)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">
+                          {formatEuro(extra.isFree ? 0 : extra.unitPriceEx)}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(extra.omzet)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(extra.kosten)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">
+                          {formatEuro(extra.omzet - extra.kosten)}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">-</div>
+                      </td>
+                      <td />
+                    </tr>
+                  ))
+                : null}
               {offerteLitersRows.length === 0 ? (
                 <tr>
                   <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length : 12} className="prijs-empty-cell">
@@ -4142,15 +4262,24 @@ export function PrijsvoorstelWizard({
       : [];
     const kanaalLabel = currentKanaalLabel;
     const transportForStep = editPricing ? transportEffect : null;
-    const totalsWithTransport = transportForStep?.isValid
-      ? {
-          omzet: offerteProductTotals.omzet + transportForStep.omzet,
-          kosten: offerteProductTotals.kosten + transportForStep.kosten,
-          kortingEur: offerteProductTotals.kortingEur,
-          margeEur: offerteProductTotals.margeEur + (transportForStep.omzet - transportForStep.kosten)
-        }
-      : offerteProductTotals;
-    const totalMargePct = calcMarginPctFromRevenueCost(totalsWithTransport.omzet, totalsWithTransport.kosten);
+    const extrasForStep = editPricing ? extrasEffects : [];
+    const extrasTotals = extrasForStep.reduce(
+      (totals, row) => ({
+        omzet: totals.omzet + row.omzet,
+        kosten: totals.kosten + row.kosten
+      }),
+      { omzet: 0, kosten: 0 }
+    );
+    const totalsWithAdjustments = {
+      omzet: offerteProductTotals.omzet + (transportForStep?.isValid ? transportForStep.omzet : 0) + extrasTotals.omzet,
+      kosten: offerteProductTotals.kosten + (transportForStep?.isValid ? transportForStep.kosten : 0) + extrasTotals.kosten,
+      kortingEur: offerteProductTotals.kortingEur,
+      margeEur:
+        offerteProductTotals.margeEur +
+        (transportForStep?.isValid ? transportForStep.omzet - transportForStep.kosten : 0) +
+        (extrasTotals.omzet - extrasTotals.kosten)
+    };
+    const totalMargePct = calcMarginPctFromRevenueCost(totalsWithAdjustments.omzet, totalsWithAdjustments.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
     const pricingRuleActive = activeBlocks.some((block) =>
       ["discount_pct", "staffel", "xy_gratis"].includes(String((block as any).type))
@@ -4184,20 +4313,20 @@ export function PrijsvoorstelWizard({
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(totalsWithTransport.omzet)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithAdjustments.omzet)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(totalsWithTransport.kosten)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kosten)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(totalsWithTransport.kortingEur)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale marge</div>
             <div className="stat-value small">
-              {formatEuro(totalsWithTransport.margeEur)} ({formatPercentage(totalMargePct)})
+              {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
         </div>
@@ -4454,6 +4583,51 @@ export function PrijsvoorstelWizard({
                   </tr>
                 )
               ) : null}
+              {editPricing && !isMultiKanaalMode
+                ? extrasEffects.map((extra) => (
+                    <tr key={`extra-${extra.id}`} className="is-derived-row">
+                      <td style={{ color: "var(--muted-text)" }}>-</td>
+                      <td style={{ fontWeight: 600 }}>
+                        {extra.label}{" "}
+                        <span style={{ color: "var(--muted-text)", fontWeight: 400 }}>
+                          (extra{extra.isFree ? ", gratis" : ""})
+                        </span>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatNumber(extra.qty, 0)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">-</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(extra.unitCostEx)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">
+                          {formatEuro(extra.isFree ? 0 : extra.unitPriceEx)}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(extra.omzet)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(extra.kosten)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">
+                          {formatEuro(extra.omzet - extra.kosten)}
+                        </div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">-</div>
+                      </td>
+                      <td />
+                    </tr>
+                  ))
+                : null}
               {offerteProductRows.length === 0 ? (
                 <tr>
                   <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length : 12} className="prijs-empty-cell">
@@ -4607,6 +4781,35 @@ export function PrijsvoorstelWizard({
                 title={isMultiKanaalMode ? "Transport werkt nu alleen voor 1 kanaal per scenario." : undefined}
               >
                 Transport
+              </button>
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => {
+                  const blocks = getVariantBlocks(current, activeVariantId);
+                  const existing = blocks.filter((b) => String((b as any).type) === "extras") as QuoteBuilderBlock[];
+                  const effectivePeriodIndex: 1 | 2 = hasIntroBlock(current, activeVariantId) ? activePeriodIndex : 2;
+
+                  setExtrasDraftApplies(
+                    (existing[0]?.applies_to_periods as any) ?? (effectivePeriodIndex === 1 ? "intro" : "standard")
+                  );
+                  setExtrasDraftRows(
+                    existing.map((block) => ({
+                      id: String(block.id ?? createId()),
+                      label: normalizeText((block as any).extra_label ?? ""),
+                      qty: Math.max(0, toNumber((block as any).extra_qty ?? 1, 1)),
+                      unitPriceEx: Math.max(0, toNumber((block as any).extra_unit_price_ex ?? 0, 0)),
+                      unitCostEx: Math.max(0, toNumber((block as any).extra_unit_cost_ex ?? 0, 0)),
+                      isFree: Boolean((block as any).extra_is_free ?? false),
+                      thresholdAmountEx: Math.max(0, toNumber((block as any).extra_threshold_amount_ex ?? 0, 0))
+                    }))
+                  );
+                  setExtrasModalOpen(true);
+                }}
+                disabled={isMultiKanaalMode}
+                title={isMultiKanaalMode ? "Extra's werken nu alleen voor 1 kanaal per scenario." : undefined}
+              >
+                Extra&apos;s
               </button>
             </div>
             <div className="editor-actions-group" />
@@ -4916,6 +5119,19 @@ export function PrijsvoorstelWizard({
           }
         </tr>`
         : "";
+    const extrasRows = !isMultiKanaalMode
+      ? extrasEffects
+          .map(
+            (extra) => `<tr>
+          <td>-</td>
+          <td>${String(extra.label).replace(/</g, "&lt;")}${extra.isFree ? " (gratis)" : ""}</td>
+          <td>${formatNumber(extra.qty, 0)}</td>
+          <td>${formatEuro(extra.unitCostEx)}</td>
+          ${isMultiKanaalMode ? selectedChannelOptions.map(() => `<td>${formatEuro(0)}</td>`).join("") : `<td>${formatEuro(extra.isFree ? 0 : extra.unitPriceEx)}</td>`}
+        </tr>`
+          )
+          .join("")
+      : "";
 
     const tableRows =
       (isLitersMode ? litersDisplayRows : productDisplayRows)
@@ -4933,7 +5149,7 @@ export function PrijsvoorstelWizard({
           }
         </tr>`
       )
-      .join("") + transportRow;
+      .join("") + transportRow + extrasRows;
     const printWindow = window.open("", "_blank", "width=1100,height=800");
     if (!printWindow) {
       return;
@@ -5980,6 +6196,308 @@ export function PrijsvoorstelWizard({
                     };
                   });
                   setTransportModalOpen(false);
+                }}
+              >
+                Opslaan
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {extrasModalOpen ? (
+        <div className="confirm-modal-overlay" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="extras-modal-title">
+            <div className="confirm-modal-title" id="extras-modal-title">
+              Extra&apos;s (diensten) instellen
+            </div>
+            <div className="confirm-modal-text">
+              Extra&apos;s zijn diensten (bijv. proeverij, tapverhuur). BTW is altijd 21% voor de factuur; de berekening
+              hier blijft exclusief BTW. Je kunt extra&apos;s gratis maken of conditioneel laten worden op basis van een
+              omzetdrempel (ex).
+            </div>
+
+            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
+              <label className="nested-field">
+                <span>Toepassen op</span>
+                <select
+                  className="dataset-input"
+                  value={extrasDraftApplies}
+                  onChange={(event) =>
+                    setExtrasDraftApplies(event.target.value as NonNullable<QuoteBuilderBlock["applies_to_periods"]>)
+                  }
+                >
+                  <option value="intro">Introductie (periode 1)</option>
+                  <option value="standard">Standaard (periode 2)</option>
+                  <option value="both">Beide periodes</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+              <table className="dataset-editor-table wizard-table-compact">
+                <thead>
+                  <tr>
+                    <th>Omschrijving</th>
+                    <th>Aantal</th>
+                    <th>Verkoopprijs (ex)</th>
+                    <th>Kosten (ex)</th>
+                    <th>Gratis</th>
+                    <th>Omzetdrempel (ex)</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {extrasDraftRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          value={row.label}
+                          onChange={(event) =>
+                            setExtrasDraftRows((prev) =>
+                              prev.map((item) => (item.id === row.id ? { ...item, label: event.target.value } : item))
+                            )
+                          }
+                          placeholder="Bijv. Proeverij"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={String(row.qty)}
+                          onChange={(event) =>
+                            setExtrasDraftRows((prev) =>
+                              prev.map((item) =>
+                                item.id === row.id
+                                  ? { ...item, qty: Math.max(0, Math.floor(Number(event.target.value || 0))) }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          value={String(row.unitPriceEx)}
+                          onChange={(event) =>
+                            setExtrasDraftRows((prev) =>
+                              prev.map((item) =>
+                                item.id === row.id
+                                  ? { ...item, unitPriceEx: Math.max(0, Number(event.target.value || 0)) }
+                                  : item
+                              )
+                            )
+                          }
+                          disabled={row.isFree}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          value={String(row.unitCostEx)}
+                          onChange={(event) =>
+                            setExtrasDraftRows((prev) =>
+                              prev.map((item) =>
+                                item.id === row.id
+                                  ? { ...item, unitCostEx: Math.max(0, Number(event.target.value || 0)) }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={row.isFree}
+                          onChange={(event) =>
+                            setExtrasDraftRows((prev) =>
+                              prev.map((item) =>
+                                item.id === row.id
+                                  ? {
+                                      ...item,
+                                      isFree: event.target.checked,
+                                      unitPriceEx: event.target.checked ? 0 : item.unitPriceEx
+                                    }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          value={String(row.thresholdAmountEx)}
+                          onChange={(event) =>
+                            setExtrasDraftRows((prev) =>
+                              prev.map((item) =>
+                                item.id === row.id
+                                  ? { ...item, thresholdAmountEx: Math.max(0, Number(event.target.value || 0)) }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="icon-button-table"
+                          aria-label="Verwijderen"
+                          title="Verwijderen"
+                          onClick={() => setExtrasDraftRows((prev) => prev.filter((item) => item.id !== row.id))}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {extrasDraftRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="prijs-empty-cell">
+                        Nog geen extra&apos;s toegevoegd.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
+              <div className="editor-actions-group">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() =>
+                    setExtrasDraftRows((prev) => [
+                      ...prev,
+                      {
+                        id: createId(),
+                        label: "",
+                        qty: 1,
+                        unitPriceEx: 0,
+                        unitCostEx: 0,
+                        isFree: false,
+                        thresholdAmountEx: 0
+                      }
+                    ])
+                  }
+                >
+                  Extra toevoegen
+                </button>
+              </div>
+              <div className="editor-actions-group" />
+            </div>
+
+            <div className="confirm-modal-actions">
+              {hasExtrasBlock(current, activeVariantId) ? (
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() => {
+                    updateCurrent((draft) => {
+                      const list = Array.isArray((draft as any).variants)
+                        ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                        : [];
+                      const activeId =
+                        String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                      if (!activeId) return;
+
+                      const blocksByVariant =
+                        typeof (draft as any).builder_blocks_by_variant === "object" &&
+                        (draft as any).builder_blocks_by_variant !== null
+                          ? { ...(draft as any).builder_blocks_by_variant }
+                          : {};
+                      const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+                        ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+                        : [];
+                      blocksByVariant[activeId] = existingBlocks.filter((b) => String((b as any).type) !== "extras");
+                      (draft as any).builder_blocks_by_variant = blocksByVariant;
+                    });
+                    setExtrasModalOpen(false);
+                  }}
+                >
+                  Verwijderen
+                </button>
+              ) : (
+                <span />
+              )}
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => setExtrasModalOpen(false)}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="editor-button"
+                onClick={() => {
+                  updateCurrent((draft) => {
+                    const list = Array.isArray((draft as any).variants)
+                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                      : [];
+                    const activeId =
+                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                    if (!activeId) return;
+
+                    const blocksByVariant =
+                      typeof (draft as any).builder_blocks_by_variant === "object" &&
+                      (draft as any).builder_blocks_by_variant !== null
+                        ? { ...(draft as any).builder_blocks_by_variant }
+                        : {};
+                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+                      : [];
+
+                    const cleanedDraft = extrasDraftRows
+                      .map((row) => ({
+                        ...row,
+                        label: normalizeText(row.label),
+                        qty: Math.max(0, Math.floor(toNumber(row.qty, 0))),
+                        unitPriceEx: Math.max(0, toNumber(row.unitPriceEx, 0)),
+                        unitCostEx: Math.max(0, toNumber(row.unitCostEx, 0)),
+                        thresholdAmountEx: Math.max(0, toNumber(row.thresholdAmountEx, 0)),
+                        isFree: Boolean(row.isFree)
+                      }))
+                      .filter((row) => row.qty > 0 && (row.label || row.unitPriceEx > 0 || row.unitCostEx > 0 || row.isFree));
+
+                    const nextBlocks: QuoteBuilderBlock[] = [
+                      ...existingBlocks.filter((b) => String((b as any).type) !== "extras"),
+                      ...cleanedDraft.map((row) => ({
+                        id: `${activeId}:extras:${row.id}`,
+                        type: "extras" as const,
+                        applies_to_periods: extrasDraftApplies,
+                        extra_label: row.label || "Extra",
+                        extra_qty: row.qty,
+                        extra_unit_price_ex: row.unitPriceEx,
+                        extra_unit_cost_ex: row.unitCostEx,
+                        extra_is_free: row.isFree,
+                        extra_threshold_amount_ex: row.thresholdAmountEx
+                      }))
+                    ];
+                    blocksByVariant[activeId] = nextBlocks;
+                    (draft as any).builder_blocks_by_variant = blocksByVariant;
+                  });
+                  setExtrasModalOpen(false);
                 }}
               >
                 Opslaan
