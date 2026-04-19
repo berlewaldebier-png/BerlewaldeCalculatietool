@@ -56,7 +56,7 @@ type QuoteBuilderContext = {
 
 type QuoteBuilderBlock = {
   id: string;
-  type: "discount_pct" | "intro";
+  type: "discount_pct" | "intro" | "staffel";
   // intro block config
   start_date?: string;
   end_date?: string;
@@ -169,6 +169,7 @@ type ProductDisplayRow = {
   verpakking: string;
   aantal: number;
   kortingPct: number;
+  litersPerProduct: number;
   kostprijsPerStuk: number;
   offerPrijs: number;
   sellInPrijs: number;
@@ -455,6 +456,69 @@ function getVariantBlocks(quote: GenericRecord, variantId: string): QuoteBuilder
 
 function hasIntroBlock(quote: GenericRecord, variantId: string) {
   return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "intro");
+}
+
+function hasStaffelBlock(quote: GenericRecord, variantId: string) {
+  return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "staffel");
+}
+
+function getStaffelTiers(raw: unknown): Array<{ id: string; product_id: string; product_type: string; liters: number; korting_pct: number }> {
+  const list = Array.isArray(raw) ? (raw as GenericRecord[]) : [];
+  return list
+    .filter((row) => typeof row === "object" && row !== null)
+    .map((row) => ({
+      id: String((row as any).id ?? createId()),
+      product_id: String((row as any).product_id ?? ""),
+      product_type: String((row as any).product_type ?? ""),
+      liters: toNumber((row as any).liters, 0),
+      korting_pct: toNumber((row as any).korting_pct, 0)
+    }))
+    .filter((row) => row.liters > 0 && row.korting_pct > 0);
+}
+
+function computeStaffelKortingByProductRef({
+  rows,
+  tiers
+}: {
+  rows: Array<{ included: boolean; productType: string; productId: string; aantal?: number; liters?: number; litersPerProduct?: number }>;
+  tiers: Array<{ product_id: string; product_type: string; liters: number; korting_pct: number }>;
+}) {
+  const tiersList = Array.isArray(tiers) ? tiers : [];
+  if (tiersList.length === 0) return new Map<string, number>();
+
+  const totalsByRef = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.included) continue;
+    if (row.productType === "catalog") continue;
+    const productId = String(row.productId ?? "");
+    const productType = String(row.productType ?? "");
+    if (!productId || !productType) continue;
+    const liters =
+      typeof row.liters === "number" && Number.isFinite(row.liters)
+        ? Math.max(0, row.liters)
+        : Math.max(0, toFiniteNumber(row.aantal, 0)) * Math.max(0, toFiniteNumber(row.litersPerProduct, 0));
+    if (liters <= 0) continue;
+    const ref = `${productType}|${productId}`;
+    totalsByRef.set(ref, (totalsByRef.get(ref) ?? 0) + liters);
+  }
+
+  const kortingByRef = new Map<string, number>();
+  for (const [ref, liters] of totalsByRef.entries()) {
+    const [productType, productId] = ref.split("|");
+    let best = 0;
+    for (const tier of tiersList) {
+      const matches =
+        (!tier.product_id && !tier.product_type) ||
+        (String(tier.product_id) === String(productId) && String(tier.product_type) === String(productType));
+      if (!matches) continue;
+      if (liters >= toFiniteNumber(tier.liters, 0)) {
+        best = Math.max(best, toFiniteNumber(tier.korting_pct, 0));
+      }
+    }
+    kortingByRef.set(ref, best);
+  }
+
+  return kortingByRef;
 }
 
 function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
@@ -784,6 +848,10 @@ export function PrijsvoorstelWizard({
   const [introModalOpen, setIntroModalOpen] = useState(false);
   const [introDraftStart, setIntroDraftStart] = useState("");
   const [introDraftEnd, setIntroDraftEnd] = useState("");
+  const [staffelModalOpen, setStaffelModalOpen] = useState(false);
+  const [staffelDraftTiers, setStaffelDraftTiers] = useState<
+    Array<{ id: string; product_id: string; product_type: string; liters: number; korting_pct: number }>
+  >([]);
 
   const effectiveSelectedId = useMemo(() => {
     if (rows.some((row) => String(row.id) === String(selectedId))) {
@@ -2276,6 +2344,43 @@ export function PrijsvoorstelWizard({
     return litersDisplayRows.filter((row) => row.productType === "basis");
   }, [isLitersMode, offerLevel, litersDisplayRows]);
 
+  const staffelProductOptions = useMemo<SelectOption[]>(() => {
+    const currentProductRows = Array.isArray(current.product_rows) ? (current.product_rows as GenericRecord[]) : [];
+    const byRef = new Map<string, SelectOption>();
+    for (const row of currentProductRows) {
+      const bierId = String(row.bier_id ?? "");
+      const fixedKostprijsversieId = String(row.kostprijsversie_id ?? "");
+      const snapshotRowsForBier = getSnapshotProductRowsForBier(bierId, fixedKostprijsversieId);
+      const rowProductId = String(row.product_id ?? "");
+      const rowProductType = String(row.product_type ?? "");
+      const explicitLabel = String(row.verpakking_label ?? "");
+      const rowLabel =
+        explicitLabel ||
+        productDefinitionMap.get(`id|${rowProductId}`)?.label ||
+        rowProductId;
+      const snapshot = snapshotRowsForBier.find(
+        (item) =>
+          (rowProductId && item.productId === rowProductId) ||
+          normalizeKey(item.verpakking) === normalizeKey(rowLabel) ||
+          normalizeKey(item.sourcePackaging) === normalizeKey(rowLabel)
+      );
+      const productId = snapshot?.productId ?? rowProductId;
+      const productType = snapshot?.productType ?? (rowProductType === "basis" || rowProductType === "samengesteld" ? rowProductType : "");
+      if (!productId || !productType) continue;
+      const ref = `${productType}|${productId}`;
+      if (!byRef.has(ref)) {
+        byRef.set(ref, {
+          value: ref,
+          label: snapshot?.verpakking ?? productDefinitionMap.get(`id|${productId}`)?.label ?? productId
+        });
+      }
+    }
+    return [
+      { value: "", label: "Alle producten" },
+      ...[...byRef.values()].sort((a, b) => a.label.localeCompare(b.label, "nl-NL"))
+    ];
+  }, [current.product_rows, productDefinitionMap, currentYear]);
+
   const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
     const currentProductRows = Array.isArray(current.product_rows) ? (current.product_rows as GenericRecord[]) : [];
 
@@ -2369,14 +2474,14 @@ export function PrijsvoorstelWizard({
       }
 
       const offerPrijs = pricing.offerPrice;
-      const kortingPct = toNumber(row.korting_pct, 0);
+      const kortingPctRaw = toNumber(row.korting_pct, 0);
       const aantal = toNumber(row.aantal, 0);
-      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
+      const litersPerProduct = firstPositiveNumber(snapshot?.litersPerProduct, 0);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
         qty: aantal,
-        kortingPct
+        kortingPct: kortingPctRaw
       });
       return {
         id: String(row.id ?? ""),
@@ -2389,7 +2494,8 @@ export function PrijsvoorstelWizard({
         productKey: snapshot?.productKey ?? "",
         verpakking,
         aantal,
-        kortingPct,
+        kortingPct: kortingPctRaw,
+        litersPerProduct,
         kostprijsPerStuk,
         offerPrijs,
         sellInPrijs: pricing.sellInPrice,
@@ -2426,7 +2532,6 @@ export function PrijsvoorstelWizard({
       const offerPrijs = pricing.offerPrice;
       const kortingPct = toNumber((row as any).korting_pct, 0);
       const aantal = toNumber((row as any).aantal, 0);
-      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
@@ -2446,6 +2551,7 @@ export function PrijsvoorstelWizard({
         verpakking: naam,
         aantal,
         kortingPct,
+        litersPerProduct: 0,
         kostprijsPerStuk,
         offerPrijs,
         sellInPrijs: pricing.sellInPrice,
@@ -2461,12 +2567,41 @@ export function PrijsvoorstelWizard({
       };
     });
 
-    return [...beerProductRows, ...catalogRows];
+    const rows = [...beerProductRows, ...catalogRows];
+    if (!hasStaffelBlock(current, activeVariantId)) {
+      return rows;
+    }
+
+    const tiers = getStaffelTiers(current.staffels);
+    const kortingByRef = computeStaffelKortingByProductRef({ rows, tiers });
+    return rows.map((row) => {
+      if (row.productType === "catalog") {
+        return { ...row, kortingPct: 0 };
+      }
+      const ref = `${row.productType}|${row.productId}`;
+      const nextKorting = kortingByRef.get(ref) ?? 0;
+      const totals = calcOfferLineTotals({
+        kostprijsEx: row.kostprijsPerStuk,
+        offerPriceEx: row.offerPrijs,
+        qty: row.aantal,
+        kortingPct: nextKorting
+      });
+      return {
+        ...row,
+        kortingPct: nextKorting,
+        omzet: totals.omzet,
+        kosten: totals.kosten,
+        kortingEur: totals.kortingEur,
+        margeEur: totals.winst,
+        margePct: totals.margePct
+      };
+    });
   }, [
     current.product_rows,
     (current as any).catalog_product_rows,
     bierNameMap,
     currentKanaal,
+    activeVariantId,
     productDefinitionMap,
     selectedChannelOptions,
     verkoopstrategieWindow,
@@ -3490,7 +3625,9 @@ export function PrijsvoorstelWizard({
     const kanaalLabel = currentKanaalLabel;
     const totalMargePct = calcMarginPctFromRevenueCost(offerteLitersTotals.omzet, offerteLitersTotals.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
-    const pricingRuleActive = activeBlocks.some((block) => ["discount_pct"].includes(String((block as any).type)));
+    const pricingRuleActive = activeBlocks.some((block) =>
+      ["discount_pct", "staffel"].includes(String((block as any).type))
+    );
 
     return (
       <div className="wizard-stack">
@@ -3701,7 +3838,9 @@ export function PrijsvoorstelWizard({
     const kanaalLabel = currentKanaalLabel;
     const totalMargePct = calcMarginPctFromRevenueCost(offerteProductTotals.omzet, offerteProductTotals.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
-    const pricingRuleActive = activeBlocks.some((block) => ["discount_pct"].includes(String((block as any).type)));
+    const pricingRuleActive = activeBlocks.some((block) =>
+      ["discount_pct", "staffel"].includes(String((block as any).type))
+    );
 
     return (
       <div className="wizard-stack">
@@ -3930,10 +4069,22 @@ export function PrijsvoorstelWizard({
                 type="button"
                 className="editor-button editor-button-secondary"
                 onClick={() => {
+                  const existing = getStaffelTiers(current.staffels);
+                  setStaffelDraftTiers(existing);
+                  setStaffelModalOpen(true);
+                }}
+              >
+                Staffel
+              </button>
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => {
                   setDiscountDraftPct(0);
                   setDiscountDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
                   setDiscountModalOpen(true);
                 }}
+                disabled={hasStaffelBlock(current, activeVariantId)}
               >
                 % korting
               </button>
@@ -4647,6 +4798,220 @@ export function PrijsvoorstelWizard({
                     }
                   });
                   setIntroModalOpen(false);
+                }}
+              >
+                Opslaan
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {staffelModalOpen ? (
+        <div className="confirm-modal-overlay" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="staffel-modal-title">
+            <div className="confirm-modal-title" id="staffel-modal-title">
+              Staffel instellen
+            </div>
+            <div className="confirm-modal-text">
+              Staffel werkt op liters per product (aantal x inhoud). De hoogste staffel waarvan de drempel is gehaald
+              geldt voor alle inbegrepen regels van dat product.
+            </div>
+
+            <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+              <table className="dataset-editor-table wizard-table-compact">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Drempel (L)</th>
+                    <th>Korting (%)</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {staffelDraftTiers.map((tier) => (
+                    <tr key={tier.id}>
+                      <td>
+                        <select
+                          className="dataset-input"
+                          value={tier.product_id ? `${tier.product_type}|${tier.product_id}` : ""}
+                          onChange={(event) => {
+                            const value = String(event.target.value ?? "");
+                            const [product_type, product_id] = value ? value.split("|") : ["", ""];
+                            setStaffelDraftTiers((prev) =>
+                              prev.map((row) =>
+                                row.id === tier.id ? { ...row, product_id: product_id ?? "", product_type: product_type ?? "" } : row
+                              )
+                            );
+                          }}
+                        >
+                          {staffelProductOptions.map((option) => (
+                            <option key={option.value || "all"} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          value={String(tier.liters)}
+                          onChange={(event) => {
+                            const liters = toNumber(event.target.value, 0);
+                            setStaffelDraftTiers((prev) =>
+                              prev.map((row) => (row.id === tier.id ? { ...row, liters } : row))
+                            );
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.1"
+                          value={String(tier.korting_pct)}
+                          onChange={(event) => {
+                            const korting_pct = toNumber(event.target.value, 0);
+                            setStaffelDraftTiers((prev) =>
+                              prev.map((row) => (row.id === tier.id ? { ...row, korting_pct } : row))
+                            );
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="icon-button-table"
+                          aria-label="Staffel verwijderen"
+                          title="Verwijderen"
+                          onClick={() => setStaffelDraftTiers((prev) => prev.filter((row) => row.id !== tier.id))}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {staffelDraftTiers.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="prijs-empty-cell">
+                        Voeg een staffel toe om korting automatisch af te leiden.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
+              <div className="editor-actions-group">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() =>
+                    setStaffelDraftTiers((prev) => [
+                      ...prev,
+                      {
+                        id: createId(),
+                        product_id: "",
+                        product_type: "",
+                        liters: 50,
+                        korting_pct: 5
+                      }
+                    ])
+                  }
+                >
+                  Staffel toevoegen
+                </button>
+              </div>
+              <div className="editor-actions-group" />
+            </div>
+
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => setStaffelModalOpen(false)}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="editor-button"
+                onClick={() => {
+                  const sanitized = staffelDraftTiers
+                    .map((row) => ({
+                      ...row,
+                      liters: Math.max(0, toNumber(row.liters, 0)),
+                      korting_pct: Math.min(100, Math.max(0, toNumber(row.korting_pct, 0)))
+                    }))
+                    .filter((row) => row.liters > 0 && row.korting_pct > 0);
+
+                  updateCurrent((draft) => {
+                    const list = Array.isArray((draft as any).variants)
+                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                      : [];
+                    const activeId =
+                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                    const index = list.findIndex((row) => String(row.id) === activeId);
+                    if (index < 0) return;
+
+                    const nextList = [...list];
+                    nextList[index] = { ...nextList[index], staffels: sanitized as any };
+                    (draft as any).variants = nextList;
+                    (draft as any).active_period_index = hasIntroBlock(draft, activeId)
+                      ? toPeriodIndex((draft as any).active_period_index, 2)
+                      : 2;
+
+                    // Enforce exclusivity: remove discount blocks and clear manual korting fields.
+                    const blocksByVariant =
+                      typeof (draft as any).builder_blocks_by_variant === "object" &&
+                      (draft as any).builder_blocks_by_variant !== null
+                        ? { ...(draft as any).builder_blocks_by_variant }
+                        : {};
+                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+                      : [];
+                    const nextBlocks: QuoteBuilderBlock[] = [
+                      ...existingBlocks.filter((b) => !["discount_pct"].includes(String((b as any).type))),
+                      { id: `${activeId}:staffel`, type: "staffel" }
+                    ];
+                    blocksByVariant[activeId] = nextBlocks;
+                    (draft as any).builder_blocks_by_variant = blocksByVariant;
+
+                    const clearManual = (rows: QuoteLineRow[]) =>
+                      rows.map((row) => ({
+                        ...row,
+                        korting_pct_p1: 0,
+                        korting_pct_p2: 0,
+                        korting_pct: 0
+                      }));
+                    const variant = nextList[index];
+                    nextList[index] = {
+                      ...variant,
+                      product_rows: clearManual(variant.product_rows),
+                      beer_rows: clearManual(variant.beer_rows),
+                      staffels: sanitized as any
+                    };
+                    (draft as any).variants = nextList;
+
+                    const activeVariant = nextList[index];
+                    draft.staffels = Array.isArray(activeVariant.staffels) ? activeVariant.staffels : [];
+                    draft.product_rows = applyVariantPeriodToWorkingRows(
+                      activeVariant.product_rows,
+                      toPeriodIndex((draft as any).active_period_index, 2)
+                    );
+                    draft.beer_rows = applyVariantPeriodToWorkingRows(
+                      activeVariant.beer_rows,
+                      toPeriodIndex((draft as any).active_period_index, 2)
+                    );
+                  });
+
+                  setStaffelModalOpen(false);
                 }}
               >
                 Opslaan
