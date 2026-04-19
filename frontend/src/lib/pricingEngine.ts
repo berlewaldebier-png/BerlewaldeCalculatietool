@@ -96,6 +96,112 @@ export function calcOfferLineTotals({
   return { omzet, kosten, kortingEur, winst, margePct };
 }
 
+export function calcOfferLineTotalsWithGratis({
+  kostprijsEx,
+  offerPriceEx,
+  qty,
+  freeQty
+}: {
+  kostprijsEx: number;
+  offerPriceEx: number;
+  qty: number;
+  freeQty: number;
+}) {
+  const q = Math.max(0, toFiniteNumber(qty, 0));
+  const free = Math.min(q, Math.max(0, toFiniteNumber(freeQty, 0)));
+  const paid = Math.max(0, q - free);
+  const unit = Math.max(0, toFiniteNumber(offerPriceEx, 0));
+  const omzet = paid * unit;
+  const kosten = q * Math.max(0, toFiniteNumber(kostprijsEx, 0));
+  const kortingEur = free * unit;
+  const winst = omzet - kosten;
+  const margePct = omzet > 0 ? (winst / omzet) * 100 : 0;
+  return { omzet, kosten, kortingEur, winst, margePct };
+}
+
+// X+Y gratis helpers ---------------------------------------------------------
+
+export function calcGratisTotalFreeQtyFromPaid({
+  totalPaidQty,
+  requiredQty,
+  freeQty
+}: {
+  totalPaidQty: number;
+  requiredQty: number;
+  freeQty: number;
+}) {
+  const paid = Math.max(0, Math.floor(toFiniteNumber(totalPaidQty, 0)));
+  const req = Math.max(1, Math.floor(toFiniteNumber(requiredQty, 1)));
+  const free = Math.max(1, Math.floor(toFiniteNumber(freeQty, 1)));
+  const groups = Math.floor(paid / req);
+  return Math.max(0, groups * free);
+}
+
+export function allocateGratisCheapest({
+  units,
+  totalFreeQty
+}: {
+  units: Array<{ ref: string; unitPriceEx: number; qtyPaid: number }>;
+  totalFreeQty: number;
+}) {
+  const freeTotal = Math.max(0, Math.floor(toFiniteNumber(totalFreeQty, 0)));
+  if (freeTotal <= 0) return new Map<string, number>();
+
+  const sorted = units
+    .map((unit) => ({
+      ref: String(unit.ref ?? ""),
+      unitPriceEx: Math.max(0, toFiniteNumber(unit.unitPriceEx, 0)),
+      qtyPaid: Math.max(0, Math.floor(toFiniteNumber(unit.qtyPaid, 0)))
+    }))
+    .filter((unit) => unit.ref && unit.qtyPaid > 0)
+    .sort((a, b) => a.unitPriceEx - b.unitPriceEx);
+
+  const freeByRef = new Map<string, number>();
+  let remaining = freeTotal;
+  for (const unit of sorted) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, unit.qtyPaid);
+    if (take > 0) {
+      freeByRef.set(unit.ref, (freeByRef.get(unit.ref) ?? 0) + take);
+      remaining -= take;
+    }
+  }
+
+  return freeByRef;
+}
+
+export function computeGratisFreeByRefFromPaidRows({
+  rows,
+  requiredQty,
+  freeQty,
+  eligibleRefs
+}: {
+  rows: Array<{ included: boolean; ref: string; qtyPaid: number; unitPriceEx: number }>;
+  requiredQty: number;
+  freeQty: number;
+  eligibleRefs: string[];
+}) {
+  const eligibleSet = new Set((eligibleRefs ?? []).filter(Boolean));
+  const units: Array<{ ref: string; unitPriceEx: number; qtyPaid: number }> = [];
+  let totalPaid = 0;
+
+  for (const row of rows) {
+    if (!row.included) continue;
+    const qtyPaid = Math.max(0, Math.floor(toFiniteNumber(row.qtyPaid, 0)));
+    if (qtyPaid <= 0) continue;
+    const ref = String(row.ref ?? "");
+    if (!ref) continue;
+    if (eligibleSet.size > 0 && !eligibleSet.has(ref)) continue;
+    const unitPriceEx = Math.max(0, toFiniteNumber(row.unitPriceEx, 0));
+    units.push({ ref, unitPriceEx, qtyPaid });
+    totalPaid += qtyPaid;
+  }
+
+  const totalFree = calcGratisTotalFreeQtyFromPaid({ totalPaidQty: totalPaid, requiredQty, freeQty });
+  const freeByRef = allocateGratisCheapest({ units, totalFreeQty: totalFree });
+  return { totalFree, freeByRef };
+}
+
 export function calcMarginPctFromRevenueCost(omzet: number, kosten: number) {
   const r = toFiniteNumber(omzet, 0);
   const c = toFiniteNumber(kosten, 0);
