@@ -6,7 +6,7 @@ import { usePageShellWizardSidebar } from "@/components/PageShell";
 import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
-import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcSellInExFromOpslagPct, parseNumberLoose } from "@/lib/pricingEngine";
+import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, parseNumberLoose } from "@/lib/pricingEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -56,12 +56,16 @@ type QuoteBuilderContext = {
 
 type QuoteBuilderBlock = {
   id: string;
-  type: "discount_pct" | "intro" | "staffel";
+  type: "discount_pct" | "intro" | "staffel" | "xy_gratis";
   // intro block config
   start_date?: string;
   end_date?: string;
   korting_pct?: number;
   applies_to_periods?: "both" | "intro" | "standard";
+  // x+y gratis config (products-mode only for now)
+  required_qty?: number;
+  free_qty?: number;
+  eligible_product_refs?: string[]; // ["samengesteld|<id>", ...] ; empty => all
 };
 
 type PrijsvoorstelWizardProps = {
@@ -462,6 +466,18 @@ function hasStaffelBlock(quote: GenericRecord, variantId: string) {
   return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "staffel");
 }
 
+function hasXyGratisBlock(quote: GenericRecord, variantId: string) {
+  return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "xy_gratis");
+}
+
+function isBlockActiveForPeriod(block: QuoteBuilderBlock, periodIndex: 1 | 2) {
+  const applies = String((block as any).applies_to_periods ?? "both");
+  if (applies === "both") return true;
+  if (applies === "intro") return periodIndex === 1;
+  if (applies === "standard") return periodIndex === 2;
+  return true;
+}
+
 function getStaffelTiers(raw: unknown): Array<{ id: string; product_id: string; product_type: string; liters: number; korting_pct: number }> {
   const list = Array.isArray(raw) ? (raw as GenericRecord[]) : [];
   return list
@@ -519,6 +535,58 @@ function computeStaffelKortingByProductRef({
   }
 
   return kortingByRef;
+}
+
+function computeGratisUnitsByProductRef({
+  rows,
+  requiredQty,
+  freeQty,
+  eligibleRefs
+}: {
+  rows: Array<{ included: boolean; productType: string; productId: string; aantal: number; offerPrijs: number }>;
+  requiredQty: number;
+  freeQty: number;
+  eligibleRefs: string[];
+}) {
+  const req = Math.max(1, Math.floor(requiredQty));
+  const free = Math.max(1, Math.floor(freeQty));
+  // Important: `aantal` is interpreted as PAID quantity. Free units are added on top of that.
+  // So for "4 + 1 gratis": if the customer orders 4 paid units, they receive 5 units delivered.
+  // Free units do not count towards unlocking more free units.
+  if (req <= 0 || free <= 0) return { freeByRef: new Map<string, number>(), totalFree: 0 };
+
+  const eligibleSet = new Set((eligibleRefs ?? []).filter(Boolean));
+  const units: Array<{ ref: string; unitPrice: number; qty: number }> = [];
+  let totalEligibleQty = 0;
+  for (const row of rows) {
+    if (!row.included) continue;
+    if (row.productType === "catalog") continue;
+    const qty = Math.max(0, Math.floor(toFiniteNumber(row.aantal, 0)));
+    if (qty <= 0) continue;
+    const ref = `${row.productType}|${row.productId}`;
+    if (eligibleSet.size > 0 && !eligibleSet.has(ref)) continue;
+    const unitPrice = Math.max(0, toFiniteNumber(row.offerPrijs, 0));
+    units.push({ ref, unitPrice, qty });
+    totalEligibleQty += qty;
+  }
+
+  const groups = Math.floor(totalEligibleQty / req);
+  const totalFree = groups * free;
+  if (totalFree <= 0) return { freeByRef: new Map<string, number>(), totalFree: 0 };
+
+  units.sort((a, b) => a.unitPrice - b.unitPrice);
+  const freeByRef = new Map<string, number>();
+  let remaining = totalFree;
+  for (const unit of units) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, unit.qty);
+    if (take > 0) {
+      freeByRef.set(unit.ref, (freeByRef.get(unit.ref) ?? 0) + take);
+      remaining -= take;
+    }
+  }
+
+  return { freeByRef, totalFree };
 }
 
 function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
@@ -852,6 +920,12 @@ export function PrijsvoorstelWizard({
   const [staffelDraftTiers, setStaffelDraftTiers] = useState<
     Array<{ id: string; product_id: string; product_type: string; liters: number; korting_pct: number }>
   >([]);
+  const [xyGratisModalOpen, setXyGratisModalOpen] = useState(false);
+  const [xyDraftRequired, setXyDraftRequired] = useState(4);
+  const [xyDraftFree, setXyDraftFree] = useState(1);
+  const [xyDraftApplies, setXyDraftApplies] =
+    useState<NonNullable<QuoteBuilderBlock["applies_to_periods"]>>("both");
+  const [xyDraftEligibleRefs, setXyDraftEligibleRefs] = useState<string[]>([]);
 
   const effectiveSelectedId = useMemo(() => {
     if (rows.some((row) => String(row.id) === String(selectedId))) {
@@ -2381,6 +2455,11 @@ export function PrijsvoorstelWizard({
     ];
   }, [current.product_rows, productDefinitionMap, currentYear]);
 
+  const xyEligibleProductOptions = useMemo<SelectOption[]>(() => {
+    // Reuse same product refs as staffel, but without the "alle producten" option.
+    return staffelProductOptions.filter((option) => option.value);
+  }, [staffelProductOptions]);
+
   const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
     const currentProductRows = Array.isArray(current.product_rows) ? (current.product_rows as GenericRecord[]) : [];
 
@@ -2568,7 +2647,55 @@ export function PrijsvoorstelWizard({
     });
 
     const rows = [...beerProductRows, ...catalogRows];
-    if (!hasStaffelBlock(current, activeVariantId)) {
+
+    const activeBlocks = getVariantBlocks(current, activeVariantId);
+    const introEnabled = hasIntroBlock(current, activeVariantId);
+    const effectivePeriod: 1 | 2 = introEnabled ? toPeriodIndex((current as any).active_period_index, 2) : 2;
+
+    // Exclusivity: only one pricing rule can be active per period.
+    // If xy_gratis applies to this period, it wins. Else staffel wins. Else manual korting_pct stays.
+    const xyBlock = activeBlocks.find((b) => String((b as any).type) === "xy_gratis" && isBlockActiveForPeriod(b as any, effectivePeriod)) as
+      | QuoteBuilderBlock
+      | undefined;
+    const staffelActive = activeBlocks.some((b) => String((b as any).type) === "staffel");
+
+    if (xyBlock) {
+      const requiredQty = toNumber((xyBlock as any).required_qty, 4);
+      const freeQty = toNumber((xyBlock as any).free_qty, 1);
+      const eligibleRefs = Array.isArray((xyBlock as any).eligible_product_refs) ? ((xyBlock as any).eligible_product_refs as string[]) : [];
+      const gratis = computeGratisUnitsByProductRef({
+        rows: rows as any,
+        requiredQty,
+        freeQty,
+        eligibleRefs
+      });
+
+      return rows.map((row) => {
+        if (row.productType === "catalog") {
+          return row;
+        }
+        const ref = `${row.productType}|${row.productId}`;
+        const freeUnits = gratis.freeByRef.get(ref) ?? 0;
+        const totals = calcOfferLineTotalsWithGratis({
+          kostprijsEx: row.kostprijsPerStuk,
+          offerPriceEx: row.offerPrijs,
+          // `aantal` is PAID qty; free units are delivered on top of that.
+          qty: row.aantal + freeUnits,
+          freeQty: freeUnits
+        });
+        return {
+          ...row,
+          kortingPct: 0,
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          margeEur: totals.winst,
+          margePct: totals.margePct
+        };
+      });
+    }
+
+    if (!staffelActive) {
       return rows;
     }
 
@@ -3626,7 +3753,7 @@ export function PrijsvoorstelWizard({
     const totalMargePct = calcMarginPctFromRevenueCost(offerteLitersTotals.omzet, offerteLitersTotals.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
     const pricingRuleActive = activeBlocks.some((block) =>
-      ["discount_pct", "staffel"].includes(String((block as any).type))
+      ["discount_pct", "staffel", "xy_gratis"].includes(String((block as any).type))
     );
 
     return (
@@ -3839,8 +3966,9 @@ export function PrijsvoorstelWizard({
     const totalMargePct = calcMarginPctFromRevenueCost(offerteProductTotals.omzet, offerteProductTotals.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
     const pricingRuleActive = activeBlocks.some((block) =>
-      ["discount_pct", "staffel"].includes(String((block as any).type))
+      ["discount_pct", "staffel", "xy_gratis"].includes(String((block as any).type))
     );
+    const gratisContext = editPricing ? getGratisContextForCurrentPeriod() : null;
 
     return (
       <div className="wizard-stack">
@@ -3914,82 +4042,173 @@ export function PrijsvoorstelWizard({
               </tr>
             </thead>
             <tbody>
-              {offerteProductRows.map((row) => (
-                <tr key={row.id} className={row.included ? "" : "is-excluded"}>
-                  <td>{row.biernaam}</td>
-                  <td>{row.verpakking}</td>
-                  <td>
-                    <input
-                      className="dataset-input"
-                      type="number"
-                      min={0}
-                      step="1"
-                      style={{ minWidth: "8rem" }}
-                      value={String(row.aantal)}
-                      onChange={(event) =>
-                        (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
-                          row.id,
-                          "aantal",
-                          Number(event.target.value || 0)
-                        )
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="dataset-input"
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      style={{ minWidth: "8rem" }}
-                      value={String(row.kortingPct)}
-                      disabled={!editPricing || pricingRuleActive}
-                      onChange={(event) =>
-                        (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
-                          row.id,
-                          "korting_pct",
-                          Number(event.target.value || 0)
-                        )
-                      }
-                    />
-                  </td>
-                  <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kostprijsPerStuk)}</div></td>
-                  {isMultiKanaalMode
-                    ? selectedChannelOptions.map((option) => (
+              {offerteProductRows.flatMap((row) => {
+                const output: JSX.Element[] = [];
+                const ref = `${row.productType}|${row.productId}`;
+                const freeUnits =
+                  gratisContext && row.productType !== "catalog" ? (gratisContext.freeByRef.get(ref) ?? 0) : 0;
+
+                // When X+Y applies we show the paid line + an explicit gratis line.
+                // We keep totals correct by splitting cost/discount across these 2 rows.
+                const paidTotals =
+                  freeUnits > 0 && !isMultiKanaalMode
+                    ? calcOfferLineTotals({
+                        kostprijsEx: row.kostprijsPerStuk,
+                        offerPriceEx: row.offerPrijs,
+                        qty: row.aantal,
+                        kortingPct: 0
+                      })
+                    : null;
+                const freeKortingEur = freeUnits > 0 ? freeUnits * Math.max(0, toFiniteNumber(row.offerPrijs, 0)) : 0;
+                const freeKosten = freeUnits > 0 ? freeUnits * Math.max(0, toFiniteNumber(row.kostprijsPerStuk, 0)) : 0;
+
+                output.push(
+                  <tr key={row.id} className={row.included ? "" : "is-excluded"}>
+                    <td>{row.biernaam}</td>
+                    <td>{row.verpakking}</td>
+                    <td>
+                      <input
+                        className="dataset-input"
+                        type="number"
+                        min={0}
+                        step="1"
+                        style={{ minWidth: "8rem" }}
+                        value={String(row.aantal)}
+                        onChange={(event) =>
+                          (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                            row.id,
+                            "aantal",
+                            Number(event.target.value || 0)
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="dataset-input"
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        style={{ minWidth: "8rem" }}
+                        value={String(row.kortingPct)}
+                        disabled={!editPricing || pricingRuleActive}
+                        onChange={(event) =>
+                          (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                            row.id,
+                            "korting_pct",
+                            Number(event.target.value || 0)
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">{formatEuro(row.kostprijsPerStuk)}</div>
+                    </td>
+                    {isMultiKanaalMode ? (
+                      selectedChannelOptions.map((option) => (
                         <td key={`${option.value}-offer`}>
                           <div className="dataset-input dataset-input-readonly">
                             {formatEuro(row.offerByChannel[option.value] ?? 0)}
                           </div>
                         </td>
                       ))
-                    : (
+                    ) : (
                       <>
-                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.offerPrijs)}</div></td>
-                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div></td>
-                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kosten)}</div></td>
-                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kortingEur)}</div></td>
-                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.margeEur)}</div></td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">{formatEuro(row.offerPrijs)}</div>
+                        </td>
                         <td>
                           <div className="dataset-input dataset-input-readonly">
-                            {formatPercentage(row.margePct)}
+                            {formatEuro(paidTotals ? paidTotals.omzet : row.omzet)}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(paidTotals ? paidTotals.kosten : row.kosten)}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(paidTotals ? 0 : row.kortingEur)}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(paidTotals ? paidTotals.winst : row.margeEur)}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatPercentage(paidTotals ? paidTotals.margePct : row.margePct)}
                           </div>
                         </td>
                       </>
                     )}
-                  <td>
-                    {renderIncludeToggle(
-                      row.included,
-                      () =>
-                        (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
-                          row.id,
-                          "included",
-                          !row.included
-                        ),
-                      row.included ? "Niet meenemen in offerte" : "Wel meenemen in offerte"
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    <td>
+                      {renderIncludeToggle(
+                        row.included,
+                        () =>
+                          (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                            row.id,
+                            "included",
+                            !row.included
+                          ),
+                        row.included ? "Niet meenemen in offerte" : "Wel meenemen in offerte"
+                      )}
+                    </td>
+                  </tr>
+                );
+
+                if (freeUnits > 0) {
+                  const freeId = `${row.id}:gratis`;
+                  output.push(
+                    <tr key={freeId} className={row.included ? "" : "is-excluded"}>
+                      <td style={{ color: "var(--muted-text)" }}>{row.biernaam}</td>
+                      <td style={{ color: "var(--muted-text)" }}>{row.verpakking} (gratis)</td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatNumber(freeUnits, 0)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">gratis</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(row.kostprijsPerStuk)}</div>
+                      </td>
+                      {isMultiKanaalMode ? (
+                        selectedChannelOptions.map((option) => (
+                          <td key={`${freeId}-${option.value}-offer`}>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                          </td>
+                        ))
+                      ) : (
+                        <>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                          </td>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                          </td>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(freeKosten)}</div>
+                          </td>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(freeKortingEur)}</div>
+                          </td>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(-freeKosten)}</div>
+                          </td>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">-</div>
+                          </td>
+                        </>
+                      )}
+                      <td />
+                    </tr>
+                  );
+                }
+
+                return output;
+              })}
               {offerteProductRows.length === 0 ? (
                 <tr>
                   <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length : 12} className="prijs-empty-cell">
@@ -4073,8 +4292,24 @@ export function PrijsvoorstelWizard({
                   setStaffelDraftTiers(existing);
                   setStaffelModalOpen(true);
                 }}
+                disabled={hasXyGratisBlock(current, activeVariantId)}
               >
                 Staffel
+              </button>
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => {
+                  setXyDraftRequired(4);
+                  setXyDraftFree(1);
+                  setXyDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
+                  setXyDraftEligibleRefs([]);
+                  setXyGratisModalOpen(true);
+                }}
+                disabled={isLitersMode || hasStaffelBlock(current, activeVariantId)}
+                title={isLitersMode ? "X+Y gratis werkt nu alleen in productenmodus." : undefined}
+              >
+                X+Y gratis
               </button>
               <button
                 type="button"
@@ -4084,7 +4319,7 @@ export function PrijsvoorstelWizard({
                   setDiscountDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
                   setDiscountModalOpen(true);
                 }}
-                disabled={hasStaffelBlock(current, activeVariantId)}
+                disabled={hasStaffelBlock(current, activeVariantId) || hasXyGratisBlock(current, activeVariantId)}
               >
                 % korting
               </button>
@@ -4440,6 +4675,30 @@ export function PrijsvoorstelWizard({
         </div>
       </div>
     );
+  }
+
+  function getGratisContextForCurrentPeriod() {
+    const blocks = getVariantBlocks(current, activeVariantId);
+    const introEnabled = hasIntroBlock(current, activeVariantId);
+    const effectivePeriod: 1 | 2 = introEnabled ? activePeriodIndex : 2;
+    const xyBlock = blocks.find(
+      (b) => String((b as any).type) === "xy_gratis" && isBlockActiveForPeriod(b as any, effectivePeriod)
+    ) as QuoteBuilderBlock | undefined;
+    if (!xyBlock) {
+      return null;
+    }
+    const requiredQty = toNumber((xyBlock as any).required_qty, 4);
+    const freeQty = toNumber((xyBlock as any).free_qty, 1);
+    const eligibleRefs = Array.isArray((xyBlock as any).eligible_product_refs)
+      ? ((xyBlock as any).eligible_product_refs as string[])
+      : [];
+    const gratis = computeGratisUnitsByProductRef({
+      rows: offerteProductRows as any,
+      requiredQty,
+      freeQty,
+      eligibleRefs
+    });
+    return { freeByRef: gratis.freeByRef, totalFree: gratis.totalFree, xyBlock };
   }
 
   function renderProductenStep() {
@@ -5012,6 +5271,208 @@ export function PrijsvoorstelWizard({
                   });
 
                   setStaffelModalOpen(false);
+                }}
+              >
+                Opslaan
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {xyGratisModalOpen ? (
+        <div className="confirm-modal-overlay" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="xy-modal-title">
+            <div className="confirm-modal-title" id="xy-modal-title">
+              X+Y gratis instellen
+            </div>
+            <div className="confirm-modal-text">
+              De goedkoopste eligible units worden gratis (omzet = 0, kosten tellen wel mee). Korting stapelt niet met
+              staffels of % korting.
+            </div>
+            <div className="confirm-modal-text" style={{ marginTop: "0.5rem" }}>
+              Let op: de aantallen in de offerte zijn de betaalde stuks. De gratis stuks worden hier bovenop toegevoegd.
+            </div>
+
+            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
+              <label className="nested-field">
+                <span>Toepassen op</span>
+                <select
+                  className="dataset-input"
+                  value={xyDraftApplies}
+                  onChange={(event) =>
+                    setXyDraftApplies(event.target.value as NonNullable<QuoteBuilderBlock["applies_to_periods"]>)
+                  }
+                >
+                  <option value="intro">Introductie (periode 1)</option>
+                  <option value="standard">Standaard (periode 2)</option>
+                  <option value="both">Beide periodes</option>
+                </select>
+              </label>
+              <label className="nested-field">
+                <span>X (kopen)</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={String(xyDraftRequired)}
+                  onChange={(event) => setXyDraftRequired(Math.max(1, Math.floor(Number(event.target.value || 1))))}
+                />
+              </label>
+              <label className="nested-field">
+                <span>Y (gratis)</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={String(xyDraftFree)}
+                  onChange={(event) => setXyDraftFree(Math.max(1, Math.floor(Number(event.target.value || 1))))}
+                />
+              </label>
+            </div>
+
+            <div className="module-card compact-card" style={{ marginTop: "0.75rem" }}>
+              <div className="module-card-title">Eligible producten</div>
+              <div className="module-card-text">
+                Laat leeg om alle (niet-catalogus) producten mee te nemen. Kies 1 of meer producten voor een mix-actie.
+              </div>
+              <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+                <table className="dataset-editor-table wizard-table-compact">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {xyDraftEligibleRefs.map((ref) => {
+                      const option = xyEligibleProductOptions.find((o) => o.value === ref);
+                      return (
+                        <tr key={ref}>
+                          <td>{option?.label ?? ref}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="icon-button-table"
+                              aria-label="Verwijderen"
+                              title="Verwijderen"
+                              onClick={() => setXyDraftEligibleRefs((prev) => prev.filter((v) => v !== ref))}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {xyDraftEligibleRefs.length === 0 ? (
+                      <tr>
+                        <td colSpan={2} className="prijs-empty-cell">
+                          Alle producten zijn eligible.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
+                <div className="editor-actions-group">
+                  <select
+                    className="dataset-input"
+                    value=""
+                    onChange={(event) => {
+                      const value = String(event.target.value ?? "");
+                      if (!value) return;
+                      setXyDraftEligibleRefs((prev) => (prev.includes(value) ? prev : [...prev, value]));
+                    }}
+                  >
+                    <option value="">Product toevoegen...</option>
+                    {xyEligibleProductOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="editor-actions-group" />
+              </div>
+            </div>
+
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => setXyGratisModalOpen(false)}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="editor-button"
+                onClick={() => {
+                  updateCurrent((draft) => {
+                    const list = Array.isArray((draft as any).variants)
+                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                      : [];
+                    const activeId =
+                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                    const index = list.findIndex((row) => String(row.id) === activeId);
+                    if (index < 0) return;
+
+                    const blocksByVariant =
+                      typeof (draft as any).builder_blocks_by_variant === "object" &&
+                      (draft as any).builder_blocks_by_variant !== null
+                        ? { ...(draft as any).builder_blocks_by_variant }
+                        : {};
+                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+                      : [];
+
+                    // Enforce exclusivity: remove discount/staffel blocks and clear staffels + manual korting fields.
+                    const nextBlocks: QuoteBuilderBlock[] = [
+                      ...existingBlocks.filter(
+                        (b) => !["discount_pct", "staffel", "xy_gratis"].includes(String((b as any).type))
+                      ),
+                      {
+                        id: `${activeId}:xy_gratis`,
+                        type: "xy_gratis",
+                        required_qty: xyDraftRequired,
+                        free_qty: xyDraftFree,
+                        applies_to_periods: xyDraftApplies,
+                        eligible_product_refs: xyDraftEligibleRefs
+                      }
+                    ];
+                    blocksByVariant[activeId] = nextBlocks;
+                    (draft as any).builder_blocks_by_variant = blocksByVariant;
+
+                    const clearManual = (rows: QuoteLineRow[]) =>
+                      rows.map((row) => ({
+                        ...row,
+                        korting_pct_p1: 0,
+                        korting_pct_p2: 0,
+                        korting_pct: 0
+                      }));
+
+                    const nextList = [...list];
+                    const variant = nextList[index];
+                    nextList[index] = {
+                      ...variant,
+                      product_rows: clearManual(variant.product_rows),
+                      beer_rows: clearManual(variant.beer_rows),
+                      staffels: []
+                    };
+                    (draft as any).variants = nextList;
+
+                    const currentPeriod = hasIntroBlock(draft, activeId)
+                      ? toPeriodIndex((draft as any).active_period_index, 2)
+                      : 2;
+                    draft.staffels = [];
+                    draft.product_rows = applyVariantPeriodToWorkingRows(nextList[index].product_rows, currentPeriod);
+                    draft.beer_rows = applyVariantPeriodToWorkingRows(nextList[index].beer_rows, currentPeriod);
+                  });
+                  setXyGratisModalOpen(false);
                 }}
               >
                 Opslaan

@@ -96,6 +96,29 @@ export function calcOfferLineTotals({
   return { omzet, kosten, kortingEur, winst, margePct };
 }
 
+export function calcOfferLineTotalsWithGratis({
+  kostprijsEx,
+  offerPriceEx,
+  qty,
+  freeQty
+}: {
+  kostprijsEx: number;
+  offerPriceEx: number;
+  qty: number;
+  freeQty: number;
+}) {
+  const q = Math.max(0, toFiniteNumber(qty, 0));
+  const free = Math.min(q, Math.max(0, toFiniteNumber(freeQty, 0)));
+  const paid = Math.max(0, q - free);
+  const unit = Math.max(0, toFiniteNumber(offerPriceEx, 0));
+  const omzet = paid * unit;
+  const kosten = q * Math.max(0, toFiniteNumber(kostprijsEx, 0));
+  const kortingEur = free * unit;
+  const winst = omzet - kosten;
+  const margePct = omzet > 0 ? (winst / omzet) * 100 : 0;
+  return { omzet, kosten, kortingEur, winst, margePct };
+}
+
 export function calcMarginPctFromRevenueCost(omzet: number, kosten: number) {
   const r = toFiniteNumber(omzet, 0);
   const c = toFiniteNumber(kosten, 0);
