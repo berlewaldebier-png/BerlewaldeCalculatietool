@@ -56,9 +56,12 @@ type QuoteBuilderContext = {
 
 type QuoteBuilderBlock = {
   id: string;
-  type: "discount_pct";
-  korting_pct: number;
-  applies_to_periods: "both" | "intro" | "standard";
+  type: "discount_pct" | "intro";
+  // intro block config
+  start_date?: string;
+  end_date?: string;
+  korting_pct?: number;
+  applies_to_periods?: "both" | "intro" | "standard";
 };
 
 type PrijsvoorstelWizardProps = {
@@ -439,6 +442,21 @@ function ensureVariantPeriods(raw: unknown): QuoteVariantPeriod[] {
   return [p1, p2];
 }
 
+function getBuilderBlocksByVariant(quote: GenericRecord): Record<string, QuoteBuilderBlock[]> {
+  const raw = (quote as any).builder_blocks_by_variant;
+  if (typeof raw !== "object" || raw === null) return {};
+  return raw as Record<string, QuoteBuilderBlock[]>;
+}
+
+function getVariantBlocks(quote: GenericRecord, variantId: string): QuoteBuilderBlock[] {
+  const blocks = getBuilderBlocksByVariant(quote)[String(variantId)] ?? [];
+  return Array.isArray(blocks) ? (blocks as QuoteBuilderBlock[]) : [];
+}
+
+function hasIntroBlock(quote: GenericRecord, variantId: string) {
+  return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "intro");
+}
+
 function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
   const rows = Array.isArray(raw) ? (raw as GenericRecord[]) : [];
   return rows
@@ -474,7 +492,8 @@ function normalizeQuoteVariant(raw: GenericRecord, fallbackChannel: string): Quo
     channel_code: normalizeKey(raw.channel_code) || fallbackChannel,
     return_pct: toNumber(raw.return_pct, 0),
     sort_index: Number(raw.sort_index ?? 0) || 0,
-    periods: ensureVariantPeriods(raw.periods),
+    // Periods are optional; they become relevant only when an Intro block exists.
+    periods: Array.isArray((raw as any).periods) ? ensureVariantPeriods((raw as any).periods) : [],
     product_rows: normalizeVariantLineRows(raw.product_rows),
     beer_rows: normalizeVariantLineRows(raw.beer_rows),
     staffels: Array.isArray(raw.staffels) ? (raw.staffels as GenericRecord[]) : []
@@ -490,10 +509,7 @@ function buildDefaultVariantFromLegacy(quote: GenericRecord, pricingChannel: str
     channel_code: pricingChannel,
     return_pct: 0,
     sort_index: 0,
-    periods: [
-      { id: `${variantId}:p1`, period_index: 1, label: "Introductie", start_date: "", end_date: "" },
-      { id: `${variantId}:p2`, period_index: 2, label: "Standaard", start_date: "", end_date: "" }
-    ],
+    periods: [],
     product_rows: normalizeVariantLineRows(quote.product_rows),
     beer_rows: normalizeVariantLineRows(quote.beer_rows),
     staffels: Array.isArray(quote.staffels) ? (quote.staffels as GenericRecord[]) : []
@@ -615,6 +631,21 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
 
   const activeVariantId = String((base as any).active_variant_id ?? "").trim() || String(variants[0]?.id ?? "");
   (base as any).active_variant_id = activeVariantId;
+  // Periods are only enabled when an Intro block exists for the active scenario.
+  // Without Intro we keep the model in "simple" mode and force period index = 2 (standard).
+  const introEnabled = hasIntroBlock(base as any, activeVariantId);
+  if (!introEnabled) {
+    (base as any).active_period_index = 2;
+    variants.forEach((variant) => {
+      const vid = String(variant.id ?? "");
+      variant.periods = hasIntroBlock(base as any, vid) ? ensureVariantPeriods(variant.periods) : [];
+    });
+  } else {
+    variants.forEach((variant) => {
+      const vid = String(variant.id ?? "");
+      variant.periods = hasIntroBlock(base as any, vid) ? ensureVariantPeriods(variant.periods) : [];
+    });
+  }
 
   // Materialize the active scenario into the legacy working rows (so existing wizard logic stays intact).
   const activePeriod = toPeriodIndex((base as any).active_period_index, 2);
@@ -750,6 +781,9 @@ export function PrijsvoorstelWizard({
   const [discountDraftPct, setDiscountDraftPct] = useState(0);
   const [discountDraftApplies, setDiscountDraftApplies] =
     useState<QuoteBuilderBlock["applies_to_periods"]>("both");
+  const [introModalOpen, setIntroModalOpen] = useState(false);
+  const [introDraftStart, setIntroDraftStart] = useState("");
+  const [introDraftEnd, setIntroDraftEnd] = useState("");
 
   const effectiveSelectedId = useMemo(() => {
     if (rows.some((row) => String(row.id) === String(selectedId))) {
@@ -2622,7 +2656,7 @@ export function PrijsvoorstelWizard({
       active.beer_rows = mergeRows((next as any).beer_rows, (active as any).beer_rows);
       active.staffels = Array.isArray((next as any).staffels) ? ((next as any).staffels as GenericRecord[]) : [];
       active.channel_code = normalizeKey((active as any).channel_code) || normalizeKey((next as any).pricing_channel) || normalizeKey((next as any).kanaal) || defaultKanaal;
-      active.periods = ensureVariantPeriods((active as any).periods);
+      active.periods = hasIntroBlock(next, String(active.id)) ? ensureVariantPeriods((active as any).periods) : [];
     }
 
     (next as any).variants = nextVariants;
@@ -2638,7 +2672,11 @@ export function PrijsvoorstelWizard({
         return;
       }
       (draft as any).active_variant_id = String(target.id);
-      const periodIndex = toPeriodIndex((draft as any).active_period_index, 2);
+      const introEnabled = hasIntroBlock(draft, String(target.id));
+      const periodIndex = introEnabled ? toPeriodIndex((draft as any).active_period_index, 2) : 2;
+      if (!introEnabled) {
+        (draft as any).active_period_index = 2;
+      }
       draft.product_rows = applyVariantPeriodToWorkingRows(target.product_rows, periodIndex);
       draft.beer_rows = applyVariantPeriodToWorkingRows(target.beer_rows, periodIndex);
       draft.staffels = Array.isArray(target.staffels) ? target.staffels : [];
@@ -2648,6 +2686,13 @@ export function PrijsvoorstelWizard({
 
   function selectPeriod(periodIndex: 1 | 2) {
     updateCurrent((draft) => {
+      const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+      const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+      if (!activeId || !hasIntroBlock(draft, activeId)) {
+        // Period switching is disabled in simple mode.
+        (draft as any).active_period_index = 2;
+        return;
+      }
       (draft as any).active_period_index = periodIndex;
       draft.product_rows = applyVariantPeriodToWorkingRows(
         Array.isArray(draft.product_rows) ? (draft.product_rows as GenericRecord[]) : [],
@@ -3444,6 +3489,8 @@ export function PrijsvoorstelWizard({
       : [];
     const kanaalLabel = currentKanaalLabel;
     const totalMargePct = calcMarginPctFromRevenueCost(offerteLitersTotals.omzet, offerteLitersTotals.kosten);
+    const activeBlocks = getVariantBlocks(current, activeVariantId);
+    const pricingRuleActive = activeBlocks.some((block) => ["discount_pct"].includes(String((block as any).type)));
 
     return (
       <div className="wizard-stack">
@@ -3566,7 +3613,7 @@ export function PrijsvoorstelWizard({
                       step="0.1"
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
-                      disabled={!editPricing}
+                      disabled={!editPricing || pricingRuleActive}
                       onChange={(event) =>
                         updateBeerRow(row.id, "korting_pct", Number(event.target.value || 0))
                       }
@@ -3653,6 +3700,8 @@ export function PrijsvoorstelWizard({
       : [];
     const kanaalLabel = currentKanaalLabel;
     const totalMargePct = calcMarginPctFromRevenueCost(offerteProductTotals.omzet, offerteProductTotals.kosten);
+    const activeBlocks = getVariantBlocks(current, activeVariantId);
+    const pricingRuleActive = activeBlocks.some((block) => ["discount_pct"].includes(String((block as any).type)));
 
     return (
       <div className="wizard-stack">
@@ -3755,7 +3804,7 @@ export function PrijsvoorstelWizard({
                       step="0.1"
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
-                      disabled={!editPricing}
+                      disabled={!editPricing || pricingRuleActive}
                       onChange={(event) =>
                         (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
                           row.id,
@@ -3848,7 +3897,11 @@ export function PrijsvoorstelWizard({
 
   function renderOfferteStep() {
     const canDeleteScenario = variants.length > 1;
-    const periodLabel = activePeriod?.label || (activePeriodIndex === 1 ? "Introductie" : "Standaard");
+    const introEnabled = hasIntroBlock(current, activeVariantId);
+    const effectivePeriodIndex: 1 | 2 = introEnabled ? activePeriodIndex : 2;
+    const periodLabel = introEnabled
+      ? (activePeriod?.label || (effectivePeriodIndex === 1 ? "Introductie" : "Standaard"))
+      : "Standaard";
     const scenarioLabel = activeVariant?.name || "Scenario";
     const activeKanaalLabel = channelOptionMap.get(normalizeKey(activeVariant?.channel_code) || currentKanaal)?.label ?? currentKanaalLabel;
 
@@ -3866,8 +3919,19 @@ export function PrijsvoorstelWizard({
                 type="button"
                 className="editor-button editor-button-secondary"
                 onClick={() => {
+                  setIntroDraftStart(getDateInputValue(activePeriod?.start_date) || "");
+                  setIntroDraftEnd(getDateInputValue(activePeriod?.end_date) || "");
+                  setIntroModalOpen(true);
+                }}
+              >
+                Introductie
+              </button>
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => {
                   setDiscountDraftPct(0);
-                  setDiscountDraftApplies(activePeriodIndex === 1 ? "intro" : "standard");
+                  setDiscountDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
                   setDiscountModalOpen(true);
                 }}
               >
@@ -3879,9 +3943,9 @@ export function PrijsvoorstelWizard({
         </div>
 
         <div className="module-card compact-card">
-          <div className="module-card-title">Scenario & periode</div>
+          <div className="module-card-title">{introEnabled ? "Scenario & periode" : "Scenario"}</div>
           <div className="module-card-text">
-            Maak scenario's (sub-offertes) en bepaal kortingspercentages per periode. De berekening hieronder toont nu: <strong>{periodLabel}</strong>.
+            Maak scenario's (sub-offertes) en beheer kanaalkeuze. {introEnabled ? "De berekening hieronder toont nu: " : "De berekening gebruikt: "}<strong>{periodLabel}</strong>.
           </div>
           <div className="module-card-text" style={{ marginTop: "0.35rem" }}>
             Actief: <strong>{scenarioLabel}</strong> · <strong>{periodLabel}</strong> · <strong>{activeKanaalLabel}</strong>
@@ -3939,72 +4003,31 @@ export function PrijsvoorstelWizard({
             </div>
 
             <div>
-              <div className="field-label">Periode</div>
-              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                <button
-                  type="button"
-                  className={activePeriodIndex === 1 ? "btn btn-primary" : "btn"}
-                  onClick={() => selectPeriod(1)}
-                >
-                  Introductie
-                </button>
-                <button
-                  type="button"
-                  className={activePeriodIndex === 2 ? "btn btn-primary" : "btn"}
-                  onClick={() => selectPeriod(2)}
-                >
-                  Standaard
-                </button>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginTop: "0.75rem" }}>
-                <div>
-                  <div className="field-label">Startdatum</div>
-                  <input
-                    className="input"
-                    type="date"
-                    value={getDateInputValue(activePeriod?.start_date)}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      updateCurrent((draft) => {
-                        const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
-                        const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
-                        const index = list.findIndex((row) => String(row.id) === activeId);
-                        if (index < 0) return;
-                        const next = [...list];
-                        const periods = ensureVariantPeriods(next[index].periods).map((p) =>
-                          p.period_index === activePeriodIndex ? { ...p, start_date: value } : p
-                        );
-                        next[index] = { ...next[index], periods };
-                        (draft as any).variants = next;
-                      });
-                    }}
-                  />
+              {introEnabled ? (
+                <>
+                  <div className="field-label">Periode</div>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className={effectivePeriodIndex === 1 ? "btn btn-primary" : "btn"}
+                      onClick={() => selectPeriod(1)}
+                    >
+                      Introductie
+                    </button>
+                    <button
+                      type="button"
+                      className={effectivePeriodIndex === 2 ? "btn btn-primary" : "btn"}
+                      onClick={() => selectPeriod(2)}
+                    >
+                      Standaard
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="muted" style={{ marginTop: "0.4rem" }}>
+                  Voeg een introductie toe om met periodes te werken.
                 </div>
-                <div>
-                  <div className="field-label">Einddatum</div>
-                  <input
-                    className="input"
-                    type="date"
-                    value={getDateInputValue(activePeriod?.end_date)}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      updateCurrent((draft) => {
-                        const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
-                        const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
-                        const index = list.findIndex((row) => String(row.id) === activeId);
-                        if (index < 0) return;
-                        const next = [...list];
-                        const periods = ensureVariantPeriods(next[index].periods).map((p) =>
-                          p.period_index === activePeriodIndex ? { ...p, end_date: value } : p
-                        );
-                        next[index] = { ...next[index], periods };
-                        (draft as any).variants = next;
-                      });
-                    }}
-                  />
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -4506,18 +4529,124 @@ export function PrijsvoorstelWizard({
                       (draft as any).builder_blocks_by_variant !== null
                         ? { ...(draft as any).builder_blocks_by_variant }
                         : {};
-                    const blocks: QuoteBuilderBlock[] = [
-                      {
-                        id: `${activeId}:discount`,
-                        type: "discount_pct",
-                        korting_pct: pct,
-                        applies_to_periods: discountDraftApplies
-                      }
-                    ];
-                    blocksByVariant[activeId] = blocks;
+                  const blocks: QuoteBuilderBlock[] = [
+                    ...getVariantBlocks(draft, activeId).filter((block) => String((block as any).type) !== "discount_pct"),
+                    {
+                      id: `${activeId}:discount`,
+                      type: "discount_pct",
+                      korting_pct: pct,
+                      applies_to_periods: discountDraftApplies
+                    }
+                  ];
+                  blocksByVariant[activeId] = blocks;
                     (draft as any).builder_blocks_by_variant = blocksByVariant;
                   });
                   setDiscountModalOpen(false);
+                }}
+              >
+                Opslaan
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {introModalOpen ? (
+        <div className="confirm-modal-overlay" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="intro-modal-title">
+            <div className="confirm-modal-title" id="intro-modal-title">
+              Introductieperiode instellen
+            </div>
+            <div className="confirm-modal-text">
+              Door een introductieperiode toe te voegen, wordt de offerte opgesplitst in 2 periodes: Introductie (periode
+              1) en Standaard (periode 2).
+            </div>
+            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
+              <label className="nested-field">
+                <span>Startdatum</span>
+                <input
+                  className="dataset-input"
+                  type="date"
+                  value={introDraftStart}
+                  onChange={(event) => setIntroDraftStart(event.target.value)}
+                />
+              </label>
+              <label className="nested-field">
+                <span>Einddatum</span>
+                <input
+                  className="dataset-input"
+                  type="date"
+                  value={introDraftEnd}
+                  onChange={(event) => setIntroDraftEnd(event.target.value)}
+                />
+              </label>
+            </div>
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => setIntroModalOpen(false)}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="editor-button"
+                onClick={() => {
+                  updateCurrent((draft) => {
+                    const list = Array.isArray((draft as any).variants)
+                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                      : [];
+                    const activeId =
+                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                    if (!activeId) return;
+
+                    const blocksByVariant =
+                      typeof (draft as any).builder_blocks_by_variant === "object" &&
+                      (draft as any).builder_blocks_by_variant !== null
+                        ? { ...(draft as any).builder_blocks_by_variant }
+                        : {};
+                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+                      : [];
+
+                    const nextBlocks = [
+                      ...existingBlocks.filter((block) => String((block as any).type) !== "intro"),
+                      {
+                        id: `${activeId}:intro`,
+                        type: "intro",
+                        start_date: introDraftStart,
+                        end_date: introDraftEnd
+                      } satisfies QuoteBuilderBlock
+                    ];
+                    blocksByVariant[activeId] = nextBlocks;
+                    (draft as any).builder_blocks_by_variant = blocksByVariant;
+
+                    const index = list.findIndex((row) => String(row.id) === activeId);
+                    if (index >= 0) {
+                      const nextList = [...list];
+                      const variant = nextList[index];
+                      const periods = ensureVariantPeriods((variant as any).periods).map((p) =>
+                        p.period_index === 1
+                          ? { ...p, start_date: introDraftStart, end_date: introDraftEnd }
+                          : p
+                      );
+                      nextList[index] = { ...variant, periods };
+                      (draft as any).variants = nextList;
+                    }
+
+                    (draft as any).active_period_index = 1;
+                    // Re-materialize working rows for the selected period.
+                    const nextList = Array.isArray((draft as any).variants)
+                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                      : [];
+                    const activeVariant = nextList.find((row) => String(row.id) === activeId);
+                    if (activeVariant) {
+                      draft.product_rows = applyVariantPeriodToWorkingRows(activeVariant.product_rows, 1);
+                      draft.beer_rows = applyVariantPeriodToWorkingRows(activeVariant.beer_rows, 1);
+                    }
+                  });
+                  setIntroModalOpen(false);
                 }}
               >
                 Opslaan
