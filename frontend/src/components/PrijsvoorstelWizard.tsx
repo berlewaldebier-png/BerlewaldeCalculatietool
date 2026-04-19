@@ -6,7 +6,7 @@ import { usePageShellWizardSidebar } from "@/components/PageShell";
 import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
-import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcSellInExFromOpslagPct } from "@/lib/pricingEngine";
+import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcSellInExFromOpslagPct, parseNumberLoose } from "@/lib/pricingEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -46,6 +46,19 @@ type QuoteVariant = {
   product_rows: QuoteLineRow[];
   beer_rows: QuoteLineRow[];
   staffels: GenericRecord[];
+};
+
+type QuoteBuilderContext = {
+  postcode: string;
+  distance_km: number;
+  transport_threshold_ex: number;
+};
+
+type QuoteBuilderBlock = {
+  id: string;
+  type: "discount_pct";
+  korting_pct: number;
+  applies_to_periods: "both" | "intro" | "standard";
 };
 
 type PrijsvoorstelWizardProps = {
@@ -190,29 +203,24 @@ const steps: StepDefinition[] = [
     description: "Vul de basisinformatie van het prijsvoorstel in."
   },
   {
-    id: "uitgangspunten",
-    label: "Uitgangspunten",
-    description: "Kies voorsteltype, litersbasis en het referentiekanaal."
+    id: "producten",
+    label: "Producten & aantallen",
+    description: "Selecteer producten en vul aantallen (of liters) in."
   },
   {
-    id: "offerte",
-    label: "Offerte",
-    description: "Stel het voorstel samen op basis van liters of producten."
+    id: "offerte_maken",
+    label: "Offerte maken",
+    description: "Bouw de offerte op met scenario's en (optionele) prijsblokken."
   },
   {
-    id: "samenvatting",
-    label: "Samenvatting",
-    description: "Controleer de commerciële uitkomst en rond het prijsvoorstel af."
+    id: "vergelijken",
+    label: "Vergelijken",
+    description: "Vergelijk scenario's en controleer de uitkomst."
   }
 ];
 
 const wizardSteps: StepDefinition[] = [
-  ...steps.slice(0, 3),
-  {
-    id: "samenvatting",
-    label: "Samenvatting",
-    description: "Controleer kostprijs en verkoopprijzen voor het gekozen kanaal."
-  },
+  ...steps,
   {
     id: "afronden",
     label: "Afronden",
@@ -539,6 +547,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
 
   const base = {
     ...cloneRecord(raw),
+    schema_version: toNumber((raw as any).schema_version, 1),
     id: String(raw.id ?? createId()),
     offertenummer: String(raw.offertenummer ?? ""),
     status: String(raw.status ?? "concept"),
@@ -575,6 +584,18 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
     product_rows: normalizeProductRows,
     beer_rows: normalizeBeerRows,
     catalog_product_rows: Array.isArray(raw.catalog_product_rows) ? raw.catalog_product_rows : [],
+    builder_context: {
+      postcode: String(((raw as any).builder_context as QuoteBuilderContext | undefined)?.postcode ?? ""),
+      distance_km: toNumber(((raw as any).builder_context as QuoteBuilderContext | undefined)?.distance_km ?? 0, 0),
+      transport_threshold_ex: toNumber(
+        ((raw as any).builder_context as QuoteBuilderContext | undefined)?.transport_threshold_ex ?? 0,
+        0
+      )
+    } satisfies QuoteBuilderContext,
+    builder_blocks_by_variant:
+      typeof (raw as any).builder_blocks_by_variant === "object" && (raw as any).builder_blocks_by_variant !== null
+        ? (raw as any).builder_blocks_by_variant
+        : {},
     variants: Array.isArray((raw as any).variants)
       ? ((raw as any).variants as GenericRecord[])
           .filter((row) => typeof row === "object" && row !== null)
@@ -613,6 +634,7 @@ function createEmptyPrijsvoorstel(defaultYear?: number): GenericRecord {
     ? Number(defaultYear)
     : new Date().getFullYear();
   return normalizePrijsvoorstel({
+    schema_version: 2,
     id: createId(),
     offertenummer: "",
     status: "concept",
@@ -639,6 +661,8 @@ function createEmptyPrijsvoorstel(defaultYear?: number): GenericRecord {
     product_rows: [],
     beer_rows: [],
     catalog_product_rows: [],
+    builder_context: { postcode: "", distance_km: 0, transport_threshold_ex: 0 },
+    builder_blocks_by_variant: {},
     last_step: 1,
     finalized_at: ""
   });
@@ -722,6 +746,10 @@ export function PrijsvoorstelWizard({
     body: string;
     onConfirm: () => void;
   } | null>(null);
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [discountDraftPct, setDiscountDraftPct] = useState(0);
+  const [discountDraftApplies, setDiscountDraftApplies] =
+    useState<QuoteBuilderBlock["applies_to_periods"]>("both");
 
   const effectiveSelectedId = useMemo(() => {
     if (rows.some((row) => String(row.id) === String(selectedId))) {
@@ -3249,6 +3277,69 @@ export function PrijsvoorstelWizard({
             onChange={(event) => updateCurrent((draft) => void (draft.referentie = event.target.value))}
           />
         </label>
+        <label className="nested-field">
+          <span>Postcode</span>
+          <input
+            className="dataset-input"
+            value={String(((current as any).builder_context as QuoteBuilderContext | undefined)?.postcode ?? "")}
+            onChange={(event) =>
+              updateCurrent((draft) => {
+                const ctx = ((draft as any).builder_context as QuoteBuilderContext | undefined) ?? {
+                  postcode: "",
+                  distance_km: 0,
+                  transport_threshold_ex: 0
+                };
+                (draft as any).builder_context = { ...ctx, postcode: event.target.value };
+              })
+            }
+            placeholder="1234AB"
+          />
+        </label>
+        <label className="nested-field">
+          <span>Afstand (km)</span>
+          <input
+            className="dataset-input"
+            type="number"
+            inputMode="decimal"
+            value={String(((current as any).builder_context as QuoteBuilderContext | undefined)?.distance_km ?? 0)}
+            onChange={(event) => {
+              const next = parseNumberLoose(event.target.value);
+              updateCurrent((draft) => {
+                const ctx = ((draft as any).builder_context as QuoteBuilderContext | undefined) ?? {
+                  postcode: "",
+                  distance_km: 0,
+                  transport_threshold_ex: 0
+                };
+                (draft as any).builder_context = { ...ctx, distance_km: Number.isFinite(next) ? next : 0 };
+              });
+            }}
+          />
+        </label>
+        <label className="nested-field">
+          <span>Transport drempel (ex)</span>
+          <input
+            className="dataset-input"
+            type="number"
+            inputMode="decimal"
+            value={String(
+              ((current as any).builder_context as QuoteBuilderContext | undefined)?.transport_threshold_ex ?? 0
+            )}
+            onChange={(event) => {
+              const next = parseNumberLoose(event.target.value);
+              updateCurrent((draft) => {
+                const ctx = ((draft as any).builder_context as QuoteBuilderContext | undefined) ?? {
+                  postcode: "",
+                  distance_km: 0,
+                  transport_threshold_ex: 0
+                };
+                (draft as any).builder_context = {
+                  ...ctx,
+                  transport_threshold_ex: Number.isFinite(next) ? next : 0
+                };
+              });
+            }}
+          />
+        </label>
       </div>
     );
   }
@@ -3347,7 +3438,7 @@ export function PrijsvoorstelWizard({
     );
   }
 
-  function renderLitersOfferte() {
+  function renderLitersOfferte(editPricing: boolean = true) {
     const selectedBeerIds = Array.isArray(current.selected_bier_ids)
       ? (current.selected_bier_ids as string[]).filter(Boolean)
       : [];
@@ -3475,6 +3566,7 @@ export function PrijsvoorstelWizard({
                       step="0.1"
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
+                      disabled={!editPricing}
                       onChange={(event) =>
                         updateBeerRow(row.id, "korting_pct", Number(event.target.value || 0))
                       }
@@ -3552,7 +3644,7 @@ export function PrijsvoorstelWizard({
     );
   }
 
-  function renderProductOfferte() {
+  function renderProductOfferte(editPricing: boolean = true) {
     const selectedBeerIds = Array.isArray(current.selected_bier_ids)
       ? (current.selected_bier_ids as string[]).filter(Boolean)
       : [];
@@ -3663,6 +3755,7 @@ export function PrijsvoorstelWizard({
                       step="0.1"
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
+                      disabled={!editPricing}
                       onChange={(event) =>
                         (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
                           row.id,
@@ -3761,6 +3854,30 @@ export function PrijsvoorstelWizard({
 
     return (
       <div className="wizard-stack">
+        <div className="module-card compact-card">
+          <div className="module-card-title">Bouwblokken</div>
+          <div className="module-card-text">
+            Voeg optionele prijsblokken toe aan het actieve scenario. Voor nu is alleen <strong>% korting</strong>{" "}
+            beschikbaar als proof-of-concept.
+          </div>
+          <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
+            <div className="editor-actions-group">
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => {
+                  setDiscountDraftPct(0);
+                  setDiscountDraftApplies(activePeriodIndex === 1 ? "intro" : "standard");
+                  setDiscountModalOpen(true);
+                }}
+              >
+                % korting
+              </button>
+            </div>
+            <div className="editor-actions-group" />
+          </div>
+        </div>
+
         <div className="module-card compact-card">
           <div className="module-card-title">Scenario & periode</div>
           <div className="module-card-text">
@@ -4151,11 +4268,35 @@ export function PrijsvoorstelWizard({
     );
   }
 
+  function renderProductenStep() {
+    return (
+      <div className="wizard-stack">
+        <div className="module-card compact-card">
+          <div className="module-card-title">Producten & aantallen</div>
+          <div className="module-card-text">
+            Selecteer bieren (en optioneel verkoopbare artikelen) en vul aantallen in. Kortingen en prijslogica voeg je
+            toe in de volgende stap.
+          </div>
+        </div>
+        {renderUitgangspuntenStep()}
+        {isLitersMode ? renderLitersOfferte(false) : renderProductOfferte(false)}
+      </div>
+    );
+  }
+
+  function renderOfferteMakenStep() {
+    return renderOfferteStep();
+  }
+
+  function renderVergelijkenStep() {
+    return renderSamenvattingStep();
+  }
+
   function renderStepContent() {
     if (currentStep.id === "basis") return renderBasisStep();
-    if (currentStep.id === "uitgangspunten") return renderUitgangspuntenStep();
-    if (currentStep.id === "offerte") return renderOfferteStep();
-    if (currentStep.id === "samenvatting") return renderSamenvattingStep();
+    if (currentStep.id === "producten") return renderProductenStep();
+    if (currentStep.id === "offerte_maken") return renderOfferteMakenStep();
+    if (currentStep.id === "vergelijken") return renderVergelijkenStep();
     return renderAfrondenStep();
   }
 
@@ -4167,8 +4308,7 @@ export function PrijsvoorstelWizard({
             {String(current.offertenummer || current.klantnaam || "Nieuw prijsvoorstel")}
           </h2>
           <div className="page-text">
-            Bouw het prijsvoorstel op vanuit basisgegevens, uitgangspunten, offerte-opbouw en een
-            commerciële samenvatting per kanaal.
+            Bouw het prijsvoorstel op vanuit basisgegevens, productselectie, offerte-opbouw en vergelijken van scenario&apos;s.
           </div>
         </div>
         <div className="wizard-main-header-actions">
@@ -4268,6 +4408,122 @@ export function PrijsvoorstelWizard({
       {status ? (
         <div className={`editor-status wizard-inline-status${statusTone ? ` ${statusTone}` : ""}`}>
           {status}
+        </div>
+      ) : null}
+
+      {discountModalOpen ? (
+        <div className="confirm-modal-overlay" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="discount-modal-title">
+            <div className="confirm-modal-title" id="discount-modal-title">
+              % korting instellen
+            </div>
+            <div className="confirm-modal-text">
+              Stel een kortingspercentage in voor het actieve scenario. Deze proof-of-concept block zet de korting op alle
+              inbegrepen regels.
+            </div>
+            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
+              <label className="nested-field">
+                <span>Toepassen op</span>
+                <select
+                  className="dataset-input"
+                  value={discountDraftApplies}
+                  onChange={(event) =>
+                    setDiscountDraftApplies(event.target.value as QuoteBuilderBlock["applies_to_periods"])
+                  }
+                >
+                  <option value="intro">Introductie (periode 1)</option>
+                  <option value="standard">Standaard (periode 2)</option>
+                  <option value="both">Beide periodes</option>
+                </select>
+              </label>
+              <label className="nested-field">
+                <span>Korting (%)</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.1"
+                  value={String(discountDraftPct)}
+                  onChange={(event) => setDiscountDraftPct(Number(event.target.value || 0))}
+                />
+              </label>
+            </div>
+            <div className="confirm-modal-actions">
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => setDiscountModalOpen(false)}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="editor-button"
+                onClick={() => {
+                  const pct = Math.min(100, Math.max(0, toNumber(discountDraftPct, 0)));
+                  updateCurrent((draft) => {
+                    const list = Array.isArray((draft as any).variants)
+                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                      : [];
+                    const activeId =
+                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                    const index = list.findIndex((row) => String(row.id) === activeId);
+                    if (index < 0) return;
+
+                    const periodTargets: (1 | 2)[] =
+                      discountDraftApplies === "both"
+                        ? [1, 2]
+                        : discountDraftApplies === "intro"
+                          ? [1]
+                          : [2];
+
+                    const applyDiscount = (rows: QuoteLineRow[]) =>
+                      rows.map((row) => {
+                        if (!isIncluded((row as any).included)) return row;
+                        const next: QuoteLineRow = { ...row };
+                        if (periodTargets.includes(1)) (next as any).korting_pct_p1 = pct;
+                        if (periodTargets.includes(2)) (next as any).korting_pct_p2 = pct;
+                        return next;
+                      });
+
+                    const currentPeriod = toPeriodIndex((draft as any).active_period_index, 2);
+                    const nextVariants = [...list];
+                    const existing = nextVariants[index];
+                    const updatedVariant: QuoteVariant = {
+                      ...existing,
+                      product_rows: applyDiscount(existing.product_rows),
+                      beer_rows: applyDiscount(existing.beer_rows)
+                    };
+                    nextVariants[index] = updatedVariant;
+                    (draft as any).variants = nextVariants;
+
+                    draft.product_rows = applyVariantPeriodToWorkingRows(updatedVariant.product_rows, currentPeriod);
+                    draft.beer_rows = applyVariantPeriodToWorkingRows(updatedVariant.beer_rows, currentPeriod);
+
+                    const blocksByVariant =
+                      typeof (draft as any).builder_blocks_by_variant === "object" &&
+                      (draft as any).builder_blocks_by_variant !== null
+                        ? { ...(draft as any).builder_blocks_by_variant }
+                        : {};
+                    const blocks: QuoteBuilderBlock[] = [
+                      {
+                        id: `${activeId}:discount`,
+                        type: "discount_pct",
+                        korting_pct: pct,
+                        applies_to_periods: discountDraftApplies
+                      }
+                    ];
+                    blocksByVariant[activeId] = blocks;
+                    (draft as any).builder_blocks_by_variant = blocksByVariant;
+                  });
+                  setDiscountModalOpen(false);
+                }}
+              >
+                Opslaan
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 
