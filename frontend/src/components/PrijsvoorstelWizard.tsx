@@ -6,7 +6,7 @@ import { usePageShellWizardSidebar } from "@/components/PageShell";
 import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
-import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, parseNumberLoose } from "@/lib/pricingEngine";
+import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, parseNumberLoose, round2 } from "@/lib/pricingEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -46,6 +46,24 @@ type QuoteVariant = {
   product_rows: QuoteLineRow[];
   beer_rows: QuoteLineRow[];
   staffels: GenericRecord[];
+};
+
+type ScenarioCompareRow = {
+  scenarioId: string;
+  scenarioName: string;
+  channelLabel: string;
+  periodIndex: 1 | 2;
+  periodLabel: string;
+  omzet: number;
+  kosten: number;
+  kortingEur: number;
+  margeEur: number;
+  margePct: number;
+  transportMode?: "charge" | "cost";
+  transportAmountEx?: number;
+  extrasOmzet?: number;
+  extrasKosten?: number;
+  activeRuleLabel?: string;
 };
 
 type QuoteBuilderContext = {
@@ -680,6 +698,19 @@ function applyVariantPeriodToWorkingRows<T extends GenericRecord>(rows: T[], per
     const nextKorting = periodIndex === 1 ? p1 : p2;
     return { ...row, korting_pct: nextKorting } as T;
   }) as T[];
+}
+
+function downloadTextFile(filename: string, content: string, mime = "text/plain;charset=utf-8") {
+  if (typeof window === "undefined") return;
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
@@ -2077,6 +2108,299 @@ export function PrijsvoorstelWizard({
     const offerPrice = sellInPrice;
 
     return { sellInMarginPct, sellInPrice, offerPrice };
+  }
+
+  function getActiveRuleLabelForPeriod(blocks: QuoteBuilderBlock[], periodIndex: 1 | 2) {
+    const xy = blocks.find((b) => String((b as any).type) === "xy_gratis" && isBlockActiveForPeriod(b as any, periodIndex));
+    if (xy) {
+      const x = toNumber((xy as any).required_qty, 0);
+      const y = toNumber((xy as any).free_qty, 0);
+      return `X+Y gratis (${formatNumber(x, 0)} + ${formatNumber(y, 0)})`;
+    }
+    const staffel = blocks.find((b) => String((b as any).type) === "staffel");
+    if (staffel) return "Staffel";
+    const disc = blocks.find((b) => String((b as any).type) === "discount_pct" && isBlockActiveForPeriod(b as any, periodIndex));
+    if (disc) {
+      const k = toNumber((disc as any).korting_pct ?? (disc as any).discount_pct ?? 0, 0);
+      return `% korting (${formatNumber(k, 0)}%)`;
+    }
+    return "Handmatig";
+  }
+
+  function computeTransportForVariantPeriod(variantId: string, periodIndex: 1 | 2, baseOmzetEx: number) {
+    const blocks = getVariantBlocks(current, variantId);
+    const transportBlock = blocks.find(
+      (b) => String((b as any).type) === "transport" && isBlockActiveForPeriod(b as any, periodIndex)
+    ) as QuoteBuilderBlock | undefined;
+    if (!transportBlock) return null;
+
+    const ctx = ((current as any).builder_context as QuoteBuilderContext | undefined) ?? {
+      postcode: "",
+      distance_km: 0,
+      transport_threshold_ex: 0,
+      transport_km_threshold: 40,
+      transport_deliveries: 1,
+      transport_rate_ex: 0
+    };
+    const postcode = normalizeText((transportBlock as any).postcode ?? ctx.postcode ?? "");
+    const distanceKm = Math.max(0, toNumber((transportBlock as any).distance_km ?? ctx.distance_km ?? 0, 0));
+    const kmThreshold = Math.max(0, toNumber((transportBlock as any).km_threshold ?? ctx.transport_km_threshold ?? 40, 40));
+    const thresholdAmountEx = Math.max(0, toNumber((transportBlock as any).threshold_amount_ex ?? ctx.transport_threshold_ex ?? 0, 0));
+    const deliveries = Math.max(0, Math.floor(toNumber((transportBlock as any).deliveries ?? ctx.transport_deliveries ?? 1, 1)));
+    const rateEx = Math.max(0, toNumber((transportBlock as any).rate_ex ?? ctx.transport_rate_ex ?? 0, 0));
+
+    const isValid = Boolean(postcode) && distanceKm > 0 && deliveries > 0 && rateEx > 0;
+    if (!isValid) {
+      return { isValid: false as const, message: "Transport mist gegevens.", mode: "cost" as const, omzet: 0, kosten: 0, amountEx: 0, deliveries, rateEx };
+    }
+
+    const shouldCharge = distanceKm > kmThreshold && (thresholdAmountEx <= 0 || baseOmzetEx < thresholdAmountEx);
+    const amountEx = deliveries * rateEx;
+    const omzet = shouldCharge ? amountEx : 0;
+    const kosten = amountEx;
+    return { isValid: true as const, message: "", mode: shouldCharge ? ("charge" as const) : ("cost" as const), omzet, kosten, amountEx, deliveries, rateEx };
+  }
+
+  function computeExtrasForVariantPeriod(variantId: string, periodIndex: 1 | 2, baseOmzetEx: number) {
+    const blocks = getVariantBlocks(current, variantId);
+    const extraBlocks = blocks.filter(
+      (b) => String((b as any).type) === "extras" && isBlockActiveForPeriod(b as any, periodIndex)
+    ) as QuoteBuilderBlock[];
+    if (extraBlocks.length === 0) return [];
+
+    return extraBlocks.map((block) => {
+      const label = normalizeText((block as any).extra_label ?? "Extra");
+      const qty = Math.max(0, toNumber((block as any).extra_qty ?? 1, 1));
+      const unitPriceEx = Math.max(0, toNumber((block as any).extra_unit_price_ex ?? 0, 0));
+      const unitCostEx = Math.max(0, toNumber((block as any).extra_unit_cost_ex ?? 0, 0));
+      const isFree = Boolean((block as any).extra_is_free ?? false);
+      const thresholdAmountEx = Math.max(0, toNumber((block as any).extra_threshold_amount_ex ?? 0, 0));
+      const meetsThreshold = thresholdAmountEx <= 0 || baseOmzetEx >= thresholdAmountEx;
+      const effectiveIsFree = isFree || !meetsThreshold;
+      const omzet = effectiveIsFree ? 0 : qty * unitPriceEx;
+      const kosten = qty * unitCostEx;
+      return { id: String(block.id ?? createId()), label, qty, unitPriceEx, unitCostEx, isFree: effectiveIsFree, omzet, kosten };
+    });
+  }
+
+  function computeOfferTotalsForVariantPeriod(variant: QuoteVariant, periodIndex: 1 | 2) {
+    const blocks = getVariantBlocks(current, variant.id);
+    const workingProductRows = applyVariantPeriodToWorkingRows(variant.product_rows, periodIndex);
+    const workingBeerRows = applyVariantPeriodToWorkingRows(variant.beer_rows, periodIndex);
+
+    const selectedChannelOptions = isMultiKanaalMode
+      ? channelOptions.filter((opt) => effectiveSelectedKanaalValues.includes(opt.value))
+      : channelOptions.filter((opt) => opt.value === normalizeKey(variant.channel_code || currentKanaal) || opt.value === currentKanaal);
+    const channelCode = normalizeKey(variant.channel_code) || currentKanaal;
+
+    const beerProductRows: ProductDisplayRow[] = workingProductRows.flatMap((row) => {
+      if (!row || typeof row !== "object") return [];
+      const bierId = String((row as any).bier_id ?? "");
+      const biernaam = bierNameMap.get(bierId) || normalizeText((row as any).biernaam) || bierId || "-";
+      const fixedKostprijsversieId = String((row as any).kostprijsversie_id ?? "");
+      const snapshotRows = getSnapshotProductRowsForBier(bierId, fixedKostprijsversieId);
+      const productId = String((row as any).product_id ?? "");
+      const productType = normalizeKey((row as any).product_type) === "basis" ? ("basis" as const) : ("samengesteld" as const);
+      const snapshot =
+        snapshotRows.find((item) => String(item.productId) === productId && String(item.productType) === productType) ??
+        snapshotRows.find((item) => normalizeKey(item.verpakking) === normalizeKey(String((row as any).verpakking_label ?? "")));
+      if (!snapshot) return [];
+
+      const kostprijsPerStuk = snapshot.costPerPiece;
+      const pricingByChannel = Object.fromEntries(
+        selectedChannelOptions.map((option) => [
+          option.value,
+          buildPricingForChannel(kostprijsPerStuk, bierId, productId, productType, snapshot.verpakking, option.value)
+        ])
+      ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+      const pricing = pricingByChannel[channelCode] ?? pricingByChannel[currentKanaal] ?? pricingByChannel[selectedChannelOptions[0]?.value ?? currentKanaal];
+      const offerPrijs = pricing?.offerPrice ?? 0;
+
+      const kortingPct = toNumber((row as any).korting_pct, 0);
+      const aantal = toNumber((row as any).aantal, 0);
+      const totals = calcOfferLineTotals({
+        kostprijsEx: kostprijsPerStuk,
+        offerPriceEx: offerPrijs,
+        qty: aantal,
+        kortingPct
+      });
+
+      return [
+        {
+          id: String((row as any).id ?? createId()),
+          bierKey: bierId,
+          biernaam,
+          kostprijsversieId: fixedKostprijsversieId,
+          included: isIncluded((row as any).included),
+          productId,
+          productType,
+          productKey: `${productType}|${productId}`,
+          verpakking: snapshot.verpakking,
+          aantal,
+          kortingPct,
+          litersPerProduct: snapshot.litersPerProduct,
+          kostprijsPerStuk,
+          offerPrijs,
+          sellInPrijs: pricing?.sellInPrice ?? 0,
+          sellInMargePct: pricing?.sellInMarginPct ?? 0,
+          offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value]?.offerPrice ?? 0])),
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          margeEur: totals.winst,
+          margePct: totals.margePct
+        } as ProductDisplayRow
+      ];
+    });
+
+    const currentCatalogRows = Array.isArray((current as any).catalog_product_rows)
+      ? (((current as any).catalog_product_rows as GenericRecord[]) ?? [])
+      : [];
+    const catalogRows: ProductDisplayRow[] = currentCatalogRows.map((row) => {
+      const catalogProductId = String((row as any).catalog_product_id ?? "");
+      const naam =
+        String((row as any).naam ?? "") ||
+        catalogProductOptionMap.get(catalogProductId)?.naam ||
+        catalogProductId ||
+        "-";
+      const kostprijsPerStuk = catalogProductCostById.get(catalogProductId) ?? 0;
+      const pricingByChannel = Object.fromEntries(
+        selectedChannelOptions.map((option) => [
+          option.value,
+          buildPricingForChannel(kostprijsPerStuk, "", `catalog:${catalogProductId}`, "catalog", naam, option.value)
+        ])
+      ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
+      const pricing = pricingByChannel[channelCode] ?? pricingByChannel[currentKanaal] ?? pricingByChannel[selectedChannelOptions[0]?.value ?? currentKanaal];
+      const offerPrijs = pricing?.offerPrice ?? 0;
+      const kortingPct = toNumber((row as any).korting_pct, 0);
+      const aantal = toNumber((row as any).aantal, 0);
+      const totals = calcOfferLineTotals({
+        kostprijsEx: kostprijsPerStuk,
+        offerPriceEx: offerPrijs,
+        qty: aantal,
+        kortingPct
+      });
+      return {
+        id: String((row as any).id ?? ""),
+        bierKey: "",
+        biernaam: "Artikel",
+        kostprijsversieId: "",
+        included: isIncluded((row as any).included),
+        productId: `catalog:${catalogProductId}`,
+        productType: "catalog" as const,
+        productKey: `catalog|${catalogProductId}`,
+        verpakking: naam,
+        aantal,
+        kortingPct,
+        litersPerProduct: 0,
+        kostprijsPerStuk,
+        offerPrijs,
+        sellInPrijs: pricing?.sellInPrice ?? 0,
+        sellInMargePct: pricing?.sellInMarginPct ?? 0,
+        offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value]?.offerPrice ?? 0])),
+        omzet: totals.omzet,
+        kosten: totals.kosten,
+        kortingEur: totals.kortingEur,
+        margeEur: totals.winst,
+        margePct: totals.margePct
+      };
+    });
+
+    const allRows = [...beerProductRows, ...catalogRows].filter((row) => row.included);
+
+    // Apply pricing rule exclusivity to totals (same precedence as the active view).
+    const xyBlock = blocks.find((b) => String((b as any).type) === "xy_gratis" && isBlockActiveForPeriod(b as any, periodIndex)) as QuoteBuilderBlock | undefined;
+    const staffelActive = blocks.some((b) => String((b as any).type) === "staffel");
+
+    let totals = { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 };
+
+    if (xyBlock) {
+      const requiredQty = toNumber((xyBlock as any).required_qty, 4);
+      const freeQty = toNumber((xyBlock as any).free_qty, 1);
+      const eligibleRefs = Array.isArray((xyBlock as any).eligible_product_refs) ? ((xyBlock as any).eligible_product_refs as string[]) : [];
+      const gratis = computeGratisUnitsByProductRef({ rows: allRows as any, requiredQty, freeQty, eligibleRefs });
+      for (const row of allRows) {
+        if (row.productType === "catalog") {
+          totals.omzet += row.omzet;
+          totals.kosten += row.kosten;
+          totals.kortingEur += row.kortingEur;
+          totals.margeEur += row.margeEur;
+          continue;
+        }
+        const ref = `${row.productType}|${row.productId}`;
+        const freeUnits = gratis.freeByRef.get(ref) ?? 0;
+        const lineTotals = calcOfferLineTotalsWithGratis({
+          kostprijsEx: row.kostprijsPerStuk,
+          offerPriceEx: row.offerPrijs,
+          qty: row.aantal + freeUnits,
+          freeQty: freeUnits
+        });
+        totals.omzet += lineTotals.omzet;
+        totals.kosten += lineTotals.kosten;
+        totals.kortingEur += lineTotals.kortingEur;
+        totals.margeEur += lineTotals.winst;
+      }
+    } else if (staffelActive) {
+      const tiers = getStaffelTiers(current.staffels);
+      const kortingByRef = computeStaffelKortingByProductRef({ rows: allRows as any, tiers });
+      for (const row of allRows) {
+        if (row.productType === "catalog") {
+          totals.omzet += row.omzet;
+          totals.kosten += row.kosten;
+          totals.kortingEur += row.kortingEur;
+          totals.margeEur += row.margeEur;
+          continue;
+        }
+        const ref = `${row.productType}|${row.productId}`;
+        const k = kortingByRef.get(ref) ?? 0;
+        const lineTotals = calcOfferLineTotals({
+          kostprijsEx: row.kostprijsPerStuk,
+          offerPriceEx: row.offerPrijs,
+          qty: row.aantal,
+          kortingPct: k
+        });
+        totals.omzet += lineTotals.omzet;
+        totals.kosten += lineTotals.kosten;
+        totals.kortingEur += lineTotals.kortingEur;
+        totals.margeEur += lineTotals.winst;
+      }
+    } else {
+      totals = allRows.reduce(
+        (acc, row) => ({
+          omzet: acc.omzet + row.omzet,
+          kosten: acc.kosten + row.kosten,
+          kortingEur: acc.kortingEur + row.kortingEur,
+          margeEur: acc.margeEur + row.margeEur
+        }),
+        { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 }
+      );
+    }
+
+    const transport = computeTransportForVariantPeriod(variant.id, periodIndex, totals.omzet);
+    const extras = computeExtrasForVariantPeriod(variant.id, periodIndex, totals.omzet);
+    const extrasTotals = extras.reduce(
+      (acc, row) => ({ omzet: acc.omzet + row.omzet, kosten: acc.kosten + row.kosten }),
+      { omzet: 0, kosten: 0 }
+    );
+
+    const omzet = totals.omzet + (transport?.isValid ? transport.omzet : 0) + extrasTotals.omzet;
+    const kosten = totals.kosten + (transport?.isValid ? transport.kosten : 0) + extrasTotals.kosten;
+    const margeEur = totals.margeEur + (transport?.isValid ? transport.omzet - transport.kosten : 0) + (extrasTotals.omzet - extrasTotals.kosten);
+    const kortingEur = totals.kortingEur;
+    const margePct = calcMarginPctFromRevenueCost(omzet, kosten);
+
+    return {
+      omzet,
+      kosten,
+      kortingEur,
+      margeEur,
+      margePct,
+      transportMode: transport?.isValid ? transport.mode : undefined,
+      transportAmountEx: transport?.isValid ? transport.amountEx : undefined,
+      extrasOmzet: extrasTotals.omzet,
+      extrasKosten: extrasTotals.kosten,
+      activeRuleLabel: getActiveRuleLabelForPeriod(blocks, periodIndex)
+    };
   }
 
   const currentKanaalLabel = channelOptionMap.get(currentKanaal)?.label ?? currentKanaal;
@@ -5239,7 +5563,169 @@ export function PrijsvoorstelWizard({
   }
 
   function renderVergelijkenStep() {
-    return renderSamenvattingStep();
+    const introEnabled = hasIntroBlock(current, activeVariantId);
+    const periods: Array<{ index: 1 | 2; label: string }> = introEnabled
+      ? [
+          { index: 1, label: "Introductie" },
+          { index: 2, label: "Standaard" }
+        ]
+      : [{ index: 2, label: "Standaard" }];
+
+    const compareRows: ScenarioCompareRow[] = variants.flatMap((variant) => {
+      const channelLabel =
+        channelOptionMap.get(normalizeKey(variant.channel_code) || currentKanaal)?.label ?? currentKanaalLabel;
+      return periods.map((period) => {
+        const totals = computeOfferTotalsForVariantPeriod(variant, period.index);
+        return {
+          scenarioId: variant.id,
+          scenarioName: variant.name || variant.id,
+          channelLabel,
+          periodIndex: period.index,
+          periodLabel: period.label,
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          margeEur: totals.margeEur,
+          margePct: totals.margePct,
+          transportMode: totals.transportMode,
+          transportAmountEx: totals.transportAmountEx,
+          extrasOmzet: totals.extrasOmzet,
+          extrasKosten: totals.extrasKosten,
+          activeRuleLabel: totals.activeRuleLabel
+        };
+      });
+    });
+
+    function exportCompareCsv() {
+      const header = [
+        "scenario",
+        "kanaal",
+        "periode",
+        "pricing_rule",
+        "omzet_ex",
+        "kosten_ex",
+        "korting_ex",
+        "marge_ex",
+        "marge_pct",
+        "transport_mode",
+        "transport_amount_ex",
+        "extras_omzet_ex",
+        "extras_kosten_ex"
+      ];
+      const lines = compareRows.map((row) =>
+        [
+          row.scenarioName,
+          row.channelLabel,
+          row.periodLabel,
+          row.activeRuleLabel ?? "",
+          round2(row.omzet),
+          round2(row.kosten),
+          round2(row.kortingEur),
+          round2(row.margeEur),
+          round2(row.margePct),
+          row.transportMode ?? "",
+          round2(row.transportAmountEx ?? 0),
+          round2(row.extrasOmzet ?? 0),
+          round2(row.extrasKosten ?? 0)
+        ]
+          .map((value) => `"${String(value).replaceAll("\"", "\"\"")}"`)
+          .join(",")
+      );
+      downloadTextFile(
+        `scenario-vergelijking-${String(current.offertenummer || current.klantnaam || "prijsvoorstel")}.csv`,
+        [header.join(","), ...lines].join("\n"),
+        "text/csv;charset=utf-8"
+      );
+    }
+
+    return (
+      <div className="wizard-stack">
+        <div className="module-card compact-card">
+          <div className="module-card-title">Vergelijken</div>
+          <div className="module-card-text">
+            Vergelijk scenario&apos;s op basis van dezelfde actieve kostprijzen en verkoopstrategie. Transport en
+            extra&apos;s worden meegenomen als bouwblok-correcties. Alles is exclusief BTW.
+          </div>
+          <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
+            <div className="editor-actions-group" />
+            <div className="editor-actions-group">
+              <button type="button" className="editor-button editor-button-secondary" onClick={exportCompareCsv}>
+                Export CSV
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table wizard-table-compact">
+            <thead>
+              <tr>
+                <th>Scenario</th>
+                <th>Kanaal</th>
+                <th>Periode</th>
+                <th>Logica</th>
+                <th>Omzet (ex)</th>
+                <th>Kosten (ex)</th>
+                <th>Korting (ex)</th>
+                <th>Marge</th>
+                <th>Marge %</th>
+                <th>Transport</th>
+                <th>Extra&apos;s</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compareRows.map((row) => (
+                <tr key={`${row.scenarioId}-${row.periodIndex}`}>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => selectVariant(row.scenarioId)}
+                      title="Ga naar scenario"
+                    >
+                      {row.scenarioName}
+                    </button>
+                  </td>
+                  <td>{row.channelLabel}</td>
+                  <td>{row.periodLabel}</td>
+                  <td>{row.activeRuleLabel ?? "-"}</td>
+                  <td>{formatEuro(row.omzet)}</td>
+                  <td>{formatEuro(row.kosten)}</td>
+                  <td>{formatEuro(row.kortingEur)}</td>
+                  <td>{formatEuro(row.margeEur)}</td>
+                  <td>{formatPercentage(row.margePct)}</td>
+                  <td>
+                    {row.transportAmountEx && row.transportAmountEx > 0
+                      ? `${row.transportMode === "charge" ? "+" : "≈"} ${formatEuro(row.transportAmountEx)}`
+                      : "-"}
+                  </td>
+                  <td>
+                    {(row.extrasOmzet ?? 0) !== 0 || (row.extrasKosten ?? 0) !== 0
+                      ? `${formatEuro(row.extrasOmzet ?? 0)} / ${formatEuro(row.extrasKosten ?? 0)}`
+                      : "-"}
+                  </td>
+                </tr>
+              ))}
+              {compareRows.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="prijs-empty-cell">
+                    Nog geen scenario&apos;s beschikbaar.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="module-card compact-card">
+          <div className="module-card-title">Details actief scenario</div>
+          <div className="module-card-text">
+            Hieronder staat nog steeds de commerciële samenvatting van het actieve scenario (handig om in te zoomen).
+          </div>
+        </div>
+        {renderSamenvattingStep()}
+      </div>
+    );
   }
 
   function renderStepContent() {
