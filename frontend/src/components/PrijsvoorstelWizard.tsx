@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { usePageShellWizardSidebar } from "@/components/PageShell";
 import UitgangspuntenStep from "@/components/UitgangspuntenStep";
@@ -52,11 +52,14 @@ type QuoteBuilderContext = {
   postcode: string;
   distance_km: number;
   transport_threshold_ex: number;
+  transport_km_threshold?: number;
+  transport_rate_ex?: number;
+  transport_deliveries?: number;
 };
 
 type QuoteBuilderBlock = {
   id: string;
-  type: "discount_pct" | "intro" | "staffel" | "xy_gratis";
+  type: "discount_pct" | "intro" | "staffel" | "xy_gratis" | "transport";
   // intro block config
   start_date?: string;
   end_date?: string;
@@ -66,6 +69,13 @@ type QuoteBuilderBlock = {
   required_qty?: number;
   free_qty?: number;
   eligible_product_refs?: string[]; // ["samengesteld|<id>", ...] ; empty => all
+  // transport config (per delivery; amounts are ex VAT, transport VAT is always 21%)
+  postcode?: string;
+  distance_km?: number;
+  km_threshold?: number; // default 40
+  threshold_amount_ex?: number; // if set: charge transport only when base omzet_ex < this threshold
+  deliveries?: number;
+  rate_ex?: number;
 };
 
 type PrijsvoorstelWizardProps = {
@@ -470,6 +480,10 @@ function hasXyGratisBlock(quote: GenericRecord, variantId: string) {
   return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "xy_gratis");
 }
 
+function hasTransportBlock(quote: GenericRecord, variantId: string) {
+  return getVariantBlocks(quote, variantId).some((block) => String((block as any).type) === "transport");
+}
+
 function isBlockActiveForPeriod(block: QuoteBuilderBlock, periodIndex: 1 | 2) {
   const applies = String((block as any).applies_to_periods ?? "both");
   if (applies === "both") return true;
@@ -738,6 +752,20 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
       transport_threshold_ex: toNumber(
         ((raw as any).builder_context as QuoteBuilderContext | undefined)?.transport_threshold_ex ?? 0,
         0
+      ),
+      transport_km_threshold: toNumber(
+        ((raw as any).builder_context as QuoteBuilderContext | undefined)?.transport_km_threshold ?? 40,
+        40
+      ),
+      transport_rate_ex: toNumber(
+        ((raw as any).builder_context as QuoteBuilderContext | undefined)?.transport_rate_ex ?? 0,
+        0
+      ),
+      transport_deliveries: Math.max(
+        0,
+        Math.floor(
+          toNumber(((raw as any).builder_context as QuoteBuilderContext | undefined)?.transport_deliveries ?? 1, 1)
+        )
       )
     } satisfies QuoteBuilderContext,
     builder_blocks_by_variant:
@@ -824,7 +852,14 @@ function createEmptyPrijsvoorstel(defaultYear?: number): GenericRecord {
     product_rows: [],
     beer_rows: [],
     catalog_product_rows: [],
-    builder_context: { postcode: "", distance_km: 0, transport_threshold_ex: 0 },
+    builder_context: {
+      postcode: "",
+      distance_km: 0,
+      transport_threshold_ex: 0,
+      transport_km_threshold: 40,
+      transport_rate_ex: 0,
+      transport_deliveries: 1
+    },
     builder_blocks_by_variant: {},
     last_step: 1,
     finalized_at: ""
@@ -926,6 +961,15 @@ export function PrijsvoorstelWizard({
   const [xyDraftApplies, setXyDraftApplies] =
     useState<NonNullable<QuoteBuilderBlock["applies_to_periods"]>>("both");
   const [xyDraftEligibleRefs, setXyDraftEligibleRefs] = useState<string[]>([]);
+  const [transportModalOpen, setTransportModalOpen] = useState(false);
+  const [transportDraftApplies, setTransportDraftApplies] =
+    useState<NonNullable<QuoteBuilderBlock["applies_to_periods"]>>("both");
+  const [transportDraftPostcode, setTransportDraftPostcode] = useState("");
+  const [transportDraftDistanceKm, setTransportDraftDistanceKm] = useState(0);
+  const [transportDraftKmThreshold, setTransportDraftKmThreshold] = useState(40);
+  const [transportDraftThresholdEx, setTransportDraftThresholdEx] = useState(0);
+  const [transportDraftDeliveries, setTransportDraftDeliveries] = useState(1);
+  const [transportDraftRateEx, setTransportDraftRateEx] = useState(0);
 
   const effectiveSelectedId = useMemo(() => {
     if (rows.some((row) => String(row.id) === String(selectedId))) {
@@ -2804,6 +2848,79 @@ export function PrijsvoorstelWizard({
     [offerteProductRows]
   );
 
+  const transportEffect = useMemo(() => {
+    const blocks = getVariantBlocks(current, activeVariantId);
+    const introEnabled = hasIntroBlock(current, activeVariantId);
+    const effectivePeriod: 1 | 2 = introEnabled ? activePeriodIndex : 2;
+    const transportBlock = blocks.find(
+      (b) => String((b as any).type) === "transport" && isBlockActiveForPeriod(b as any, effectivePeriod)
+    ) as QuoteBuilderBlock | undefined;
+    if (!transportBlock) {
+      return null;
+    }
+
+    const ctx = ((current as any).builder_context as QuoteBuilderContext | undefined) ?? {
+      postcode: "",
+      distance_km: 0,
+      transport_threshold_ex: 0
+    };
+    const postcode = normalizeText((transportBlock as any).postcode ?? ctx.postcode ?? "");
+    const distanceKm = Math.max(0, toNumber((transportBlock as any).distance_km ?? ctx.distance_km ?? 0, 0));
+    const kmThreshold = Math.max(0, toNumber((transportBlock as any).km_threshold ?? ctx.transport_km_threshold ?? 40, 40));
+    const thresholdAmountEx = Math.max(
+      0,
+      toNumber((transportBlock as any).threshold_amount_ex ?? ctx.transport_threshold_ex ?? 0, 0)
+    );
+    const deliveries = Math.max(0, Math.floor(toNumber((transportBlock as any).deliveries ?? ctx.transport_deliveries ?? 1, 1)));
+    const rateEx = Math.max(0, toNumber((transportBlock as any).rate_ex ?? ctx.transport_rate_ex ?? 0, 0));
+
+    const baseOmzetEx = isLitersMode ? offerteLitersTotals.omzet : offerteProductTotals.omzet;
+
+    const isValid = Boolean(postcode) && distanceKm > 0 && deliveries > 0 && rateEx > 0;
+    if (!isValid) {
+      return {
+        isValid: false as const,
+        message: "Transport mist postcode, afstand, leveringen of tarief.",
+        mode: "cost" as const,
+        omzet: 0,
+        kosten: 0,
+        btwPct: 21,
+        amountEx: 0,
+        deliveries,
+        rateEx,
+        distanceKm,
+        kmThreshold,
+        thresholdAmountEx
+      };
+    }
+
+    // Rule: within km threshold -> cost. Above threshold:
+    // - if thresholdAmountEx <= 0: always charge transport
+    // - else: charge only when base omzet_ex < thresholdAmountEx; otherwise it's a cost (free shipping)
+    const shouldCharge =
+      distanceKm > kmThreshold && (thresholdAmountEx <= 0 || baseOmzetEx < thresholdAmountEx);
+
+    const amountEx = deliveries * rateEx;
+    const omzet = shouldCharge ? amountEx : 0;
+    // Conservative: when charging transport we assume it is neutral (cost equals charged amount).
+    const kosten = amountEx;
+
+    return {
+      isValid: true as const,
+      message: "",
+      mode: shouldCharge ? ("charge" as const) : ("cost" as const),
+      omzet,
+      kosten,
+      btwPct: 21,
+      amountEx,
+      deliveries,
+      rateEx,
+      distanceKm,
+      kmThreshold,
+      thresholdAmountEx
+    };
+  }, [activePeriodIndex, activeVariantId, current, isLitersMode, offerteLitersTotals.omzet, offerteProductTotals.omzet]);
+
   const derivedBasisRows = useMemo(() => {
     if (isLitersMode || offerLevel !== "samengesteld") {
       return [];
@@ -3750,7 +3867,16 @@ export function PrijsvoorstelWizard({
       ? (current.selected_bier_ids as string[]).filter(Boolean)
       : [];
     const kanaalLabel = currentKanaalLabel;
-    const totalMargePct = calcMarginPctFromRevenueCost(offerteLitersTotals.omzet, offerteLitersTotals.kosten);
+    const transportForStep = editPricing ? transportEffect : null;
+    const totalsWithTransport = transportForStep?.isValid
+      ? {
+          omzet: offerteLitersTotals.omzet + transportForStep.omzet,
+          kosten: offerteLitersTotals.kosten + transportForStep.kosten,
+          kortingEur: offerteLitersTotals.kortingEur,
+          margeEur: offerteLitersTotals.margeEur + (transportForStep.omzet - transportForStep.kosten)
+        }
+      : offerteLitersTotals;
+    const totalMargePct = calcMarginPctFromRevenueCost(totalsWithTransport.omzet, totalsWithTransport.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
     const pricingRuleActive = activeBlocks.some((block) =>
       ["discount_pct", "staffel", "xy_gratis"].includes(String((block as any).type))
@@ -3807,20 +3933,20 @@ export function PrijsvoorstelWizard({
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(offerteLitersTotals.omzet)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithTransport.omzet)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(offerteLitersTotals.kosten)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithTransport.kosten)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(offerteLitersTotals.kortingEur)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithTransport.kortingEur)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale marge</div>
             <div className="stat-value small">
-              {formatEuro(offerteLitersTotals.margeEur)} ({formatPercentage(totalMargePct)})
+              {formatEuro(totalsWithTransport.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
         </div>
@@ -3911,6 +4037,58 @@ export function PrijsvoorstelWizard({
                   </td>
                 </tr>
               ))}
+              {editPricing && !isMultiKanaalMode && transportEffect ? (
+                transportEffect.isValid ? (
+                  <tr key="transport-line-liters" className="is-derived-row">
+                    <td style={{ color: "var(--muted-text)" }}>-</td>
+                    <td style={{ fontWeight: 600 }}>
+                      Transport{" "}
+                      <span style={{ color: "var(--muted-text)", fontWeight: 400 }}>
+                        ({transportEffect.deliveries} levering{transportEffect.deliveries === 1 ? "" : "en"}
+                        {transportEffect.mode === "charge" ? ", doorbelast" : ", kosten"})
+                      </span>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">-</div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">-</div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">{formatEuro(transportEffect.rateEx)}</div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">
+                        {formatEuro(transportEffect.mode === "charge" ? transportEffect.rateEx : 0)}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">{formatEuro(transportEffect.omzet)}</div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">{formatEuro(transportEffect.kosten)}</div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">
+                        {formatEuro(transportEffect.omzet - transportEffect.kosten)}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">-</div>
+                    </td>
+                    <td />
+                  </tr>
+                ) : (
+                  <tr key="transport-line-liters-invalid">
+                    <td colSpan={12} className="prijs-empty-cell">
+                      Transport blok is ingesteld maar mist gegevens: {transportEffect.message}
+                    </td>
+                  </tr>
+                )
+              ) : null}
               {offerteLitersRows.length === 0 ? (
                 <tr>
                   <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length : 12} className="prijs-empty-cell">
@@ -3963,7 +4141,16 @@ export function PrijsvoorstelWizard({
       ? (((current as any).selected_catalog_product_ids as string[]) ?? []).filter(Boolean)
       : [];
     const kanaalLabel = currentKanaalLabel;
-    const totalMargePct = calcMarginPctFromRevenueCost(offerteProductTotals.omzet, offerteProductTotals.kosten);
+    const transportForStep = editPricing ? transportEffect : null;
+    const totalsWithTransport = transportForStep?.isValid
+      ? {
+          omzet: offerteProductTotals.omzet + transportForStep.omzet,
+          kosten: offerteProductTotals.kosten + transportForStep.kosten,
+          kortingEur: offerteProductTotals.kortingEur,
+          margeEur: offerteProductTotals.margeEur + (transportForStep.omzet - transportForStep.kosten)
+        }
+      : offerteProductTotals;
+    const totalMargePct = calcMarginPctFromRevenueCost(totalsWithTransport.omzet, totalsWithTransport.kosten);
     const activeBlocks = getVariantBlocks(current, activeVariantId);
     const pricingRuleActive = activeBlocks.some((block) =>
       ["discount_pct", "staffel", "xy_gratis"].includes(String((block as any).type))
@@ -3997,20 +4184,20 @@ export function PrijsvoorstelWizard({
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(offerteProductTotals.omzet)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithTransport.omzet)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(offerteProductTotals.kosten)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithTransport.kosten)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(offerteProductTotals.kortingEur)}</div>
+            <div className="stat-value small">{formatEuro(totalsWithTransport.kortingEur)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Totale marge</div>
             <div className="stat-value small">
-              {formatEuro(offerteProductTotals.margeEur)} ({formatPercentage(totalMargePct)})
+              {formatEuro(totalsWithTransport.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
         </div>
@@ -4043,7 +4230,7 @@ export function PrijsvoorstelWizard({
             </thead>
             <tbody>
               {offerteProductRows.flatMap((row) => {
-                const output: JSX.Element[] = [];
+                const output: ReactNode[] = [];
                 const ref = `${row.productType}|${row.productId}`;
                 const freeUnits =
                   gratisContext && row.productType !== "catalog" ? (gratisContext.freeByRef.get(ref) ?? 0) : 0;
@@ -4209,6 +4396,64 @@ export function PrijsvoorstelWizard({
 
                 return output;
               })}
+              {editPricing && !isMultiKanaalMode && transportEffect ? (
+                transportEffect.isValid ? (
+                  <tr key="transport-line" className="is-derived-row">
+                    <td style={{ color: "var(--muted-text)" }}>-</td>
+                    <td style={{ fontWeight: 600 }}>
+                      Transport{" "}
+                      <span style={{ color: "var(--muted-text)", fontWeight: 400 }}>
+                        ({transportEffect.deliveries} levering{transportEffect.deliveries === 1 ? "" : "en"}
+                        {transportEffect.mode === "charge" ? ", doorbelast" : ", kosten"})
+                      </span>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">
+                        {formatNumber(transportEffect.deliveries, 0)}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">-</div>
+                    </td>
+                    <td>
+                      <div className="dataset-input dataset-input-readonly">{formatEuro(transportEffect.rateEx)}</div>
+                    </td>
+                    {isMultiKanaalMode ? null : (
+                      <>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(transportEffect.mode === "charge" ? transportEffect.rateEx : 0)}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">{formatEuro(transportEffect.omzet)}</div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">{formatEuro(transportEffect.kosten)}</div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(transportEffect.omzet - transportEffect.kosten)}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">-</div>
+                        </td>
+                      </>
+                    )}
+                    <td />
+                  </tr>
+                ) : (
+                  <tr key="transport-line-invalid">
+                    <td colSpan={12} className="prijs-empty-cell">
+                      Transport blok is ingesteld maar mist gegevens: {transportEffect.message}
+                    </td>
+                  </tr>
+                )
+              ) : null}
               {offerteProductRows.length === 0 ? (
                 <tr>
                   <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length : 12} className="prijs-empty-cell">
@@ -4322,6 +4567,46 @@ export function PrijsvoorstelWizard({
                 disabled={hasStaffelBlock(current, activeVariantId) || hasXyGratisBlock(current, activeVariantId)}
               >
                 % korting
+              </button>
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => {
+                  const blocks = getVariantBlocks(current, activeVariantId);
+                  const existing = blocks.find((b) => String((b as any).type) === "transport") as QuoteBuilderBlock | undefined;
+                  const ctx = ((current as any).builder_context as QuoteBuilderContext | undefined) ?? {
+                    postcode: "",
+                    distance_km: 0,
+                    transport_threshold_ex: 0
+                  };
+                  setTransportDraftApplies(
+                    (existing?.applies_to_periods as any) ?? (effectivePeriodIndex === 1 ? "intro" : "standard")
+                  );
+                  setTransportDraftPostcode(String((existing as any)?.postcode ?? ctx.postcode ?? ""));
+                  setTransportDraftDistanceKm(
+                    toNumber((existing as any)?.distance_km ?? ctx.distance_km ?? 0, 0)
+                  );
+                  setTransportDraftKmThreshold(
+                    toNumber((existing as any)?.km_threshold ?? ctx.transport_km_threshold ?? 40, 40)
+                  );
+                  setTransportDraftThresholdEx(
+                    toNumber((existing as any)?.threshold_amount_ex ?? ctx.transport_threshold_ex ?? 0, 0)
+                  );
+                  setTransportDraftDeliveries(
+                    Math.max(
+                      1,
+                      Math.floor(toNumber((existing as any)?.deliveries ?? ctx.transport_deliveries ?? 1, 1))
+                    )
+                  );
+                  setTransportDraftRateEx(
+                    toNumber((existing as any)?.rate_ex ?? ctx.transport_rate_ex ?? 0, 0)
+                  );
+                  setTransportModalOpen(true);
+                }}
+                disabled={isMultiKanaalMode}
+                title={isMultiKanaalMode ? "Transport werkt nu alleen voor 1 kanaal per scenario." : undefined}
+              >
+                Transport
               </button>
             </div>
             <div className="editor-actions-group" />
@@ -4617,7 +4902,23 @@ export function PrijsvoorstelWizard({
     const pdfChannelHeaders = isMultiKanaalMode
       ? selectedChannelOptions.map((option) => `<th>${offerPriceLabel} ${option.label}</th>`).join("")
       : `<th>${offerPriceLabel}</th>`;
-    const tableRows = (isLitersMode ? litersDisplayRows : productDisplayRows)
+    const transportRow =
+      !isMultiKanaalMode && transportEffect?.isValid
+        ? `<tr>
+          <td>-</td>
+          <td>Transport (${formatNumber(transportEffect.deliveries, 0)} levering${transportEffect.deliveries === 1 ? "" : "en"}${transportEffect.mode === "charge" ? ", doorbelast" : ", kosten"})</td>
+          <td>${formatNumber(transportEffect.deliveries, 0)}</td>
+          <td>${formatEuro(transportEffect.rateEx)}</td>
+          ${
+            isMultiKanaalMode
+              ? selectedChannelOptions.map(() => `<td>${formatEuro(0)}</td>`).join("")
+              : `<td>${formatEuro(transportEffect.mode === "charge" ? transportEffect.rateEx : 0)}</td>`
+          }
+        </tr>`
+        : "";
+
+    const tableRows =
+      (isLitersMode ? litersDisplayRows : productDisplayRows)
       .filter((row) => row.included)
       .map((row) =>
         `<tr>
@@ -4632,7 +4933,7 @@ export function PrijsvoorstelWizard({
           }
         </tr>`
       )
-      .join("");
+      .join("") + transportRow;
     const printWindow = window.open("", "_blank", "width=1100,height=800");
     if (!printWindow) {
       return;
@@ -5473,6 +5774,212 @@ export function PrijsvoorstelWizard({
                     draft.beer_rows = applyVariantPeriodToWorkingRows(nextList[index].beer_rows, currentPeriod);
                   });
                   setXyGratisModalOpen(false);
+                }}
+              >
+                Opslaan
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {transportModalOpen ? (
+        <div className="confirm-modal-overlay" role="presentation">
+          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="transport-modal-title">
+            <div className="confirm-modal-title" id="transport-modal-title">
+              Transport instellen
+            </div>
+            <div className="confirm-modal-text">
+              Transport is per levering. Binnen de km-drempel telt het als kostenpost. Boven de km-drempel kan transport
+              worden doorbelast (omzet) wanneer de order onder de omzetdrempel blijft. Transport heeft altijd 21% BTW
+              (weergave), maar de berekening blijft exclusief BTW.
+            </div>
+
+            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
+              <label className="nested-field">
+                <span>Toepassen op</span>
+                <select
+                  className="dataset-input"
+                  value={transportDraftApplies}
+                  onChange={(event) =>
+                    setTransportDraftApplies(event.target.value as NonNullable<QuoteBuilderBlock["applies_to_periods"]>)
+                  }
+                >
+                  <option value="intro">Introductie (periode 1)</option>
+                  <option value="standard">Standaard (periode 2)</option>
+                  <option value="both">Beide periodes</option>
+                </select>
+              </label>
+              <label className="nested-field">
+                <span>Postcode (klant)</span>
+                <input
+                  className="dataset-input"
+                  value={transportDraftPostcode}
+                  onChange={(event) => setTransportDraftPostcode(event.target.value)}
+                  placeholder="1234AB"
+                />
+              </label>
+              <label className="nested-field">
+                <span>Afstand (km)</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.1"
+                  value={String(transportDraftDistanceKm)}
+                  onChange={(event) => setTransportDraftDistanceKm(Math.max(0, Number(event.target.value || 0)))}
+                />
+              </label>
+              <label className="nested-field">
+                <span>Km-drempel</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.1"
+                  value={String(transportDraftKmThreshold)}
+                  onChange={(event) => setTransportDraftKmThreshold(Math.max(0, Number(event.target.value || 0)))}
+                />
+              </label>
+              <label className="nested-field">
+                <span>Omzetdrempel (ex)</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  value={String(transportDraftThresholdEx)}
+                  onChange={(event) => setTransportDraftThresholdEx(Math.max(0, Number(event.target.value || 0)))}
+                />
+              </label>
+              <label className="nested-field">
+                <span>Aantal leveringen</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  min={1}
+                  step="1"
+                  value={String(transportDraftDeliveries)}
+                  onChange={(event) => setTransportDraftDeliveries(Math.max(1, Math.floor(Number(event.target.value || 1))))}
+                />
+              </label>
+              <label className="nested-field">
+                <span>Tarief per levering (ex)</span>
+                <input
+                  className="dataset-input"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  value={String(transportDraftRateEx)}
+                  onChange={(event) => setTransportDraftRateEx(Math.max(0, Number(event.target.value || 0)))}
+                />
+              </label>
+            </div>
+
+            <div className="confirm-modal-actions">
+              {hasTransportBlock(current, activeVariantId) ? (
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() => {
+                    updateCurrent((draft) => {
+                      const list = Array.isArray((draft as any).variants)
+                        ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                        : [];
+                      const activeId =
+                        String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                      if (!activeId) return;
+
+                      const blocksByVariant =
+                        typeof (draft as any).builder_blocks_by_variant === "object" &&
+                        (draft as any).builder_blocks_by_variant !== null
+                          ? { ...(draft as any).builder_blocks_by_variant }
+                          : {};
+                      const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+                        ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+                        : [];
+                      blocksByVariant[activeId] = existingBlocks.filter((b) => String((b as any).type) !== "transport");
+                      (draft as any).builder_blocks_by_variant = blocksByVariant;
+                    });
+                    setTransportModalOpen(false);
+                  }}
+                >
+                  Verwijderen
+                </button>
+              ) : (
+                <span />
+              )}
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={() => setTransportModalOpen(false)}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                className="editor-button"
+                disabled={
+                  !String(transportDraftPostcode || "").trim() ||
+                  transportDraftDistanceKm <= 0 ||
+                  transportDraftDeliveries <= 0 ||
+                  transportDraftRateEx <= 0
+                }
+                onClick={() => {
+                  updateCurrent((draft) => {
+                    const list = Array.isArray((draft as any).variants)
+                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+                      : [];
+                    const activeId =
+                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+                    if (!activeId) return;
+
+                    const blocksByVariant =
+                      typeof (draft as any).builder_blocks_by_variant === "object" &&
+                      (draft as any).builder_blocks_by_variant !== null
+                        ? { ...(draft as any).builder_blocks_by_variant }
+                        : {};
+                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+                      : [];
+
+                    const nextBlocks: QuoteBuilderBlock[] = [
+                      ...existingBlocks.filter((b) => String((b as any).type) !== "transport"),
+                      {
+                        id: `${activeId}:transport`,
+                        type: "transport",
+                        applies_to_periods: transportDraftApplies,
+                        postcode: String(transportDraftPostcode || "").trim(),
+                        distance_km: Math.max(0, toNumber(transportDraftDistanceKm, 0)),
+                        km_threshold: Math.max(0, toNumber(transportDraftKmThreshold, 40)),
+                        threshold_amount_ex: Math.max(0, toNumber(transportDraftThresholdEx, 0)),
+                        deliveries: Math.max(1, Math.floor(toNumber(transportDraftDeliveries, 1))),
+                        rate_ex: Math.max(0, toNumber(transportDraftRateEx, 0))
+                      }
+                    ];
+                    blocksByVariant[activeId] = nextBlocks;
+                    (draft as any).builder_blocks_by_variant = blocksByVariant;
+
+                    const ctx = ((draft as any).builder_context as QuoteBuilderContext | undefined) ?? {
+                      postcode: "",
+                      distance_km: 0,
+                      transport_threshold_ex: 0
+                    };
+                    (draft as any).builder_context = {
+                      ...ctx,
+                      postcode: String(transportDraftPostcode || "").trim(),
+                      distance_km: Math.max(0, toNumber(transportDraftDistanceKm, 0)),
+                      transport_threshold_ex: Math.max(0, toNumber(transportDraftThresholdEx, 0)),
+                      transport_km_threshold: Math.max(0, toNumber(transportDraftKmThreshold, 40)),
+                      transport_rate_ex: Math.max(0, toNumber(transportDraftRateEx, 0)),
+                      transport_deliveries: Math.max(1, Math.floor(toNumber(transportDraftDeliveries, 1)))
+                    };
+                  });
+                  setTransportModalOpen(false);
                 }}
               >
                 Opslaan
