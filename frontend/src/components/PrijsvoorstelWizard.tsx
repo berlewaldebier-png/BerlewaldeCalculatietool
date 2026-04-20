@@ -4693,9 +4693,10 @@ export function PrijsvoorstelWizard({
     return (
       <div className="wizard-stack">
         <div className="module-card compact-card">
-          <div className="module-card-title">Selectie</div>
+          <div className="module-card-title">Basisofferte</div>
           <div className="module-card-text">
-            Kies hieronder het bier of de bieren waarop deze liters-offerte moet worden gebaseerd.
+            Start simpel: kies het bier (of de bieren) waarop deze liters-offerte wordt gebaseerd. Kortingen en acties
+            voeg je toe via de toolbar hierboven.
           </div>
 
           {litersBasis === "een_bier" ? (
@@ -4734,41 +4735,46 @@ export function PrijsvoorstelWizard({
           )}
         </div>
 
-        <div className="stats-grid wizard-stats-grid prijs-info-grid">
-          <div className="stat-card">
-            <div className="stat-label">{isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
-            <div className="stat-value small">{isMultiKanaalMode ? selectedKanaalLabels : kanaalLabel}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(totalsWithAdjustments.omzet)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kosten)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale fee (ex)</div>
-            <div className="stat-value small">{formatEuro((offerteLitersTotals as any).feeEur ?? 0)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale retour</div>
-            <div className="stat-value small">{formatEuro((offerteLitersTotals as any).retourEur ?? 0)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale winst/marge</div>
-            <div className="stat-value small">
-              {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
+        {!editPricing ? (
+          <>
+            <div className="stats-grid wizard-stats-grid prijs-info-grid">
+              <div className="stat-card">
+                <div className="stat-label">{isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
+                <div className="stat-value small">{isMultiKanaalMode ? selectedKanaalLabels : kanaalLabel}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale omzet</div>
+                <div className="stat-value small">{formatEuro(totalsWithAdjustments.omzet)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale kosten</div>
+                <div className="stat-value small">{formatEuro(totalsWithAdjustments.kosten)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale korting</div>
+                <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale fee (ex)</div>
+                <div className="stat-value small">{formatEuro((offerteLitersTotals as any).feeEur ?? 0)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale retour</div>
+                <div className="stat-value small">{formatEuro((offerteLitersTotals as any).retourEur ?? 0)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale winst/marge</div>
+                <div className="stat-value small">
+                  {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
-          Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid van omzet en kosten.
-        </div>
+            <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+              Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid
+              van omzet en kosten.
+            </div>
+          </>
+        ) : null}
 
         <div className="dataset-editor-scroll">
           <table className="dataset-editor-table wizard-table-compact">
@@ -5067,10 +5073,9 @@ export function PrijsvoorstelWizard({
     return (
       <div className="wizard-stack">
         <div className="module-card compact-card">
-          <div className="module-card-title">Selectie</div>
+          <div className="module-card-title">Basisofferte</div>
           <div className="module-card-text">
-            Kies één of meer bieren met een actieve kostprijsversie. De app haalt daarna automatisch de gekoppelde
-            producten en kostprijzen op uit de actieve kostprijsversies.
+            Start simpel: kies producten en aantallen. Kortingen en acties voeg je toe via de toolbar hierboven.
           </div>
           {renderBeerSelectionList(selectedBeerIds, handleBeerMultiSelection)}
           <div className="module-card-text" style={{ marginTop: "0.75rem" }}>
@@ -5084,41 +5089,46 @@ export function PrijsvoorstelWizard({
           )}
         </div>
 
-        <div className="stats-grid wizard-stats-grid prijs-info-grid">
-          <div className="stat-card">
-            <div className="stat-label">{isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
-            <div className="stat-value small">{isMultiKanaalMode ? selectedKanaalLabels : kanaalLabel}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale omzet</div>
-            <div className="stat-value small">{formatEuro(totalsWithAdjustments.omzet)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale kosten</div>
-            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kosten)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale korting</div>
-            <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale fee (ex)</div>
-            <div className="stat-value small">{formatEuro((offerteProductTotals as any).feeEur ?? 0)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale retour</div>
-            <div className="stat-value small">{formatEuro((offerteProductTotals as any).retourEur ?? 0)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Totale winst/marge</div>
-            <div className="stat-value small">
-              {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
+        {!editPricing ? (
+          <>
+            <div className="stats-grid wizard-stats-grid prijs-info-grid">
+              <div className="stat-card">
+                <div className="stat-label">{isMultiKanaalMode ? "Kanalen" : "Kanaal"}</div>
+                <div className="stat-value small">{isMultiKanaalMode ? selectedKanaalLabels : kanaalLabel}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale omzet</div>
+                <div className="stat-value small">{formatEuro(totalsWithAdjustments.omzet)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale kosten</div>
+                <div className="stat-value small">{formatEuro(totalsWithAdjustments.kosten)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale korting</div>
+                <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale fee (ex)</div>
+                <div className="stat-value small">{formatEuro((offerteProductTotals as any).feeEur ?? 0)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale retour</div>
+                <div className="stat-value small">{formatEuro((offerteProductTotals as any).retourEur ?? 0)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Totale winst/marge</div>
+                <div className="stat-value small">
+                  {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
-          Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid van omzet en kosten.
-        </div>
+            <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+              Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid
+              van omzet en kosten.
+            </div>
+          </>
+        ) : null}
 
         <div className="dataset-editor-scroll">
           <table className="dataset-editor-table wizard-table-compact">
