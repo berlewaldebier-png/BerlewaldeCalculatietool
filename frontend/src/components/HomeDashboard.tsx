@@ -53,6 +53,12 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
   const overviewItem = { label: "Overzicht", href: "/", active: true };
   const byHref = new Map(normalized.map((item) => [item.href, item]));
 
+  // CPQ entry is owned by the frontend. The backend navigation list may not contain it yet.
+  // We inject it explicitly so it always shows in the dashboard sidebar.
+  if (!byHref.has("/offerte-samenstellen")) {
+    byHref.set("/offerte-samenstellen", { label: "Prijsvoorstel maken", href: "/offerte-samenstellen" });
+  }
+
   const result: DashboardNavItem[] = [];
 
   for (const href of preferredOrder) {
@@ -86,18 +92,6 @@ function buildAlertCards(summary: DashboardSummary): AlertCard[] {
       value: String(summary.definitieve_berekeningen),
       description: "Beschikbare basis voor verdere prijslogica",
       href: "/nieuwe-kostprijsberekening?mode=landing"
-    },
-    {
-      title: "Concept prijsvoorstellen",
-      value: String(summary.concept_prijsvoorstellen).padStart(2, "0"),
-      description: "Voorstellen die nog aandacht nodig hebben",
-      href: "/offerte-samenstellen"
-    },
-    {
-      title: "Definitieve prijsvoorstellen",
-      value: String(summary.definitieve_prijsvoorstellen),
-      description: "Afgeronde voorstellen in deze omgeving",
-      href: "/offerte-samenstellen"
     },
     {
       title: "Klaar om te activeren",
