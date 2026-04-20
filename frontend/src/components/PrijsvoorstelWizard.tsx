@@ -7,6 +7,9 @@ import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
 import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, computeGratisFreeByRefFromPaidRows, parseNumberLoose, round2 } from "@/lib/pricingEngine";
+import XyGratisModal from "@/components/prijsvoorstel/modals/XyGratisModal";
+import TransportModal from "@/components/prijsvoorstel/modals/TransportModal";
+import ExtrasModal from "@/components/prijsvoorstel/modals/ExtrasModal";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -6259,715 +6262,243 @@ export function PrijsvoorstelWizard({
         </div>
       ) : null}
 
-      {xyGratisModalOpen ? (
-        <div className="confirm-modal-overlay" role="presentation">
-          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="xy-modal-title">
-            <div className="confirm-modal-title" id="xy-modal-title">
-              X+Y gratis instellen
-            </div>
-            <div className="confirm-modal-text">
-              De goedkoopste eligible units worden gratis (omzet = 0, kosten tellen wel mee). Korting stapelt niet met
-              staffels of % korting.
-            </div>
-            <div className="confirm-modal-text" style={{ marginTop: "0.5rem" }}>
-              Let op: de aantallen in de offerte zijn de betaalde stuks. De gratis stuks worden hier bovenop toegevoegd.
-            </div>
+      <XyGratisModal
+        open={xyGratisModalOpen}
+        isLitersMode={isLitersMode}
+        requiredQty={xyDraftRequired}
+        freeQty={xyDraftFree}
+        appliesTo={xyDraftApplies as any}
+        eligibleRefs={xyDraftEligibleRefs}
+        eligibleOptions={xyEligibleProductOptions}
+        onChangeRequiredQty={setXyDraftRequired}
+        onChangeFreeQty={setXyDraftFree}
+        onChangeAppliesTo={(value) => setXyDraftApplies(value as any)}
+        onAddEligibleRef={(value) =>
+          setXyDraftEligibleRefs((prev) => (prev.includes(value) ? prev : [...prev, value]))
+        }
+        onRemoveEligibleRef={(value) => setXyDraftEligibleRefs((prev) => prev.filter((v) => v !== value))}
+        onCancel={() => setXyGratisModalOpen(false)}
+        onSave={() => {
+          updateCurrent((draft) => {
+            const list = Array.isArray((draft as any).variants)
+              ? (((draft as any).variants as unknown[]) as QuoteVariant[])
+              : [];
+            const activeId =
+              String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+            const index = list.findIndex((row) => String(row.id) === activeId);
+            if (index < 0) return;
 
-            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
-              <label className="nested-field">
-                <span>Toepassen op</span>
-                <select
-                  className="dataset-input"
-                  value={xyDraftApplies}
-                  onChange={(event) =>
-                    setXyDraftApplies(event.target.value as NonNullable<QuoteBuilderBlock["applies_to_periods"]>)
-                  }
-                >
-                  <option value="intro">Introductie (periode 1)</option>
-                  <option value="standard">Standaard (periode 2)</option>
-                  <option value="both">Beide periodes</option>
-                </select>
-              </label>
-              <label className="nested-field">
-                <span>X (kopen)</span>
-                <input
-                  className="dataset-input"
-                  type="number"
-                  min={1}
-                  step="1"
-                  value={String(xyDraftRequired)}
-                  onChange={(event) => setXyDraftRequired(Math.max(1, Math.floor(Number(event.target.value || 1))))}
-                />
-              </label>
-              <label className="nested-field">
-                <span>Y (gratis)</span>
-                <input
-                  className="dataset-input"
-                  type="number"
-                  min={1}
-                  step="1"
-                  value={String(xyDraftFree)}
-                  onChange={(event) => setXyDraftFree(Math.max(1, Math.floor(Number(event.target.value || 1))))}
-                />
-              </label>
-            </div>
+            const blocksByVariant =
+              typeof (draft as any).builder_blocks_by_variant === "object" &&
+              (draft as any).builder_blocks_by_variant !== null
+                ? { ...(draft as any).builder_blocks_by_variant }
+                : {};
+            const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
+              ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
+              : [];
 
-            <div className="module-card compact-card" style={{ marginTop: "0.75rem" }}>
-              <div className="module-card-title">Eligible producten</div>
-              <div className="module-card-text">
-                Laat leeg om alle (niet-catalogus) producten mee te nemen. Kies 1 of meer producten voor een mix-actie.
-              </div>
-              <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
-                <table className="dataset-editor-table wizard-table-compact">
-                  <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {xyDraftEligibleRefs.map((ref) => {
-                      const option = xyEligibleProductOptions.find((o) => o.value === ref);
-                      return (
-                        <tr key={ref}>
-                          <td>{option?.label ?? ref}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="icon-button-table"
-                              aria-label="Verwijderen"
-                              title="Verwijderen"
-                              onClick={() => setXyDraftEligibleRefs((prev) => prev.filter((v) => v !== ref))}
-                            >
-                              <TrashIcon />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {xyDraftEligibleRefs.length === 0 ? (
-                      <tr>
-                        <td colSpan={2} className="prijs-empty-cell">
-                          Alle producten zijn eligible.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
+            // Enforce exclusivity: remove discount/staffel blocks and clear staffels + manual korting fields.
+            const nextBlocks: QuoteBuilderBlock[] = [
+              ...existingBlocks.filter(
+                (b) => !["discount_pct", "staffel", "xy_gratis"].includes(String((b as any).type))
+              ),
+              {
+                id: `${activeId}:xy_gratis`,
+                type: "xy_gratis",
+                required_qty: xyDraftRequired,
+                free_qty: xyDraftFree,
+                applies_to_periods: xyDraftApplies,
+                eligible_product_refs: xyDraftEligibleRefs
+              }
+            ];
+            blocksByVariant[activeId] = nextBlocks;
+            (draft as any).builder_blocks_by_variant = blocksByVariant;
 
-              <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
-                <div className="editor-actions-group">
-                  <select
-                    className="dataset-input"
-                    value=""
-                    onChange={(event) => {
-                      const value = String(event.target.value ?? "");
-                      if (!value) return;
-                      setXyDraftEligibleRefs((prev) => (prev.includes(value) ? prev : [...prev, value]));
-                    }}
-                  >
-                    <option value="">Product toevoegen...</option>
-                    {xyEligibleProductOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="editor-actions-group" />
-              </div>
-            </div>
+            const clearManual = (rows: QuoteLineRow[]) =>
+              rows.map((row) => ({
+                ...row,
+                korting_pct_p1: 0,
+                korting_pct_p2: 0,
+                korting_pct: 0
+              }));
 
-            <div className="confirm-modal-actions">
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => setXyGratisModalOpen(false)}
-              >
-                Annuleren
-              </button>
-              <button
-                type="button"
-                className="editor-button"
-                onClick={() => {
-                  updateCurrent((draft) => {
-                    const list = Array.isArray((draft as any).variants)
-                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
-                      : [];
-                    const activeId =
-                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
-                    const index = list.findIndex((row) => String(row.id) === activeId);
-                    if (index < 0) return;
+            const nextList = [...list];
+            const variant = nextList[index];
+            nextList[index] = {
+              ...variant,
+              product_rows: clearManual(variant.product_rows),
+              beer_rows: clearManual(variant.beer_rows),
+              staffels: []
+            };
+            (draft as any).variants = nextList;
 
-                    const blocksByVariant =
-                      typeof (draft as any).builder_blocks_by_variant === "object" &&
-                      (draft as any).builder_blocks_by_variant !== null
-                        ? { ...(draft as any).builder_blocks_by_variant }
-                        : {};
-                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
-                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
-                      : [];
+            const currentPeriod = hasIntroBlock(draft, activeId)
+              ? toPeriodIndex((draft as any).active_period_index, 2)
+              : 2;
+            draft.staffels = [];
+            draft.product_rows = applyVariantPeriodToWorkingRows(nextList[index].product_rows, currentPeriod);
+            draft.beer_rows = applyVariantPeriodToWorkingRows(nextList[index].beer_rows, currentPeriod);
+          });
+          setXyGratisModalOpen(false);
+        }}
+      />
 
-                    // Enforce exclusivity: remove discount/staffel blocks and clear staffels + manual korting fields.
-                    const nextBlocks: QuoteBuilderBlock[] = [
-                      ...existingBlocks.filter(
-                        (b) => !["discount_pct", "staffel", "xy_gratis"].includes(String((b as any).type))
-                      ),
-                      {
-                        id: `${activeId}:xy_gratis`,
-                        type: "xy_gratis",
-                        required_qty: xyDraftRequired,
-                        free_qty: xyDraftFree,
-                        applies_to_periods: xyDraftApplies,
-                        eligible_product_refs: xyDraftEligibleRefs
-                      }
-                    ];
-                    blocksByVariant[activeId] = nextBlocks;
-                    (draft as any).builder_blocks_by_variant = blocksByVariant;
+      <TransportModal
+        open={transportModalOpen}
+        appliesTo={transportDraftApplies as any}
+        postcode={transportDraftPostcode}
+        distanceKm={transportDraftDistanceKm}
+        kmThreshold={transportDraftKmThreshold}
+        thresholdAmountEx={transportDraftThresholdEx}
+        deliveries={transportDraftDeliveries}
+        rateEx={transportDraftRateEx}
+        canDelete={hasTransportBlock(current, activeVariantId)}
+        onChangeAppliesTo={(value) => setTransportDraftApplies(value as any)}
+        onChangePostcode={setTransportDraftPostcode}
+        onChangeDistanceKm={setTransportDraftDistanceKm}
+        onChangeKmThreshold={setTransportDraftKmThreshold}
+        onChangeThresholdAmountEx={setTransportDraftThresholdEx}
+        onChangeDeliveries={setTransportDraftDeliveries}
+        onChangeRateEx={setTransportDraftRateEx}
+        onDelete={() => {
+          updateCurrent((draft) => {
+            const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+            const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+            if (!activeId) return;
 
-                    const clearManual = (rows: QuoteLineRow[]) =>
-                      rows.map((row) => ({
-                        ...row,
-                        korting_pct_p1: 0,
-                        korting_pct_p2: 0,
-                        korting_pct: 0
-                      }));
+            const blocksByVariant =
+              typeof (draft as any).builder_blocks_by_variant === "object" && (draft as any).builder_blocks_by_variant !== null
+                ? { ...(draft as any).builder_blocks_by_variant }
+                : {};
+            const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId]) ? (blocksByVariant[activeId] as QuoteBuilderBlock[]) : [];
+            blocksByVariant[activeId] = existingBlocks.filter((b) => String((b as any).type) !== "transport");
+            (draft as any).builder_blocks_by_variant = blocksByVariant;
+          });
+          setTransportModalOpen(false);
+        }}
+        onCancel={() => setTransportModalOpen(false)}
+        onSave={() => {
+          updateCurrent((draft) => {
+            const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+            const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+            if (!activeId) return;
 
-                    const nextList = [...list];
-                    const variant = nextList[index];
-                    nextList[index] = {
-                      ...variant,
-                      product_rows: clearManual(variant.product_rows),
-                      beer_rows: clearManual(variant.beer_rows),
-                      staffels: []
-                    };
-                    (draft as any).variants = nextList;
+            const blocksByVariant =
+              typeof (draft as any).builder_blocks_by_variant === "object" && (draft as any).builder_blocks_by_variant !== null
+                ? { ...(draft as any).builder_blocks_by_variant }
+                : {};
+            const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId]) ? (blocksByVariant[activeId] as QuoteBuilderBlock[]) : [];
 
-                    const currentPeriod = hasIntroBlock(draft, activeId)
-                      ? toPeriodIndex((draft as any).active_period_index, 2)
-                      : 2;
-                    draft.staffels = [];
-                    draft.product_rows = applyVariantPeriodToWorkingRows(nextList[index].product_rows, currentPeriod);
-                    draft.beer_rows = applyVariantPeriodToWorkingRows(nextList[index].beer_rows, currentPeriod);
-                  });
-                  setXyGratisModalOpen(false);
-                }}
-              >
-                Opslaan
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            const nextBlocks: QuoteBuilderBlock[] = [
+              ...existingBlocks.filter((b) => String((b as any).type) !== "transport"),
+              {
+                id: `${activeId}:transport`,
+                type: "transport",
+                applies_to_periods: transportDraftApplies,
+                postcode: String(transportDraftPostcode || "").trim(),
+                distance_km: Math.max(0, toNumber(transportDraftDistanceKm, 0)),
+                km_threshold: Math.max(0, toNumber(transportDraftKmThreshold, 40)),
+                threshold_amount_ex: Math.max(0, toNumber(transportDraftThresholdEx, 0)),
+                deliveries: Math.max(1, Math.floor(toNumber(transportDraftDeliveries, 1))),
+                rate_ex: Math.max(0, toNumber(transportDraftRateEx, 0))
+              }
+            ];
+            blocksByVariant[activeId] = nextBlocks;
+            (draft as any).builder_blocks_by_variant = blocksByVariant;
 
-      {transportModalOpen ? (
-        <div className="confirm-modal-overlay" role="presentation">
-          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="transport-modal-title">
-            <div className="confirm-modal-title" id="transport-modal-title">
-              Transport instellen
-            </div>
-            <div className="confirm-modal-text">
-              Transport is per levering. Binnen de km-drempel telt het als kostenpost. Boven de km-drempel kan transport
-              worden doorbelast (omzet) wanneer de order onder de omzetdrempel blijft. Transport heeft altijd 21% BTW
-              (weergave), maar de berekening blijft exclusief BTW.
-            </div>
+            const ctx = ((draft as any).builder_context as QuoteBuilderContext | undefined) ?? {
+              postcode: "",
+              distance_km: 0,
+              transport_threshold_ex: 0
+            };
+            (draft as any).builder_context = {
+              ...ctx,
+              postcode: String(transportDraftPostcode || "").trim(),
+              distance_km: Math.max(0, toNumber(transportDraftDistanceKm, 0)),
+              transport_threshold_ex: Math.max(0, toNumber(transportDraftThresholdEx, 0)),
+              transport_km_threshold: Math.max(0, toNumber(transportDraftKmThreshold, 40)),
+              transport_rate_ex: Math.max(0, toNumber(transportDraftRateEx, 0)),
+              transport_deliveries: Math.max(1, Math.floor(toNumber(transportDraftDeliveries, 1)))
+            };
+          });
+          setTransportModalOpen(false);
+        }}
+      />
 
-            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
-              <label className="nested-field">
-                <span>Toepassen op</span>
-                <select
-                  className="dataset-input"
-                  value={transportDraftApplies}
-                  onChange={(event) =>
-                    setTransportDraftApplies(event.target.value as NonNullable<QuoteBuilderBlock["applies_to_periods"]>)
-                  }
-                >
-                  <option value="intro">Introductie (periode 1)</option>
-                  <option value="standard">Standaard (periode 2)</option>
-                  <option value="both">Beide periodes</option>
-                </select>
-              </label>
-              <label className="nested-field">
-                <span>Postcode (klant)</span>
-                <input
-                  className="dataset-input"
-                  value={transportDraftPostcode}
-                  onChange={(event) => setTransportDraftPostcode(event.target.value)}
-                  placeholder="1234AB"
-                />
-              </label>
-              <label className="nested-field">
-                <span>Afstand (km)</span>
-                <input
-                  className="dataset-input"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step="0.1"
-                  value={String(transportDraftDistanceKm)}
-                  onChange={(event) => setTransportDraftDistanceKm(Math.max(0, Number(event.target.value || 0)))}
-                />
-              </label>
-              <label className="nested-field">
-                <span>Km-drempel</span>
-                <input
-                  className="dataset-input"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step="0.1"
-                  value={String(transportDraftKmThreshold)}
-                  onChange={(event) => setTransportDraftKmThreshold(Math.max(0, Number(event.target.value || 0)))}
-                />
-              </label>
-              <label className="nested-field">
-                <span>Omzetdrempel (ex)</span>
-                <input
-                  className="dataset-input"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step="0.01"
-                  value={String(transportDraftThresholdEx)}
-                  onChange={(event) => setTransportDraftThresholdEx(Math.max(0, Number(event.target.value || 0)))}
-                />
-              </label>
-              <label className="nested-field">
-                <span>Aantal leveringen</span>
-                <input
-                  className="dataset-input"
-                  type="number"
-                  min={1}
-                  step="1"
-                  value={String(transportDraftDeliveries)}
-                  onChange={(event) => setTransportDraftDeliveries(Math.max(1, Math.floor(Number(event.target.value || 1))))}
-                />
-              </label>
-              <label className="nested-field">
-                <span>Tarief per levering (ex)</span>
-                <input
-                  className="dataset-input"
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step="0.01"
-                  value={String(transportDraftRateEx)}
-                  onChange={(event) => setTransportDraftRateEx(Math.max(0, Number(event.target.value || 0)))}
-                />
-              </label>
-            </div>
+      <ExtrasModal
+        open={extrasModalOpen}
+        appliesTo={extrasDraftApplies as any}
+        rows={extrasDraftRows as any}
+        canDelete={hasExtrasBlock(current, activeVariantId)}
+        onChangeAppliesTo={(value) => setExtrasDraftApplies(value as any)}
+        onChangeRows={(rows) => setExtrasDraftRows(rows as any)}
+        onAddRow={() =>
+          setExtrasDraftRows((prev) => [
+            ...prev,
+            { id: createId(), label: "", qty: 1, unitPriceEx: 0, unitCostEx: 0, isFree: false, thresholdAmountEx: 0 }
+          ])
+        }
+        onDelete={() => {
+          updateCurrent((draft) => {
+            const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+            const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+            if (!activeId) return;
 
-            <div className="confirm-modal-actions">
-              {hasTransportBlock(current, activeVariantId) ? (
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={() => {
-                    updateCurrent((draft) => {
-                      const list = Array.isArray((draft as any).variants)
-                        ? (((draft as any).variants as unknown[]) as QuoteVariant[])
-                        : [];
-                      const activeId =
-                        String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
-                      if (!activeId) return;
+            const blocksByVariant =
+              typeof (draft as any).builder_blocks_by_variant === "object" && (draft as any).builder_blocks_by_variant !== null
+                ? { ...(draft as any).builder_blocks_by_variant }
+                : {};
+            const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId]) ? (blocksByVariant[activeId] as QuoteBuilderBlock[]) : [];
+            blocksByVariant[activeId] = existingBlocks.filter((b) => String((b as any).type) !== "extras");
+            (draft as any).builder_blocks_by_variant = blocksByVariant;
+          });
+          setExtrasModalOpen(false);
+        }}
+        onCancel={() => setExtrasModalOpen(false)}
+        onSave={() => {
+          updateCurrent((draft) => {
+            const list = Array.isArray((draft as any).variants) ? (((draft as any).variants as unknown[]) as QuoteVariant[]) : [];
+            const activeId = String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
+            if (!activeId) return;
 
-                      const blocksByVariant =
-                        typeof (draft as any).builder_blocks_by_variant === "object" &&
-                        (draft as any).builder_blocks_by_variant !== null
-                          ? { ...(draft as any).builder_blocks_by_variant }
-                          : {};
-                      const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
-                        ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
-                        : [];
-                      blocksByVariant[activeId] = existingBlocks.filter((b) => String((b as any).type) !== "transport");
-                      (draft as any).builder_blocks_by_variant = blocksByVariant;
-                    });
-                    setTransportModalOpen(false);
-                  }}
-                >
-                  Verwijderen
-                </button>
-              ) : (
-                <span />
-              )}
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => setTransportModalOpen(false)}
-              >
-                Annuleren
-              </button>
-              <button
-                type="button"
-                className="editor-button"
-                disabled={
-                  !String(transportDraftPostcode || "").trim() ||
-                  transportDraftDistanceKm <= 0 ||
-                  transportDraftDeliveries <= 0 ||
-                  transportDraftRateEx <= 0
-                }
-                onClick={() => {
-                  updateCurrent((draft) => {
-                    const list = Array.isArray((draft as any).variants)
-                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
-                      : [];
-                    const activeId =
-                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
-                    if (!activeId) return;
+            const blocksByVariant =
+              typeof (draft as any).builder_blocks_by_variant === "object" && (draft as any).builder_blocks_by_variant !== null
+                ? { ...(draft as any).builder_blocks_by_variant }
+                : {};
+            const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId]) ? (blocksByVariant[activeId] as QuoteBuilderBlock[]) : [];
 
-                    const blocksByVariant =
-                      typeof (draft as any).builder_blocks_by_variant === "object" &&
-                      (draft as any).builder_blocks_by_variant !== null
-                        ? { ...(draft as any).builder_blocks_by_variant }
-                        : {};
-                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
-                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
-                      : [];
+            const cleanedDraft = extrasDraftRows
+              .map((row) => ({
+                ...row,
+                label: normalizeText(row.label),
+                qty: Math.max(0, Math.floor(toNumber(row.qty, 0))),
+                unitPriceEx: Math.max(0, toNumber(row.unitPriceEx, 0)),
+                unitCostEx: Math.max(0, toNumber(row.unitCostEx, 0)),
+                thresholdAmountEx: Math.max(0, toNumber(row.thresholdAmountEx, 0)),
+                isFree: Boolean(row.isFree)
+              }))
+              .filter((row) => row.qty > 0 && (row.label || row.unitPriceEx > 0 || row.unitCostEx > 0 || row.isFree));
 
-                    const nextBlocks: QuoteBuilderBlock[] = [
-                      ...existingBlocks.filter((b) => String((b as any).type) !== "transport"),
-                      {
-                        id: `${activeId}:transport`,
-                        type: "transport",
-                        applies_to_periods: transportDraftApplies,
-                        postcode: String(transportDraftPostcode || "").trim(),
-                        distance_km: Math.max(0, toNumber(transportDraftDistanceKm, 0)),
-                        km_threshold: Math.max(0, toNumber(transportDraftKmThreshold, 40)),
-                        threshold_amount_ex: Math.max(0, toNumber(transportDraftThresholdEx, 0)),
-                        deliveries: Math.max(1, Math.floor(toNumber(transportDraftDeliveries, 1))),
-                        rate_ex: Math.max(0, toNumber(transportDraftRateEx, 0))
-                      }
-                    ];
-                    blocksByVariant[activeId] = nextBlocks;
-                    (draft as any).builder_blocks_by_variant = blocksByVariant;
-
-                    const ctx = ((draft as any).builder_context as QuoteBuilderContext | undefined) ?? {
-                      postcode: "",
-                      distance_km: 0,
-                      transport_threshold_ex: 0
-                    };
-                    (draft as any).builder_context = {
-                      ...ctx,
-                      postcode: String(transportDraftPostcode || "").trim(),
-                      distance_km: Math.max(0, toNumber(transportDraftDistanceKm, 0)),
-                      transport_threshold_ex: Math.max(0, toNumber(transportDraftThresholdEx, 0)),
-                      transport_km_threshold: Math.max(0, toNumber(transportDraftKmThreshold, 40)),
-                      transport_rate_ex: Math.max(0, toNumber(transportDraftRateEx, 0)),
-                      transport_deliveries: Math.max(1, Math.floor(toNumber(transportDraftDeliveries, 1)))
-                    };
-                  });
-                  setTransportModalOpen(false);
-                }}
-              >
-                Opslaan
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {extrasModalOpen ? (
-        <div className="confirm-modal-overlay" role="presentation">
-          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="extras-modal-title">
-            <div className="confirm-modal-title" id="extras-modal-title">
-              Extra&apos;s (diensten) instellen
-            </div>
-            <div className="confirm-modal-text">
-              Extra&apos;s zijn diensten (bijv. proeverij, tapverhuur). BTW is altijd 21% voor de factuur; de berekening
-              hier blijft exclusief BTW. Je kunt extra&apos;s gratis maken of conditioneel laten worden op basis van een
-              omzetdrempel (ex).
-            </div>
-
-            <div className="wizard-form-grid" style={{ marginTop: "0.75rem" }}>
-              <label className="nested-field">
-                <span>Toepassen op</span>
-                <select
-                  className="dataset-input"
-                  value={extrasDraftApplies}
-                  onChange={(event) =>
-                    setExtrasDraftApplies(event.target.value as NonNullable<QuoteBuilderBlock["applies_to_periods"]>)
-                  }
-                >
-                  <option value="intro">Introductie (periode 1)</option>
-                  <option value="standard">Standaard (periode 2)</option>
-                  <option value="both">Beide periodes</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
-              <table className="dataset-editor-table wizard-table-compact">
-                <thead>
-                  <tr>
-                    <th>Omschrijving</th>
-                    <th>Aantal</th>
-                    <th>Verkoopprijs (ex)</th>
-                    <th>Kosten (ex)</th>
-                    <th>Gratis</th>
-                    <th>Omzetdrempel (ex)</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {extrasDraftRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <input
-                          className="dataset-input"
-                          value={row.label}
-                          onChange={(event) =>
-                            setExtrasDraftRows((prev) =>
-                              prev.map((item) => (item.id === row.id ? { ...item, label: event.target.value } : item))
-                            )
-                          }
-                          placeholder="Bijv. Proeverij"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          min={0}
-                          step="1"
-                          value={String(row.qty)}
-                          onChange={(event) =>
-                            setExtrasDraftRows((prev) =>
-                              prev.map((item) =>
-                                item.id === row.id
-                                  ? { ...item, qty: Math.max(0, Math.floor(Number(event.target.value || 0))) }
-                                  : item
-                              )
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step="0.01"
-                          value={String(row.unitPriceEx)}
-                          onChange={(event) =>
-                            setExtrasDraftRows((prev) =>
-                              prev.map((item) =>
-                                item.id === row.id
-                                  ? { ...item, unitPriceEx: Math.max(0, Number(event.target.value || 0)) }
-                                  : item
-                              )
-                            )
-                          }
-                          disabled={row.isFree}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step="0.01"
-                          value={String(row.unitCostEx)}
-                          onChange={(event) =>
-                            setExtrasDraftRows((prev) =>
-                              prev.map((item) =>
-                                item.id === row.id
-                                  ? { ...item, unitCostEx: Math.max(0, Number(event.target.value || 0)) }
-                                  : item
-                              )
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={row.isFree}
-                          onChange={(event) =>
-                            setExtrasDraftRows((prev) =>
-                              prev.map((item) =>
-                                item.id === row.id
-                                  ? {
-                                      ...item,
-                                      isFree: event.target.checked,
-                                      unitPriceEx: event.target.checked ? 0 : item.unitPriceEx
-                                    }
-                                  : item
-                              )
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step="0.01"
-                          value={String(row.thresholdAmountEx)}
-                          onChange={(event) =>
-                            setExtrasDraftRows((prev) =>
-                              prev.map((item) =>
-                                item.id === row.id
-                                  ? { ...item, thresholdAmountEx: Math.max(0, Number(event.target.value || 0)) }
-                                  : item
-                              )
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="icon-button-table"
-                          aria-label="Verwijderen"
-                          title="Verwijderen"
-                          onClick={() => setExtrasDraftRows((prev) => prev.filter((item) => item.id !== row.id))}
-                        >
-                          <TrashIcon />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {extrasDraftRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="prijs-empty-cell">
-                        Nog geen extra&apos;s toegevoegd.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
-              <div className="editor-actions-group">
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={() =>
-                    setExtrasDraftRows((prev) => [
-                      ...prev,
-                      {
-                        id: createId(),
-                        label: "",
-                        qty: 1,
-                        unitPriceEx: 0,
-                        unitCostEx: 0,
-                        isFree: false,
-                        thresholdAmountEx: 0
-                      }
-                    ])
-                  }
-                >
-                  Extra toevoegen
-                </button>
-              </div>
-              <div className="editor-actions-group" />
-            </div>
-
-            <div className="confirm-modal-actions">
-              {hasExtrasBlock(current, activeVariantId) ? (
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={() => {
-                    updateCurrent((draft) => {
-                      const list = Array.isArray((draft as any).variants)
-                        ? (((draft as any).variants as unknown[]) as QuoteVariant[])
-                        : [];
-                      const activeId =
-                        String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
-                      if (!activeId) return;
-
-                      const blocksByVariant =
-                        typeof (draft as any).builder_blocks_by_variant === "object" &&
-                        (draft as any).builder_blocks_by_variant !== null
-                          ? { ...(draft as any).builder_blocks_by_variant }
-                          : {};
-                      const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
-                        ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
-                        : [];
-                      blocksByVariant[activeId] = existingBlocks.filter((b) => String((b as any).type) !== "extras");
-                      (draft as any).builder_blocks_by_variant = blocksByVariant;
-                    });
-                    setExtrasModalOpen(false);
-                  }}
-                >
-                  Verwijderen
-                </button>
-              ) : (
-                <span />
-              )}
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => setExtrasModalOpen(false)}
-              >
-                Annuleren
-              </button>
-              <button
-                type="button"
-                className="editor-button"
-                onClick={() => {
-                  updateCurrent((draft) => {
-                    const list = Array.isArray((draft as any).variants)
-                      ? (((draft as any).variants as unknown[]) as QuoteVariant[])
-                      : [];
-                    const activeId =
-                      String((draft as any).active_variant_id ?? "").trim() || String(list[0]?.id ?? "");
-                    if (!activeId) return;
-
-                    const blocksByVariant =
-                      typeof (draft as any).builder_blocks_by_variant === "object" &&
-                      (draft as any).builder_blocks_by_variant !== null
-                        ? { ...(draft as any).builder_blocks_by_variant }
-                        : {};
-                    const existingBlocks: QuoteBuilderBlock[] = Array.isArray(blocksByVariant[activeId])
-                      ? (blocksByVariant[activeId] as QuoteBuilderBlock[])
-                      : [];
-
-                    const cleanedDraft = extrasDraftRows
-                      .map((row) => ({
-                        ...row,
-                        label: normalizeText(row.label),
-                        qty: Math.max(0, Math.floor(toNumber(row.qty, 0))),
-                        unitPriceEx: Math.max(0, toNumber(row.unitPriceEx, 0)),
-                        unitCostEx: Math.max(0, toNumber(row.unitCostEx, 0)),
-                        thresholdAmountEx: Math.max(0, toNumber(row.thresholdAmountEx, 0)),
-                        isFree: Boolean(row.isFree)
-                      }))
-                      .filter((row) => row.qty > 0 && (row.label || row.unitPriceEx > 0 || row.unitCostEx > 0 || row.isFree));
-
-                    const nextBlocks: QuoteBuilderBlock[] = [
-                      ...existingBlocks.filter((b) => String((b as any).type) !== "extras"),
-                      ...cleanedDraft.map((row) => ({
-                        id: `${activeId}:extras:${row.id}`,
-                        type: "extras" as const,
-                        applies_to_periods: extrasDraftApplies,
-                        extra_label: row.label || "Extra",
-                        extra_qty: row.qty,
-                        extra_unit_price_ex: row.unitPriceEx,
-                        extra_unit_cost_ex: row.unitCostEx,
-                        extra_is_free: row.isFree,
-                        extra_threshold_amount_ex: row.thresholdAmountEx
-                      }))
-                    ];
-                    blocksByVariant[activeId] = nextBlocks;
-                    (draft as any).builder_blocks_by_variant = blocksByVariant;
-                  });
-                  setExtrasModalOpen(false);
-                }}
-              >
-                Opslaan
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            const nextBlocks: QuoteBuilderBlock[] = [
+              ...existingBlocks.filter((b) => String((b as any).type) !== "extras"),
+              ...cleanedDraft.map((row) => ({
+                id: `${activeId}:extras:${row.id}`,
+                type: "extras" as const,
+                applies_to_periods: extrasDraftApplies,
+                extra_label: row.label || "Extra",
+                extra_qty: row.qty,
+                extra_unit_price_ex: row.unitPriceEx,
+                extra_unit_cost_ex: row.unitCostEx,
+                extra_is_free: row.isFree,
+                extra_threshold_amount_ex: row.thresholdAmountEx
+              }))
+            ];
+            blocksByVariant[activeId] = nextBlocks;
+            (draft as any).builder_blocks_by_variant = blocksByVariant;
+          });
+          setExtrasModalOpen(false);
+        }}
+      />
 
       {pendingDelete ? (
         <div className="confirm-modal-overlay" role="presentation">
