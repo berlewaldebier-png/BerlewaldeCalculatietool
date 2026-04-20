@@ -1172,34 +1172,6 @@ export function PrijsvoorstelWizard({
     [channelOptionMap, effectiveSelectedKanaalValues]
   );
 
-  const staffelProductOptions = useMemo(() => {
-    const options: Array<{ value: string; label: string; productId: string; productType: "basis" | "samengesteld" }> = [];
-
-    for (const row of pickLatestKnownProductRows(basisproducten, currentYear)) {
-      const id = String(row.id ?? "");
-      if (!id) continue;
-      options.push({
-        value: `basis|${id}`,
-        label: String(row.omschrijving ?? id),
-        productId: id,
-        productType: "basis"
-      });
-    }
-    for (const row of pickLatestKnownProductRows(samengesteldeProducten, currentYear)) {
-      const id = String(row.id ?? "");
-      if (!id) continue;
-      options.push({
-        value: `samengesteld|${id}`,
-        label: String(row.omschrijving ?? id),
-        productId: id,
-        productType: "samengesteld"
-      });
-    }
-
-    options.sort((a, b) => a.label.localeCompare(b.label, "nl"));
-    return options;
-  }, [basisproducten, currentYear, samengesteldeProducten]);
-
   const productDefinitionMap = useMemo(() => {
     const map = new Map<string, ProductDefinition>();
     for (const row of pickLatestKnownProductRows(basisproducten, currentYear)) {
@@ -2298,12 +2270,16 @@ export function PrijsvoorstelWizard({
       const offerPrijs = pricing?.offerPrice ?? 0;
 
       const kortingPct = toNumber((row as any).korting_pct, 0);
+      const feeEx = toNumber((row as any).fee_ex, 0);
+      const retourPct = toNumber((row as any).retour_pct, 0);
       const aantal = toNumber((row as any).aantal, 0);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
         qty: aantal,
-        kortingPct
+        kortingPct,
+        feeExPerUnit: feeEx,
+        retourPct
       });
 
       return [
@@ -2320,6 +2296,8 @@ export function PrijsvoorstelWizard({
           aantal,
           kortingPct,
           litersPerProduct: snapshot.litersPerProduct,
+          feeEx,
+          retourPct,
           kostprijsPerStuk,
           offerPrijs,
           sellInPrijs: pricing?.sellInPrice ?? 0,
@@ -2328,6 +2306,8 @@ export function PrijsvoorstelWizard({
           omzet: totals.omzet,
           kosten: totals.kosten,
           kortingEur: totals.kortingEur,
+          feeEur: (totals as any).feeEur ?? 0,
+          retourEur: (totals as any).retourEur ?? 0,
           margeEur: totals.winst,
           margePct: totals.margePct
         } as ProductDisplayRow
@@ -2354,12 +2334,16 @@ export function PrijsvoorstelWizard({
       const pricing = pricingByChannel[channelCode] ?? pricingByChannel[currentKanaal] ?? pricingByChannel[selectedChannelOptions[0]?.value ?? currentKanaal];
       const offerPrijs = pricing?.offerPrice ?? 0;
       const kortingPct = toNumber((row as any).korting_pct, 0);
+      const feeEx = toNumber((row as any).fee_ex, 0);
+      const retourPct = toNumber((row as any).retour_pct, 0);
       const aantal = toNumber((row as any).aantal, 0);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
         qty: aantal,
-        kortingPct
+        kortingPct,
+        feeExPerUnit: feeEx,
+        retourPct
       });
       return {
         id: String((row as any).id ?? ""),
@@ -2374,6 +2358,8 @@ export function PrijsvoorstelWizard({
         aantal,
         kortingPct,
         litersPerProduct: 0,
+        feeEx,
+        retourPct,
         kostprijsPerStuk,
         offerPrijs,
         sellInPrijs: pricing?.sellInPrice ?? 0,
@@ -2382,6 +2368,8 @@ export function PrijsvoorstelWizard({
         omzet: totals.omzet,
         kosten: totals.kosten,
         kortingEur: totals.kortingEur,
+        feeEur: (totals as any).feeEur ?? 0,
+        retourEur: (totals as any).retourEur ?? 0,
         margeEur: totals.winst,
         margePct: totals.margePct
       };
