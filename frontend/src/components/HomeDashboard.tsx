@@ -31,7 +31,7 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
   const preferredOrder = [
     "/",
     "/nieuwe-kostprijsberekening",
-    "/prijsvoorstel",
+    "/offerte-samenstellen",
     "/productie",
     "/vaste-kosten",
     "/tarieven-heffingen",
@@ -52,6 +52,12 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
 
   const overviewItem = { label: "Overzicht", href: "/", active: true };
   const byHref = new Map(normalized.map((item) => [item.href, item]));
+
+  // CPQ entry is owned by the frontend. The backend navigation list may not contain it yet.
+  // We inject it explicitly so it always shows in the dashboard sidebar.
+  if (!byHref.has("/offerte-samenstellen")) {
+    byHref.set("/offerte-samenstellen", { label: "Prijsvoorstel maken", href: "/offerte-samenstellen" });
+  }
 
   const result: DashboardNavItem[] = [];
 
@@ -90,14 +96,14 @@ function buildAlertCards(summary: DashboardSummary): AlertCard[] {
     {
       title: "Concept prijsvoorstellen",
       value: String(summary.concept_prijsvoorstellen).padStart(2, "0"),
-      description: "Voorstellen die nog aandacht nodig hebben",
-      href: "/prijsvoorstel?mode=select-existing&filter=concept"
+      description: "Offertes in opbouw in de nieuwe CPQ builder",
+      href: "/offerte-samenstellen"
     },
     {
       title: "Definitieve prijsvoorstellen",
       value: String(summary.definitieve_prijsvoorstellen),
-      description: "Afgeronde voorstellen in deze omgeving",
-      href: "/prijsvoorstel?mode=select-existing&filter=definitief"
+      description: "Opgeslagen offertes en scenario's",
+      href: "/offerte-samenstellen"
     },
     {
       title: "Klaar om te activeren",
@@ -240,10 +246,10 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                   </div>
                 </Link>
 
-                <Link href="/prijsvoorstel" className="dashboard-quick-card">
-                  <div className="dashboard-quick-card-title">Nieuw prijsvoorstel</div>
+                <Link href="/offerte-samenstellen" className="dashboard-quick-card">
+                  <div className="dashboard-quick-card-title">Prijsvoorstel maken</div>
                   <div className="dashboard-quick-card-text">
-                    Werk een voorstel uit op basis van producten, liters en kanaalkeuzes.
+                    Maak een nieuw prijsvoorstel in de CPQ builder (scenario's en prijsblokken).
                   </div>
                 </Link>
 
@@ -267,7 +273,7 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
               </div>
 
               <Link
-                href={"/prijsvoorstel?mode=select-existing&filter=concept&focus=aflopend" as Route}
+                href={"/offerte-samenstellen" as Route}
                 className="dashboard-attention-list"
               >
                 <div className="dashboard-attention-item">

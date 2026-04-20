@@ -1,0 +1,2000 @@
+"use client";
+
+import React, { useMemo, useState } from "react";
+
+import {
+  applyDiscountPct,
+  calcOfferLineTotals,
+  calcOfferLineTotalsWithGratis,
+  calcSellInExFromOpslagPct,
+  computeGratisFreeByRefFromPaidRows,
+} from "@/lib/pricingEngine";
+
+type GenericRecord = Record<string, unknown>;
+
+type StepKey = "basis" | "builder" | "vergelijk" | "afronden";
+type UnitMode = "producten" | "liters";
+type VatMode = "incl" | "excl";
+type ScenarioId = "A" | "B" | "C";
+
+type QuoteChannel = "Horeca" | "Retail" | "Events";
+
+type QuoteProduct = {
+  id: string;
+  name: string;
+  pack: string;
+  qty: number;
+  litersPerUnit: number;
+  unit: "fust" | "doos" | "fles";
+  standardPriceEx: number;
+  costPriceEx: number;
+  vatRatePct: number;
+  source?: {
+    bier_id?: string;
+    product_id?: string;
+    kostprijsversie_id?: string;
+  };
+};
+
+type OptionType =
+  | "Intro"
+  | "Staffel"
+  | "Mix"
+  | "Korting"
+  | "Transport"
+  | "Retour"
+  | "Proeverij"
+  | "Tapverhuur";
+
+type ToolbarGroup = { title: string; items: Array<{ icon: React.ReactNode; label: OptionType }> };
+
+type BuilderBlock = {
+  id: string;
+  type: OptionType;
+  title: string;
+  subtitle: string;
+  lines: string[];
+  tone: string;
+  icon: React.ReactNode;
+  impact?: string;
+  appliesTo?: "intro" | "standard" | "global";
+  // Minimal payload for v1 calculations. Kept explicit to avoid hidden magic.
+  payload?: Record<string, unknown>;
+};
+
+type Scenario = {
+  id: ScenarioId;
+  name: string;
+  // Products are the base quote lines for this scenario.
+  products: QuoteProduct[];
+  // Blocks represent pricing rules/services for this scenario.
+  blocks: BuilderBlock[];
+  note?: string;
+  intro?: { start: string; end: string } | null;
+};
+
+type BasisData = {
+  klantNaam: string;
+  contactpersoon: string;
+  kanaal: QuoteChannel;
+  offerteNaam: string;
+  geldigTot: string;
+  opmerking: string;
+};
+
+type Props = {
+  year: number;
+  channels: GenericRecord[];
+  bieren: GenericRecord[];
+  kostprijsversies: GenericRecord[];
+  kostprijsproductactiveringen: GenericRecord[];
+  verkoopprijzen: GenericRecord[];
+  basisproducten: GenericRecord[];
+  samengesteldeProducten: GenericRecord[];
+  catalogusproducten: GenericRecord[];
+  verpakkingsonderdelen: GenericRecord[];
+  verpakkingsonderdeelPrijzen: GenericRecord[];
+  initialMode?: string;
+};
+
+const tones: Record<OptionType, string> = {
+  Intro: "cpq-tone-intro",
+  Staffel: "cpq-tone-staffel",
+  Mix: "cpq-tone-mix",
+  Korting: "cpq-tone-korting",
+  Transport: "cpq-tone-transport",
+  Retour: "cpq-tone-retour",
+  Proeverij: "cpq-tone-proeverij",
+  Tapverhuur: "cpq-tone-tap",
+};
+
+const icons: Record<OptionType, React.ReactNode> = {
+  Intro: <IconClock />,
+  Staffel: <IconChart />,
+  Mix: <IconShuffle />,
+  Korting: <IconTag />,
+  Transport: <IconTruck />,
+  Retour: <IconReturn />,
+  Proeverij: <IconBeer />,
+  Tapverhuur: <IconTent />,
+};
+
+const toolbarGroups: ToolbarGroup[] = [
+  {
+    title: "Pricing",
+    items: [
+      { icon: icons.Intro, label: "Intro" },
+      { icon: icons.Staffel, label: "Staffel" },
+      { icon: icons.Mix, label: "Mix" },
+      { icon: icons.Korting, label: "Korting" },
+    ],
+  },
+  {
+    title: "Logistiek",
+    items: [
+      { icon: icons.Transport, label: "Transport" },
+      { icon: icons.Retour, label: "Retour" },
+    ],
+  },
+  {
+    title: "Extra's",
+    items: [
+      { icon: icons.Proeverij, label: "Proeverij" },
+      { icon: icons.Tapverhuur, label: "Tapverhuur" },
+    ],
+  },
+];
+
+function euro(value: number) {
+  return new Intl.NumberFormat("nl-NL", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function clampNumber(value: unknown, fallback: number) {
+  const num = typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function channelToStrategyKey(channel: QuoteChannel): string | null {
+  // This mapping is explicit. If a channel has no strategy key, we do not guess.
+  if (channel === "Horeca") return "horeca";
+  if (channel === "Retail") return "retail";
+  return null; // Events not guaranteed in verkoopstrategie dataset.
+}
+
+function inferUnitFromPack(pack: string): "fust" | "doos" | "fles" {
+  const text = pack.toLowerCase();
+  if (text.includes("fust")) return "fust";
+  if (text.includes("doos")) return "doos";
+  return "fles";
+}
+
+type ProductOption = {
+  optionId: string;
+  bierId: string;
+  productId: string;
+  label: string;
+  bierName: string;
+  packLabel: string;
+  litersPerUnit: number;
+  costPriceEx: number;
+  standardPriceEx: number;
+  vatRatePct: number;
+  kostprijsversieId: string;
+};
+
+function buildProductOptions(params: {
+  year: number;
+  channel: QuoteChannel;
+  bieren: GenericRecord[];
+  kostprijsversies: GenericRecord[];
+  kostprijsproductactiveringen: GenericRecord[];
+  verkoopprijzen: GenericRecord[];
+  basisproducten: GenericRecord[];
+  samengesteldeProducten: GenericRecord[];
+}): { options: ProductOption[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const strategyKey = channelToStrategyKey(params.channel);
+  if (!strategyKey) {
+    warnings.push(
+      `Geen verkoopstrategie-prijzen bekend voor kanaal '${params.channel}'. Standaardprijzen blijven 0 tot je een ondersteund kanaal kiest.`
+    );
+  }
+
+  const bierNameById = new Map<string, string>();
+  for (const record of params.bieren) {
+    const id = normalizeText((record as any).id);
+    if (!id) continue;
+    bierNameById.set(id, normalizeText((record as any).biernaam || (record as any).naam || id));
+  }
+
+  const masterByProductId = new Map<string, { pack: string; litersPerUnit: number }>();
+  for (const record of params.basisproducten) {
+    const id = normalizeText((record as any).id);
+    if (!id) continue;
+    masterByProductId.set(id, {
+      pack: normalizeText((record as any).omschrijving || (record as any).verpakking || id),
+      litersPerUnit: clampNumber((record as any).inhoud_per_eenheid_liter, 0),
+    });
+  }
+  for (const record of params.samengesteldeProducten) {
+    const id = normalizeText((record as any).id);
+    if (!id) continue;
+    masterByProductId.set(id, {
+      pack: normalizeText((record as any).omschrijving || (record as any).verpakking || id),
+      litersPerUnit: clampNumber((record as any).inhoud_per_eenheid_liter, 0),
+    });
+  }
+
+  const versionById = new Map<string, GenericRecord>();
+  for (const record of params.kostprijsversies) {
+    const id = normalizeText((record as any).id);
+    if (id) versionById.set(id, record);
+  }
+
+  const verkoopRowsForYear = params.verkoopprijzen.filter(
+    (row) => clampNumber((row as any).jaar, 0) === params.year
+  );
+
+  const productStrategyByKey = new Map<string, GenericRecord>();
+  const packagingStrategyByProductId = new Map<string, GenericRecord>();
+  for (const row of verkoopRowsForYear) {
+    const recordType = normalizeText((row as any).record_type);
+    if (recordType === "verkoopstrategie_product") {
+      const bierId = normalizeText((row as any).bier_id);
+      const productId = normalizeText((row as any).product_id);
+      if (!bierId || !productId) continue;
+      productStrategyByKey.set(`${bierId}:${productId}`, row);
+    } else if (recordType === "verkoopstrategie_verpakking") {
+      const productId = normalizeText((row as any).product_id);
+      if (!productId) continue;
+      packagingStrategyByProductId.set(productId, row);
+    }
+  }
+
+  const activationRows = params.kostprijsproductactiveringen.filter(
+    (row) => clampNumber((row as any).jaar, 0) === params.year
+  );
+
+  const options: ProductOption[] = [];
+  const seen = new Set<string>();
+
+  for (const activation of activationRows) {
+    const bierId = normalizeText((activation as any).bier_id);
+    const productId = normalizeText((activation as any).product_id);
+    const kostprijsversieId = normalizeText((activation as any).kostprijsversie_id);
+    if (!bierId || !productId || !kostprijsversieId) continue;
+
+    const key = `${bierId}:${productId}:${kostprijsversieId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const master = masterByProductId.get(productId);
+    const packLabel = master?.pack || normalizeText((activation as any).verpakking || productId);
+    const litersPerUnit = master?.litersPerUnit ?? 0;
+
+    const version = versionById.get(kostprijsversieId);
+    const snapshot = (version as any)?.resultaat_snapshot as any;
+    const basisgegevens = (version as any)?.basisgegevens as any;
+    const btwTariefRaw = normalizeText(basisgegevens?.btw_tarief ?? "");
+    const vatRatePct = clampNumber(btwTariefRaw.replace("%", ""), 0) || 0;
+    const products = snapshot?.producten ?? {};
+    const listA = Array.isArray(products?.basisproducten) ? products.basisproducten : [];
+    const listB = Array.isArray(products?.samengestelde_producten) ? products.samengestelde_producten : [];
+    const match = [...listA, ...listB].find((row) => normalizeText(row?.product_id) === productId);
+    const costPriceEx = clampNumber(match?.kostprijs, 0);
+
+    // Verkoopstrategie semantics:
+    // - `sell_in_prices` / `kanaalprijzen`: explicit unit price override (per verpakkingseenheid).
+    // - `sell_in_margins` / `kanaalmarges`: opslag% (source of truth) used to derive sell-in price from cost.
+    // We do not guess between them; we prefer explicit price override, else derive from opslag% if present.
+    let standardPriceEx = 0;
+    if (strategyKey) {
+      const productStrategy = productStrategyByKey.get(`${bierId}:${productId}`);
+      const packagingStrategy = packagingStrategyByProductId.get(productId);
+      const priceMap =
+        ((productStrategy as any)?.sell_in_prices as Record<string, unknown>) ||
+        ((productStrategy as any)?.kanaalprijzen as Record<string, unknown>) ||
+        ((packagingStrategy as any)?.sell_in_prices as Record<string, unknown>) ||
+        ((packagingStrategy as any)?.kanaalprijzen as Record<string, unknown>) ||
+        {};
+      const opslagMap =
+        ((productStrategy as any)?.sell_in_margins as Record<string, unknown>) ||
+        ((productStrategy as any)?.kanaalmarges as Record<string, unknown>) ||
+        ((packagingStrategy as any)?.sell_in_margins as Record<string, unknown>) ||
+        ((packagingStrategy as any)?.kanaalmarges as Record<string, unknown>) ||
+        {};
+
+      const explicit = clampNumber(priceMap?.[strategyKey], 0);
+      if (explicit > 0) {
+        standardPriceEx = explicit;
+      } else {
+        const opslagPct = clampNumber(opslagMap?.[strategyKey], 0);
+        if (opslagPct > 0 && costPriceEx > 0) {
+          standardPriceEx = calcSellInExFromOpslagPct(costPriceEx, opslagPct);
+        }
+      }
+    }
+
+    const bierName = bierNameById.get(bierId) || bierId;
+    const optionId = `beer:${bierId}:product:${productId}`;
+
+    options.push({
+      optionId,
+      bierId,
+      productId,
+      label: `${bierName} · ${packLabel}`,
+      bierName,
+      packLabel,
+      litersPerUnit,
+      costPriceEx,
+      standardPriceEx,
+      vatRatePct,
+      kostprijsversieId,
+    });
+  }
+
+  options.sort((a, b) => a.label.localeCompare(b.label));
+  if (options.length === 0) {
+    warnings.push(
+      `Geen actieve kostprijsproductactiveringen gevonden voor jaar ${params.year}. Draai eerst reset+seed of activeer kostprijzen.`
+    );
+  }
+
+  if (options.length > 0 && options.every((row) => row.vatRatePct === 0)) {
+    warnings.push(
+      "BTW-tarief ontbreekt in kostprijsversies (basisgegevens.btw_tarief). BTW toggle toont dan alleen ex prijzen."
+    );
+  }
+
+  return { options, warnings };
+}
+
+type ScenarioMetrics = {
+  revenueEx: number;
+  costEx: number;
+  extraCostEx: number;
+  transportCostEx: number;
+  marginPct: number;
+  breakEvenCurrent: number | null;
+  breakEvenProjected: number | null;
+  notes: string[];
+};
+
+function calculateScenarioMetrics(scenario: Scenario, activePeriod: "standard" | "intro"): ScenarioMetrics {
+  const notes: string[] = [];
+
+  const periodBlocks = scenario.blocks.filter(
+    (b) => (b.appliesTo ?? "standard") === activePeriod || (b.appliesTo ?? "standard") === "global"
+  );
+
+  const staffelBlock = periodBlocks.find((b) => b.type === "Staffel");
+  const discountBlock = periodBlocks.find((b) => b.type === "Korting");
+  const mixBlock = periodBlocks.find((b) => b.type === "Mix");
+  const returnBlock = periodBlocks.find((b) => b.type === "Retour");
+  const introBlock = periodBlocks.find((b) => b.type === "Intro");
+
+  if (introBlock) {
+    // We capture intro config fully, but promo variants are still being expanded. Keep it explicit.
+    notes.push("Introductieperiode: berekening is beperkt tot eenvoudige korting of X+Y gratis (v1).");
+  }
+
+  const lines = scenario.products
+    .filter((p) => p.qty > 0)
+    .map((p) => {
+      const ref =
+        p.source?.bier_id && p.source?.product_id
+          ? `beer:${String(p.source.bier_id)}:product:${String(p.source.product_id)}`
+          : p.id;
+      return {
+        ref,
+        qtyPaid: Math.max(0, clampNumber(p.qty, 0)),
+        unitPriceEx: Math.max(0, clampNumber(p.standardPriceEx, 0)),
+        costPriceEx: Math.max(0, clampNumber(p.costPriceEx, 0)),
+      };
+    })
+    .filter((row) => row.ref && row.qtyPaid > 0);
+
+  if (lines.length === 0) {
+    return {
+      revenueEx: 0,
+      costEx: 0,
+      extraCostEx: 0,
+      transportCostEx: 0,
+      marginPct: 0,
+      breakEvenCurrent: null,
+      breakEvenProjected: null,
+      notes,
+    };
+  }
+
+  // 1) Determine unit prices, including staffel overrides.
+  const unitPriceByRef = new Map<string, number>();
+  for (const row of lines) unitPriceByRef.set(row.ref, row.unitPriceEx);
+
+  if (staffelBlock) {
+    const tiersRaw = Array.isArray(staffelBlock.payload?.tiers) ? (staffelBlock.payload?.tiers as any[]) : [];
+    const eligible = new Set<string>(Array.isArray(staffelBlock.payload?.eligibleRefs) ? (staffelBlock.payload?.eligibleRefs as any[]).map(String) : []);
+    if (tiersRaw.length === 0 || eligible.size === 0) {
+      notes.push("Staffel is actief maar mist tiers/productselectie (v1).");
+    } else {
+      for (const row of lines) {
+        if (!eligible.has(row.ref)) continue;
+        const qty = row.qtyPaid;
+        const tier = tiersRaw.find((t) => {
+          const from = clampNumber(t?.from, 0);
+          const to = t?.to === null || t?.to === undefined || String(t?.to).trim() === "" ? Number.POSITIVE_INFINITY : clampNumber(t?.to, Number.POSITIVE_INFINITY);
+          return qty >= from && qty <= to;
+        });
+        const nextPrice = tier ? clampNumber((tier as any).priceEx, 0) : 0;
+        if (nextPrice > 0) {
+          unitPriceByRef.set(row.ref, nextPrice);
+        }
+      }
+    }
+  }
+
+  // 2) Apply % discount (exclusive with staffel/mix in same context by guardrails).
+  const discountPct = discountBlock ? clampNumber(discountBlock.payload?.discountPct, 0) : 0;
+  const hasStaffel = Boolean(staffelBlock);
+  const hasMix = Boolean(mixBlock);
+  if (discountPct > 0 && (hasStaffel || hasMix)) {
+    notes.push("Korting is genegeerd: korting is niet combineerbaar met staffel/mix in dezelfde periode.");
+  } else if (discountPct > 0) {
+    for (const row of lines) {
+      const current = unitPriceByRef.get(row.ref) ?? row.unitPriceEx;
+      unitPriceByRef.set(row.ref, applyDiscountPct(current, discountPct));
+    }
+  }
+
+  // 3) Mix/X+Y gratis (implemented as cheapest-free allocation across eligible refs).
+  let freeByRef = new Map<string, number>();
+  if (mixBlock) {
+    const requiredQty = clampNumber(mixBlock.payload?.requiredQty, 0);
+    const freeQty = clampNumber(mixBlock.payload?.freeQty, 0);
+    const eligibleRefs = Array.isArray(mixBlock.payload?.eligibleRefs) ? (mixBlock.payload?.eligibleRefs as any[]).map(String) : [];
+    if (requiredQty <= 0 || freeQty <= 0) {
+      notes.push("Mix deal mist geldige X+Y configuratie (v1).");
+    } else {
+      const rows = lines.map((row) => ({
+        included: eligibleRefs.length === 0 ? true : eligibleRefs.includes(row.ref),
+        ref: row.ref,
+        qtyPaid: row.qtyPaid,
+        unitPriceEx: unitPriceByRef.get(row.ref) ?? row.unitPriceEx,
+      }));
+      const { freeByRef: computed } = computeGratisFreeByRefFromPaidRows({
+        rows,
+        requiredQty,
+        freeQty,
+        eligibleRefs,
+      });
+      freeByRef = computed;
+    }
+  }
+
+  // 4) Compute offer totals for product lines.
+  let revenueEx = 0;
+  let costEx = 0;
+  for (const row of lines) {
+    const unitPriceEx = unitPriceByRef.get(row.ref) ?? row.unitPriceEx;
+    const freeQty = freeByRef.get(row.ref) ?? 0;
+    if (freeQty > 0) {
+      const totals = calcOfferLineTotalsWithGratis({
+        kostprijsEx: row.costPriceEx,
+        offerPriceEx: unitPriceEx,
+        qty: row.qtyPaid,
+        freeQty,
+      });
+      revenueEx += totals.omzet;
+      costEx += totals.kosten;
+      continue;
+    }
+    const totals = calcOfferLineTotals({
+      kostprijsEx: row.costPriceEx,
+      offerPriceEx: unitPriceEx,
+      qty: row.qtyPaid,
+      kortingPct: 0,
+      feeExPerUnit: 0,
+      retourPct: 0,
+    });
+    revenueEx += totals.omzet;
+    costEx += totals.kosten;
+  }
+
+  // 5) Return/consignation (v1 conservative: reduce revenue only).
+  const returnPct = returnBlock ? clampNumber(returnBlock.payload?.returnPct, 0) : 0;
+  if (returnPct > 0) {
+    const retourEur = revenueEx * Math.max(0, Math.min(100, returnPct)) / 100;
+    revenueEx = Math.max(0, revenueEx - retourEur);
+    notes.push("Retour-effect is conservatief: omzet wordt verlaagd, kosten blijven gelijk (v1).");
+  }
+
+  // 6) Transport and extras.
+  let extraCostEx = 0;
+  let transportCostEx = 0;
+  for (const block of periodBlocks) {
+    if (block.type === "Transport") {
+      const charged = Boolean(block.payload?.chargedToCustomer ?? false);
+      const amount = clampNumber(block.payload?.amountEx, 0);
+      if (amount <= 0) continue;
+      if (charged) revenueEx += amount;
+      else transportCostEx += amount;
+      continue;
+    }
+
+    if (block.type === "Proeverij" || block.type === "Tapverhuur") {
+      const priceEx = clampNumber(block.payload?.priceEx, 0);
+      const costLocal = clampNumber(block.payload?.costEx, 0);
+      const isFree = Boolean(block.payload?.isFree ?? false);
+      if (!isFree) revenueEx += priceEx;
+      extraCostEx += costLocal;
+      continue;
+    }
+  }
+
+  costEx += extraCostEx + transportCostEx;
+  const marginPct = revenueEx > 0 ? ((revenueEx - costEx) / revenueEx) * 100 : 0;
+
+  return {
+    revenueEx: Math.max(0, revenueEx),
+    costEx: Math.max(0, costEx),
+    extraCostEx,
+    transportCostEx,
+    marginPct,
+    breakEvenCurrent: null,
+    breakEvenProjected: null,
+    notes,
+  };
+}
+
+function buildBlock(type: OptionType, form: any, activePeriod: "intro" | "standard"): BuilderBlock {
+  // v1: capture configuration explicitly; keep calculations conservative/placeholder unless unambiguous.
+  switch (type) {
+    case "Intro":
+      return {
+        id: `intro-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: "Introductieperiode",
+        subtitle: `${normalizeText(form.introStart)} t/m ${normalizeText(form.introEnd)}`,
+        lines: [
+          `Producten: ${normalizeText(form.introProducts) || "—"}`,
+          `Promotie: ${normalizeText(form.introAction) || "—"}`,
+        ],
+        tone: tones[type],
+        impact: "Na introductie valt de offerte automatisch terug op de standaardperiode.",
+        appliesTo: "intro",
+        payload: {
+          start: normalizeText(form.introStart),
+          end: normalizeText(form.introEnd),
+          products: normalizeText(form.introProducts),
+          promoType: normalizeText(form.introPromoType),
+          action: normalizeText(form.introAction),
+          value: normalizeText(form.introValue),
+        },
+      };
+    case "Staffel":
+      return {
+        id: `staffel-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: `Staffel — ${normalizeText(form.staffelProduct) || "Product"}`,
+        subtitle: "Actief voor standaardperiode",
+        lines: Array.isArray(form.staffelRows)
+          ? form.staffelRows.map((row: any) => `${row.from}–${row.to} → € ${row.price}`)
+          : [],
+        tone: tones[type],
+        appliesTo: "standard",
+        payload: {
+          productLabel: normalizeText(form.staffelProduct),
+          eligibleRefs: Array.isArray(form.staffelEligibleRefs) ? form.staffelEligibleRefs.map(String) : [],
+          tiers: Array.isArray(form.staffelRows)
+            ? form.staffelRows
+                .map((row: any) => {
+                  const from = clampNumber(row?.from, 0);
+                  const toRaw = normalizeText(row?.to ?? "");
+                  const to =
+                    !toRaw || toRaw === "∞" || toRaw.toLowerCase() === "inf" ? null : clampNumber(toRaw, 0);
+                  const priceEx = clampNumber(normalizeText(row?.price ?? "").replace(",", "."), 0);
+                  return { from, to, priceEx };
+                })
+                .filter((t: any) => Number.isFinite(t.from) && t.priceEx > 0)
+            : [],
+        },
+      };
+    case "Mix":
+      return {
+        id: `mix-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: "Mix deal",
+        subtitle: "Assortimentsdeal",
+        lines: [
+          `Voorwaarde: ${normalizeText(form.mixCondition) || "—"}`,
+          `Structuur: ${normalizeText(form.mixStructure) || "—"}`,
+        ],
+        tone: tones[type],
+        appliesTo: activePeriod,
+        payload: {
+          condition: normalizeText(form.mixCondition),
+          structure: normalizeText(form.mixStructure),
+          requiredQty: clampNumber(String(form.mixStructure ?? "").split("+")[0], 0),
+          freeQty: clampNumber(String(form.mixStructure ?? "").split("+")[1], 0),
+          eligibleRefs: Array.isArray(form.mixEligibleRefs) ? form.mixEligibleRefs.map(String) : [],
+        },
+      };
+    case "Korting":
+      return {
+        id: `korting-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: "Korting",
+        subtitle: `${normalizeText(form.discountMode) || "Totaal"} korting`,
+        lines: [`${normalizeText(form.discountValue) || "0"}% korting op verkoopprijs`],
+        tone: tones[type],
+        appliesTo: activePeriod,
+        payload: {
+          discountMode: normalizeText(form.discountMode || "Totaal"),
+          discountPct: clampNumber(form.discountValue, 0),
+        },
+      };
+    case "Transport": {
+      const distance = clampNumber(form.transportDistanceKm, 0);
+      const rate = clampNumber(form.transportRateEx, 0);
+      const deliveries = Math.max(1, Math.floor(clampNumber(form.transportDeliveries, 1)));
+      const thresholdKm = clampNumber(form.transportThresholdKm, 40);
+      const amountEx = distance > thresholdKm ? distance * 2 * rate * deliveries : 0;
+      const chargedToCustomer = Boolean(form.transportChargedToCustomer ?? false);
+      return {
+        id: `transport-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: "Transport",
+        subtitle: "Verzending vanaf brouwerij",
+        lines: [
+          `${distance} km enkele rit`,
+          `${distance * 2} km retour`,
+          `${deliveries} levering(en)`,
+          `${euro(rate)} per km → ${euro(amountEx)}`,
+          chargedToCustomer ? "Extern doorbelast" : "Intern (marge-impact)",
+        ],
+        tone: tones[type],
+        appliesTo: "global",
+        payload: {
+          distanceKm: distance,
+          rateEx: rate,
+          deliveries,
+          thresholdKm,
+          amountEx,
+          chargedToCustomer,
+        },
+      };
+    }
+    case "Retour": {
+      const pct = clampNumber(form.returnPct, 0);
+      return {
+        id: `retour-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: "Retour / consignatie",
+        subtitle: "Verwachte retouren",
+        lines: [`${pct}% retour verwacht (v1: conservatieve impact)`],
+        tone: tones[type],
+        appliesTo: "global",
+        payload: {
+          returnPct: pct,
+        },
+      };
+    }
+    case "Proeverij": {
+      const costEx = clampNumber(form.tastingCostEx, 0);
+      const isFree = Boolean(form.tastingIsFree ?? true);
+      const priceEx = clampNumber(form.tastingPriceEx, 0);
+      return {
+        id: `proeverij-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: "Proeverij",
+        subtitle: "Extra service",
+        lines: [normalizeText(form.tastingCondition) || "Voorwaarde: —", isFree ? "Gratis" : `Prijs: ${euro(priceEx)}`],
+        tone: tones[type],
+        appliesTo: "global",
+        payload: { costEx, priceEx, isFree, condition: normalizeText(form.tastingCondition) },
+      };
+    }
+    case "Tapverhuur": {
+      const costEx = clampNumber(form.tapCostEx, 0);
+      const isFree = Boolean(form.tapIsFree ?? true);
+      const priceEx = clampNumber(form.tapPriceEx, 0);
+      return {
+        id: `tap-${Date.now()}`,
+        type,
+        icon: icons[type],
+        title: "Tapverhuur",
+        subtitle: "Extra service",
+        lines: [normalizeText(form.tapCondition) || "Voorwaarde: —", isFree ? "Gratis" : `Prijs: ${euro(priceEx)}`],
+        tone: tones[type],
+        appliesTo: "global",
+        payload: { costEx, priceEx, isFree, condition: normalizeText(form.tapCondition) },
+      };
+    }
+  }
+}
+
+export function OfferteSamenstellenApp({
+  year,
+  channels,
+  bieren,
+  kostprijsversies,
+  kostprijsproductactiveringen,
+  verkoopprijzen,
+  basisproducten,
+  samengesteldeProducten,
+  initialMode,
+}: Props) {
+  const [step, setStep] = useState<StepKey>("basis");
+  const [activeScenario, setActiveScenario] = useState<ScenarioId>("A");
+  const [unitMode, setUnitMode] = useState<UnitMode>("producten");
+  const [vatMode, setVatMode] = useState<VatMode>("incl");
+
+  const [basis, setBasis] = useState<BasisData>({
+    klantNaam: "",
+    contactpersoon: "",
+    kanaal: "Horeca",
+    offerteNaam: "",
+    geldigTot: "",
+    opmerking: "",
+  });
+
+  const productIndex = useMemo(() => {
+    return buildProductOptions({
+      year,
+      channel: basis.kanaal,
+      bieren,
+      kostprijsversies,
+      kostprijsproductactiveringen,
+      verkoopprijzen,
+      basisproducten,
+      samengesteldeProducten,
+    });
+  }, [
+    year,
+    basis.kanaal,
+    bieren,
+    kostprijsversies,
+    kostprijsproductactiveringen,
+    verkoopprijzen,
+    basisproducten,
+    samengesteldeProducten,
+  ]);
+
+  const emptyScenario = (id: ScenarioId): Scenario => ({
+    id,
+    name: `Scenario ${id}`,
+    products: [],
+    blocks: [],
+    note: "",
+    intro: null,
+  });
+
+  const [scenarios, setScenarios] = useState<Record<ScenarioId, Scenario>>({
+    A: emptyScenario("A"),
+    B: emptyScenario("B"),
+    C: emptyScenario("C"),
+  });
+
+  const [selectedOption, setSelectedOption] = useState<OptionType | null>(null);
+  const [activePeriodView, setActivePeriodView] = useState<"standard" | "intro">("standard");
+
+  const [form, setForm] = useState<any>({
+    introStart: "",
+    introEnd: "",
+    introProducts: "",
+    introPromoType: "discount",
+    introAction: "",
+    introValue: "",
+    staffelProduct: "",
+    staffelEligibleRefs: [] as string[],
+    staffelRows: [
+      { from: "1", to: "9", price: "25,00" },
+      { from: "10", to: "49", price: "22,00" },
+      { from: "50", to: "∞", price: "20,00" },
+    ],
+    mixCondition: "3 verschillende bieren",
+    mixStructure: "3+2",
+    mixEligibleRefs: [] as string[],
+    discountMode: "Totaal",
+    discountValue: "5",
+    transportDistanceKm: "42",
+    transportRateEx: "0,50",
+    transportDeliveries: "1",
+    transportThresholdKm: "40",
+    transportChargedToCustomer: true,
+    returnPct: "10",
+    tastingCondition: "Gratis bij ≥ 10 fusten",
+    tastingIsFree: true,
+    tastingPriceEx: "0",
+    tastingCostEx: "75",
+    tapCondition: "Gratis bij ≥ 5 fusten",
+    tapIsFree: true,
+    tapPriceEx: "0",
+    tapCostEx: "90",
+  });
+
+  const scenario = scenarios[activeScenario];
+  const hasIntro = Boolean(scenario.intro && scenario.intro.start && scenario.intro.end);
+
+  const scenarioMetrics = useMemo(() => {
+    const ids: ScenarioId[] = ["A", "B", "C"];
+    const result: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }> = {
+      A: { standard: calculateScenarioMetrics(scenarios.A, "standard"), intro: null },
+      B: { standard: calculateScenarioMetrics(scenarios.B, "standard"), intro: null },
+      C: { standard: calculateScenarioMetrics(scenarios.C, "standard"), intro: null },
+    };
+    for (const id of ids) {
+      const sc = scenarios[id];
+      result[id] = {
+        standard: calculateScenarioMetrics(sc, "standard"),
+        intro: sc.intro ? calculateScenarioMetrics(sc, "intro") : null,
+      };
+    }
+    return result;
+  }, [scenarios]);
+
+  function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
+    setScenarios((prev) => ({
+      ...prev,
+      [activeScenario]: {
+        ...prev[activeScenario],
+        products: prev[activeScenario].products.map((p) => (p.id === productId ? { ...p, ...patch } : p)),
+      },
+    }));
+  }
+
+  function addProductRow() {
+    const id = `row-${Date.now()}`;
+    setScenarios((prev) => ({
+      ...prev,
+      [activeScenario]: {
+        ...prev[activeScenario],
+        products: [
+          ...prev[activeScenario].products,
+          {
+            id,
+            name: "",
+            pack: "",
+            qty: 1,
+            litersPerUnit: 0,
+            unit: "doos",
+            standardPriceEx: 0,
+            costPriceEx: 0,
+            vatRatePct: 0,
+          },
+        ],
+      },
+    }));
+  }
+
+  function applyOptionToScenario(type: OptionType) {
+    const period: "intro" | "standard" = type === "Intro" ? "intro" : activePeriodView;
+    const block = buildBlock(type, form, period);
+
+    setScenarios((prev) => {
+      const existing = prev[activeScenario];
+
+      // If no explicit product selection was captured for a pricing rule, default it to "all current product lines"
+      // to avoid silent no-ops. This is an explicit v1 behavior (not hidden): the modal will show the selection later.
+      if (type === "Staffel" || type === "Mix") {
+        const payload = (block.payload ?? {}) as Record<string, unknown>;
+        const eligibleRaw = Array.isArray(payload.eligibleRefs) ? (payload.eligibleRefs as unknown[]) : [];
+        const eligible = eligibleRaw.map((r) => String(r ?? "")).filter(Boolean);
+        if (eligible.length === 0) {
+          const refs = (existing.products ?? [])
+            .map((p) =>
+              p.source?.bier_id && p.source?.product_id
+                ? `beer:${String(p.source.bier_id)}:product:${String(p.source.product_id)}`
+                : String(p.id ?? "")
+            )
+            .filter(Boolean);
+          block.payload = { ...payload, eligibleRefs: refs };
+        }
+      }
+
+      // Guardrails (explicit, no hidden fallback):
+      if (type === "Intro") {
+        const hasStaffelWithoutIntro = !existing.intro && existing.blocks.some((b) => b.type === "Staffel" && (b.appliesTo ?? "standard") === "standard");
+        if (hasStaffelWithoutIntro) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...existing,
+            intro: { start: normalizeText(form.introStart), end: normalizeText(form.introEnd) },
+            blocks: [block, ...existing.blocks.filter((b) => b.type !== "Intro")],
+          },
+        };
+      }
+
+      // Max 2 pricing rules per context (intro/standard). Extras always allowed.
+      const isPricingRule = (t: OptionType) => ["Staffel", "Mix", "Korting"].includes(t);
+      const context = (block.appliesTo ?? "standard") as "intro" | "standard" | "global";
+      const currentPricingRules = existing.blocks.filter(
+        (b) => (b.appliesTo ?? "standard") === context && isPricingRule(b.type)
+      );
+      if (isPricingRule(type) && currentPricingRules.length >= 2) {
+        return prev;
+      }
+
+      // Staffel conflicts with korting in same context.
+      const hasStaffel = existing.blocks.some((b) => (b.appliesTo ?? "standard") === context && b.type === "Staffel");
+      const hasKorting = existing.blocks.some((b) => (b.appliesTo ?? "standard") === context && b.type === "Korting");
+      if ((type === "Staffel" && hasKorting) || (type === "Korting" && hasStaffel)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...existing,
+          blocks: [block, ...existing.blocks],
+        },
+      };
+    });
+
+    setSelectedOption(null);
+  }
+
+  function removeBlock(blockId: string) {
+    setScenarios((prev) => {
+      const existing = prev[activeScenario];
+      const nextBlocks = existing.blocks.filter((b) => b.id !== blockId);
+      const removedWasIntro = existing.blocks.some((b) => b.id === blockId && b.type === "Intro");
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...existing,
+          blocks: nextBlocks,
+          intro: removedWasIntro ? null : existing.intro,
+        },
+      };
+    });
+  }
+
+  function duplicateScenario() {
+    const base = scenarios[activeScenario];
+    const targetId: ScenarioId = activeScenario === "A" ? "B" : activeScenario === "B" ? "C" : "A";
+    setScenarios((prev) => ({
+      ...prev,
+      [targetId]: {
+        ...base,
+        id: targetId,
+        name: `Scenario ${targetId}`,
+        note: `Duplicaat van scenario ${activeScenario}`,
+      },
+    }));
+    setActiveScenario(targetId);
+    setStep("vergelijk");
+  }
+
+  function handleSelectOptionForRow(rowId: string, optionId: string) {
+    const option = productIndex.options.find((o) => o.optionId === optionId);
+    if (!option) return;
+    updateProduct(rowId, {
+      name: option.bierName,
+      pack: option.packLabel,
+      litersPerUnit: option.litersPerUnit,
+      unit: inferUnitFromPack(option.packLabel),
+      standardPriceEx: option.standardPriceEx,
+      costPriceEx: option.costPriceEx,
+      vatRatePct: option.vatRatePct,
+      source: {
+        bier_id: option.bierId,
+        product_id: option.productId,
+        kostprijsversie_id: option.kostprijsversieId,
+      },
+    });
+  }
+
+  function downloadQuoteStub() {
+    const payload = {
+      year,
+      basis,
+      activeScenario,
+      scenarios,
+      exported_at: new Date().toISOString(),
+      note: "V1 export stub: document generator is nog niet gekoppeld.",
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `offerte-${normalizeText(basis.offerteNaam) || "concept"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const steps: { id: StepKey; title: string; desc: string }[] = [
+    { id: "basis", title: "Basisgegevens", desc: "Klant, kanaal en naam" },
+    { id: "builder", title: "Offerte maken", desc: "Producten, opties en scenario’s" },
+    { id: "vergelijk", title: "Vergelijken", desc: "Scenario’s naast elkaar" },
+    { id: "afronden", title: "Afronden", desc: "Export en notities" },
+  ];
+
+  const activeMetrics = scenarioMetrics[activeScenario];
+  const rightMetrics = activePeriodView === "intro" && activeMetrics.intro ? activeMetrics.intro : activeMetrics.standard;
+
+  const incompatibilityHints = useMemo(() => {
+    const hints: string[] = [];
+    const standardPricing = scenario.blocks.filter((b) => (b.appliesTo ?? "standard") === "standard" && ["Staffel", "Mix", "Korting"].includes(b.type));
+    if (standardPricing.length >= 2) hints.push("Standaardperiode: max 2 prijsregels bereikt.");
+    const standardHasStaffel = standardPricing.some((b) => b.type === "Staffel");
+    const standardHasKorting = standardPricing.some((b) => b.type === "Korting");
+    if (standardHasStaffel && standardHasKorting) hints.push("Standaardperiode: Staffel en korting zijn niet combineerbaar.");
+    if (!hasIntro && standardHasStaffel) hints.push("Introductie toevoegen is geblokkeerd zolang Staffel actief is (verwijder Staffel eerst).");
+    return hints;
+  }, [scenario.blocks, hasIntro]);
+
+  return (
+    <div className="cpq-root">
+      <div className="cpq-frame">
+        <div className="cpq-topbar">
+          <div>
+            <div className="cpq-kicker">Offerte wizard</div>
+            <h1 className="cpq-title">Offerte samenstellen</h1>
+          </div>
+          <div className="cpq-topbar-actions">
+            <div className="cpq-toggle-strip" role="group" aria-label="Eenheden">
+              <button
+                onClick={() => setUnitMode("producten")}
+                className={`cpq-toggle${unitMode === "producten" ? " active" : ""}`}
+              >
+                Producten
+              </button>
+              <button
+                onClick={() => setUnitMode("liters")}
+                className={`cpq-toggle${unitMode === "liters" ? " active" : ""}`}
+              >
+                Liters
+              </button>
+            </div>
+            <div className="cpq-toggle-strip" role="group" aria-label="BTW">
+              <button
+                onClick={() => setVatMode("excl")}
+                className={`cpq-toggle${vatMode === "excl" ? " active" : ""}`}
+              >
+                Excl. btw
+              </button>
+              <button
+                onClick={() => setVatMode("incl")}
+                className={`cpq-toggle${vatMode === "incl" ? " active" : ""}`}
+              >
+                Incl. btw
+              </button>
+            </div>
+            <button onClick={duplicateScenario} className="cpq-button cpq-button-secondary">
+              Dupliceer scenario
+            </button>
+            <button className="cpq-button cpq-button-primary" type="button">
+              Opslaan
+            </button>
+          </div>
+        </div>
+
+        <div className="cpq-grid">
+          <aside className="cpq-left">
+            <div className="cpq-left-title">Stappen</div>
+            <div className="cpq-steps">
+              {steps.map((item, idx) => {
+                const active = item.id === step;
+                const done = steps.findIndex((s) => s.id === step) > idx;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setStep(item.id)}
+                    className={`cpq-step${active ? " active" : ""}${done ? " done" : ""}`}
+                    type="button"
+                  >
+                    <div className="cpq-step-row">
+                      <div className="cpq-step-dot">{done ? "✓" : idx + 1}</div>
+                      <div>
+                        <div className="cpq-step-title">{item.title}</div>
+                        <div className="cpq-step-desc">{item.desc}</div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="cpq-quick">
+              <div className="cpq-quick-title">Quick view</div>
+              <div className="cpq-quick-grid">
+                <QuickCell label="Klant" value={basis.klantNaam || "—"} />
+                <QuickCell label="Kanaal" value={basis.kanaal} />
+                <QuickCell label="Status" value="Concept" />
+                <QuickCell label="Scenario" value={activeScenario} />
+                <QuickCell label="Jaar" value={String(year)} />
+              </div>
+            </div>
+          </aside>
+
+          <main className="cpq-main">
+            {step === "basis" ? (
+              <BasisStep basis={basis} setBasis={setBasis} onNext={() => setStep("builder")} />
+            ) : null}
+
+            {step === "builder" ? (
+              <BuilderStep
+                unitMode={unitMode}
+                vatMode={vatMode}
+                hasIntro={hasIntro}
+                activePeriodView={activePeriodView}
+                setActivePeriodView={setActivePeriodView}
+                scenario={scenario}
+                activeScenario={activeScenario}
+                setActiveScenario={setActiveScenario}
+                updateProduct={updateProduct}
+                addProductRow={addProductRow}
+                removeBlock={removeBlock}
+                toolbarGroups={toolbarGroups}
+                openOption={setSelectedOption}
+                onNext={() => setStep("vergelijk")}
+                productOptions={productIndex.options}
+                onSelectRowOption={handleSelectOptionForRow}
+                warnings={productIndex.warnings}
+                incompatibilityHints={incompatibilityHints}
+              />
+            ) : null}
+
+            {step === "vergelijk" ? (
+              <CompareStep
+                scenarios={scenarios}
+                metrics={scenarioMetrics}
+                activeScenario={activeScenario}
+                setActiveScenario={setActiveScenario}
+                onNext={() => setStep("afronden")}
+                onBack={() => setStep("builder")}
+              />
+            ) : null}
+
+            {step === "afronden" ? (
+              <FinalizeStep
+                basis={basis}
+                scenario={scenario}
+                metrics={scenarioMetrics[activeScenario].standard}
+                onBack={() => setStep("vergelijk")}
+                onDownload={downloadQuoteStub}
+              />
+            ) : null}
+          </main>
+
+          <aside className="cpq-right">
+            <h2 className="cpq-right-kicker">Live inzicht</h2>
+            <div className="cpq-panel">
+              <Kpi label="Omzet (ex)" value={euro(rightMetrics.revenueEx)} />
+              <Kpi label="Kostprijs (ex)" value={euro(rightMetrics.costEx)} />
+              <Kpi label="Transportkosten" value={rightMetrics.transportCostEx ? euro(rightMetrics.transportCostEx) : "—"} />
+              <Kpi label="Extra kosten" value={rightMetrics.extraCostEx ? euro(rightMetrics.extraCostEx) : "—"} />
+              <div className="cpq-divider" />
+              <Kpi label="Netto marge" value={`${Math.round(rightMetrics.marginPct)}%`} strong />
+            </div>
+
+            <div className="cpq-panel cpq-panel-dark">
+              <div className="cpq-panel-dark-title">
+                <span>Break-even impact</span>
+                <span className="cpq-pill">Placeholder</span>
+              </div>
+              <div className="cpq-panel-dark-body">
+                <div className="cpq-kv"><span>Huidig</span><span>—</span></div>
+                <div className="cpq-kv"><span>Na offerte</span><span>—</span></div>
+                <div className="cpq-kv"><span>Impact</span><span className="cpq-accent">—</span></div>
+              </div>
+              <div className="cpq-panel-dark-note">
+                Placeholder tot de juiste data beschikbaar is. Hier kan later break-even omzet of volume komen.
+              </div>
+            </div>
+
+            <div className="cpq-panel">
+              <h3 className="cpq-panel-title">Actieve scenario-notitie</h3>
+              <p className="cpq-panel-text">{scenario.note || "Geen notitie toegevoegd."}</p>
+            </div>
+          </aside>
+        </div>
+
+        {selectedOption ? (
+          <OptionModal
+            selectedOption={selectedOption}
+            hasIntro={hasIntro}
+            activePeriodView={activePeriodView}
+            incompatibilityHints={incompatibilityHints}
+            form={form}
+            setForm={setForm}
+            onClose={() => setSelectedOption(null)}
+            onSave={() => applyOptionToScenario(selectedOption)}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function BasisStep({
+  basis,
+  setBasis,
+  onNext,
+}: {
+  basis: BasisData;
+  setBasis: React.Dispatch<React.SetStateAction<BasisData>>;
+  onNext: () => void;
+}) {
+  return (
+    <section className="cpq-card">
+      <div className="cpq-card-header">
+        <div>
+          <h2 className="cpq-card-title">Basisgegevens</h2>
+          <p className="cpq-card-subtitle">Vul klant, kanaal en context van de offerte in.</p>
+        </div>
+      </div>
+
+      <div className="cpq-form-grid">
+        <Field label="Klantnaam" value={basis.klantNaam} onChange={(v) => setBasis((prev) => ({ ...prev, klantNaam: v }))} />
+        <Field label="Contactpersoon" value={basis.contactpersoon} onChange={(v) => setBasis((prev) => ({ ...prev, contactpersoon: v }))} />
+        <Field label="Offertenaam" value={basis.offerteNaam} onChange={(v) => setBasis((prev) => ({ ...prev, offerteNaam: v }))} />
+        <Field label="Geldig tot" value={basis.geldigTot} onChange={(v) => setBasis((prev) => ({ ...prev, geldigTot: v }))} />
+      </div>
+
+      <div className="cpq-form-row">
+        <div className="cpq-label">Kanaal</div>
+        <div className="cpq-toggle-strip" role="group" aria-label="Kanaal">
+          {(["Horeca", "Retail", "Events"] as QuoteChannel[]).map((kanaal) => (
+            <button
+              key={kanaal}
+              type="button"
+              onClick={() => setBasis((prev) => ({ ...prev, kanaal }))}
+              className={`cpq-toggle${basis.kanaal === kanaal ? " active" : ""}`}
+            >
+              {kanaal}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="cpq-form-row">
+        <label className="cpq-field">
+          <div className="cpq-label">Opmerking</div>
+          <textarea
+            value={basis.opmerking}
+            onChange={(e) => setBasis((prev) => ({ ...prev, opmerking: e.target.value }))}
+            className="cpq-textarea"
+          />
+        </label>
+      </div>
+
+      <div className="cpq-actions">
+        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
+          Verder naar offerte maken
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function BuilderStep({
+  unitMode,
+  vatMode,
+  hasIntro,
+  activePeriodView,
+  setActivePeriodView,
+  scenario,
+  activeScenario,
+  setActiveScenario,
+  updateProduct,
+  addProductRow,
+  removeBlock,
+  toolbarGroups,
+  openOption,
+  onNext,
+  productOptions,
+  onSelectRowOption,
+  warnings,
+  incompatibilityHints,
+}: {
+  unitMode: UnitMode;
+  vatMode: VatMode;
+  hasIntro: boolean;
+  activePeriodView: "intro" | "standard";
+  setActivePeriodView: (next: "intro" | "standard") => void;
+  scenario: Scenario;
+  activeScenario: ScenarioId;
+  setActiveScenario: (id: ScenarioId) => void;
+  updateProduct: (productId: string, patch: Partial<QuoteProduct>) => void;
+  addProductRow: () => void;
+  removeBlock: (blockId: string) => void;
+  toolbarGroups: ToolbarGroup[];
+  openOption: (type: OptionType) => void;
+  onNext: () => void;
+  productOptions: ProductOption[];
+  onSelectRowOption: (rowId: string, optionId: string) => void;
+  warnings: string[];
+  incompatibilityHints: string[];
+}) {
+  return (
+    <div className="cpq-stack">
+      <div className="cpq-builder-header">
+        <div>
+          <h2 className="cpq-card-title">Offerte maken</h2>
+          <p className="cpq-card-subtitle">Start simpel met producten en breid uit met blokken via de toolbar.</p>
+        </div>
+        <div className="cpq-toggle-strip" role="group" aria-label="Scenario">
+          {(["A", "B", "C"] as ScenarioId[]).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveScenario(id)}
+              className={`cpq-toggle${activeScenario === id ? " active" : ""}`}
+            >
+              Scenario {id}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {warnings.length > 0 ? (
+        <div className="cpq-alert">
+          {warnings.map((w) => (
+            <div key={w}>{w}</div>
+          ))}
+        </div>
+      ) : null}
+
+      {incompatibilityHints.length > 0 ? (
+        <div className="cpq-alert cpq-alert-warn">
+          {incompatibilityHints.map((w) => (
+            <div key={w}>{w}</div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="cpq-toolbar">
+        <div className="cpq-toolbar-inner">
+          {toolbarGroups.map((group) => (
+            <div key={group.title} className="cpq-toolbar-group">
+              <div className="cpq-toolbar-title">{group.title}</div>
+              {group.items.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => openOption(item.label)}
+                  className="cpq-tool"
+                  title={item.label}
+                >
+                  <span className="cpq-tool-icon">{item.icon}</span>
+                  <span className="cpq-tool-tooltip">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+          {hasIntro ? (
+            <div className="cpq-toolbar-group cpq-toolbar-right">
+              <div className="cpq-toolbar-title">Periode</div>
+              <div className="cpq-toggle-strip" role="group" aria-label="Periode">
+                <button
+                  type="button"
+                  className={`cpq-toggle${activePeriodView === "intro" ? " active" : ""}`}
+                  onClick={() => setActivePeriodView("intro")}
+                >
+                  Introductie
+                </button>
+                <button
+                  type="button"
+                  className={`cpq-toggle${activePeriodView === "standard" ? " active" : ""}`}
+                  onClick={() => setActivePeriodView("standard")}
+                >
+                  Standaard
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <section className="cpq-card">
+        <div className="cpq-card-header cpq-card-header-row">
+          <div>
+            <h3 className="cpq-card-title">Basisofferte</h3>
+            <p className="cpq-card-subtitle">Basisprijs komt uit verkoopstrategie (sell-in, ex). BTW-toggle is alleen weergave.</p>
+          </div>
+          <button onClick={addProductRow} className="cpq-button cpq-button-secondary" type="button">
+            + Product toevoegen
+          </button>
+        </div>
+
+        <div className="cpq-table-wrap">
+          <table className="cpq-table">
+            <thead>
+              <tr>
+                <th>Bier</th>
+                <th>Verpakking</th>
+                <th>Aantal</th>
+                <th>Weergave</th>
+                <th>Stukprijs</th>
+                <th>Totaal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scenario.products.map((product) => {
+                const display = unitMode === "liters" ? `${(product.qty * product.litersPerUnit).toFixed(1)} L` : `${product.qty} ${product.unit}`;
+                const vatFactor = vatMode === "incl" ? 1 + Math.max(0, clampNumber(product.vatRatePct, 0)) / 100 : 1;
+                const unitPrice = product.standardPriceEx * vatFactor;
+                const totalPrice = product.qty * product.standardPriceEx * vatFactor;
+                const qtyInputValue = unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
+                return (
+                  <tr key={product.id}>
+                    <td>
+                      <select
+                        className="cpq-select"
+                        value={product.source?.bier_id && product.source?.product_id ? `beer:${product.source.bier_id}:product:${product.source.product_id}` : ""}
+                        onChange={(e) => onSelectRowOption(product.id, e.target.value)}
+                      >
+                        <option value="">Kies product…</option>
+                        {productOptions.map((opt) => (
+                          <option key={opt.optionId} value={opt.optionId}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="cpq-muted">{product.pack || "—"}</td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        value={Number.isFinite(qtyInputValue) ? qtyInputValue : 0}
+                        onChange={(e) => {
+                          const raw = Math.max(0, clampNumber(e.target.value, 0));
+                          if (unitMode === "liters") {
+                            const lpu = Math.max(0, clampNumber(product.litersPerUnit, 0));
+                            const nextQty = lpu > 0 ? raw / lpu : 0;
+                            updateProduct(product.id, { qty: nextQty });
+                            return;
+                          }
+                          updateProduct(product.id, { qty: raw });
+                        }}
+                        className="cpq-input cpq-input-small"
+                      />
+                    </td>
+                    <td className="cpq-muted">{display}</td>
+                    <td>{euro(unitPrice)}</td>
+                    <td className="cpq-strong">{euro(totalPrice)}</td>
+                  </tr>
+                );
+              })}
+              {scenario.products.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="cpq-empty">
+                    Nog geen producten toegevoegd.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div className="cpq-stack">
+        {scenario.blocks
+          .filter((block) => {
+            const period = block.appliesTo ?? "standard";
+            if (period === "global") return true;
+            if (!hasIntro) return period === "standard";
+            return period === activePeriodView;
+          })
+          .map((block) => (
+            <section key={block.id} className={`cpq-block ${block.tone}`}>
+              <div className="cpq-block-row">
+                <div className="cpq-block-icon">{block.icon}</div>
+                <div className="cpq-block-body">
+                  <div className="cpq-block-title">{block.title}</div>
+                  <div className="cpq-block-subtitle">{block.subtitle}</div>
+                  <ul className="cpq-block-list">
+                    {block.lines.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                  {block.impact ? <div className="cpq-block-impact">{block.impact}</div> : null}
+                </div>
+                <div className="cpq-block-actions">
+                  <button type="button" className="cpq-button cpq-button-secondary" onClick={() => openOption(block.type)}>
+                    Bewerken
+                  </button>
+                  <button type="button" className="cpq-button cpq-button-secondary" onClick={() => removeBlock(block.id)}>
+                    Verwijderen
+                  </button>
+                </div>
+              </div>
+            </section>
+          ))}
+      </div>
+
+      <div className="cpq-actions">
+        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
+          Verder naar vergelijken
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CompareStep({
+  scenarios,
+  metrics,
+  activeScenario,
+  setActiveScenario,
+  onNext,
+  onBack,
+}: {
+  scenarios: Record<ScenarioId, Scenario>;
+  metrics: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }>;
+  activeScenario: ScenarioId;
+  setActiveScenario: (id: ScenarioId) => void;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <section className="cpq-card">
+      <div className="cpq-card-header">
+        <div>
+          <h2 className="cpq-card-title">Vergelijken</h2>
+          <p className="cpq-card-subtitle">Vergelijk scenario’s zonder verborgen aannames: we tonen standaard en (optioneel) introductie apart.</p>
+        </div>
+      </div>
+
+      <div className="cpq-compare-grid">
+        {(["A", "B", "C"] as ScenarioId[]).map((id) => {
+          const active = activeScenario === id;
+          const m = metrics[id];
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveScenario(id)}
+              className={`cpq-compare-card${active ? " active" : ""}`}
+            >
+              <div className="cpq-compare-title">
+                <span>{scenarios[id].name}</span>
+                {active ? <span className="cpq-badge">Actief</span> : null}
+              </div>
+
+              <div className="cpq-compare-section">
+                <div className="cpq-compare-section-title">Standaard</div>
+                <Metric label="Omzet" value={euro(m.standard.revenueEx)} />
+                <Metric label="Kosten" value={euro(m.standard.costEx)} />
+                <Metric label="Marge" value={`${Math.round(m.standard.marginPct)}%`} />
+              </div>
+
+              {m.intro ? (
+                <div className="cpq-compare-section">
+                  <div className="cpq-compare-section-title">Introductie</div>
+                  <Metric label="Omzet" value={euro(m.intro.revenueEx)} />
+                  <Metric label="Kosten" value={euro(m.intro.costEx)} />
+                  <Metric label="Marge" value={`${Math.round(m.intro.marginPct)}%`} />
+                </div>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="cpq-actions cpq-actions-split">
+        <button onClick={onBack} className="cpq-button cpq-button-secondary" type="button">
+          Terug
+        </button>
+        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
+          Verder naar afronden
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function FinalizeStep({
+  basis,
+  scenario,
+  metrics,
+  onBack,
+  onDownload,
+}: {
+  basis: BasisData;
+  scenario: Scenario;
+  metrics: ScenarioMetrics;
+  onBack: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <section className="cpq-card">
+      <div className="cpq-card-header">
+        <div>
+          <h2 className="cpq-card-title">Afronden</h2>
+          <p className="cpq-card-subtitle">Export/document is nog niet geïmplementeerd. Dit is een technische stub voor toekomstige output.</p>
+        </div>
+      </div>
+
+      <div className="cpq-final-grid">
+        <div className="cpq-final-card">
+          <h3 className="cpq-panel-title">Samenvatting</h3>
+          <Metric label="Klant" value={basis.klantNaam || "—"} />
+          <Metric label="Kanaal" value={basis.kanaal} />
+          <Metric label="Scenario" value={scenario.name} />
+          <Metric label="Omzet (ex)" value={euro(metrics.revenueEx)} />
+          <Metric label="Marge" value={`${Math.round(metrics.marginPct)}%`} />
+        </div>
+        <div className="cpq-final-card">
+          <h3 className="cpq-panel-title">Opmerking</h3>
+          <div className="cpq-panel-text">{basis.opmerking || "Geen opmerking."}</div>
+        </div>
+      </div>
+
+      <div className="cpq-actions cpq-actions-split">
+        <button onClick={onBack} className="cpq-button cpq-button-secondary" type="button">
+          Terug
+        </button>
+        <button onClick={onDownload} className="cpq-button cpq-button-primary" type="button">
+          Concept downloaden (JSON stub)
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function OptionModal({
+  selectedOption,
+  hasIntro,
+  activePeriodView,
+  incompatibilityHints,
+  form,
+  setForm,
+  onClose,
+  onSave,
+}: {
+  selectedOption: OptionType;
+  hasIntro: boolean;
+  activePeriodView: "intro" | "standard";
+  incompatibilityHints: string[];
+  form: any;
+  setForm: React.Dispatch<React.SetStateAction<any>>;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const title = selectedOption;
+  const contextLabel =
+    selectedOption === "Intro" ? "Introductieperiode" : hasIntro ? (activePeriodView === "intro" ? "Introductie" : "Standaard") : "Standaard";
+
+  return (
+    <div className="cpq-modal-overlay" role="dialog" aria-modal="true">
+      <div className="cpq-modal">
+        <div className="cpq-modal-header">
+          <div>
+            <div className="cpq-kicker">Optie toevoegen</div>
+            <h3 className="cpq-modal-title">
+              {title} <span className="cpq-muted">({contextLabel})</span>
+            </h3>
+          </div>
+          <button onClick={onClose} className="cpq-icon-button" type="button">
+            ×
+          </button>
+        </div>
+
+        <div className="cpq-modal-body">
+          {incompatibilityHints.length > 0 ? (
+            <div className="cpq-alert cpq-alert-warn">
+              {incompatibilityHints.map((w) => (
+                <div key={w}>{w}</div>
+              ))}
+            </div>
+          ) : null}
+
+          {selectedOption === "Intro" ? (
+            <>
+              <Field label="Startdatum (YYYY-MM-DD)" value={form.introStart} onChange={(v) => setForm((prev: any) => ({ ...prev, introStart: v }))} />
+              <Field label="Einddatum (YYYY-MM-DD)" value={form.introEnd} onChange={(v) => setForm((prev: any) => ({ ...prev, introEnd: v }))} />
+              <Field label="Producten (vrije tekst v1)" value={form.introProducts} onChange={(v) => setForm((prev: any) => ({ ...prev, introProducts: v }))} />
+              <Field label="Promotietype" value={form.introPromoType} onChange={(v) => setForm((prev: any) => ({ ...prev, introPromoType: v }))} />
+              <Field label="Actie" value={form.introAction} onChange={(v) => setForm((prev: any) => ({ ...prev, introAction: v }))} />
+              <Field label="Waarde" value={form.introValue} onChange={(v) => setForm((prev: any) => ({ ...prev, introValue: v }))} />
+              <Idea text="V1: promotie-varianten worden nog niet allemaal exact doorgerekend; de configuratie wordt wel opgeslagen als block." />
+            </>
+          ) : null}
+
+          {selectedOption === "Staffel" ? (
+            <>
+              <Field label="Product (vrije tekst v1)" value={form.staffelProduct} onChange={(v) => setForm((prev: any) => ({ ...prev, staffelProduct: v }))} />
+              <div className="cpq-field">
+                <div className="cpq-label">Staffelregels</div>
+                <div className="cpq-staffel-grid">
+                  {form.staffelRows.map((row: any, idx: number) => (
+                    <div key={idx} className="cpq-staffel-row">
+                      <input
+                        className="cpq-input"
+                        value={row.from}
+                        onChange={(e) => updateStaffelRow(form, setForm, idx, "from", e.target.value)}
+                        placeholder="Vanaf"
+                      />
+                      <input
+                        className="cpq-input"
+                        value={row.to}
+                        onChange={(e) => updateStaffelRow(form, setForm, idx, "to", e.target.value)}
+                        placeholder="Tot"
+                      />
+                      <input
+                        className="cpq-input"
+                        value={row.price}
+                        onChange={(e) => updateStaffelRow(form, setForm, idx, "price", e.target.value)}
+                        placeholder="Prijs"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <Idea text="V1: staffel wordt opgeslagen als block. Exacte doorrekening volgt (business rule details en unit-basis)." />
+            </>
+          ) : null}
+
+          {selectedOption === "Mix" ? (
+            <>
+              <Field label="Voorwaarde" value={form.mixCondition} onChange={(v) => setForm((prev: any) => ({ ...prev, mixCondition: v }))} />
+              <Field label="Structuur (bijv. 3+2)" value={form.mixStructure} onChange={(v) => setForm((prev: any) => ({ ...prev, mixStructure: v }))} />
+              <Field label="Producten (vrije tekst v1)" value={form.mixProducts} onChange={(v) => setForm((prev: any) => ({ ...prev, mixProducts: v }))} />
+              <Idea text="V1: mix deal wordt als block opgeslagen; exacte berekening is afhankelijk van geselecteerde producten en gratis-logica." />
+            </>
+          ) : null}
+
+          {selectedOption === "Korting" ? (
+            <>
+              <Field label="Type korting" value={form.discountMode} onChange={(v) => setForm((prev: any) => ({ ...prev, discountMode: v }))} />
+              <Field label="Waarde (%)" value={form.discountValue} onChange={(v) => setForm((prev: any) => ({ ...prev, discountValue: v }))} />
+              <Idea text="Korting wordt toegepast op de verkoopprijs. In v1 wordt regel vs totaal nog niet apart verdeeld." />
+            </>
+          ) : null}
+
+          {selectedOption === "Transport" ? (
+            <>
+              <Field label="Afstand (km enkele rit)" value={form.transportDistanceKm} onChange={(v) => setForm((prev: any) => ({ ...prev, transportDistanceKm: v }))} />
+              <Field label="Prijs per km (ex)" value={form.transportRateEx} onChange={(v) => setForm((prev: any) => ({ ...prev, transportRateEx: v }))} />
+              <Field label="Leveringen" value={form.transportDeliveries} onChange={(v) => setForm((prev: any) => ({ ...prev, transportDeliveries: v }))} />
+              <Field label="Drempel (km)" value={form.transportThresholdKm} onChange={(v) => setForm((prev: any) => ({ ...prev, transportThresholdKm: v }))} />
+              <div className="cpq-form-row">
+                <div className="cpq-label">Doorbelasten?</div>
+                <div className="cpq-toggle-strip" role="group" aria-label="Transport doorbelasten">
+                  <button type="button" className={`cpq-toggle${form.transportChargedToCustomer ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, transportChargedToCustomer: true }))}>
+                    Ja
+                  </button>
+                  <button type="button" className={`cpq-toggle${!form.transportChargedToCustomer ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, transportChargedToCustomer: false }))}>
+                    Nee (intern)
+                  </button>
+                </div>
+              </div>
+              <Idea text="Regel: afstand > 40km => transportkosten. Als niet doorbelast, telt het als interne kost (marge-impact)." />
+            </>
+          ) : null}
+
+          {selectedOption === "Retour" ? (
+            <>
+              <Field label="Retourpercentage (%)" value={form.returnPct} onChange={(v) => setForm((prev: any) => ({ ...prev, returnPct: v }))} />
+              <Idea text="V1: conservatieve impact: omzet omlaag, kosten gelijk. Exacte return-logica volgt later." />
+            </>
+          ) : null}
+
+          {selectedOption === "Proeverij" ? (
+            <>
+              <Field label="Voorwaarde" value={form.tastingCondition} onChange={(v) => setForm((prev: any) => ({ ...prev, tastingCondition: v }))} />
+              <Field label="Interne kost (ex)" value={form.tastingCostEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tastingCostEx: v }))} />
+              <div className="cpq-form-row">
+                <div className="cpq-label">Gratis?</div>
+                <div className="cpq-toggle-strip" role="group" aria-label="Proeverij gratis">
+                  <button type="button" className={`cpq-toggle${form.tastingIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tastingIsFree: true }))}>
+                    Ja
+                  </button>
+                  <button type="button" className={`cpq-toggle${!form.tastingIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tastingIsFree: false }))}>
+                    Nee
+                  </button>
+                </div>
+              </div>
+              {!form.tastingIsFree ? (
+                <Field label="Prijs (ex)" value={form.tastingPriceEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tastingPriceEx: v }))} />
+              ) : null}
+            </>
+          ) : null}
+
+          {selectedOption === "Tapverhuur" ? (
+            <>
+              <Field label="Voorwaarde" value={form.tapCondition} onChange={(v) => setForm((prev: any) => ({ ...prev, tapCondition: v }))} />
+              <Field label="Interne kost (ex)" value={form.tapCostEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tapCostEx: v }))} />
+              <div className="cpq-form-row">
+                <div className="cpq-label">Gratis?</div>
+                <div className="cpq-toggle-strip" role="group" aria-label="Tapverhuur gratis">
+                  <button type="button" className={`cpq-toggle${form.tapIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tapIsFree: true }))}>
+                    Ja
+                  </button>
+                  <button type="button" className={`cpq-toggle${!form.tapIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tapIsFree: false }))}>
+                    Nee
+                  </button>
+                </div>
+              </div>
+              {!form.tapIsFree ? (
+                <Field label="Prijs (ex)" value={form.tapPriceEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tapPriceEx: v }))} />
+              ) : null}
+            </>
+          ) : null}
+        </div>
+
+        <div className="cpq-modal-footer">
+          <button onClick={onClose} className="cpq-button cpq-button-secondary" type="button">
+            Annuleren
+          </button>
+          <button onClick={onSave} className="cpq-button cpq-button-primary" type="button">
+            Opslaan
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="cpq-field">
+      <div className="cpq-label">{label}</div>
+      <input value={value} onChange={(e) => onChange(e.target.value)} className="cpq-input" />
+    </label>
+  );
+}
+
+function Idea({ text }: { text: string }) {
+  return <div className="cpq-idea">{text}</div>;
+}
+
+function QuickCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="cpq-quick-label">{label}</div>
+      <div className="cpq-quick-value">{value}</div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="cpq-metric">
+      <span className="cpq-muted">{label}</span>
+      <span className="cpq-strong">{value}</span>
+    </div>
+  );
+}
+
+function Kpi({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="cpq-kpi">
+      <span className="cpq-muted">{label}</span>
+      <span className={strong ? "cpq-kpi-strong" : "cpq-kpi-value"}>{value}</span>
+    </div>
+  );
+}
+
+function updateStaffelRow(
+  form: any,
+  setForm: React.Dispatch<React.SetStateAction<any>>,
+  idx: number,
+  key: "from" | "to" | "price",
+  value: string
+) {
+  const nextRows = [...form.staffelRows];
+  nextRows[idx] = { ...nextRows[idx], [key]: value };
+  setForm((prev: any) => ({ ...prev, staffelRows: nextRows }));
+}
+
+function BaseIcon({
+  children,
+  title,
+}: {
+  children: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="cpq-icon"
+      role="img"
+      aria-label={title}
+      focusable="false"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function IconClock() {
+  return (
+    <BaseIcon title="Introductie">
+      <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 7.5v5.0l3.2 2.0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </BaseIcon>
+  );
+}
+
+function IconChart() {
+  return (
+    <BaseIcon title="Staffel">
+      <path d="M6 18V10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M12 18V6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M18 18v-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M5 18.5h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </BaseIcon>
+  );
+}
+
+function IconShuffle() {
+  return (
+    <BaseIcon title="Mix deal">
+      <path d="M6 7h4l2.2 3.2L14.5 7H18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M18 7l-2 2m2-2l-2-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M6 17h4l2.2-3.2 2.3 3.2H18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M18 17l-2 2m2-2l-2-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </BaseIcon>
+  );
+}
+
+function IconTag() {
+  return (
+    <BaseIcon title="Korting">
+      <path d="M4.8 12.0l7.2 7.2c.4.4 1 .4 1.4 0l5.8-5.8c.4-.4.4-1 0-1.4L12 4.8H7.3c-.5 0-1 .2-1.3.6L4.3 7.1c-.3.3-.5.8-.5 1.3V12z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="8.3" cy="8.3" r="1.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </BaseIcon>
+  );
+}
+
+function IconTruck() {
+  return (
+    <BaseIcon title="Transport">
+      <path d="M3.8 15.5V7.5h9.5v8.0H3.8z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M13.3 10.0h3.7l2.2 2.6v2.9h-5.9V10z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="7.1" cy="16.8" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="16.8" cy="16.8" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </BaseIcon>
+  );
+}
+
+function IconReturn() {
+  return (
+    <BaseIcon title="Retour">
+      <path d="M9.5 8.2L6 11.8l3.5 3.6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 11.8h8.4c2.7 0 4.6 1.9 4.6 4.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </BaseIcon>
+  );
+}
+
+function IconBeer() {
+  return (
+    <BaseIcon title="Proeverij">
+      <path d="M7.2 7.5h6.6v8.8c0 1.2-1 2.2-2.2 2.2H9.4c-1.2 0-2.2-1-2.2-2.2V7.5z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M13.8 9.2h1.6c1.3 0 2.4 1.1 2.4 2.4s-1.1 2.4-2.4 2.4h-1.6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M7.2 7.5c0-1.2 1-2.2 2.2-2.2h2.2c1.2 0 2.2 1 2.2 2.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </BaseIcon>
+  );
+}
+
+function IconTent() {
+  return (
+    <BaseIcon title="Tapverhuur">
+      <path d="M4.5 18.5L12 5.8l7.5 12.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M9.2 18.5V14.2c0-.6.5-1.1 1.1-1.1h3.4c.6 0 1.1.5 1.1 1.1v4.3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </BaseIcon>
+  );
+}
