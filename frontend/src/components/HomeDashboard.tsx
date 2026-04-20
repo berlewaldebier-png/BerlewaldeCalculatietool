@@ -241,9 +241,9 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                 </Link>
 
                 <Link href="/offerte-samenstellen" className="dashboard-quick-card">
-                  <div className="dashboard-quick-card-title">Offerte samenstellen</div>
+                  <div className="dashboard-quick-card-title">Prijsvoorstel maken</div>
                   <div className="dashboard-quick-card-text">
-                    Start een nieuwe CPQ offerte builder met scenario's en prijsblokken.
+                    Maak een nieuw prijsvoorstel in de CPQ builder (scenario's en prijsblokken).
                   </div>
                 </Link>
 
