@@ -31,7 +31,7 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
   const preferredOrder = [
     "/",
     "/nieuwe-kostprijsberekening",
-    "/prijsvoorstel",
+    "/offerte-samenstellen",
     "/productie",
     "/vaste-kosten",
     "/tarieven-heffingen",
@@ -91,13 +91,13 @@ function buildAlertCards(summary: DashboardSummary): AlertCard[] {
       title: "Concept prijsvoorstellen",
       value: String(summary.concept_prijsvoorstellen).padStart(2, "0"),
       description: "Voorstellen die nog aandacht nodig hebben",
-      href: "/prijsvoorstel?mode=select-existing&filter=concept"
+      href: "/offerte-samenstellen"
     },
     {
       title: "Definitieve prijsvoorstellen",
       value: String(summary.definitieve_prijsvoorstellen),
       description: "Afgeronde voorstellen in deze omgeving",
-      href: "/prijsvoorstel?mode=select-existing&filter=definitief"
+      href: "/offerte-samenstellen"
     },
     {
       title: "Klaar om te activeren",
@@ -240,10 +240,10 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                   </div>
                 </Link>
 
-                <Link href="/prijsvoorstel" className="dashboard-quick-card">
-                  <div className="dashboard-quick-card-title">Nieuw prijsvoorstel</div>
+                <Link href="/offerte-samenstellen" className="dashboard-quick-card">
+                  <div className="dashboard-quick-card-title">Offerte samenstellen</div>
                   <div className="dashboard-quick-card-text">
-                    Werk een voorstel uit op basis van producten, liters en kanaalkeuzes.
+                    Start een nieuwe CPQ offerte builder met scenario's en prijsblokken.
                   </div>
                 </Link>
 
@@ -267,7 +267,7 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
               </div>
 
               <Link
-                href={"/prijsvoorstel?mode=select-existing&filter=concept&focus=aflopend" as Route}
+                href={"/offerte-samenstellen" as Route}
                 className="dashboard-attention-list"
               >
                 <div className="dashboard-attention-item">
