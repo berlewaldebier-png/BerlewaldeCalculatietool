@@ -208,6 +208,10 @@ def ensure_schema() -> None:
                         included BOOLEAN NOT NULL DEFAULT TRUE,
                         korting_pct_p1 NUMERIC NOT NULL DEFAULT 0,
                         korting_pct_p2 NUMERIC NOT NULL DEFAULT 0,
+                        fee_ex_p1 NUMERIC NOT NULL DEFAULT 0,
+                        fee_ex_p2 NUMERIC NOT NULL DEFAULT 0,
+                        retour_pct_p1 NUMERIC NOT NULL DEFAULT 0,
+                        retour_pct_p2 NUMERIC NOT NULL DEFAULT 0,
                         sell_in_price_override_p1 NUMERIC NOT NULL DEFAULT 0,
                         sell_in_price_override_p2 NUMERIC NOT NULL DEFAULT 0,
                         sort_index INTEGER NOT NULL DEFAULT 0
@@ -226,12 +230,33 @@ def ensure_schema() -> None:
                         product_type TEXT NOT NULL DEFAULT '',
                         liters NUMERIC NOT NULL DEFAULT 0,
                         korting_pct NUMERIC NOT NULL DEFAULT 0,
+                        korting_pct_p1 NUMERIC NOT NULL DEFAULT 0,
+                        korting_pct_p2 NUMERIC NOT NULL DEFAULT 0,
                         sort_index INTEGER NOT NULL DEFAULT 0
                     );
                     """
                 )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS ix_price_quote_variant_staffels_variant ON price_quote_variant_staffels(variant_id)"
+                )
+                # Backfill schema for older installs (columns added after initial rollout).
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_staffels ADD COLUMN IF NOT EXISTS korting_pct_p1 NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_staffels ADD COLUMN IF NOT EXISTS korting_pct_p2 NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_lines ADD COLUMN IF NOT EXISTS fee_ex_p1 NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_lines ADD COLUMN IF NOT EXISTS fee_ex_p2 NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_lines ADD COLUMN IF NOT EXISTS retour_pct_p1 NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE price_quote_variant_lines ADD COLUMN IF NOT EXISTS retour_pct_p2 NUMERIC NOT NULL DEFAULT 0"
                 )
                 cur.execute(
                     """
@@ -330,6 +355,8 @@ def load_dataset(default_value: Any) -> Any:
                     id, variant_id, line_kind, bier_id, kostprijsversie_id, product_id, product_type,
                     verpakking_label, liters, aantal, included,
                     korting_pct_p1, korting_pct_p2,
+                    fee_ex_p1, fee_ex_p2,
+                    retour_pct_p1, retour_pct_p2,
                     sell_in_price_override_p1, sell_in_price_override_p2,
                     sort_index
                 FROM price_quote_variant_lines
@@ -340,7 +367,7 @@ def load_dataset(default_value: Any) -> Any:
             cur.execute(
                 """
                 SELECT
-                    id, variant_id, product_id, product_type, liters, korting_pct, sort_index
+                    id, variant_id, product_id, product_type, liters, korting_pct, korting_pct_p1, korting_pct_p2, sort_index
                 FROM price_quote_variant_staffels
                 ORDER BY variant_id, sort_index, id
                 """
@@ -438,6 +465,10 @@ def load_dataset(default_value: Any) -> Any:
         included,
         korting_pct_p1,
         korting_pct_p2,
+        fee_ex_p1,
+        fee_ex_p2,
+        retour_pct_p1,
+        retour_pct_p2,
         sell_in_price_override_p1,
         sell_in_price_override_p2,
         _sort_index,
@@ -454,6 +485,13 @@ def load_dataset(default_value: Any) -> Any:
             "included": bool(included),
             "korting_pct_p1": float(korting_pct_p1 or 0),
             "korting_pct_p2": float(korting_pct_p2 or 0),
+            # Keep legacy base fields for the UI; period-specific is leading.
+            "fee_ex": float(fee_ex_p2 or 0),
+            "fee_ex_p1": float(fee_ex_p1 or 0),
+            "fee_ex_p2": float(fee_ex_p2 or 0),
+            "retour_pct": float(retour_pct_p2 or 0),
+            "retour_pct_p1": float(retour_pct_p1 or 0),
+            "retour_pct_p2": float(retour_pct_p2 or 0),
             "sell_in_price_override_p1": float(sell_in_price_override_p1 or 0),
             "sell_in_price_override_p2": float(sell_in_price_override_p2 or 0),
         }
@@ -463,14 +501,17 @@ def load_dataset(default_value: Any) -> Any:
             product_lines_by_variant.setdefault(str(variant_id), []).append(payload)
 
     staffels_by_variant: dict[str, list[dict[str, Any]]] = {}
-    for staffel_id, variant_id, product_id, product_type, liters, korting_pct, _sort_index in variant_staffel_rows:
+    for staffel_id, variant_id, product_id, product_type, liters, korting_pct, korting_pct_p1, korting_pct_p2, _sort_index in variant_staffel_rows:
         staffels_by_variant.setdefault(str(variant_id), []).append(
             {
                 "id": str(staffel_id),
                 "product_id": str(product_id or ""),
                 "product_type": str(product_type or ""),
                 "liters": float(liters or 0),
+                # Keep legacy field but also provide period-specific korting.
                 "korting_pct": float(korting_pct or 0),
+                "korting_pct_p1": float(korting_pct_p1 or 0),
+                "korting_pct_p2": float(korting_pct_p2 or 0),
             }
         )
 
@@ -703,6 +744,8 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                     continue
                                 line_id = f"{variant_id}:{base_id}"
                                 korting_single = float(item.get("korting_pct", 0) or 0)
+                                fee_single = float(item.get("fee_ex", 0) or 0)
+                                retour_single = float(item.get("retour_pct", 0) or 0)
                                 variant_line_params.append(
                                     (
                                         line_id,
@@ -718,6 +761,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                         bool(item.get("included", True)),
                                         float(item.get("korting_pct_p1", korting_single) or 0),
                                         float(item.get("korting_pct_p2", korting_single) or 0),
+                                        float(item.get("fee_ex_p1", fee_single) or 0),
+                                        float(item.get("fee_ex_p2", fee_single) or 0),
+                                        float(item.get("retour_pct_p1", retour_single) or 0),
+                                        float(item.get("retour_pct_p2", retour_single) or 0),
                                         float(item.get("sell_in_price_override_p1", 0) or 0),
                                         float(item.get("sell_in_price_override_p2", 0) or 0),
                                         int(item.get("sort_index", sort_index_lines) or sort_index_lines),
@@ -732,6 +779,8 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                     continue
                                 line_id = f"{variant_id}:{base_id}"
                                 korting_single = float(item.get("korting_pct", 0) or 0)
+                                fee_single = float(item.get("fee_ex", 0) or 0)
+                                retour_single = float(item.get("retour_pct", 0) or 0)
                                 variant_line_params.append(
                                     (
                                         line_id,
@@ -747,6 +796,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                         bool(item.get("included", True)),
                                         float(item.get("korting_pct_p1", korting_single) or 0),
                                         float(item.get("korting_pct_p2", korting_single) or 0),
+                                        float(item.get("fee_ex_p1", fee_single) or 0),
+                                        float(item.get("fee_ex_p2", fee_single) or 0),
+                                        float(item.get("retour_pct_p1", retour_single) or 0),
+                                        float(item.get("retour_pct_p2", retour_single) or 0),
                                         float(item.get("sell_in_price_override_p1", 0) or 0),
                                         float(item.get("sell_in_price_override_p2", 0) or 0),
                                         int(item.get("sort_index", sort_index_lines) or sort_index_lines),
@@ -761,6 +814,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 if not base_id:
                                     continue
                                 staffel_id = f"{variant_id}:{base_id}"
+                                korting_single = float(item.get("korting_pct", 0) or 0)
                                 variant_staffel_params.append(
                                     (
                                         staffel_id,
@@ -768,7 +822,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                         str(item.get("product_id", "") or ""),
                                         str(item.get("product_type", "") or ""),
                                         float(item.get("liters", 0) or 0),
-                                        float(item.get("korting_pct", 0) or 0),
+                                        float(item.get("korting_pct", korting_single) or 0),
+                                        float(item.get("korting_pct_p1", korting_single) or 0),
+                                        float(item.get("korting_pct_p2", korting_single) or 0),
                                         int(item.get("sort_index", staffel_index) or staffel_index),
                                     )
                                 )
@@ -830,6 +886,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 korting,
                                 0.0,
                                 0.0,
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0,
                                 int(sort_index),
                             )
                         )
@@ -881,6 +941,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 korting,
                                 0.0,
                                 0.0,
+                                0.0,
+                                0.0,
+                                0.0,
+                                0.0,
                                 int(sort_index),
                             )
                         )
@@ -892,6 +956,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         staffel_id = str(item.get("id", "") or "").strip()
                         if not staffel_id:
                             continue
+                        korting = float(item.get("korting_pct", 0) or 0)
                         staffel_params.append(
                             (
                                 staffel_id,
@@ -899,7 +964,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 str(item.get("product_id", "") or ""),
                                 str(item.get("product_type", "") or ""),
                                 float(item.get("liters", 0) or 0),
-                                float(item.get("korting_pct", 0) or 0),
+                                korting,
                                 int(staffel_index),
                             )
                         )
@@ -910,7 +975,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                                 str(item.get("product_id", "") or ""),
                                 str(item.get("product_type", "") or ""),
                                 float(item.get("liters", 0) or 0),
-                                float(item.get("korting_pct", 0) or 0),
+                                korting,
+                                korting,
+                                korting,
                                 int(staffel_index),
                             )
                         )
@@ -940,13 +1007,19 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         INSERT INTO price_quote_variant_lines (
                             id, variant_id, line_kind, bier_id, kostprijsversie_id, product_id, product_type,
                             verpakking_label, liters, aantal, included,
-                            korting_pct_p1, korting_pct_p2, sell_in_price_override_p1, sell_in_price_override_p2,
+                            korting_pct_p1, korting_pct_p2,
+                            fee_ex_p1, fee_ex_p2,
+                            retour_pct_p1, retour_pct_p2,
+                            sell_in_price_override_p1, sell_in_price_override_p2,
                             sort_index
                         )
                         VALUES (
                             %s, %s, %s, %s, %s, %s, %s,
                             %s, %s, %s, %s,
-                            %s, %s, %s, %s,
+                            %s, %s,
+                            %s, %s,
+                            %s, %s,
+                            %s, %s,
                             %s
                         )
                         """,
@@ -956,9 +1029,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     cur.executemany(
                         """
                         INSERT INTO price_quote_variant_staffels (
-                            id, variant_id, product_id, product_type, liters, korting_pct, sort_index
+                            id, variant_id, product_id, product_type, liters, korting_pct, korting_pct_p1, korting_pct_p2, sort_index
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         variant_staffel_params,
                     )

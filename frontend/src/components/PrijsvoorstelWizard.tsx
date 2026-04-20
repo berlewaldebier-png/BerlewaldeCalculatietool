@@ -27,8 +27,25 @@ type QuoteLineRow = GenericRecord & {
   korting_pct: number;
   korting_pct_p1?: number;
   korting_pct_p2?: number;
+  fee_ex?: number;
+  fee_ex_p1?: number;
+  fee_ex_p2?: number;
+  retour_pct?: number;
+  retour_pct_p1?: number;
+  retour_pct_p2?: number;
   sell_in_price_override_p1?: number;
   sell_in_price_override_p2?: number;
+};
+
+type QuoteStaffelRow = GenericRecord & {
+  id: string;
+  liters: number;
+  product_id?: string;
+  product_type?: string;
+  korting_pct: number;
+  korting_pct_p1?: number;
+  korting_pct_p2?: number;
+  sort_index?: number;
 };
 
 type QuoteVariantPeriod = {
@@ -48,7 +65,7 @@ type QuoteVariant = {
   periods: QuoteVariantPeriod[];
   product_rows: QuoteLineRow[];
   beer_rows: QuoteLineRow[];
-  staffels: GenericRecord[];
+  staffels: QuoteStaffelRow[];
 };
 
 type ScenarioCompareRow = {
@@ -187,6 +204,8 @@ type LitersDisplayRow = {
   verpakking: string;
   liters: number;
   kortingPct: number;
+  feeEx: number;
+  retourPct: number;
   kostprijsPerLiter: number;
   offerPrijs: number;
   sellInPrijs: number;
@@ -195,6 +214,8 @@ type LitersDisplayRow = {
   omzet: number;
   kosten: number;
   kortingEur: number;
+  feeEur: number;
+  retourEur: number;
   margeEur: number;
   margePct: number;
 };
@@ -212,6 +233,8 @@ type ProductDisplayRow = {
   aantal: number;
   kortingPct: number;
   litersPerProduct: number;
+  feeEx: number;
+  retourPct: number;
   kostprijsPerStuk: number;
   offerPrijs: number;
   sellInPrijs: number;
@@ -220,6 +243,8 @@ type ProductDisplayRow = {
   omzet: number;
   kosten: number;
   kortingEur: number;
+  feeEur: number;
+  retourEur: number;
   margeEur: number;
   margePct: number;
 };
@@ -617,6 +642,8 @@ function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
     .filter((row) => typeof row === "object" && row !== null)
     .map((row) => {
       const kortingPct = toNumber((row as any).korting_pct, 0);
+      const feeEx = toNumber((row as any).fee_ex, 0);
+      const retourPct = toNumber((row as any).retour_pct, 0);
       return {
         ...row,
         id: String((row as any).id ?? createId()),
@@ -633,10 +660,37 @@ function normalizeVariantLineRows(raw: unknown): QuoteLineRow[] {
         korting_pct: kortingPct,
         korting_pct_p1: toNumber((row as any).korting_pct_p1, kortingPct),
         korting_pct_p2: toNumber((row as any).korting_pct_p2, kortingPct),
+        fee_ex: feeEx,
+        fee_ex_p1: toNumber((row as any).fee_ex_p1, feeEx),
+        fee_ex_p2: toNumber((row as any).fee_ex_p2, feeEx),
+        retour_pct: retourPct,
+        retour_pct_p1: toNumber((row as any).retour_pct_p1, retourPct),
+        retour_pct_p2: toNumber((row as any).retour_pct_p2, retourPct),
         sell_in_price_override_p1: toNumber((row as any).sell_in_price_override_p1, 0),
         sell_in_price_override_p2: toNumber((row as any).sell_in_price_override_p2, 0)
       } as QuoteLineRow;
     });
+}
+
+function normalizeVariantStaffels(raw: unknown): QuoteStaffelRow[] {
+  const rows = Array.isArray(raw) ? (raw as GenericRecord[]) : [];
+  return rows
+    .filter((row) => typeof row === "object" && row !== null)
+    .map((row, index) => {
+      const kortingPct = toNumber((row as any).korting_pct, 0);
+      return {
+        ...row,
+        id: String((row as any).id ?? createId()),
+        liters: toNumber((row as any).liters, 0),
+        product_id: String((row as any).product_id ?? ""),
+        product_type: String((row as any).product_type ?? ""),
+        korting_pct: kortingPct,
+        korting_pct_p1: toNumber((row as any).korting_pct_p1, kortingPct),
+        korting_pct_p2: toNumber((row as any).korting_pct_p2, kortingPct),
+        sort_index: Number((row as any).sort_index ?? index) || index
+      } as QuoteStaffelRow;
+    })
+    .sort((a, b) => toNumber(a.liters, 0) - toNumber(b.liters, 0));
 }
 
 function normalizeQuoteVariant(raw: GenericRecord, fallbackChannel: string): QuoteVariant {
@@ -650,7 +704,7 @@ function normalizeQuoteVariant(raw: GenericRecord, fallbackChannel: string): Quo
     periods: Array.isArray((raw as any).periods) ? ensureVariantPeriods((raw as any).periods) : [],
     product_rows: normalizeVariantLineRows(raw.product_rows),
     beer_rows: normalizeVariantLineRows(raw.beer_rows),
-    staffels: Array.isArray(raw.staffels) ? (raw.staffels as GenericRecord[]) : []
+    staffels: normalizeVariantStaffels(raw.staffels)
   };
 }
 
@@ -666,7 +720,7 @@ function buildDefaultVariantFromLegacy(quote: GenericRecord, pricingChannel: str
     periods: [],
     product_rows: normalizeVariantLineRows(quote.product_rows),
     beer_rows: normalizeVariantLineRows(quote.beer_rows),
-    staffels: Array.isArray(quote.staffels) ? (quote.staffels as GenericRecord[]) : []
+    staffels: normalizeVariantStaffels(quote.staffels)
   };
 }
 
@@ -675,7 +729,17 @@ function applyVariantPeriodToWorkingRows<T extends GenericRecord>(rows: T[], per
     const p1 = toNumber((row as any).korting_pct_p1, toNumber((row as any).korting_pct, 0));
     const p2 = toNumber((row as any).korting_pct_p2, toNumber((row as any).korting_pct, 0));
     const nextKorting = periodIndex === 1 ? p1 : p2;
-    return { ...row, korting_pct: nextKorting } as T;
+    const feeBase = toNumber((row as any).fee_ex, 0);
+    const feeP1 = toNumber((row as any).fee_ex_p1, feeBase);
+    const feeP2 = toNumber((row as any).fee_ex_p2, feeBase);
+    const nextFee = periodIndex === 1 ? feeP1 : feeP2;
+
+    const retourBase = toNumber((row as any).retour_pct, 0);
+    const retourP1 = toNumber((row as any).retour_pct_p1, retourBase);
+    const retourP2 = toNumber((row as any).retour_pct_p2, retourBase);
+    const nextRetour = periodIndex === 1 ? retourP1 : retourP2;
+
+    return { ...row, korting_pct: nextKorting, fee_ex: nextFee, retour_pct: nextRetour } as T;
   }) as T[];
 }
 
@@ -690,6 +754,16 @@ function downloadTextFile(filename: string, content: string, mime = "text/plain;
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function applyVariantPeriodToWorkingStaffels(rows: QuoteStaffelRow[], periodIndex: 1 | 2): QuoteStaffelRow[] {
+  const list = Array.isArray(rows) ? rows : [];
+  return list.map((row) => {
+    const p1 = toNumber((row as any).korting_pct_p1, toNumber((row as any).korting_pct, 0));
+    const p2 = toNumber((row as any).korting_pct_p2, toNumber((row as any).korting_pct, 0));
+    const nextKorting = periodIndex === 1 ? p1 : p2;
+    return { ...row, korting_pct: nextKorting } as QuoteStaffelRow;
+  });
 }
 
 function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
@@ -763,7 +837,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
       ? raw.kostprijsversie_ids.map((value) => String(value ?? "")).filter(Boolean)
       : [],
     deleted_product_refs: Array.isArray(raw.deleted_product_refs) ? raw.deleted_product_refs : [],
-    staffels: Array.isArray(raw.staffels) ? raw.staffels : [],
+    staffels: normalizeVariantStaffels(raw.staffels),
     product_rows: normalizeProductRows,
     beer_rows: normalizeBeerRows,
     catalog_product_rows: Array.isArray(raw.catalog_product_rows) ? raw.catalog_product_rows : [],
@@ -834,7 +908,7 @@ function normalizePrijsvoorstel(raw: GenericRecord): GenericRecord {
   if (activeVariant) {
     base.product_rows = applyVariantPeriodToWorkingRows(activeVariant.product_rows, activePeriod);
     base.beer_rows = applyVariantPeriodToWorkingRows(activeVariant.beer_rows, activePeriod);
-    base.staffels = Array.isArray(activeVariant.staffels) ? activeVariant.staffels : [];
+    base.staffels = applyVariantPeriodToWorkingStaffels(activeVariant.staffels, activePeriod);
   }
 
   (base as any).variants = variants;
@@ -1097,6 +1171,34 @@ export function PrijsvoorstelWizard({
     () => effectiveSelectedKanaalValues.map((value) => channelOptionMap.get(value)).filter((value): value is ChannelOption => Boolean(value)),
     [channelOptionMap, effectiveSelectedKanaalValues]
   );
+
+  const staffelProductOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string; productId: string; productType: "basis" | "samengesteld" }> = [];
+
+    for (const row of pickLatestKnownProductRows(basisproducten, currentYear)) {
+      const id = String(row.id ?? "");
+      if (!id) continue;
+      options.push({
+        value: `basis|${id}`,
+        label: String(row.omschrijving ?? id),
+        productId: id,
+        productType: "basis"
+      });
+    }
+    for (const row of pickLatestKnownProductRows(samengesteldeProducten, currentYear)) {
+      const id = String(row.id ?? "");
+      if (!id) continue;
+      options.push({
+        value: `samengesteld|${id}`,
+        label: String(row.omschrijving ?? id),
+        productId: id,
+        productType: "samengesteld"
+      });
+    }
+
+    options.sort((a, b) => a.label.localeCompare(b.label, "nl"));
+    return options;
+  }, [basisproducten, currentYear, samengesteldeProducten]);
 
   const productDefinitionMap = useMemo(() => {
     const map = new Map<string, ProductDefinition>();
@@ -2532,34 +2634,35 @@ export function PrijsvoorstelWizard({
     });
   }
 
-  const litersDisplayRows = useMemo<LitersDisplayRow[]>(() => {
-    const currentBeerRows = Array.isArray(current.beer_rows) ? (current.beer_rows as GenericRecord[]) : [];
+  function computeLitersDisplayRows(record: GenericRecord, kanaalOverride?: string): LitersDisplayRow[] {
+    const recordBeerRows = Array.isArray(record.beer_rows) ? (record.beer_rows as GenericRecord[]) : [];
 
     if (!isLitersMode) {
       return [];
     }
+    const effectiveKanaal = String(kanaalOverride ?? "").trim() || currentKanaal;
 
     if (litersBasis === "een_bier") {
-      const bierId = String(current.bier_id ?? "");
+      const bierId = String(record.bier_id ?? "");
       const sourceRows = bierId
         ? (() => {
-            const currentProductRows = Array.isArray(current.product_rows)
-              ? (current.product_rows as GenericRecord[])
+            const recordProductRows = Array.isArray(record.product_rows)
+              ? (record.product_rows as GenericRecord[])
               : [];
-            const fromProducts = syncBeerRowsFromProductRows(bierId, currentProductRows, currentBeerRows);
+            const fromProducts = syncBeerRowsFromProductRows(bierId, recordProductRows, recordBeerRows);
             return fromProducts.length > 0
               ? fromProducts
-              : syncBeerRowsForSingleBeer(bierId, currentBeerRows);
+              : syncBeerRowsForSingleBeer(bierId, recordBeerRows);
           })()
-        : currentBeerRows;
+        : recordBeerRows;
 
       return sourceRows.map((row) => {
-        const bierId = String(row.bier_id ?? current.bier_id ?? "");
+        const rowBierId = String(row.bier_id ?? record.bier_id ?? "");
         const kostprijsversieId = String(row.kostprijsversie_id ?? "");
         const rowProductId = String(row.product_id ?? "");
         const snapshots = kostprijsversieId
-          ? getSnapshotProductRowsForBier(bierId, kostprijsversieId)
-          : getHighestLiterRowsForBier(bierId);
+          ? getSnapshotProductRowsForBier(rowBierId, kostprijsversieId)
+          : getHighestLiterRowsForBier(rowBierId);
         const snapshot = snapshots.find(
           (item) =>
             (rowProductId && item.productId === rowProductId) ||
@@ -2574,12 +2677,14 @@ export function PrijsvoorstelWizard({
           productDefinitionMap.get(`id|${rowProductId}`)?.label ||
           "-";
         const kortingPct = toNumber(row.korting_pct, 0);
+        const feeEx = toNumber((row as any).fee_ex, 0);
+        const retourPct = toNumber((row as any).retour_pct, 0);
         const pricingByChannel = Object.fromEntries(
           selectedChannelOptions.map((option) => [
             option.value,
             buildPricingForChannel(
               kostprijsPerLiter,
-              bierId,
+              rowBierId,
               snapshot?.productId ?? rowProductId,
               snapshot?.productType ??
                 (String(row.product_type ?? "") as "basis" | "samengesteld" | ""),
@@ -2588,20 +2693,21 @@ export function PrijsvoorstelWizard({
             )
           ])
         ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-        const pricing = pricingByChannel[currentKanaal];
+        const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
         const offerPrijs = pricing.offerPrice;
-        const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
         const liters = toNumber(row.liters, 0);
         const totals = calcOfferLineTotals({
           kostprijsEx: kostprijsPerLiter,
           offerPriceEx: offerPrijs,
           qty: liters,
-          kortingPct
+          kortingPct,
+          feeExPerUnit: feeEx,
+          retourPct
         });
         return {
           id: String(row.id ?? ""),
-          bierKey: bierId,
-          biernaam: bierNameMap.get(bierId) || "-",
+          bierKey: rowBierId,
+          biernaam: bierNameMap.get(rowBierId) || "-",
           kostprijsversieId: snapshot?.kostprijsversieId ?? kostprijsversieId,
           included: isIncluded(row.included),
           productId: snapshot?.productId ?? rowProductId,
@@ -2614,14 +2720,20 @@ export function PrijsvoorstelWizard({
           verpakking,
           liters,
           kortingPct,
+          feeEx,
+          retourPct,
           kostprijsPerLiter,
-          offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
+          offerByChannel: Object.fromEntries(
+            selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])
+          ),
           offerPrijs,
           sellInPrijs: pricing.sellInPrice,
           sellInMargePct: pricing.sellInMarginPct,
           omzet: totals.omzet,
           kosten: totals.kosten,
           kortingEur: totals.kortingEur,
+          feeEur: (totals as any).feeEur ?? 0,
+          retourEur: (totals as any).retourEur ?? 0,
           margeEur: totals.winst,
           margePct: totals.margePct
         };
@@ -2629,7 +2741,7 @@ export function PrijsvoorstelWizard({
     }
 
     if (litersBasis === "meerdere_bieren") {
-      return currentBeerRows.map((row) => {
+      return recordBeerRows.map((row) => {
         const bierId = String(row.bier_id ?? "");
         const fixedVersion = String(row.kostprijsversie_id ?? "");
         const highest = fixedVersion
@@ -2644,18 +2756,24 @@ export function PrijsvoorstelWizard({
             }
           : getHighestCostForBier(bierId);
         const kortingPct = toNumber(row.korting_pct, 0);
+        const feeEx = toNumber((row as any).fee_ex, 0);
+        const retourPct = toNumber((row as any).retour_pct, 0);
         const pricingByChannel = Object.fromEntries(
-          selectedChannelOptions.map((option) => [option.value, buildPricingForChannel(highest.cost, bierId, "", "", "liter", option.value)])
+          selectedChannelOptions.map((option) => [
+            option.value,
+            buildPricingForChannel(highest.cost, bierId, "", "", "liter", option.value)
+          ])
         ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-        const pricing = pricingByChannel[currentKanaal];
+        const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
         const offerPrijs = pricing.offerPrice;
-        const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
         const liters = toNumber(row.liters, 0);
         const totals = calcOfferLineTotals({
           kostprijsEx: highest.cost,
           offerPriceEx: offerPrijs,
           qty: liters,
-          kortingPct
+          kortingPct,
+          feeExPerUnit: feeEx,
+          retourPct
         });
         return {
           id: String(row.id ?? ""),
@@ -2667,14 +2785,20 @@ export function PrijsvoorstelWizard({
           verpakking: "Literregel",
           liters,
           kortingPct,
+          feeEx,
+          retourPct,
           kostprijsPerLiter: highest.cost,
-          offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
+          offerByChannel: Object.fromEntries(
+            selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])
+          ),
           offerPrijs,
           sellInPrijs: pricing.sellInPrice,
           sellInMargePct: pricing.sellInMarginPct,
           omzet: totals.omzet,
           kosten: totals.kosten,
           kortingEur: totals.kortingEur,
+          feeEur: (totals as any).feeEur ?? 0,
+          retourEur: (totals as any).retourEur ?? 0,
           margeEur: totals.winst,
           margePct: totals.margePct
         };
@@ -2682,7 +2806,7 @@ export function PrijsvoorstelWizard({
     }
 
     const overall = getHighestCostOverall();
-    return currentBeerRows.map((row) => {
+    return recordBeerRows.map((row) => {
       const fixedVersion = String(row.kostprijsversie_id ?? "");
       const effectiveOverall = fixedVersion
         ? {
@@ -2700,41 +2824,64 @@ export function PrijsvoorstelWizard({
           }
         : overall;
       const kortingPct = toNumber(row.korting_pct, 0);
+      const feeEx = toNumber((row as any).fee_ex, 0);
+      const retourPct = toNumber((row as any).retour_pct, 0);
       const pricingByChannel = Object.fromEntries(
-        selectedChannelOptions.map((option) => [option.value, buildPricingForChannel(effectiveOverall.cost, effectiveOverall.bierKey, "", "", "liter", option.value)])
+        selectedChannelOptions.map((option) => [
+          option.value,
+          buildPricingForChannel(
+            effectiveOverall.cost,
+            effectiveOverall.bierKey,
+            "",
+            "",
+            "liter",
+            option.value
+          )
+        ])
       ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-      const pricing = pricingByChannel[currentKanaal];
+      const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
       const offerPrijs = pricing.offerPrice;
-      const verkoopprijs = offerPrijs * Math.max(0, 1 - kortingPct / 100);
       const liters = toNumber(row.liters, 0);
       const totals = calcOfferLineTotals({
         kostprijsEx: effectiveOverall.cost,
         offerPriceEx: offerPrijs,
         qty: liters,
-        kortingPct
+        kortingPct,
+        feeExPerUnit: feeEx,
+        retourPct
       });
       return {
-          id: String(row.id ?? ""),
+        id: String(row.id ?? ""),
         bierKey: effectiveOverall.bierKey,
         biernaam: effectiveOverall.biernaam,
         kostprijsversieId: effectiveOverall.kostprijsversieId,
-          included: isIncluded(row.included),
+        included: isIncluded(row.included),
         productKey: "",
         verpakking: "Algemene literregel",
         liters,
         kortingPct,
+        feeEx,
+        retourPct,
         kostprijsPerLiter: effectiveOverall.cost,
-        offerByChannel: Object.fromEntries(selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])),
+        offerByChannel: Object.fromEntries(
+          selectedChannelOptions.map((option) => [option.value, pricingByChannel[option.value].offerPrice])
+        ),
         offerPrijs,
         sellInPrijs: pricing.sellInPrice,
         sellInMargePct: pricing.sellInMarginPct,
         omzet: totals.omzet,
         kosten: totals.kosten,
         kortingEur: totals.kortingEur,
+        feeEur: (totals as any).feeEur ?? 0,
+        retourEur: (totals as any).retourEur ?? 0,
         margeEur: totals.winst,
         margePct: totals.margePct
       };
     });
+  }
+
+  const litersDisplayRows = useMemo<LitersDisplayRow[]>(() => {
+    return computeLitersDisplayRows(current);
   }, [
     current.beer_rows,
     current.bier_id,
@@ -2753,9 +2900,11 @@ export function PrijsvoorstelWizard({
           omzet: totals.omzet + row.omzet,
           kosten: totals.kosten + row.kosten,
           kortingEur: totals.kortingEur + row.kortingEur,
+          feeEur: totals.feeEur + row.feeEur,
+          retourEur: totals.retourEur + row.retourEur,
           margeEur: totals.margeEur + row.margeEur
         }),
-        { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 }
+        { omzet: 0, kosten: 0, kortingEur: 0, feeEur: 0, retourEur: 0, margeEur: 0 }
       ),
     [litersDisplayRows]
   );
@@ -2776,9 +2925,11 @@ export function PrijsvoorstelWizard({
           omzet: totals.omzet + row.omzet,
           kosten: totals.kosten + row.kosten,
           kortingEur: totals.kortingEur + row.kortingEur,
+          feeEur: totals.feeEur + row.feeEur,
+          retourEur: totals.retourEur + row.retourEur,
           margeEur: totals.margeEur + row.margeEur
         }),
-        { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 }
+        { omzet: 0, kosten: 0, kortingEur: 0, feeEur: 0, retourEur: 0, margeEur: 0 }
       ),
     [offerteLitersRows]
   );
@@ -2832,10 +2983,11 @@ export function PrijsvoorstelWizard({
     return staffelProductOptions.filter((option) => option.value);
   }, [staffelProductOptions]);
 
-  const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
-    const currentProductRows = Array.isArray(current.product_rows) ? (current.product_rows as GenericRecord[]) : [];
+  function computeProductDisplayRows(record: GenericRecord, kanaalOverride?: string): ProductDisplayRow[] {
+    const effectiveKanaal = String(kanaalOverride ?? "").trim() || currentKanaal;
+    const recordProductRows = Array.isArray(record.product_rows) ? (record.product_rows as GenericRecord[]) : [];
 
-    const beerProductRows = currentProductRows.map((row) => {
+    const beerProductRows = recordProductRows.map((row) => {
       const bierId = String(row.bier_id ?? "");
       const fixedKostprijsversieId = String(row.kostprijsversie_id ?? "");
       const snapshotRowsForBier = getSnapshotProductRowsForBier(bierId, fixedKostprijsversieId);
@@ -2884,7 +3036,7 @@ export function PrijsvoorstelWizard({
         snapshot?.productType ?? rowProductType,
         verpakking
       );
-      let pricing = pricingByChannel[currentKanaal];
+      let pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
       const hasDirectStrategyPricing = pricing.sellInPrice > 0 || pricing.sellInMarginPct > 0;
 
       if (
@@ -2920,19 +3072,23 @@ export function PrijsvoorstelWizard({
               ];
             })
           ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-          pricing = pricingByChannel[currentKanaal];
+          pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
         }
       }
 
       const offerPrijs = pricing.offerPrice;
-      const kortingPctRaw = toNumber(row.korting_pct, 0);
+      const kortingPct = toNumber(row.korting_pct, 0);
+      const feeEx = toNumber((row as any).fee_ex, 0);
+      const retourPct = toNumber((row as any).retour_pct, 0);
       const aantal = toNumber(row.aantal, 0);
       const litersPerProduct = firstPositiveNumber(snapshot?.litersPerProduct, 0);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
         qty: aantal,
-        kortingPct: kortingPctRaw
+        kortingPct,
+        feeExPerUnit: feeEx,
+        retourPct
       });
       return {
         id: String(row.id ?? ""),
@@ -2945,8 +3101,10 @@ export function PrijsvoorstelWizard({
         productKey: snapshot?.productKey ?? "",
         verpakking,
         aantal,
-        kortingPct: kortingPctRaw,
+        kortingPct,
         litersPerProduct,
+        feeEx,
+        retourPct,
         kostprijsPerStuk,
         offerPrijs,
         sellInPrijs: pricing.sellInPrice,
@@ -2955,15 +3113,17 @@ export function PrijsvoorstelWizard({
         omzet: totals.omzet,
         kosten: totals.kosten,
         kortingEur: totals.kortingEur,
+        feeEur: (totals as any).feeEur ?? 0,
+        retourEur: (totals as any).retourEur ?? 0,
         margeEur: totals.winst,
         margePct: totals.margePct
       };
     });
 
-    const currentCatalogRows = Array.isArray((current as any).catalog_product_rows)
-      ? (((current as any).catalog_product_rows as GenericRecord[]) ?? [])
+    const recordCatalogRows = Array.isArray((record as any).catalog_product_rows)
+      ? ((((record as any).catalog_product_rows as GenericRecord[]) ?? []) as GenericRecord[])
       : [];
-    const catalogRows = currentCatalogRows.map((row) => {
+    const catalogRows = recordCatalogRows.map((row) => {
       const catalogProductId = String((row as any).catalog_product_id ?? "");
       const naam =
         String((row as any).naam ?? "") ||
@@ -2978,16 +3138,20 @@ export function PrijsvoorstelWizard({
           buildPricingForChannel(kostprijsPerStuk, "", `catalog:${catalogProductId}`, "catalog", naam, option.value)
         ])
       ) as Record<string, ReturnType<typeof buildPricingForChannel>>;
-      const pricing = pricingByChannel[currentKanaal];
+      const pricing = pricingByChannel[effectiveKanaal] ?? pricingByChannel[currentKanaal];
 
       const offerPrijs = pricing.offerPrice;
       const kortingPct = toNumber((row as any).korting_pct, 0);
+      const feeEx = toNumber((row as any).fee_ex, 0);
+      const retourPct = toNumber((row as any).retour_pct, 0);
       const aantal = toNumber((row as any).aantal, 0);
       const totals = calcOfferLineTotals({
         kostprijsEx: kostprijsPerStuk,
         offerPriceEx: offerPrijs,
         qty: aantal,
-        kortingPct
+        kortingPct,
+        feeExPerUnit: feeEx,
+        retourPct
       });
 
       return {
@@ -3003,6 +3167,8 @@ export function PrijsvoorstelWizard({
         aantal,
         kortingPct,
         litersPerProduct: 0,
+        feeEx,
+        retourPct,
         kostprijsPerStuk,
         offerPrijs,
         sellInPrijs: pricing.sellInPrice,
@@ -3013,12 +3179,18 @@ export function PrijsvoorstelWizard({
         omzet: totals.omzet,
         kosten: totals.kosten,
         kortingEur: totals.kortingEur,
+        feeEur: (totals as any).feeEur ?? 0,
+        retourEur: (totals as any).retourEur ?? 0,
         margeEur: totals.winst,
         margePct: totals.margePct
       };
     });
 
-    const rows = [...beerProductRows, ...catalogRows];
+    return [...beerProductRows, ...catalogRows];
+  }
+
+  const productDisplayRows = useMemo<ProductDisplayRow[]>(() => {
+    const rows = computeProductDisplayRows(current);
 
     const activeBlocks = getVariantBlocks(current, activeVariantId);
     const introEnabled = hasIntroBlock(current, activeVariantId);
@@ -3026,15 +3198,17 @@ export function PrijsvoorstelWizard({
 
     // Exclusivity: only one pricing rule can be active per period.
     // If xy_gratis applies to this period, it wins. Else staffel wins. Else manual korting_pct stays.
-    const xyBlock = activeBlocks.find((b) => String((b as any).type) === "xy_gratis" && isBlockActiveForPeriod(b as any, effectivePeriod)) as
-      | QuoteBuilderBlock
-      | undefined;
+    const xyBlock = activeBlocks.find(
+      (b) => String((b as any).type) === "xy_gratis" && isBlockActiveForPeriod(b as any, effectivePeriod)
+    ) as QuoteBuilderBlock | undefined;
     const staffelActive = activeBlocks.some((b) => String((b as any).type) === "staffel");
 
     if (xyBlock) {
       const requiredQty = toNumber((xyBlock as any).required_qty, 4);
       const freeQty = toNumber((xyBlock as any).free_qty, 1);
-      const eligibleRefs = Array.isArray((xyBlock as any).eligible_product_refs) ? ((xyBlock as any).eligible_product_refs as string[]) : [];
+      const eligibleRefs = Array.isArray((xyBlock as any).eligible_product_refs)
+        ? ((xyBlock as any).eligible_product_refs as string[])
+        : [];
       const gratis = computeGratisUnitsByProductRef({
         rows: rows as any,
         requiredQty,
@@ -3083,7 +3257,9 @@ export function PrijsvoorstelWizard({
         kostprijsEx: row.kostprijsPerStuk,
         offerPriceEx: row.offerPrijs,
         qty: row.aantal,
-        kortingPct: nextKorting
+        kortingPct: nextKorting,
+        feeExPerUnit: row.feeEx,
+        retourPct: row.retourPct
       });
       return {
         ...row,
@@ -3091,6 +3267,8 @@ export function PrijsvoorstelWizard({
         omzet: totals.omzet,
         kosten: totals.kosten,
         kortingEur: totals.kortingEur,
+        feeEur: (totals as any).feeEur ?? 0,
+        retourEur: (totals as any).retourEur ?? 0,
         margeEur: totals.winst,
         margePct: totals.margePct
       };
@@ -3115,9 +3293,11 @@ export function PrijsvoorstelWizard({
           omzet: totals.omzet + row.omzet,
           kosten: totals.kosten + row.kosten,
           kortingEur: totals.kortingEur + row.kortingEur,
+          feeEur: totals.feeEur + row.feeEur,
+          retourEur: totals.retourEur + row.retourEur,
           margeEur: totals.margeEur + row.margeEur
         }),
-        { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 }
+        { omzet: 0, kosten: 0, kortingEur: 0, feeEur: 0, retourEur: 0, margeEur: 0 }
       ),
     [productDisplayRows]
   );
@@ -3169,9 +3349,11 @@ export function PrijsvoorstelWizard({
           omzet: totals.omzet + row.omzet,
           kosten: totals.kosten + row.kosten,
           kortingEur: totals.kortingEur + row.kortingEur,
+          feeEur: totals.feeEur + row.feeEur,
+          retourEur: totals.retourEur + row.retourEur,
           margeEur: totals.margeEur + row.margeEur
         }),
-        { omzet: 0, kosten: 0, kortingEur: 0, margeEur: 0 }
+        { omzet: 0, kosten: 0, kortingEur: 0, feeEur: 0, retourEur: 0, margeEur: 0 }
       ),
     [offerteProductRows]
   );
@@ -3364,6 +3546,8 @@ export function PrijsvoorstelWizard({
           const id = String((row as any).id ?? "");
           const prev = byId.get(id) ?? {};
           const kortingNow = toNumber((row as any).korting_pct, 0);
+          const feeNow = toNumber((row as any).fee_ex, 0);
+          const retourNow = toNumber((row as any).retour_pct, 0);
 
           const fallbackKorting = toNumber((prev as any).korting_pct, kortingNow);
           let p1 = toNumber((prev as any).korting_pct_p1, toNumber((row as any).korting_pct_p1, fallbackKorting));
@@ -3372,6 +3556,24 @@ export function PrijsvoorstelWizard({
             p1 = kortingNow;
           } else {
             p2 = kortingNow;
+          }
+
+          const fallbackFee = toNumber((prev as any).fee_ex, feeNow);
+          let feeP1 = toNumber((prev as any).fee_ex_p1, toNumber((row as any).fee_ex_p1, fallbackFee));
+          let feeP2 = toNumber((prev as any).fee_ex_p2, toNumber((row as any).fee_ex_p2, fallbackFee));
+          if (nextPeriodIndex === 1) {
+            feeP1 = feeNow;
+          } else {
+            feeP2 = feeNow;
+          }
+
+          const fallbackRetour = toNumber((prev as any).retour_pct, retourNow);
+          let retourP1 = toNumber((prev as any).retour_pct_p1, toNumber((row as any).retour_pct_p1, fallbackRetour));
+          let retourP2 = toNumber((prev as any).retour_pct_p2, toNumber((row as any).retour_pct_p2, fallbackRetour));
+          if (nextPeriodIndex === 1) {
+            retourP1 = retourNow;
+          } else {
+            retourP2 = retourNow;
           }
 
           return {
@@ -3393,6 +3595,12 @@ export function PrijsvoorstelWizard({
             korting_pct: kortingNow,
             korting_pct_p1: p1,
             korting_pct_p2: p2,
+            fee_ex: feeNow,
+            fee_ex_p1: feeP1,
+            fee_ex_p2: feeP2,
+            retour_pct: retourNow,
+            retour_pct_p1: retourP1,
+            retour_pct_p2: retourP2,
             sell_in_price_override_p1: toNumber((prev as any).sell_in_price_override_p1, toNumber((row as any).sell_in_price_override_p1, 0)),
             sell_in_price_override_p2: toNumber((prev as any).sell_in_price_override_p2, toNumber((row as any).sell_in_price_override_p2, 0))
           } as QuoteLineRow;
@@ -3402,7 +3610,43 @@ export function PrijsvoorstelWizard({
     if (active) {
       active.product_rows = mergeRows((next as any).product_rows, (active as any).product_rows);
       active.beer_rows = mergeRows((next as any).beer_rows, (active as any).beer_rows);
-      active.staffels = Array.isArray((next as any).staffels) ? ((next as any).staffels as GenericRecord[]) : [];
+      const mergeStaffels = (working: unknown, existing: unknown): QuoteStaffelRow[] => {
+        const workingRows = Array.isArray(working) ? (working as GenericRecord[]) : [];
+        const existingRows = Array.isArray(existing) ? (existing as GenericRecord[]) : [];
+        const byId = new Map(existingRows.map((row) => [String((row as any).id ?? ""), row]));
+
+        return workingRows
+          .filter((row) => typeof row === "object" && row !== null)
+          .map((row) => {
+            const id = String((row as any).id ?? "");
+            const prev = byId.get(id) ?? {};
+            const kortingNow = toNumber((row as any).korting_pct, 0);
+
+            const fallbackKorting = toNumber((prev as any).korting_pct, kortingNow);
+            let p1 = toNumber((prev as any).korting_pct_p1, toNumber((row as any).korting_pct_p1, fallbackKorting));
+            let p2 = toNumber((prev as any).korting_pct_p2, toNumber((row as any).korting_pct_p2, fallbackKorting));
+            if (nextPeriodIndex === 1) {
+              p1 = kortingNow;
+            } else {
+              p2 = kortingNow;
+            }
+
+            return {
+              ...prev,
+              ...row,
+              id: id || String((prev as any).id ?? createId()),
+              liters: toNumber((row as any).liters, toNumber((prev as any).liters, 0)),
+              product_id: String((row as any).product_id ?? (prev as any).product_id ?? ""),
+              product_type: String((row as any).product_type ?? (prev as any).product_type ?? ""),
+              korting_pct: kortingNow,
+              korting_pct_p1: p1,
+              korting_pct_p2: p2,
+              sort_index: Number((row as any).sort_index ?? (prev as any).sort_index ?? 0) || 0
+            } as QuoteStaffelRow;
+          })
+          .sort((a, b) => toNumber((a as any).liters, 0) - toNumber((b as any).liters, 0));
+      };
+      active.staffels = mergeStaffels((next as any).staffels, (active as any).staffels);
       active.channel_code = normalizeKey((active as any).channel_code) || normalizeKey((next as any).pricing_channel) || normalizeKey((next as any).kanaal) || defaultKanaal;
       active.periods = hasIntroBlock(next, String(active.id)) ? ensureVariantPeriods((active as any).periods) : [];
     }
@@ -3427,7 +3671,7 @@ export function PrijsvoorstelWizard({
       }
       draft.product_rows = applyVariantPeriodToWorkingRows(target.product_rows, periodIndex);
       draft.beer_rows = applyVariantPeriodToWorkingRows(target.beer_rows, periodIndex);
-      draft.staffels = Array.isArray(target.staffels) ? target.staffels : [];
+      draft.staffels = applyVariantPeriodToWorkingStaffels(target.staffels, periodIndex);
       draft.pricing_channel = normalizeKey(target.channel_code) || normalizeKey(draft.pricing_channel) || normalizeKey(draft.kanaal) || defaultKanaal;
     });
   }
@@ -3448,6 +3692,10 @@ export function PrijsvoorstelWizard({
       );
       draft.beer_rows = applyVariantPeriodToWorkingRows(
         Array.isArray(draft.beer_rows) ? (draft.beer_rows as GenericRecord[]) : [],
+        periodIndex
+      );
+      draft.staffels = applyVariantPeriodToWorkingStaffels(
+        Array.isArray(draft.staffels) ? (draft.staffels as QuoteStaffelRow[]) : [],
         periodIndex
       );
     });
@@ -3480,7 +3728,7 @@ export function PrijsvoorstelWizard({
         periods: ensureVariantPeriods(source.periods),
         product_rows: normalizeVariantLineRows(source.product_rows),
         beer_rows: normalizeVariantLineRows(source.beer_rows),
-        staffels: Array.isArray(source.staffels) ? (source.staffels as GenericRecord[]) : []
+        staffels: normalizeVariantStaffels(source.staffels)
       };
 
       const nextList = [...list, cloned].sort((a, b) => (a.sort_index ?? 0) - (b.sort_index ?? 0));
@@ -3490,7 +3738,7 @@ export function PrijsvoorstelWizard({
       const periodIndex = toPeriodIndex((draft as any).active_period_index, 2);
       draft.product_rows = applyVariantPeriodToWorkingRows(cloned.product_rows, periodIndex);
       draft.beer_rows = applyVariantPeriodToWorkingRows(cloned.beer_rows, periodIndex);
-      draft.staffels = cloned.staffels;
+      draft.staffels = applyVariantPeriodToWorkingStaffels(cloned.staffels, periodIndex);
     });
   }
 
@@ -3509,7 +3757,7 @@ export function PrijsvoorstelWizard({
       if (nextActive) {
         draft.product_rows = applyVariantPeriodToWorkingRows(nextActive.product_rows, periodIndex);
         draft.beer_rows = applyVariantPeriodToWorkingRows(nextActive.beer_rows, periodIndex);
-        draft.staffels = Array.isArray(nextActive.staffels) ? nextActive.staffels : [];
+        draft.staffels = applyVariantPeriodToWorkingStaffels(nextActive.staffels, periodIndex);
       }
     });
   }
@@ -3763,7 +4011,7 @@ export function PrijsvoorstelWizard({
 
   function updateBeerRow(
     rowId: string,
-    field: "liters" | "korting_pct" | "included",
+    field: "liters" | "korting_pct" | "fee_ex" | "retour_pct" | "included",
     value: number | boolean
   ) {
     updateCurrent((draft) => {
@@ -3772,9 +4020,24 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      const nextRow = { ...nextRows[index], [field]: value };
-      if (field === "korting_pct") {
-        (nextRow as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = value;
+      let nextValue: number | boolean = value;
+      if (typeof value === "number") {
+        // Guardrails: keep user input within expected bounds.
+        const raw = toNumber(value, 0);
+        if (field === "liters") nextValue = Math.max(0, raw);
+        else if (field === "fee_ex") nextValue = Math.max(0, raw);
+        else if (field === "korting_pct" || field === "retour_pct") nextValue = Math.min(100, Math.max(0, raw));
+        else nextValue = raw;
+      }
+      const nextRow = { ...nextRows[index], [field]: nextValue };
+      if (field === "korting_pct" || field === "fee_ex" || field === "retour_pct") {
+        const periodField =
+          field === "korting_pct"
+            ? activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"
+            : field === "fee_ex"
+              ? activePeriodIndex === 1 ? "fee_ex_p1" : "fee_ex_p2"
+              : activePeriodIndex === 1 ? "retour_pct_p1" : "retour_pct_p2";
+        (nextRow as any)[periodField] = nextValue;
       }
       nextRows[index] = nextRow;
       draft.beer_rows = nextRows;
@@ -3783,7 +4046,7 @@ export function PrijsvoorstelWizard({
 
   function updateProductRow(
     rowId: string,
-    field: "aantal" | "korting_pct" | "included",
+    field: "aantal" | "korting_pct" | "fee_ex" | "retour_pct" | "included",
     value: number | boolean
   ) {
     updateCurrent((draft) => {
@@ -3792,9 +4055,23 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      const nextRow = { ...nextRows[index], [field]: value };
-      if (field === "korting_pct") {
-        (nextRow as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = value;
+      let nextValue: number | boolean = value;
+      if (typeof value === "number") {
+        const raw = toNumber(value, 0);
+        if (field === "aantal") nextValue = Math.max(0, raw);
+        else if (field === "fee_ex") nextValue = Math.max(0, raw);
+        else if (field === "korting_pct" || field === "retour_pct") nextValue = Math.min(100, Math.max(0, raw));
+        else nextValue = raw;
+      }
+      const nextRow = { ...nextRows[index], [field]: nextValue };
+      if (field === "korting_pct" || field === "fee_ex" || field === "retour_pct") {
+        const periodField =
+          field === "korting_pct"
+            ? activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"
+            : field === "fee_ex"
+              ? activePeriodIndex === 1 ? "fee_ex_p1" : "fee_ex_p2"
+              : activePeriodIndex === 1 ? "retour_pct_p1" : "retour_pct_p2";
+        (nextRow as any)[periodField] = nextValue;
       }
       nextRows[index] = nextRow;
       draft.product_rows = nextRows;
@@ -3803,7 +4080,7 @@ export function PrijsvoorstelWizard({
 
   function updateCatalogProductRow(
     rowId: string,
-    field: "aantal" | "korting_pct" | "included",
+    field: "aantal" | "korting_pct" | "fee_ex" | "retour_pct" | "included",
     value: number | boolean
   ) {
     updateCurrent((draft) => {
@@ -3814,12 +4091,159 @@ export function PrijsvoorstelWizard({
       if (index < 0) {
         return;
       }
-      const nextRow = { ...nextRows[index], [field]: value };
-      if (field === "korting_pct") {
-        (nextRow as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = value;
+      let nextValue: number | boolean = value;
+      if (typeof value === "number") {
+        const raw = toNumber(value, 0);
+        if (field === "aantal") nextValue = Math.max(0, raw);
+        else if (field === "fee_ex") nextValue = Math.max(0, raw);
+        else if (field === "korting_pct" || field === "retour_pct") nextValue = Math.min(100, Math.max(0, raw));
+        else nextValue = raw;
+      }
+      const nextRow = { ...nextRows[index], [field]: nextValue };
+      if (field === "korting_pct" || field === "fee_ex" || field === "retour_pct") {
+        const periodField =
+          field === "korting_pct"
+            ? activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"
+            : field === "fee_ex"
+              ? activePeriodIndex === 1 ? "fee_ex_p1" : "fee_ex_p2"
+              : activePeriodIndex === 1 ? "retour_pct_p1" : "retour_pct_p2";
+        (nextRow as any)[periodField] = nextValue;
       }
       nextRows[index] = nextRow;
       (draft as any).catalog_product_rows = nextRows;
+    });
+  }
+
+  function addStaffelRow() {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? ([...(draft.staffels as QuoteStaffelRow[])] as QuoteStaffelRow[]) : [];
+      const next: QuoteStaffelRow = {
+        id: createId(),
+        liters: 0,
+        product_id: "",
+        product_type: "",
+        korting_pct: 0,
+        korting_pct_p1: 0,
+        korting_pct_p2: 0,
+        sort_index: staffels.length
+      };
+      staffels.push(next);
+      draft.staffels = staffels;
+    });
+  }
+
+  function updateStaffelRow(
+    rowId: string,
+    field: "liters" | "korting_pct" | "product_ref",
+    value: number | string
+  ) {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? [...(draft.staffels as QuoteStaffelRow[])] : [];
+      const index = staffels.findIndex((row) => String(row.id ?? "") === rowId);
+      if (index < 0) return;
+
+      const prev = staffels[index];
+      const next = { ...prev };
+
+      if (field === "liters") {
+        next.liters = Number(value) || 0;
+      } else if (field === "korting_pct") {
+        const korting = Number(value) || 0;
+        next.korting_pct = korting;
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+      } else {
+        const ref = String(value ?? "");
+        if (!ref) {
+          next.product_id = "";
+          next.product_type = "";
+        } else {
+          const pipe = ref.indexOf("|");
+          const kind = pipe >= 0 ? ref.slice(0, pipe) : "";
+          const id = pipe >= 0 ? ref.slice(pipe + 1) : ref;
+          next.product_id = id;
+          next.product_type = kind === "samengesteld" ? "samengesteld" : "basis";
+        }
+      }
+
+      staffels[index] = next;
+      staffels.sort((a, b) => toNumber(a.liters, 0) - toNumber(b.liters, 0));
+      staffels.forEach((row, idx) => {
+        row.sort_index = idx;
+      });
+      draft.staffels = staffels;
+    });
+  }
+
+  function removeStaffelRow(rowId: string) {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? (draft.staffels as QuoteStaffelRow[]) : [];
+      draft.staffels = staffels.filter((row) => String(row.id ?? "") !== rowId);
+    });
+  }
+
+  function applyStaffelsToKorting() {
+    updateCurrent((draft) => {
+      const staffels = Array.isArray(draft.staffels) ? (draft.staffels as QuoteStaffelRow[]) : [];
+      if (staffels.length === 0) return;
+
+      const sorted = [...staffels].sort((a, b) => toNumber(a.liters, 0) - toNumber(b.liters, 0));
+
+      const resolveKorting = (row: GenericRecord): number | null => {
+        const liters = toNumber((row as any).liters, 0);
+        if (liters <= 0) return null;
+        const productId = String((row as any).product_id ?? "");
+        const productType = normalizeKey((row as any).product_type ?? "");
+
+        const candidates = sorted.filter((staffel) => {
+          const staffelProductId = String((staffel as any).product_id ?? "");
+          if (!staffelProductId) {
+            return true;
+          }
+          if (staffelProductId !== productId) return false;
+          const staffelType = normalizeKey((staffel as any).product_type ?? "");
+          return staffelType ? staffelType === productType : true;
+        });
+
+        const match = candidates
+          .filter((staffel) => toNumber((staffel as any).liters, 0) <= liters)
+          .sort((a, b) => toNumber((a as any).liters, 0) - toNumber((b as any).liters, 0))
+          .pop();
+
+        if (!match) return null;
+        return toNumber((match as any).korting_pct, 0);
+      };
+
+      const nextBeerRows = Array.isArray(draft.beer_rows) ? [...(draft.beer_rows as GenericRecord[])] : [];
+      nextBeerRows.forEach((row, index) => {
+        const korting = resolveKorting(row);
+        if (korting === null) return;
+        const next = { ...row, korting_pct: korting };
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+        nextBeerRows[index] = next;
+      });
+      draft.beer_rows = nextBeerRows;
+
+      const nextProductRows = Array.isArray(draft.product_rows) ? [...(draft.product_rows as GenericRecord[])] : [];
+      nextProductRows.forEach((row, index) => {
+        const korting = resolveKorting(row);
+        if (korting === null) return;
+        const next = { ...row, korting_pct: korting };
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+        nextProductRows[index] = next;
+      });
+      draft.product_rows = nextProductRows;
+
+      const nextCatalogRows = Array.isArray((draft as any).catalog_product_rows)
+        ? [...((draft as any).catalog_product_rows as GenericRecord[])]
+        : [];
+      nextCatalogRows.forEach((row, index) => {
+        const korting = resolveKorting(row);
+        if (korting === null) return;
+        const next = { ...row, korting_pct: korting };
+        (next as any)[activePeriodIndex === 1 ? "korting_pct_p1" : "korting_pct_p2"] = korting;
+        nextCatalogRows[index] = next;
+      });
+      (draft as any).catalog_product_rows = nextCatalogRows;
     });
   }
 
@@ -4322,11 +4746,22 @@ export function PrijsvoorstelWizard({
             <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Totale marge</div>
+            <div className="stat-label">Totale fee (ex)</div>
+            <div className="stat-value small">{formatEuro((offerteLitersTotals as any).feeEur ?? 0)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Totale retour</div>
+            <div className="stat-value small">{formatEuro((offerteLitersTotals as any).retourEur ?? 0)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Totale winst/marge</div>
             <div className="stat-value small">
               {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
+        </div>
+        <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+          Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid van omzet en kosten.
         </div>
 
         <div className="dataset-editor-scroll">
@@ -4336,7 +4771,9 @@ export function PrijsvoorstelWizard({
                 <th>Bier</th>
                 <th>Product</th>
                 <th>Liters</th>
-                <th>Korting %</th>
+                <th>Korting (%)</th>
+                <th>Fee (EUR, ex)</th>
+                <th>Retour (%)</th>
                 <th>{costPriceLabel}</th>
                 {isMultiKanaalMode
                   ? selectedChannelOptions.map((option) => (
@@ -4348,8 +4785,10 @@ export function PrijsvoorstelWizard({
                     <th>Omzet</th>
                     <th>Kosten</th>
                     <th>{discountAmountLabel}</th>
+                    <th>Fee (ex)</th>
+                    <th>Retour (EUR)</th>
                     <th>Winst</th>
-                    <th>Onze marge</th>
+                    <th>Marge (afgeleid)</th>
                   </>
                 ) : null}
                 <th></th>
@@ -4378,12 +4817,40 @@ export function PrijsvoorstelWizard({
                       className="dataset-input"
                       type="number"
                       min={0}
+                      max={100}
                       step="0.1"
                       style={{ minWidth: "8rem" }}
                       value={String(row.kortingPct)}
                       disabled={!editPricing || pricingRuleActive}
                       onChange={(event) =>
                         updateBeerRow(row.id, "korting_pct", Number(event.target.value || 0))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="dataset-input"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      style={{ minWidth: "8rem" }}
+                      value={String(row.feeEx)}
+                      onChange={(event) =>
+                        updateBeerRow(row.id, "fee_ex", Number(event.target.value || 0))
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="dataset-input"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="0.1"
+                      style={{ minWidth: "8rem" }}
+                      value={String(row.retourPct)}
+                      onChange={(event) =>
+                        updateBeerRow(row.id, "retour_pct", Number(event.target.value || 0))
                       }
                     />
                   </td>
@@ -4402,6 +4869,8 @@ export function PrijsvoorstelWizard({
                         <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div></td>
                         <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kosten)}</div></td>
                         <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.kortingEur)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.feeEur)}</div></td>
+                        <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.retourEur)}</div></td>
                         <td><div className="dataset-input dataset-input-readonly">{formatEuro(row.margeEur)}</div></td>
                         <td><div className="dataset-input dataset-input-readonly">{formatPercentage(row.margePct)}</div></td>
                       </>
@@ -4514,7 +4983,7 @@ export function PrijsvoorstelWizard({
                 : null}
               {offerteLitersRows.length === 0 ? (
                 <tr>
-                  <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length : 12} className="prijs-empty-cell">
+                  <td colSpan={isMultiKanaalMode ? 8 + selectedChannelOptions.length : 16} className="prijs-empty-cell">
                     Kies eerst een bier of zet een literscenario klaar om de offerte op te bouwen.
                   </td>
                 </tr>
@@ -4627,11 +5096,22 @@ export function PrijsvoorstelWizard({
             <div className="stat-value small">{formatEuro(totalsWithAdjustments.kortingEur)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label">Totale marge</div>
+            <div className="stat-label">Totale fee (ex)</div>
+            <div className="stat-value small">{formatEuro((offerteProductTotals as any).feeEur ?? 0)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Totale retour</div>
+            <div className="stat-value small">{formatEuro((offerteProductTotals as any).retourEur ?? 0)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Totale winst/marge</div>
             <div className="stat-value small">
               {formatEuro(totalsWithAdjustments.margeEur)} ({formatPercentage(totalMargePct)})
             </div>
           </div>
+        </div>
+        <div className="module-card-text" style={{ marginTop: "-0.25rem", marginBottom: "0.75rem" }}>
+          Korting (%) verlaagt de verkoopprijs. Fee (EUR, ex) en retour (%) verlagen de omzet. Marge (%) is afgeleid van omzet en kosten.
         </div>
 
         <div className="dataset-editor-scroll">
@@ -4641,7 +5121,9 @@ export function PrijsvoorstelWizard({
                 <th>Bier</th>
                 <th>Product</th>
                 <th>Aantal</th>
-                <th>Korting %</th>
+                <th>Korting (%)</th>
+                <th>Fee (EUR, ex)</th>
+                <th>Retour (%)</th>
                 <th>{costPriceLabel}</th>
                 {isMultiKanaalMode
                   ? selectedChannelOptions.map((option) => (
@@ -4653,8 +5135,10 @@ export function PrijsvoorstelWizard({
                     <th>Omzet</th>
                     <th>Kosten</th>
                     <th>{discountAmountLabel}</th>
+                    <th>Fee (ex)</th>
+                    <th>Retour (EUR)</th>
                     <th>Winst</th>
-                    <th>Onze marge</th>
+                    <th>Marge (afgeleid)</th>
                   </>
                 ) : null}
                 <th></th>
@@ -4675,7 +5159,9 @@ export function PrijsvoorstelWizard({
                         kostprijsEx: row.kostprijsPerStuk,
                         offerPriceEx: row.offerPrijs,
                         qty: row.aantal,
-                        kortingPct: 0
+                        kortingPct: 0,
+                        feeExPerUnit: row.feeEx,
+                        retourPct: row.retourPct
                       })
                     : null;
                 const freeKortingEur = freeUnits > 0 ? freeUnits * Math.max(0, toFiniteNumber(row.offerPrijs, 0)) : 0;
@@ -4707,6 +5193,7 @@ export function PrijsvoorstelWizard({
                         className="dataset-input"
                         type="number"
                         min={0}
+                        max={100}
                         step="0.1"
                         style={{ minWidth: "8rem" }}
                         value={String(row.kortingPct)}
@@ -4715,6 +5202,43 @@ export function PrijsvoorstelWizard({
                           (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
                             row.id,
                             "korting_pct",
+                            Number(event.target.value || 0)
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="dataset-input"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        style={{ minWidth: "8rem" }}
+                        value={String(row.feeEx)}
+                        disabled={!editPricing}
+                        onChange={(event) =>
+                          (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                            row.id,
+                            "fee_ex",
+                            Number(event.target.value || 0)
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="dataset-input"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.1"
+                        style={{ minWidth: "8rem" }}
+                        value={String(row.retourPct)}
+                        disabled={!editPricing}
+                        onChange={(event) =>
+                          (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                            row.id,
+                            "retour_pct",
                             Number(event.target.value || 0)
                           )
                         }
@@ -4747,8 +5271,16 @@ export function PrijsvoorstelWizard({
                           </div>
                         </td>
                         <td>
+                          <div className="dataset-input dataset-input-readonly">{formatEuro(paidTotals ? 0 : row.kortingEur)}</div>
+                        </td>
+                        <td>
                           <div className="dataset-input dataset-input-readonly">
-                            {formatEuro(paidTotals ? 0 : row.kortingEur)}
+                            {formatEuro(paidTotals ? (paidTotals as any).feeEur ?? 0 : row.feeEur)}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="dataset-input dataset-input-readonly">
+                            {formatEuro(paidTotals ? (paidTotals as any).retourEur ?? 0 : row.retourEur)}
                           </div>
                         </td>
                         <td>
@@ -4791,6 +5323,12 @@ export function PrijsvoorstelWizard({
                         <div className="dataset-input dataset-input-readonly">gratis</div>
                       </td>
                       <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                      </td>
+                      <td>
                         <div className="dataset-input dataset-input-readonly">{formatEuro(row.kostprijsPerStuk)}</div>
                       </td>
                       {isMultiKanaalMode ? (
@@ -4812,6 +5350,12 @@ export function PrijsvoorstelWizard({
                           </td>
                           <td>
                             <div className="dataset-input dataset-input-readonly">{formatEuro(freeKortingEur)}</div>
+                          </td>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
+                          </td>
+                          <td>
+                            <div className="dataset-input dataset-input-readonly">{formatEuro(0)}</div>
                           </td>
                           <td>
                             <div className="dataset-input dataset-input-readonly">{formatEuro(-freeKosten)}</div>
@@ -4933,7 +5477,7 @@ export function PrijsvoorstelWizard({
                 : null}
               {offerteProductRows.length === 0 ? (
                 <tr>
-                  <td colSpan={isMultiKanaalMode ? 6 + selectedChannelOptions.length : 12} className="prijs-empty-cell">
+                  <td colSpan={isMultiKanaalMode ? 8 + selectedChannelOptions.length : 16} className="prijs-empty-cell">
                     Kies eerst een of meer bieren om de productofferte op te bouwen.
                   </td>
                 </tr>
@@ -5209,151 +5753,99 @@ export function PrijsvoorstelWizard({
           </div>
         </div>
 
-        {isLitersMode ? renderLitersOfferte() : renderProductOfferte()}
-      </div>
-    );
-  }
+        <div className="module-card compact-card">
+          <div className="module-card-title">Staffels</div>
+          <div className="module-card-text">
+            Definieer optionele kortingsstaffels voor dit scenario. Staffels gelden per periode (Introductie/Standaard) en kunnen
+            worden toegepast op de regels hieronder.
+          </div>
+          <div className="editor-actions-group" style={{ marginTop: "0.75rem" }}>
+            <button type="button" className="editor-button editor-button-secondary" onClick={addStaffelRow}>
+              Staffel toevoegen
+            </button>
+            <button type="button" className="editor-button" onClick={applyStaffelsToKorting}>
+              Kortingen invullen
+            </button>
+          </div>
 
-  function renderSummaryTable() {
-    if (isLitersMode) {
-      if (isMultiKanaalMode) {
-        return (
-          <div className="dataset-editor-scroll">
+          <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
             <table className="dataset-editor-table wizard-table-compact">
               <thead>
                 <tr>
-                  <th>Bier</th>
-                  <th>Verpakking</th>
-                  <th>Liters</th>
-                  <th>{costPriceLabel}</th>
-                  {selectedChannelOptions.map((option) => (
-                    <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
-                  ))}
+                  <th>Product</th>
+                  <th>Liters vanaf</th>
+                  <th>Korting (%)</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {offerteLitersRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.biernaam}</td>
-                    <td>{row.verpakking}</td>
-                    <td>{formatNumber(row.liters)}</td>
-                    <td>{formatEuro(row.kostprijsPerLiter)}</td>
-                    {selectedChannelOptions.map((option) => (
-                      <td key={`${row.id}-${option.value}-offer`}>{formatEuro(row.offerByChannel[option.value] ?? 0)}</td>
-                    ))}
-                  </tr>
-                ))}
-                {offerteLitersRows.length === 0 ? (
+                {(Array.isArray(current.staffels) ? (current.staffels as QuoteStaffelRow[]) : []).map((row) => {
+                  const productValue = row.product_id
+                    ? `${normalizeKey(row.product_type) === "samengesteld" ? "samengesteld" : "basis"}|${row.product_id}`
+                    : "";
+                  return (
+                    <tr key={row.id}>
+                      <td style={{ minWidth: "18rem" }}>
+                        <select
+                          className="dataset-input"
+                          value={productValue}
+                          onChange={(event) => updateStaffelRow(row.id, "product_ref", event.target.value)}
+                        >
+                          <option value="">Alle producten</option>
+                          {staffelProductOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={String(toNumber(row.liters, 0))}
+                          onChange={(event) => updateStaffelRow(row.id, "liters", Number(event.target.value || 0))}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="0.1"
+                          value={String(toNumber(row.korting_pct, 0))}
+                          onChange={(event) => updateStaffelRow(row.id, "korting_pct", Number(event.target.value || 0))}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="editor-icon-button"
+                          aria-label="Staffel verwijderen"
+                          title="Staffel verwijderen"
+                          onClick={() => removeStaffelRow(row.id)}
+                        >
+                          X
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {(Array.isArray(current.staffels) ? (current.staffels as QuoteStaffelRow[]) : []).length === 0 ? (
                   <tr>
-                    <td colSpan={4 + selectedChannelOptions.length} className="prijs-empty-cell">Nog geen liters-offerte opgebouwd.</td>
+                    <td colSpan={4} className="prijs-empty-cell">
+                      Nog geen staffels toegevoegd.
+                    </td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </div>
-        );
-      }
-
-      return (
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table wizard-table-compact">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Verpakking</th>
-                <th>Liters</th>
-                <th>{costPriceLabel}</th>
-                <th>{offerPriceLabel} {currentKanaalLabel}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {offerteLitersRows.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.biernaam}</td>
-                  <td>{row.verpakking}</td>
-                  <td>{formatNumber(row.liters)}</td>
-                  <td>{formatEuro(row.kostprijsPerLiter)}</td>
-                  <td>{formatEuro(row.offerPrijs)}</td>
-                </tr>
-              ))}
-              {offerteLitersRows.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="prijs-empty-cell">Nog geen liters-offerte opgebouwd.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
         </div>
-      );
-    }
 
-    if (isMultiKanaalMode) {
-      return (
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table wizard-table-compact">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Product</th>
-                <th>Aantal</th>
-                <th>{costPriceLabel}</th>
-                {selectedChannelOptions.map((option) => (
-                  <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {offerteProductRows.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.biernaam}</td>
-                  <td>{row.verpakking}</td>
-                  <td>{formatNumber(row.aantal, 0)}</td>
-                  <td>{formatEuro(row.kostprijsPerStuk)}</td>
-                  {selectedChannelOptions.map((option) => (
-                    <td key={`${row.id}-${option.value}-offer`}>{formatEuro(row.offerByChannel[option.value] ?? 0)}</td>
-                  ))}
-                </tr>
-              ))}
-              {offerteProductRows.length === 0 ? (
-                <tr>
-                  <td colSpan={4 + selectedChannelOptions.length} className="prijs-empty-cell">Nog geen productofferte opgebouwd.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    return (
-      <div className="dataset-editor-scroll">
-        <table className="dataset-editor-table wizard-table-compact">
-          <thead>
-            <tr>
-              <th>Bier</th>
-              <th>Product</th>
-              <th>Aantal</th>
-              <th>{costPriceLabel}</th>
-              <th>{offerPriceLabel} {currentKanaalLabel}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {offerteProductRows.map((row) => (
-              <tr key={row.id}>
-                <td>{row.biernaam}</td>
-                <td>{row.verpakking}</td>
-                <td>{formatNumber(row.aantal, 0)}</td>
-                <td>{formatEuro(row.kostprijsPerStuk)}</td>
-                <td>{formatEuro(row.offerPrijs)}</td>
-              </tr>
-            ))}
-            {offerteProductRows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="prijs-empty-cell">Nog geen productofferte opgebouwd.</td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+        {isLitersMode ? renderLitersOfferte() : renderProductOfferte()}
       </div>
     );
   }
@@ -5362,6 +5854,314 @@ export function PrijsvoorstelWizard({
     const gekozenKanaal = currentKanaalLabel;
     const scenarioLabel = activeVariant?.name || "Scenario";
     const periodLabel = activePeriod?.label || (activePeriodIndex === 1 ? "Introductie" : "Standaard");
+
+    const resolvePeriodKortingPct = (row: GenericRecord, periodIndex: 1 | 2) => {
+      const fallback = toNumber((row as any).korting_pct, 0);
+      const p1 = toNumber((row as any).korting_pct_p1, fallback);
+      const p2 = toNumber((row as any).korting_pct_p2, fallback);
+      return periodIndex === 1 ? p1 : p2;
+    };
+
+    const resolvePeriodFeeEx = (row: GenericRecord, periodIndex: 1 | 2) => {
+      const fallback = toNumber((row as any).fee_ex, 0);
+      const p1 = toNumber((row as any).fee_ex_p1, fallback);
+      const p2 = toNumber((row as any).fee_ex_p2, fallback);
+      return periodIndex === 1 ? p1 : p2;
+    };
+
+    const resolvePeriodRetourPct = (row: GenericRecord, periodIndex: 1 | 2) => {
+      const fallback = toNumber((row as any).retour_pct, 0);
+      const p1 = toNumber((row as any).retour_pct_p1, fallback);
+      const p2 = toNumber((row as any).retour_pct_p2, fallback);
+      return periodIndex === 1 ? p1 : p2;
+    };
+
+    const kortingMapP1 = new Map<string, number>();
+    const kortingMapP2 = new Map<string, number>();
+    const feeMapP1 = new Map<string, number>();
+    const feeMapP2 = new Map<string, number>();
+    const retourMapP1 = new Map<string, number>();
+    const retourMapP2 = new Map<string, number>();
+    if (activeVariant) {
+      for (const row of [...(activeVariant.beer_rows ?? []), ...(activeVariant.product_rows ?? [])]) {
+        const id = String((row as any).id ?? "").trim();
+        if (!id) continue;
+        kortingMapP1.set(id, resolvePeriodKortingPct(row as any, 1));
+        kortingMapP2.set(id, resolvePeriodKortingPct(row as any, 2));
+        feeMapP1.set(id, resolvePeriodFeeEx(row as any, 1));
+        feeMapP2.set(id, resolvePeriodFeeEx(row as any, 2));
+        retourMapP1.set(id, resolvePeriodRetourPct(row as any, 1));
+        retourMapP2.set(id, resolvePeriodRetourPct(row as any, 2));
+      }
+    }
+    const catalogRows = Array.isArray((current as any).catalog_product_rows)
+      ? (((current as any).catalog_product_rows as GenericRecord[]) ?? [])
+      : [];
+    for (const row of catalogRows) {
+      const id = String((row as any).id ?? "").trim();
+      if (!id) continue;
+      kortingMapP1.set(id, resolvePeriodKortingPct(row as any, 1));
+      kortingMapP2.set(id, resolvePeriodKortingPct(row as any, 2));
+      feeMapP1.set(id, resolvePeriodFeeEx(row as any, 1));
+      feeMapP2.set(id, resolvePeriodFeeEx(row as any, 2));
+      retourMapP1.set(id, resolvePeriodRetourPct(row as any, 1));
+      retourMapP2.set(id, resolvePeriodRetourPct(row as any, 2));
+    }
+
+    const applyPeriodToLitersRows = (
+      rows: LitersDisplayRow[],
+      kortingMap: Map<string, number>,
+      feeMap: Map<string, number>,
+      retourMap: Map<string, number>
+    ) =>
+      rows.map((row) => {
+        const kortingPct = kortingMap.has(row.id) ? Number(kortingMap.get(row.id)) || 0 : row.kortingPct;
+        const feeEx = feeMap.has(row.id) ? Number(feeMap.get(row.id)) || 0 : row.feeEx;
+        const retourPct = retourMap.has(row.id) ? Number(retourMap.get(row.id)) || 0 : row.retourPct;
+        const totals = calcOfferLineTotals({
+          kostprijsEx: row.kostprijsPerLiter,
+          offerPriceEx: row.offerPrijs,
+          qty: row.liters,
+          kortingPct,
+          feeExPerUnit: feeEx,
+          retourPct
+        });
+        return {
+          ...row,
+          kortingPct,
+          feeEx,
+          retourPct,
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          feeEur: (totals as any).feeEur ?? 0,
+          retourEur: (totals as any).retourEur ?? 0,
+          margeEur: totals.winst,
+          margePct: totals.margePct
+        };
+      });
+
+    const applyPeriodToProductRows = (
+      rows: ProductDisplayRow[],
+      kortingMap: Map<string, number>,
+      feeMap: Map<string, number>,
+      retourMap: Map<string, number>
+    ) =>
+      rows.map((row) => {
+        const kortingPct = kortingMap.has(row.id) ? Number(kortingMap.get(row.id)) || 0 : row.kortingPct;
+        const feeEx = feeMap.has(row.id) ? Number(feeMap.get(row.id)) || 0 : row.feeEx;
+        const retourPct = retourMap.has(row.id) ? Number(retourMap.get(row.id)) || 0 : row.retourPct;
+        const totals = calcOfferLineTotals({
+          kostprijsEx: row.kostprijsPerStuk,
+          offerPriceEx: row.offerPrijs,
+          qty: row.aantal,
+          kortingPct,
+          feeExPerUnit: feeEx,
+          retourPct
+        });
+        return {
+          ...row,
+          kortingPct,
+          feeEx,
+          retourPct,
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          feeEur: (totals as any).feeEur ?? 0,
+          retourEur: (totals as any).retourEur ?? 0,
+          margeEur: totals.winst,
+          margePct: totals.margePct
+        };
+      });
+
+    type ScenarioCompareRow = {
+      scenarioId: string;
+      scenarioLabel: string;
+      kanaalCode: string;
+      kanaalLabel: string;
+      periodeIndex: 1 | 2;
+      periodeLabel: string;
+      omzet: number;
+      kosten: number;
+      kortingEur: number;
+      feeEur: number;
+      retourEur: number;
+      winst: number;
+      margePct: number;
+    };
+
+    const compareRows: ScenarioCompareRow[] = [];
+    for (const variant of variants) {
+      const kanaalCode = normalizeKey((variant as any).channel_code) || currentKanaal;
+      const kanaalLabel = channelOptionMap.get(kanaalCode)?.label ?? kanaalCode;
+      const recordForVariant: GenericRecord = {
+        ...current,
+        beer_rows: (variant as any).beer_rows ?? [],
+        product_rows: (variant as any).product_rows ?? []
+      };
+      const baseRows = isLitersMode
+        ? (computeLitersDisplayRows(recordForVariant, kanaalCode) as Array<LitersDisplayRow | ProductDisplayRow>)
+        : (computeProductDisplayRows(recordForVariant, kanaalCode) as Array<LitersDisplayRow | ProductDisplayRow>);
+
+      const variantKortingMapP1 = new Map<string, number>();
+      const variantKortingMapP2 = new Map<string, number>();
+      const variantFeeMapP1 = new Map<string, number>();
+      const variantFeeMapP2 = new Map<string, number>();
+      const variantRetourMapP1 = new Map<string, number>();
+      const variantRetourMapP2 = new Map<string, number>();
+      for (const row of [...((variant as any).beer_rows ?? []), ...((variant as any).product_rows ?? []), ...catalogRows]) {
+        const id = String((row as any).id ?? "").trim();
+        if (!id) continue;
+        variantKortingMapP1.set(id, resolvePeriodKortingPct(row as any, 1));
+        variantKortingMapP2.set(id, resolvePeriodKortingPct(row as any, 2));
+        variantFeeMapP1.set(id, resolvePeriodFeeEx(row as any, 1));
+        variantFeeMapP2.set(id, resolvePeriodFeeEx(row as any, 2));
+        variantRetourMapP1.set(id, resolvePeriodRetourPct(row as any, 1));
+        variantRetourMapP2.set(id, resolvePeriodRetourPct(row as any, 2));
+      }
+
+      const buildPeriodRows = (periodIndex: 1 | 2) => {
+        const kortingMap = periodIndex === 1 ? variantKortingMapP1 : variantKortingMapP2;
+        const feeMap = periodIndex === 1 ? variantFeeMapP1 : variantFeeMapP2;
+        const retourMap = periodIndex === 1 ? variantRetourMapP1 : variantRetourMapP2;
+        return isLitersMode
+          ? (applyPeriodToLitersRows(baseRows as LitersDisplayRow[], kortingMap, feeMap, retourMap) as Array<LitersDisplayRow | ProductDisplayRow>)
+          : (applyPeriodToProductRows(baseRows as ProductDisplayRow[], kortingMap, feeMap, retourMap) as Array<LitersDisplayRow | ProductDisplayRow>);
+      };
+
+      for (const periodIndex of [1, 2] as const) {
+        const rows = buildPeriodRows(periodIndex).filter((row) => (row as any).included);
+        const totals = rows.reduce(
+          (acc, row) => ({
+            omzet: acc.omzet + (row as any).omzet,
+            kosten: acc.kosten + (row as any).kosten,
+            kortingEur: acc.kortingEur + (row as any).kortingEur,
+            feeEur: acc.feeEur + ((row as any).feeEur ?? 0),
+            retourEur: acc.retourEur + ((row as any).retourEur ?? 0),
+            winst: acc.winst + (row as any).margeEur
+          }),
+          { omzet: 0, kosten: 0, kortingEur: 0, feeEur: 0, retourEur: 0, winst: 0 }
+        );
+        const margePct = calcMarginPctFromRevenueCost(totals.omzet, totals.kosten);
+        compareRows.push({
+          scenarioId: String((variant as any).id ?? ""),
+          scenarioLabel: String((variant as any).name ?? "") || "Scenario",
+          kanaalCode,
+          kanaalLabel,
+          periodeIndex: periodIndex,
+          periodeLabel: periodIndex === 1 ? "Introductie" : "Standaard",
+          omzet: totals.omzet,
+          kosten: totals.kosten,
+          kortingEur: totals.kortingEur,
+          feeEur: totals.feeEur,
+          retourEur: totals.retourEur,
+          winst: totals.winst,
+          margePct
+        });
+      }
+    }
+
+    function handleExportScenarioVergelijkingCsv() {
+      const header = [
+        "scenario",
+        "kanaal",
+        "periode",
+        "omzet_ex",
+        "kosten_ex",
+        "korting_eur",
+        "fee_ex_eur",
+        "retour_eur",
+        "winst",
+        "marge_pct"
+      ].join(",");
+      const lines = compareRows.map((row) =>
+        [
+          JSON.stringify(row.scenarioLabel),
+          JSON.stringify(row.kanaalLabel),
+          JSON.stringify(row.periodeLabel),
+          row.omzet.toFixed(2),
+          row.kosten.toFixed(2),
+          row.kortingEur.toFixed(2),
+          row.feeEur.toFixed(2),
+          row.retourEur.toFixed(2),
+          row.winst.toFixed(2),
+          row.margePct.toFixed(2)
+        ].join(",")
+      );
+      const blob = new Blob([`${header}\n${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `scenario-vergelijking-${String(current.offertenummer || current.id || "export")}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    const summaryRowsP1 = isLitersMode
+      ? applyPeriodToLitersRows(litersDisplayRows, kortingMapP1, feeMapP1, retourMapP1)
+      : applyPeriodToProductRows(productDisplayRows, kortingMapP1, feeMapP1, retourMapP1);
+    const summaryRowsP2 = isLitersMode
+      ? applyPeriodToLitersRows(litersDisplayRows, kortingMapP2, feeMapP2, retourMapP2)
+      : applyPeriodToProductRows(productDisplayRows, kortingMapP2, feeMapP2, retourMapP2);
+
+    const renderSummaryTableFor = (rows: Array<LitersDisplayRow | ProductDisplayRow>) => {
+      const channelHeaders = isMultiKanaalMode
+        ? selectedChannelOptions.map((option) => <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>)
+        : <th>{offerPriceLabel} {currentKanaalLabel}</th>;
+      return (
+        <div className="dataset-editor-scroll">
+          <table className="dataset-editor-table wizard-table-compact">
+            <thead>
+              <tr>
+                <th>Bier</th>
+                <th>Product</th>
+                <th>{isLitersMode ? "Liters" : "Aantal"}</th>
+                <th>Korting (%)</th>
+                <th>Fee (EUR, ex)</th>
+                <th>Retour (%)</th>
+                <th>{costPriceLabel}</th>
+                {channelHeaders}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.filter((row) => row.included).map((row) => (
+                <tr key={row.id}>
+                  <td>{row.biernaam}</td>
+                  <td>{row.verpakking}</td>
+                  <td>
+                    {isLitersMode
+                      ? formatNumber((row as LitersDisplayRow).liters)
+                      : formatNumber((row as ProductDisplayRow).aantal, 0)}
+                  </td>
+                  <td>{formatPercentage((row as any).kortingPct)}</td>
+                  <td>{formatEuro((row as any).feeEx ?? 0)}</td>
+                  <td>{formatPercentage((row as any).retourPct ?? 0)}</td>
+                  <td>
+                    {isLitersMode
+                      ? formatEuro((row as LitersDisplayRow).kostprijsPerLiter)
+                      : formatEuro((row as ProductDisplayRow).kostprijsPerStuk)}
+                  </td>
+                  {isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <td key={`${row.id}-${option.value}-offer`}>{formatEuro(row.offerByChannel[option.value] ?? 0)}</td>
+                      ))
+                    : <td>{formatEuro(row.offerPrijs)}</td>}
+                </tr>
+              ))}
+              {rows.filter((row) => row.included).length === 0 ? (
+                <tr>
+                  <td colSpan={isMultiKanaalMode ? 7 + selectedChannelOptions.length : 8} className="prijs-empty-cell">
+                    Nog geen offertelijnen.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      );
+    };
 
     return (
       <div className="wizard-stack">
@@ -5389,6 +6189,59 @@ export function PrijsvoorstelWizard({
         </div>
 
         <div className="module-card compact-card">
+          <div className="module-card-title">Scenario vergelijking</div>
+          <div className="module-card-text">
+            Vergelijk de scenario's (sub-offertes) op totaalniveau per periode. Omzet/kosten zijn exclusief BTW.
+            {isMultiKanaalMode ? " Let op: vergelijking gebruikt het kanaal van het scenario (of het eerste geselecteerde kanaal)." : ""}
+          </div>
+          <div className="editor-actions-group" style={{ marginTop: "0.75rem" }}>
+            <button type="button" className="editor-button editor-button-secondary" onClick={handleExportScenarioVergelijkingCsv}>
+              Export vergelijking (CSV)
+            </button>
+          </div>
+          <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+            <table className="dataset-editor-table wizard-table-compact">
+              <thead>
+                <tr>
+                  <th>Scenario</th>
+                  <th>Kanaal</th>
+                  <th>Periode</th>
+                  <th>Omzet</th>
+                  <th>Kosten</th>
+                  <th>Korting</th>
+                  <th>Fee (ex)</th>
+                  <th>Retour</th>
+                  <th>Winst</th>
+                  <th>Marge</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compareRows.length > 0 ? (
+                  compareRows.map((row) => (
+                    <tr key={`${row.scenarioId}-${row.periodeIndex}`}>
+                      <td>{row.scenarioLabel}</td>
+                      <td>{row.kanaalLabel}</td>
+                      <td>{row.periodeLabel}</td>
+                      <td>{formatEuro(row.omzet)}</td>
+                      <td>{formatEuro(row.kosten)}</td>
+                      <td>{formatEuro(row.kortingEur)}</td>
+                      <td>{formatEuro(row.feeEur)}</td>
+                      <td>{formatEuro(row.retourEur)}</td>
+                      <td>{formatEuro(row.winst)}</td>
+                      <td>{formatPercentage(row.margePct)}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={10} className="prijs-empty-cell">Nog geen scenario's om te vergelijken.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="module-card compact-card">
           <div className="module-card-title">Commerciële samenvatting</div>
           <div className="module-card-text">
             Hieronder zie je de kostprijzen en de afgeleide verkoopprijzen per gekozen kanaal
@@ -5396,7 +6249,17 @@ export function PrijsvoorstelWizard({
           </div>
         </div>
 
-        {renderSummaryTable()}
+        <div className="module-card compact-card">
+          <div className="module-card-title">Introductie</div>
+          <div className="module-card-text">Overzicht van periode 1 (Introductie).</div>
+          {renderSummaryTableFor(summaryRowsP1)}
+        </div>
+
+        <div className="module-card compact-card">
+          <div className="module-card-title">Standaard</div>
+          <div className="module-card-text">Overzicht van periode 2 (Standaard).</div>
+          {renderSummaryTableFor(summaryRowsP2)}
+        </div>
       </div>
     );
   }
@@ -5408,56 +6271,105 @@ export function PrijsvoorstelWizard({
     const pdfChannelHeaders = isMultiKanaalMode
       ? selectedChannelOptions.map((option) => `<th>${offerPriceLabel} ${option.label}</th>`).join("")
       : `<th>${offerPriceLabel}</th>`;
-    const transportRow =
-      !isMultiKanaalMode && transportEffect?.isValid
-        ? `<tr>
-          <td>-</td>
-          <td>Transport (${formatNumber(transportEffect.deliveries, 0)} levering${transportEffect.deliveries === 1 ? "" : "en"}${transportEffect.mode === "charge" ? ", doorbelast" : ", kosten"})</td>
-          <td>${formatNumber(transportEffect.deliveries, 0)}</td>
-          <td>${formatEuro(transportEffect.rateEx)}</td>
-          ${
-            isMultiKanaalMode
-              ? selectedChannelOptions.map(() => `<td>${formatEuro(0)}</td>`).join("")
-              : `<td>${formatEuro(transportEffect.mode === "charge" ? transportEffect.rateEx : 0)}</td>`
-          }
-        </tr>`
-        : "";
-    const extrasRows = !isMultiKanaalMode
-      ? extrasEffects
-          .map(
-            (extra) => `<tr>
-          <td>-</td>
-          <td>${String(extra.label).replace(/</g, "&lt;")}${extra.isFree ? " (gratis)" : ""}</td>
-          <td>${formatNumber(extra.qty, 0)}</td>
-          <td>${formatEuro(extra.unitCostEx)}</td>
-          ${isMultiKanaalMode ? selectedChannelOptions.map(() => `<td>${formatEuro(0)}</td>`).join("") : `<td>${formatEuro(extra.isFree ? 0 : extra.unitPriceEx)}</td>`}
-        </tr>`
-          )
-          .join("")
-      : "";
-
-    const tableRows =
-      (isLitersMode ? litersDisplayRows : productDisplayRows)
-      .filter((row) => row.included)
-      .map((row) =>
-        `<tr>
-          <td>${row.biernaam}</td>
-          <td>${row.verpakking}</td>
-          <td>${isLitersMode ? formatNumber((row as LitersDisplayRow).liters) : formatNumber((row as ProductDisplayRow).aantal, 0)}</td>
-          <td>${isLitersMode ? formatEuro((row as LitersDisplayRow).kostprijsPerLiter) : formatEuro((row as ProductDisplayRow).kostprijsPerStuk)}</td>
-          ${
-            isMultiKanaalMode
-              ? selectedChannelOptions.map((option) => `<td>${formatEuro(row.offerByChannel[option.value] ?? 0)}</td>`).join("")
-              : `<td>${formatEuro(row.offerPrijs)}</td>`
-          }
-        </tr>`
-      )
-      .join("") + transportRow + extrasRows;
+    const baseRows = (isLitersMode ? litersDisplayRows : productDisplayRows).filter((row) => row.included);
+    const resolvePeriodKortingPct = (row: GenericRecord, periodIndex: 1 | 2) => {
+      const fallback = toNumber((row as any).korting_pct, 0);
+      const p1 = toNumber((row as any).korting_pct_p1, fallback);
+      const p2 = toNumber((row as any).korting_pct_p2, fallback);
+      return periodIndex === 1 ? p1 : p2;
+    };
+    const resolvePeriodFeeEx = (row: GenericRecord, periodIndex: 1 | 2) => {
+      const fallback = toNumber((row as any).fee_ex, 0);
+      const p1 = toNumber((row as any).fee_ex_p1, fallback);
+      const p2 = toNumber((row as any).fee_ex_p2, fallback);
+      return periodIndex === 1 ? p1 : p2;
+    };
+    const resolvePeriodRetourPct = (row: GenericRecord, periodIndex: 1 | 2) => {
+      const fallback = toNumber((row as any).retour_pct, 0);
+      const p1 = toNumber((row as any).retour_pct_p1, fallback);
+      const p2 = toNumber((row as any).retour_pct_p2, fallback);
+      return periodIndex === 1 ? p1 : p2;
+    };
+    const kortingMapP1 = new Map<string, number>();
+    const kortingMapP2 = new Map<string, number>();
+    const feeMapP1 = new Map<string, number>();
+    const feeMapP2 = new Map<string, number>();
+    const retourMapP1 = new Map<string, number>();
+    const retourMapP2 = new Map<string, number>();
+    if (activeVariant) {
+      for (const row of [...(activeVariant.beer_rows ?? []), ...(activeVariant.product_rows ?? [])]) {
+        const id = String((row as any).id ?? "").trim();
+        if (!id) continue;
+        kortingMapP1.set(id, resolvePeriodKortingPct(row as any, 1));
+        kortingMapP2.set(id, resolvePeriodKortingPct(row as any, 2));
+        feeMapP1.set(id, resolvePeriodFeeEx(row as any, 1));
+        feeMapP2.set(id, resolvePeriodFeeEx(row as any, 2));
+        retourMapP1.set(id, resolvePeriodRetourPct(row as any, 1));
+        retourMapP2.set(id, resolvePeriodRetourPct(row as any, 2));
+      }
+    }
+    const catalogRows = Array.isArray((current as any).catalog_product_rows)
+      ? (((current as any).catalog_product_rows as GenericRecord[]) ?? [])
+      : [];
+    for (const row of catalogRows) {
+      const id = String((row as any).id ?? "").trim();
+      if (!id) continue;
+      kortingMapP1.set(id, resolvePeriodKortingPct(row as any, 1));
+      kortingMapP2.set(id, resolvePeriodKortingPct(row as any, 2));
+      feeMapP1.set(id, resolvePeriodFeeEx(row as any, 1));
+      feeMapP2.set(id, resolvePeriodFeeEx(row as any, 2));
+      retourMapP1.set(id, resolvePeriodRetourPct(row as any, 1));
+      retourMapP2.set(id, resolvePeriodRetourPct(row as any, 2));
+    }
+    const buildTableRows = (kortingMap: Map<string, number>, feeMap: Map<string, number>, retourMap: Map<string, number>) =>
+      baseRows
+        .map((row) => {
+          const kortingPct = kortingMap.has(row.id) ? Number(kortingMap.get(row.id)) || 0 : (row as any).kortingPct;
+          const feeEx = feeMap.has(row.id) ? Number(feeMap.get(row.id)) || 0 : (row as any).feeEx;
+          const retourPct = retourMap.has(row.id) ? Number(retourMap.get(row.id)) || 0 : (row as any).retourPct;
+          return `<tr>
+            <td>${row.biernaam}</td>
+            <td>${row.verpakking}</td>
+            <td>${isLitersMode ? formatNumber((row as LitersDisplayRow).liters) : formatNumber((row as ProductDisplayRow).aantal, 0)}</td>
+            <td>${formatPercent0to2(kortingPct)}</td>
+            <td>${formatEuro(feeEx)}</td>
+            <td>${formatPercent0to2(retourPct)}</td>
+            <td>${isLitersMode ? formatEuro((row as LitersDisplayRow).kostprijsPerLiter) : formatEuro((row as ProductDisplayRow).kostprijsPerStuk)}</td>
+            ${
+              isMultiKanaalMode
+                ? selectedChannelOptions.map((option) => `<td>${formatEuro(row.offerByChannel[option.value] ?? 0)}</td>`).join("")
+                : `<td>${formatEuro(row.offerPrijs)}</td>`
+            }
+          </tr>`;
+        })
+        .join("");
     const printWindow = window.open("", "_blank", "width=1100,height=800");
     if (!printWindow) {
       return;
     }
-    printWindow.document.write(`<!doctype html><html><head><title>Conceptofferte ${String(current.offertenummer || "")}</title><style>body{font-family:Segoe UI,sans-serif;padding:24px;color:#18223a}h1,h2{margin:0 0 12px}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d7e1f4;padding:10px;text-align:left}th{background:#f3f7ff}</style></head><body><h1>Conceptofferte</h1><p><strong>Klant:</strong> ${String(current.klantnaam || "-")}<br/><strong>${isMultiKanaalMode ? "Kanalen" : "Kanaal"}:</strong> ${isMultiKanaalMode ? selectedKanaalLabels : currentKanaalLabel}<br/><strong>Jaar:</strong> ${currentYear}</p><h2>Overzicht</h2><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRows || `<tr><td colspan="${isMultiKanaalMode ? 4 + selectedChannelOptions.length : 6}">Nog geen offertelijnen.</td></tr>`}</tbody></table><p style="margin-top:24px;"><strong>Opmerking:</strong><br/>${String(current.opmerking ?? "").replace(/\n/g, "<br/>") || "-"}</p></body></html>`);
+    const tableRowsP1 = buildTableRows(kortingMapP1, feeMapP1, retourMapP1);
+    const tableRowsP2 = buildTableRows(kortingMapP2, feeMapP2, retourMapP2);
+    const totalsP1 = activeVariant ? computeOfferTotalsForVariantPeriod(activeVariant, 1) : null;
+    const totalsP2 = activeVariant ? computeOfferTotalsForVariantPeriod(activeVariant, 2) : null;
+    const buildCorrectionsSummary = (
+      totals: ReturnType<typeof computeOfferTotalsForVariantPeriod> | null,
+      label: string
+    ) => {
+      if (!totals) return "";
+      const parts: string[] = [];
+      if ((totals.transportAmountEx ?? 0) > 0) {
+        parts.push(`Transport: ${totals.transportMode === "charge" ? "+" : "≈"} ${formatEuro(totals.transportAmountEx ?? 0)} (21% BTW)`);
+      }
+      if ((totals.extrasOmzet ?? 0) !== 0 || (totals.extrasKosten ?? 0) !== 0) {
+        parts.push(`Extra's: ${formatEuro(totals.extrasOmzet ?? 0)} omzet / ${formatEuro(totals.extrasKosten ?? 0)} kosten (21% BTW)`);
+      }
+      if (parts.length === 0) return "";
+      return `<p style="margin:10px 0 0;"><strong>Correcties (${label}):</strong> ${parts.join(" | ")}</p>`;
+    };
+    const correctionsP1 = buildCorrectionsSummary(totalsP1, "Introductie");
+    const correctionsP2 = buildCorrectionsSummary(totalsP2, "Standaard");
+
+    printWindow.document.write(`<!doctype html><html><head><title>Conceptofferte ${String(current.offertenummer || "")}</title><style>body{font-family:Segoe UI,sans-serif;padding:24px;color:#18223a}h1,h2,h3{margin:0 0 12px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #d7e1f4;padding:10px;text-align:left}th{background:#f3f7ff}</style></head><body><h1>Conceptofferte</h1><p><strong>Klant:</strong> ${String(current.klantnaam || "-")}<br/><strong>${isMultiKanaalMode ? "Kanalen" : "Kanaal"}:</strong> ${isMultiKanaalMode ? selectedKanaalLabels : currentKanaalLabel}<br/><strong>Jaar:</strong> ${currentYear}</p><h2>Overzicht</h2><h3>Introductie</h3><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Korting (%)</th><th>Fee (EUR, ex)</th><th>Retour (%)</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRowsP1 || `<tr><td colspan="${isMultiKanaalMode ? 7 + selectedChannelOptions.length : 9}">Nog geen offertelijnen.</td></tr>`}</tbody></table>${correctionsP1}<h3 style="margin-top:18px;">Standaard</h3><table><thead><tr><th>Bier</th><th>Product</th><th>${isLitersMode ? "Liters" : "Aantal"}</th><th>Korting (%)</th><th>Fee (EUR, ex)</th><th>Retour (%)</th><th>Kostprijs</th>${pdfChannelHeaders}</tr></thead><tbody>${tableRowsP2 || `<tr><td colspan="${isMultiKanaalMode ? 7 + selectedChannelOptions.length : 9}">Nog geen offertelijnen.</td></tr>`}</tbody></table>${correctionsP2}<p style="margin-top:24px;"><strong>Opmerking:</strong><br/>${String(current.opmerking ?? "").replace(/\n/g, "<br/>") || "-"}</p></body></html>`);
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();

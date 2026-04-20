@@ -78,22 +78,32 @@ export function calcOfferLineTotals({
   kostprijsEx,
   offerPriceEx,
   qty,
-  kortingPct
+  kortingPct,
+  feeExPerUnit = 0,
+  retourPct = 0
 }: {
   kostprijsEx: number;
   offerPriceEx: number;
   qty: number;
   kortingPct: number;
+  feeExPerUnit?: number;
+  retourPct?: number;
 }) {
   const q = Math.max(0, toFiniteNumber(qty, 0));
   const unitList = toFiniteNumber(offerPriceEx, 0);
   const unitNet = applyDiscountPct(unitList, kortingPct);
-  const omzet = q * unitNet;
+  const unitFee = Math.max(0, toFiniteNumber(feeExPerUnit, 0));
+  const unitAfterFee = Math.max(0, unitNet - unitFee);
+  const omzetBeforeRetour = q * unitAfterFee;
+  const retour = clampPct(retourPct, { min: 0, max: 100 });
+  const retourEur = omzetBeforeRetour * (retour / 100);
+  const omzet = Math.max(0, omzetBeforeRetour - retourEur);
   const kosten = q * Math.max(0, toFiniteNumber(kostprijsEx, 0));
   const kortingEur = q * Math.max(0, unitList - unitNet);
+  const feeEur = q * unitFee;
   const winst = omzet - kosten;
   const margePct = omzet > 0 ? (winst / omzet) * 100 : 0;
-  return { omzet, kosten, kortingEur, winst, margePct };
+  return { omzet, kosten, kortingEur, feeEur, retourEur, winst, margePct };
 }
 
 export function calcOfferLineTotalsWithGratis({
