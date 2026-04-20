@@ -285,11 +285,6 @@ const steps: StepDefinition[] = [
     description: "Vul de basisinformatie van het prijsvoorstel in."
   },
   {
-    id: "producten",
-    label: "Producten & aantallen",
-    description: "Selecteer producten en vul aantallen (of liters) in."
-  },
-  {
     id: "offerte_maken",
     label: "Offerte maken",
     description: "Bouw de offerte op met scenario's en (optionele) prijsblokken."
@@ -5544,6 +5539,7 @@ export function PrijsvoorstelWizard({
     const vergelijkenIndex = Math.max(0, wizardSteps.findIndex((step) => step.id === "vergelijken"));
     const afrondenIndex = Math.max(0, wizardSteps.findIndex((step) => step.id === "afronden"));
 
+
     return (
       <div className="quote-builder-grid">
         <div className="wizard-stack">
@@ -6457,22 +6453,6 @@ export function PrijsvoorstelWizard({
     return { freeByRef: gratis.freeByRef, totalFree: gratis.totalFree, xyBlock };
   }
 
-  function renderProductenStep() {
-    return (
-      <div className="wizard-stack">
-        <div className="module-card compact-card">
-          <div className="module-card-title">Producten & aantallen</div>
-          <div className="module-card-text">
-            Selecteer bieren (en optioneel verkoopbare artikelen) en vul aantallen in. Kortingen en prijslogica voeg je
-            toe in de volgende stap.
-          </div>
-        </div>
-        {renderUitgangspuntenStep()}
-        {isLitersMode ? renderLitersOfferte(false) : renderProductOfferte(false)}
-      </div>
-    );
-  }
-
   function renderOfferteMakenStep() {
     return renderOfferteStep();
   }
@@ -6645,7 +6625,6 @@ export function PrijsvoorstelWizard({
 
   function renderStepContent() {
     if (currentStep.id === "basis") return renderBasisStep();
-    if (currentStep.id === "producten") return renderProductenStep();
     if (currentStep.id === "offerte_maken") return renderOfferteMakenStep();
     if (currentStep.id === "vergelijken") return renderVergelijkenStep();
     return renderAfrondenStep();
@@ -6659,7 +6638,7 @@ export function PrijsvoorstelWizard({
             {String(current.offertenummer || current.klantnaam || "Nieuw prijsvoorstel")}
           </h2>
           <div className="page-text">
-            Bouw het prijsvoorstel op vanuit basisgegevens, productselectie, offerte-opbouw en vergelijken van scenario&apos;s.
+            Bouw het prijsvoorstel op vanuit basisgegevens, offerte-opbouw en vergelijken van scenario&apos;s.
           </div>
         </div>
         <div className="wizard-main-header-actions">
