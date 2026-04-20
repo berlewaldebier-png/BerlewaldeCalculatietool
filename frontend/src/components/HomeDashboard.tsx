@@ -94,6 +94,18 @@ function buildAlertCards(summary: DashboardSummary): AlertCard[] {
       href: "/nieuwe-kostprijsberekening?mode=landing"
     },
     {
+      title: "Concept prijsvoorstellen",
+      value: String(summary.concept_prijsvoorstellen).padStart(2, "0"),
+      description: "Offertes in opbouw in de nieuwe CPQ builder",
+      href: "/offerte-samenstellen"
+    },
+    {
+      title: "Definitieve prijsvoorstellen",
+      value: String(summary.definitieve_prijsvoorstellen),
+      description: "Opgeslagen offertes en scenario's",
+      href: "/offerte-samenstellen"
+    },
+    {
       title: "Klaar om te activeren",
       value: String(klaar).padStart(2, "0"),
       description: "Nieuwe kostprijsversies beschikbaar",
