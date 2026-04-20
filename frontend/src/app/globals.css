@@ -1778,6 +1778,74 @@ a {
   gap: 1rem;
 }
 
+/* Prijsvoorstel: Offerte builder (2-koloms: canvas + live inzicht) */
+.quote-builder-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1rem;
+  align-items: start;
+}
+
+.quote-toolbar-card {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: #fbfbf8;
+  padding: 0.95rem 1rem;
+}
+
+.quote-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem 1rem;
+  align-items: center;
+}
+
+.quote-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.quote-toolbar-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-right: 0.25rem;
+}
+
+.quote-toolbar-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.quote-toolbar-icon:hover {
+  background: rgba(93, 131, 255, 0.08);
+  border-color: var(--accent-border);
+  transform: translateY(-1px);
+}
+
+.quote-toolbar-icon:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.quote-right-stack {
+  display: grid;
+  gap: 1rem;
+}
+
 .wizard-stats-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2204,7 +2272,8 @@ a {
   .dashboard-shell,
   .dashboard-lower-grid,
   .wizard-page-grid,
-  .wizard-shell {
+  .wizard-shell,
+  .quote-builder-grid {
     grid-template-columns: 1fr;
   }
 

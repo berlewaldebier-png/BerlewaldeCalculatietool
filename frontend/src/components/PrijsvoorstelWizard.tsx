@@ -10,6 +10,16 @@ import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsW
 import XyGratisModal from "@/components/prijsvoorstel/modals/XyGratisModal";
 import TransportModal from "@/components/prijsvoorstel/modals/TransportModal";
 import ExtrasModal from "@/components/prijsvoorstel/modals/ExtrasModal";
+import { QuoteBuilderRightPanel } from "@/components/prijsvoorstel/builder/QuoteBuilderRightPanel";
+import {
+  IconChart,
+  IconClock,
+  IconGift,
+  IconPercent,
+  IconSparkle,
+  IconTruck,
+  QuoteBuilderToolbar
+} from "@/components/prijsvoorstel/builder/QuoteBuilderToolbar";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -5517,139 +5527,142 @@ export function PrijsvoorstelWizard({
     const scenarioLabel = activeVariant?.name || "Scenario";
     const activeKanaalLabel = channelOptionMap.get(normalizeKey(activeVariant?.channel_code) || currentKanaal)?.label ?? currentKanaalLabel;
 
-    return (
-      <div className="wizard-stack">
-        <div className="module-card compact-card">
-          <div className="module-card-title">Bouwblokken</div>
-          <div className="module-card-text">
-            Voeg optionele prijsblokken toe aan het actieve scenario. Voor nu is alleen <strong>% korting</strong>{" "}
-            beschikbaar als proof-of-concept.
-          </div>
-          <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
-            <div className="editor-actions-group">
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => {
-                  setIntroDraftStart(getDateInputValue(activePeriod?.start_date) || "");
-                  setIntroDraftEnd(getDateInputValue(activePeriod?.end_date) || "");
-                  setIntroModalOpen(true);
-                }}
-              >
-                Introductie
-              </button>
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => {
-                  const existing = getStaffelTiers(current.staffels);
-                  setStaffelDraftTiers(existing);
-                  setStaffelModalOpen(true);
-                }}
-                disabled={hasXyGratisBlock(current, activeVariantId)}
-              >
-                Staffel
-              </button>
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => {
-                  setXyDraftRequired(4);
-                  setXyDraftFree(1);
-                  setXyDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
-                  setXyDraftEligibleRefs([]);
-                  setXyGratisModalOpen(true);
-                }}
-                disabled={isLitersMode || hasStaffelBlock(current, activeVariantId)}
-                title={isLitersMode ? "X+Y gratis werkt nu alleen in productenmodus." : undefined}
-              >
-                X+Y gratis
-              </button>
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => {
-                  setDiscountDraftPct(0);
-                  setDiscountDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
-                  setDiscountModalOpen(true);
-                }}
-                disabled={hasStaffelBlock(current, activeVariantId) || hasXyGratisBlock(current, activeVariantId)}
-              >
-                % korting
-              </button>
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => {
-                  const blocks = getVariantBlocks(current, activeVariantId);
-                  const existing = blocks.find((b) => String((b as any).type) === "transport") as QuoteBuilderBlock | undefined;
-                  const ctx = ((current as any).builder_context as QuoteBuilderContext | undefined) ?? {
-                    postcode: "",
-                    distance_km: 0,
-                    transport_threshold_ex: 0
-                  };
-                  setTransportDraftApplies(
-                    (existing?.applies_to_periods as any) ?? (effectivePeriodIndex === 1 ? "intro" : "standard")
-                  );
-                  setTransportDraftPostcode(String((existing as any)?.postcode ?? ctx.postcode ?? ""));
-                  setTransportDraftDistanceKm(
-                    toNumber((existing as any)?.distance_km ?? ctx.distance_km ?? 0, 0)
-                  );
-                  setTransportDraftKmThreshold(
-                    toNumber((existing as any)?.km_threshold ?? ctx.transport_km_threshold ?? 40, 40)
-                  );
-                  setTransportDraftThresholdEx(
-                    toNumber((existing as any)?.threshold_amount_ex ?? ctx.transport_threshold_ex ?? 0, 0)
-                  );
-                  setTransportDraftDeliveries(
-                    Math.max(
-                      1,
-                      Math.floor(toNumber((existing as any)?.deliveries ?? ctx.transport_deliveries ?? 1, 1))
-                    )
-                  );
-                  setTransportDraftRateEx(
-                    toNumber((existing as any)?.rate_ex ?? ctx.transport_rate_ex ?? 0, 0)
-                  );
-                  setTransportModalOpen(true);
-                }}
-                disabled={isMultiKanaalMode}
-                title={isMultiKanaalMode ? "Transport werkt nu alleen voor 1 kanaal per scenario." : undefined}
-              >
-                Transport
-              </button>
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={() => {
-                  const blocks = getVariantBlocks(current, activeVariantId);
-                  const existing = blocks.filter((b) => String((b as any).type) === "extras") as QuoteBuilderBlock[];
-                  const effectivePeriodIndex: 1 | 2 = hasIntroBlock(current, activeVariantId) ? activePeriodIndex : 2;
+    const totalsForRightPanel = activeVariant ? computeOfferTotalsForVariantPeriod(activeVariant, effectivePeriodIndex) : null;
+    const vergelijkenIndex = Math.max(0, wizardSteps.findIndex((step) => step.id === "vergelijken"));
+    const afrondenIndex = Math.max(0, wizardSteps.findIndex((step) => step.id === "afronden"));
 
-                  setExtrasDraftApplies(
-                    (existing[0]?.applies_to_periods as any) ?? (effectivePeriodIndex === 1 ? "intro" : "standard")
-                  );
-                  setExtrasDraftRows(
-                    existing.map((block) => ({
-                      id: String(block.id ?? createId()),
-                      label: normalizeText((block as any).extra_label ?? ""),
-                      qty: Math.max(0, toNumber((block as any).extra_qty ?? 1, 1)),
-                      unitPriceEx: Math.max(0, toNumber((block as any).extra_unit_price_ex ?? 0, 0)),
-                      unitCostEx: Math.max(0, toNumber((block as any).extra_unit_cost_ex ?? 0, 0)),
-                      isFree: Boolean((block as any).extra_is_free ?? false),
-                      thresholdAmountEx: Math.max(0, toNumber((block as any).extra_threshold_amount_ex ?? 0, 0))
-                    }))
-                  );
-                  setExtrasModalOpen(true);
-                }}
-                disabled={isMultiKanaalMode}
-                title={isMultiKanaalMode ? "Extra's werken nu alleen voor 1 kanaal per scenario." : undefined}
-              >
-                Extra&apos;s
-              </button>
+    return (
+      <div className="quote-builder-grid">
+        <div className="wizard-stack">
+          <div>
+            <div className="wizard-panel-header" style={{ marginBottom: "0.75rem" }}>
+              <div className="wizard-panel-title">Toolbar</div>
+              <div className="wizard-panel-text">
+                Voeg blokken toe aan het actieve scenario. Tooltips tonen wanneer een blok niet beschikbaar is.
+              </div>
             </div>
-            <div className="editor-actions-group" />
+            <QuoteBuilderToolbar
+              groups={[
+                {
+                  title: "Pricing",
+                  items: [
+                    {
+                      key: "intro",
+                      label: "Introductie",
+                      onClick: () => {
+                        setIntroDraftStart(getDateInputValue(activePeriod?.start_date) || "");
+                        setIntroDraftEnd(getDateInputValue(activePeriod?.end_date) || "");
+                        setIntroModalOpen(true);
+                      },
+                      icon: <IconClock />
+                    },
+                    {
+                      key: "staffel",
+                      label: "Staffel",
+                      disabled: hasXyGratisBlock(current, activeVariantId),
+                      onClick: () => {
+                        const existing = getStaffelTiers(current.staffels);
+                        setStaffelDraftTiers(existing);
+                        setStaffelModalOpen(true);
+                      },
+                      icon: <IconChart />
+                    },
+                    {
+                      key: "xy",
+                      label: "X+Y gratis",
+                      disabled: isLitersMode || hasStaffelBlock(current, activeVariantId),
+                      title: isLitersMode ? "X+Y gratis werkt nu alleen in productenmodus." : "X+Y gratis",
+                      onClick: () => {
+                        setXyDraftRequired(4);
+                        setXyDraftFree(1);
+                        setXyDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
+                        setXyDraftEligibleRefs([]);
+                        setXyGratisModalOpen(true);
+                      },
+                      icon: <IconGift />
+                    },
+                    {
+                      key: "discount",
+                      label: "% korting",
+                      disabled: hasStaffelBlock(current, activeVariantId) || hasXyGratisBlock(current, activeVariantId),
+                      onClick: () => {
+                        setDiscountDraftPct(0);
+                        setDiscountDraftApplies(effectivePeriodIndex === 1 ? "intro" : "standard");
+                        setDiscountModalOpen(true);
+                      },
+                      icon: <IconPercent />
+                    }
+                  ]
+                },
+                {
+                  title: "Logistiek",
+                  items: [
+                    {
+                      key: "transport",
+                      label: "Transport",
+                      disabled: isMultiKanaalMode,
+                      title: isMultiKanaalMode ? "Transport werkt nu alleen voor 1 kanaal per scenario." : "Transport",
+                      onClick: () => {
+                        const blocks = getVariantBlocks(current, activeVariantId);
+                        const existing = blocks.find((b) => String((b as any).type) === "transport") as QuoteBuilderBlock | undefined;
+                        const ctx = ((current as any).builder_context as QuoteBuilderContext | undefined) ?? {
+                          postcode: "",
+                          distance_km: 0,
+                          transport_threshold_ex: 0
+                        };
+                        setTransportDraftApplies(
+                          (existing?.applies_to_periods as any) ?? (effectivePeriodIndex === 1 ? "intro" : "standard")
+                        );
+                        setTransportDraftPostcode(String((existing as any)?.postcode ?? ctx.postcode ?? ""));
+                        setTransportDraftDistanceKm(toNumber((existing as any)?.distance_km ?? ctx.distance_km ?? 0, 0));
+                        setTransportDraftKmThreshold(toNumber((existing as any)?.km_threshold ?? ctx.transport_km_threshold ?? 40, 40));
+                        setTransportDraftThresholdEx(toNumber((existing as any)?.threshold_amount_ex ?? ctx.transport_threshold_ex ?? 0, 0));
+                        setTransportDraftDeliveries(
+                          Math.max(1, Math.floor(toNumber((existing as any)?.deliveries ?? ctx.transport_deliveries ?? 1, 1)))
+                        );
+                        setTransportDraftRateEx(toNumber((existing as any)?.rate_ex ?? ctx.transport_rate_ex ?? 0, 0));
+                        setTransportModalOpen(true);
+                      },
+                      icon: <IconTruck />
+                    }
+                  ]
+                },
+                {
+                  title: "Extra's",
+                  items: [
+                    {
+                      key: "extras",
+                      label: "Extra's",
+                      disabled: isMultiKanaalMode,
+                      title: isMultiKanaalMode ? "Extra's werken nu alleen voor 1 kanaal per scenario." : "Extra's",
+                      onClick: () => {
+                        const blocks = getVariantBlocks(current, activeVariantId);
+                        const existing = blocks.filter((b) => String((b as any).type) === "extras") as QuoteBuilderBlock[];
+                        const effectivePeriodIndex: 1 | 2 = hasIntroBlock(current, activeVariantId) ? activePeriodIndex : 2;
+
+                        setExtrasDraftApplies(
+                          (existing[0]?.applies_to_periods as any) ?? (effectivePeriodIndex === 1 ? "intro" : "standard")
+                        );
+                        setExtrasDraftRows(
+                          existing.map((block) => ({
+                            id: String(block.id ?? createId()),
+                            label: normalizeText((block as any).extra_label ?? ""),
+                            qty: Math.max(0, toNumber((block as any).extra_qty ?? 1, 1)),
+                            unitPriceEx: Math.max(0, toNumber((block as any).extra_unit_price_ex ?? 0, 0)),
+                            unitCostEx: Math.max(0, toNumber((block as any).extra_unit_cost_ex ?? 0, 0)),
+                            isFree: Boolean((block as any).extra_is_free ?? false),
+                            thresholdAmountEx: Math.max(0, toNumber((block as any).extra_threshold_amount_ex ?? 0, 0))
+                          }))
+                        );
+                        setExtrasModalOpen(true);
+                      },
+                      icon: <IconSparkle />
+                    }
+                  ]
+                }
+              ]}
+            />
           </div>
-        </div>
 
         <div className="module-card compact-card">
           <div className="module-card-title">{introEnabled ? "Scenario & periode" : "Scenario"}</div>
@@ -5835,6 +5848,16 @@ export function PrijsvoorstelWizard({
 
         {isLitersMode ? renderLitersOfferte() : renderProductOfferte()}
       </div>
+
+      <QuoteBuilderRightPanel
+        totals={totalsForRightPanel as any}
+        onGoCompare={() => setActiveStepIndex(vergelijkenIndex)}
+        onDownloadConcept={() => {
+          handleConceptPdf();
+        }}
+        onAddNote={() => setActiveStepIndex(afrondenIndex)}
+      />
+    </div>
     );
   }
 
@@ -6616,7 +6639,7 @@ export function PrijsvoorstelWizard({
   }
 
   return (
-    <section className="content-card wizard-main-card">
+    <div>
       <div className="wizard-main-header">
         <div>
           <h2 className="wizard-main-title">
@@ -7400,12 +7423,12 @@ export function PrijsvoorstelWizard({
         }}
       />
 
-      {pendingDelete ? (
-        <div className="confirm-modal-overlay" role="presentation">
-          <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-prijsvoorstel-title">
-            <div className="confirm-modal-title" id="confirm-prijsvoorstel-title">
-              {pendingDelete.title}
-            </div>
+        {pendingDelete ? (
+          <div className="confirm-modal-overlay" role="presentation">
+            <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-prijsvoorstel-title">
+              <div className="confirm-modal-title" id="confirm-prijsvoorstel-title">
+                {pendingDelete.title}
+              </div>
             <div className="confirm-modal-text">{pendingDelete.body}</div>
             <div className="confirm-modal-actions">
               <button
@@ -7427,9 +7450,9 @@ export function PrijsvoorstelWizard({
               </button>
             </div>
           </div>
-        </div>
-      ) : null}
-    </section>
+          </div>
+        ) : null}
+    </div>
   );
 }
 
