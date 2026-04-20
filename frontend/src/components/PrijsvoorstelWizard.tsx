@@ -7,6 +7,7 @@ import UitgangspuntenStep from "@/components/UitgangspuntenStep";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
 import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, computeGratisFreeByRefFromPaidRows, parseNumberLoose, round2 } from "@/lib/pricingEngine";
+import { validateQuoteBuilderGuardrails } from "@/lib/quoteBuilderGuards";
 import XyGratisModal from "@/components/prijsvoorstel/modals/XyGratisModal";
 import TransportModal from "@/components/prijsvoorstel/modals/TransportModal";
 import ExtrasModal from "@/components/prijsvoorstel/modals/ExtrasModal";
@@ -3883,11 +3884,23 @@ export function PrijsvoorstelWizard({
           frozen.status = finalize ? "definitief" : "concept";
           frozen.finalized_at = finalize ? new Date().toISOString() : "";
         }
-        // Ensure variants/period values are persisted (not just the legacy working rows).
-        // This makes scenario switching stable after save + refresh.
-        syncActiveVariantFromWorkingRows(frozen);
-        return frozen;
-      });
+         // Ensure variants/period values are persisted (not just the legacy working rows).
+         // This makes scenario switching stable after save + refresh.
+         syncActiveVariantFromWorkingRows(frozen);
+         return frozen;
+       });
+
+      // Guardrails: block save if the quote builder state violates key invariants.
+      // We explicitly avoid "read-side repairs" here; instead we surface the issue and let the user fix it.
+      const guardrailErrors = payload.flatMap((row) => validateQuoteBuilderGuardrails(row as any));
+      if (guardrailErrors.length > 0) {
+        const preview = guardrailErrors.slice(0, 3).join(" | ");
+        setStatus(
+          `Opslaan geblokkeerd: ${guardrailErrors.length} probleem(problemen) in offerte-logica. ${preview}`
+        );
+        setStatusTone("error");
+        return false;
+      }
 
       const response = await fetch(`${API_BASE_URL}/data/prijsvoorstellen`, {
         method: "PUT",
