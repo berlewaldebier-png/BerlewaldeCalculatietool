@@ -1040,6 +1040,8 @@ export function PrijsvoorstelWizard({
   const [status, setStatus] = useState("");
   const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [vatDisplay, setVatDisplay] = useState<VatDisplayMode>("excl");
+  const [showAdvancedOfferteTable, setShowAdvancedOfferteTable] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{
     title: string;
     body: string;
@@ -4693,7 +4695,7 @@ export function PrijsvoorstelWizard({
     return (
       <div className="wizard-stack">
         <div className="module-card compact-card">
-          <div className="module-card-title">Basisofferte</div>
+          <div className="module-card-title">Producten</div>
           <div className="module-card-text">
             Start simpel: kies het bier (of de bieren) waarop deze liters-offerte wordt gebaseerd. Kortingen en acties
             voeg je toe via de toolbar hierboven.
@@ -4734,6 +4736,74 @@ export function PrijsvoorstelWizard({
             </div>
           )}
         </div>
+
+        {editPricing ? (
+          <div className="module-card compact-card">
+            <div className="module-card-title">Basisofferte</div>
+            <div className="module-card-text">
+              Simpel overzicht van liters en verkoopprijs. Gebruik de toolbar voor korting, staffels of acties.
+            </div>
+            <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+              <table className="dataset-editor-table wizard-table-compact">
+                <thead>
+                  <tr>
+                    <th>Bier</th>
+                    <th>Product</th>
+                    <th>Liters</th>
+                    <th>{offerPriceLabel}</th>
+                    <th>Totaal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {offerteLitersRows.map((row) => (
+                    <tr key={row.id} className={row.included ? "" : "is-excluded"}>
+                      <td>{row.biernaam}</td>
+                      <td>{row.verpakking}</td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          style={{ minWidth: "9rem" }}
+                          value={String(row.liters)}
+                          onChange={(event) =>
+                            updateBeerRow(row.id, "liters", Number(event.target.value || 0))
+                          }
+                        />
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(row.offerPrijs)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div>
+                      </td>
+                    </tr>
+                  ))}
+                  {offerteLitersRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="prijs-empty-cell">
+                        Kies eerst een bier om de basisofferte op te bouwen.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
+              <div className="editor-actions-group" />
+              <div className="editor-actions-group">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() => setShowAdvancedOfferteTable((v) => !v)}
+                >
+                  {showAdvancedOfferteTable ? "Verberg details" : "Geavanceerd"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {!editPricing ? (
           <>
@@ -4776,37 +4846,38 @@ export function PrijsvoorstelWizard({
           </>
         ) : null}
 
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table wizard-table-compact">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Product</th>
-                <th>Liters</th>
-                <th>Korting (%)</th>
-                <th>Fee (EUR, ex)</th>
-                <th>Retour (%)</th>
-                <th>{costPriceLabel}</th>
-                {isMultiKanaalMode
-                  ? selectedChannelOptions.map((option) => (
-                      <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
-                    ))
-                  : <th>{offerPriceLabel}</th>}
-                {!isMultiKanaalMode ? (
-                  <>
-                    <th>Omzet</th>
-                    <th>Kosten</th>
-                    <th>{discountAmountLabel}</th>
-                    <th>Fee (ex)</th>
-                    <th>Retour (EUR)</th>
-                    <th>Winst</th>
-                    <th>Marge (afgeleid)</th>
-                  </>
-                ) : null}
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
+        {(!editPricing || showAdvancedOfferteTable) ? (
+          <div className="dataset-editor-scroll">
+            <table className="dataset-editor-table wizard-table-compact">
+              <thead>
+                <tr>
+                  <th>Bier</th>
+                  <th>Product</th>
+                  <th>Liters</th>
+                  <th>Korting (%)</th>
+                  <th>Fee (EUR, ex)</th>
+                  <th>Retour (%)</th>
+                  <th>{costPriceLabel}</th>
+                  {isMultiKanaalMode
+                    ? selectedChannelOptions.map((option) => (
+                        <th key={`${option.value}-offer`}>{offerPriceLabel} {option.label}</th>
+                      ))
+                    : <th>{offerPriceLabel}</th>}
+                  {!isMultiKanaalMode ? (
+                    <>
+                      <th>Omzet</th>
+                      <th>Kosten</th>
+                      <th>{discountAmountLabel}</th>
+                      <th>Fee (ex)</th>
+                      <th>Retour (EUR)</th>
+                      <th>Winst</th>
+                      <th>Marge (afgeleid)</th>
+                    </>
+                  ) : null}
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
               {offerteLitersRows.map((row) => (
                 <tr key={row.id} className={row.included ? "" : "is-excluded"}>
                   <td>{row.biernaam}</td>
@@ -5000,10 +5071,12 @@ export function PrijsvoorstelWizard({
                   </td>
                 </tr>
               ) : null}
-            </tbody>
-          </table>
-        </div>
-        {offerLevel === "samengesteld" && derivedBasisLitersRows.length > 0 ? (
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {(!editPricing || showAdvancedOfferteTable) && offerLevel === "samengesteld" && derivedBasisLitersRows.length > 0 ? (
           <div className="module-card compact-card">
             <div className="module-card-title">Afgeleide basisproducten</div>
             <div className="module-card-text">
@@ -5073,7 +5146,7 @@ export function PrijsvoorstelWizard({
     return (
       <div className="wizard-stack">
         <div className="module-card compact-card">
-          <div className="module-card-title">Basisofferte</div>
+          <div className="module-card-title">Producten</div>
           <div className="module-card-text">
             Start simpel: kies producten en aantallen. Kortingen en acties voeg je toe via de toolbar hierboven.
           </div>
@@ -5088,6 +5161,78 @@ export function PrijsvoorstelWizard({
             <div className="dataset-empty">Nog geen verkoopbare artikelen beschikbaar.</div>
           )}
         </div>
+
+        {editPricing ? (
+          <div className="module-card compact-card">
+            <div className="module-card-title">Basisofferte</div>
+            <div className="module-card-text">
+              Simpel overzicht van aantallen en verkoopprijs. Gebruik de toolbar voor korting, staffels of acties.
+            </div>
+            <div className="dataset-editor-scroll" style={{ marginTop: "0.75rem" }}>
+              <table className="dataset-editor-table wizard-table-compact">
+                <thead>
+                  <tr>
+                    <th>Bier</th>
+                    <th>Verpakking</th>
+                    <th>Aantal</th>
+                    <th>{offerPriceLabel}</th>
+                    <th>Totaal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {offerteProductRows.map((row) => (
+                    <tr key={row.id} className={row.included ? "" : "is-excluded"}>
+                      <td>{row.biernaam || "-"}</td>
+                      <td>{row.verpakking}</td>
+                      <td>
+                        <input
+                          className="dataset-input"
+                          type="number"
+                          min={0}
+                          step="1"
+                          style={{ minWidth: "8rem" }}
+                          value={String(row.aantal)}
+                          onChange={(event) =>
+                            (row.productType === "catalog" ? updateCatalogProductRow : updateProductRow)(
+                              row.id,
+                              "aantal",
+                              Number(event.target.value || 0)
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(row.offerPrijs)}</div>
+                      </td>
+                      <td>
+                        <div className="dataset-input dataset-input-readonly">{formatEuro(row.omzet)}</div>
+                      </td>
+                    </tr>
+                  ))}
+                  {offerteProductRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="prijs-empty-cell">
+                        Kies eerst een of meer bieren om de basisofferte op te bouwen.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <div className="editor-actions" style={{ marginTop: "0.75rem" }}>
+              <div className="editor-actions-group" />
+              <div className="editor-actions-group">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() => setShowAdvancedOfferteTable((v) => !v)}
+                >
+                  {showAdvancedOfferteTable ? "Verberg details" : "Geavanceerd"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {!editPricing ? (
           <>
@@ -5130,6 +5275,7 @@ export function PrijsvoorstelWizard({
           </>
         ) : null}
 
+        {(!editPricing || showAdvancedOfferteTable) ? (
         <div className="dataset-editor-scroll">
           <table className="dataset-editor-table wizard-table-compact">
             <thead>
@@ -5501,6 +5647,7 @@ export function PrijsvoorstelWizard({
             </tbody>
           </table>
         </div>
+        ) : null}
         {offerLevel === "samengesteld" && derivedBasisRows.length > 0 ? (
           <div className="module-card compact-card">
             <div className="module-card-title">Afgeleide basisproducten</div>
