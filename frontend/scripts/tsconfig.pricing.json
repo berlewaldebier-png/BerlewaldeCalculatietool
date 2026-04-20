@@ -13,5 +13,10 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["./pricingEngine.contracttest.ts", "../src/lib/pricingEngine.ts"]
+  "include": [
+    "./pricingEngine.contracttest.ts",
+    "./quoteBuilderGuards.contracttest.ts",
+    "../src/lib/pricingEngine.ts",
+    "../src/lib/quoteBuilderGuards.ts"
+  ]
 }
