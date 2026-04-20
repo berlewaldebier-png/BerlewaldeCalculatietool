@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { usePageShellWizardSidebar } from "@/components/PageShell";
-import UitgangspuntenStep from "@/components/UitgangspuntenStep";
+import { VatDisplayToggle, type VatDisplayMode } from "@/components/ui/VatDisplayToggle";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatNumber0to2, formatPercent0to2, toFiniteNumber } from "@/lib/formatters";
 import { calcMarginPctFromRevenueCost, calcOfferLineTotals, calcOfferLineTotalsWithGratis, calcSellInExFromOpslagPct, computeGratisFreeByRefFromPaidRows, parseNumberLoose, round2 } from "@/lib/pricingEngine";
@@ -4566,17 +4566,6 @@ export function PrijsvoorstelWizard({
           />
         </label>
       </div>
-    );
-  }
-
-  function renderUitgangspuntenStep() {
-    return (
-      <UitgangspuntenStep
-        row={current}
-        kanaalOptions={channelOptions}
-        litersBasisOptions={LITERS_BASIS_OPTIONS}
-        onChange={updateCurrent}
-      />
     );
   }
 
