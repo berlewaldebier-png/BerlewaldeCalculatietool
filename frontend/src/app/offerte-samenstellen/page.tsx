@@ -50,6 +50,7 @@ export default async function OfferteSamenstellenPage({
   const year = yearOptions.length > 0 ? yearOptions[0] : new Date().getFullYear();
 
   const mode = typeof resolvedSearchParams.mode === "string" ? resolvedSearchParams.mode : "";
+  const draftId = typeof resolvedSearchParams.draft === "string" ? resolvedSearchParams.draft : null;
 
   return (
     <PageShell
@@ -71,6 +72,7 @@ export default async function OfferteSamenstellenPage({
         verpakkingsonderdelen={verpakkingsonderdelen}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
         initialMode={mode}
+        initialDraftId={draftId}
       />
     </PageShell>
   );

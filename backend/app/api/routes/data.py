@@ -165,19 +165,6 @@ def post_activate_kostprijsversie_products(
     return {"activated": True, "record": activated}
 
 
-@router.get("/prijsvoorstellen")
-def get_prijsvoorstellen() -> list[dict]:
-    return dataset_store.load_dataset("prijsvoorstellen")
-
-
-@router.put("/prijsvoorstellen")
-def put_prijsvoorstellen(data: list[dict[str, Any]]) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("prijsvoorstellen", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.get("/verkoopprijzen")
 def get_verkoopprijzen() -> list[dict]:
     return dataset_store.load_dataset("verkoopprijzen")

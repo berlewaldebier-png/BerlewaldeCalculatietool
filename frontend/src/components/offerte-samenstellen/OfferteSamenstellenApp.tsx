@@ -1,14 +1,34 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
+import { buildBlockFromForm } from "@/components/offerte-samenstellen/blockFactories";
+import { hydrateFormFromBlock } from "@/components/offerte-samenstellen/blockHydrators";
+import { calculateScenarioMetrics as calculateScenarioMetricsForScenario } from "@/components/offerte-samenstellen/calculations";
 import {
-  applyDiscountPct,
-  calcOfferLineTotals,
-  calcOfferLineTotalsWithGratis,
-  calcSellInExFromOpslagPct,
-  computeGratisFreeByRefFromPaidRows,
-} from "@/lib/pricingEngine";
+  buildScenarioConflictHints,
+  evaluateOptionAvailability,
+} from "@/components/offerte-samenstellen/conflictRules";
+import { buildQuoteableProductOptions } from "@/components/offerte-samenstellen/dataSources";
+import {
+  createInitialBasisData,
+  createInitialQuoteDraft,
+  createInitialQuoteFormState,
+} from "@/components/offerte-samenstellen/quoteUtils";
+import {
+  buildQuoteDownloadFilename,
+  buildQuoteDraftSnapshot,
+  buildQuotePersistencePayload,
+} from "@/components/offerte-samenstellen/persistence";
+import {
+  createQuoteDraft,
+  loadQuoteDraft,
+  updateQuoteDraft,
+} from "@/components/offerte-samenstellen/quoteApi";
+import { ToolbarOptionDialog } from "@/components/offerte-samenstellen/ToolbarOptionDialog";
+import type { QuoteDraft, QuoteDraftSnapshot, QuoteFormState } from "@/components/offerte-samenstellen/types";
+import { calcSellInExFromOpslagPct } from "@/lib/pricingEngine";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -95,6 +115,7 @@ type Props = {
   verpakkingsonderdelen: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
   initialMode?: string;
+  initialDraftId?: string | null;
 };
 
 const tones: Record<OptionType, string> = {
@@ -368,7 +389,7 @@ type ScenarioMetrics = {
   notes: string[];
 };
 
-function calculateScenarioMetrics(scenario: Scenario, activePeriod: "standard" | "intro"): ScenarioMetrics {
+/* function calculateScenarioMetrics(scenario: Scenario, activePeriod: "standard" | "intro"): ScenarioMetrics {
   const notes: string[] = [];
 
   const periodBlocks = scenario.blocks.filter(
@@ -552,9 +573,9 @@ function calculateScenarioMetrics(scenario: Scenario, activePeriod: "standard" |
     breakEvenProjected: null,
     notes,
   };
-}
+} */
 
-function buildBlock(type: OptionType, form: any, activePeriod: "intro" | "standard"): BuilderBlock {
+/* function buildBlock(type: OptionType, form: any, activePeriod: "intro" | "standard"): BuilderBlock {
   // v1: capture configuration explicitly; keep calculations conservative/placeholder unless unambiguous.
   switch (type) {
     case "Intro":
@@ -575,6 +596,7 @@ function buildBlock(type: OptionType, form: any, activePeriod: "intro" | "standa
           start: normalizeText(form.introStart),
           end: normalizeText(form.introEnd),
           products: normalizeText(form.introProducts),
+          eligibleRefs: Array.isArray(form.introEligibleRefs) ? form.introEligibleRefs.map(String) : [],
           promoType: normalizeText(form.introPromoType),
           action: normalizeText(form.introAction),
           value: normalizeText(form.introValue),
@@ -643,6 +665,7 @@ function buildBlock(type: OptionType, form: any, activePeriod: "intro" | "standa
         payload: {
           discountMode: normalizeText(form.discountMode || "Totaal"),
           discountPct: clampNumber(form.discountValue, 0),
+          eligibleRefs: Array.isArray(form.kortingEligibleRefs) ? form.kortingEligibleRefs.map(String) : [],
         },
       };
     case "Transport": {
@@ -726,7 +749,7 @@ function buildBlock(type: OptionType, form: any, activePeriod: "intro" | "standa
       };
     }
   }
-}
+}*/
 
 export function OfferteSamenstellenApp({
   year,
@@ -738,24 +761,24 @@ export function OfferteSamenstellenApp({
   basisproducten,
   samengesteldeProducten,
   initialMode,
+  initialDraftId,
 }: Props) {
+  const router = useRouter();
+  const [currentYear, setCurrentYear] = useState<number>(year);
   const [step, setStep] = useState<StepKey>("basis");
   const [activeScenario, setActiveScenario] = useState<ScenarioId>("A");
   const [unitMode, setUnitMode] = useState<UnitMode>("producten");
   const [vatMode, setVatMode] = useState<VatMode>("incl");
+  const [draftMeta, setDraftMeta] = useState<QuoteDraft["meta"]>(() => createInitialQuoteDraft(year).meta);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
 
-  const [basis, setBasis] = useState<BasisData>({
-    klantNaam: "",
-    contactpersoon: "",
-    kanaal: "Horeca",
-    offerteNaam: "",
-    geldigTot: "",
-    opmerking: "",
-  });
+  const [basis, setBasis] = useState<BasisData>(() => createInitialBasisData());
 
   const productIndex = useMemo(() => {
-    return buildProductOptions({
-      year,
+    return buildQuoteableProductOptions({
+      year: currentYear,
       channel: basis.kanaal,
       bieren,
       kostprijsversies,
@@ -765,7 +788,7 @@ export function OfferteSamenstellenApp({
       samengesteldeProducten,
     });
   }, [
-    year,
+    currentYear,
     basis.kanaal,
     bieren,
     kostprijsversies,
@@ -775,28 +798,19 @@ export function OfferteSamenstellenApp({
     samengesteldeProducten,
   ]);
 
-  const emptyScenario = (id: ScenarioId): Scenario => ({
-    id,
-    name: `Scenario ${id}`,
-    products: [],
-    blocks: [],
-    note: "",
-    intro: null,
-  });
-
-  const [scenarios, setScenarios] = useState<Record<ScenarioId, Scenario>>({
-    A: emptyScenario("A"),
-    B: emptyScenario("B"),
-    C: emptyScenario("C"),
-  });
+  const [scenarios, setScenarios] = useState<Record<ScenarioId, Scenario>>(
+    () => createInitialQuoteDraft(year).scenarios
+  );
 
   const [selectedOption, setSelectedOption] = useState<OptionType | null>(null);
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [activePeriodView, setActivePeriodView] = useState<"standard" | "intro">("standard");
 
-  const [form, setForm] = useState<any>({
+  const [form, setForm] = useState<QuoteFormState>({
     introStart: "",
     introEnd: "",
     introProducts: "",
+    introEligibleRefs: [] as string[],
     introPromoType: "discount",
     introAction: "",
     introValue: "",
@@ -812,6 +826,7 @@ export function OfferteSamenstellenApp({
     mixEligibleRefs: [] as string[],
     discountMode: "Totaal",
     discountValue: "5",
+    kortingEligibleRefs: [] as string[],
     transportDistanceKm: "42",
     transportRateEx: "0,50",
     transportDeliveries: "1",
@@ -831,18 +846,42 @@ export function OfferteSamenstellenApp({
   const scenario = scenarios[activeScenario];
   const hasIntro = Boolean(scenario.intro && scenario.intro.start && scenario.intro.end);
 
+  function openNewOption(type: OptionType) {
+    const availability = evaluateOptionAvailability({
+      scenario,
+      type,
+      activePeriodView,
+    });
+    if (!availability.allowed) return;
+    setEditingBlockId(null);
+    setForm(createInitialQuoteFormState());
+    setSelectedOption(type);
+  }
+
+  function openEditOption(block: BuilderBlock) {
+    setEditingBlockId(block.id);
+    setForm(hydrateFormFromBlock(block));
+    setSelectedOption(block.type);
+  }
+
+  function closeOptionDialog() {
+    setSelectedOption(null);
+    setEditingBlockId(null);
+    setForm(createInitialQuoteFormState());
+  }
+
   const scenarioMetrics = useMemo(() => {
     const ids: ScenarioId[] = ["A", "B", "C"];
     const result: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }> = {
-      A: { standard: calculateScenarioMetrics(scenarios.A, "standard"), intro: null },
-      B: { standard: calculateScenarioMetrics(scenarios.B, "standard"), intro: null },
-      C: { standard: calculateScenarioMetrics(scenarios.C, "standard"), intro: null },
+      A: { standard: calculateScenarioMetricsForScenario(scenarios.A, "standard"), intro: null },
+      B: { standard: calculateScenarioMetricsForScenario(scenarios.B, "standard"), intro: null },
+      C: { standard: calculateScenarioMetricsForScenario(scenarios.C, "standard"), intro: null },
     };
     for (const id of ids) {
       const sc = scenarios[id];
       result[id] = {
-        standard: calculateScenarioMetrics(sc, "standard"),
-        intro: sc.intro ? calculateScenarioMetrics(sc, "intro") : null,
+        standard: calculateScenarioMetricsForScenario(sc, "standard"),
+        intro: sc.intro ? calculateScenarioMetricsForScenario(sc, "intro") : null,
       };
     }
     return result;
@@ -883,8 +922,25 @@ export function OfferteSamenstellenApp({
   }
 
   function applyOptionToScenario(type: OptionType) {
+    const availability = evaluateOptionAvailability({
+      scenario,
+      type,
+      activePeriodView,
+      editingBlockId,
+    });
+    if (!availability.allowed) {
+      return;
+    }
+
     const period: "intro" | "standard" = type === "Intro" ? "intro" : activePeriodView;
-    const block = buildBlock(type, form, period);
+    const block = buildBlockFromForm({
+      type,
+      form,
+      activePeriod: period,
+      tones,
+      icons,
+      existingBlockId: editingBlockId,
+    });
 
     setScenarios((prev) => {
       const existing = prev[activeScenario];
@@ -907,49 +963,31 @@ export function OfferteSamenstellenApp({
         }
       }
 
-      // Guardrails (explicit, no hidden fallback):
+      // Guardrails are evaluated before save; this branch stays structural only.
       if (type === "Intro") {
-        const hasStaffelWithoutIntro = !existing.intro && existing.blocks.some((b) => b.type === "Staffel" && (b.appliesTo ?? "standard") === "standard");
-        if (hasStaffelWithoutIntro) {
-          return prev;
-        }
         return {
           ...prev,
           [activeScenario]: {
             ...existing,
             intro: { start: normalizeText(form.introStart), end: normalizeText(form.introEnd) },
-            blocks: [block, ...existing.blocks.filter((b) => b.type !== "Intro")],
+            blocks: [
+              block,
+              ...existing.blocks.filter((b) => (b.id !== editingBlockId) && b.type !== "Intro"),
+            ],
           },
         };
-      }
-
-      // Max 2 pricing rules per context (intro/standard). Extras always allowed.
-      const isPricingRule = (t: OptionType) => ["Staffel", "Mix", "Korting"].includes(t);
-      const context = (block.appliesTo ?? "standard") as "intro" | "standard" | "global";
-      const currentPricingRules = existing.blocks.filter(
-        (b) => (b.appliesTo ?? "standard") === context && isPricingRule(b.type)
-      );
-      if (isPricingRule(type) && currentPricingRules.length >= 2) {
-        return prev;
-      }
-
-      // Staffel conflicts with korting in same context.
-      const hasStaffel = existing.blocks.some((b) => (b.appliesTo ?? "standard") === context && b.type === "Staffel");
-      const hasKorting = existing.blocks.some((b) => (b.appliesTo ?? "standard") === context && b.type === "Korting");
-      if ((type === "Staffel" && hasKorting) || (type === "Korting" && hasStaffel)) {
-        return prev;
       }
 
       return {
         ...prev,
         [activeScenario]: {
           ...existing,
-          blocks: [block, ...existing.blocks],
+          blocks: [block, ...existing.blocks.filter((b) => b.id !== editingBlockId)],
         },
       };
     });
 
-    setSelectedOption(null);
+    closeOptionDialog();
   }
 
   function removeBlock(blockId: string) {
@@ -1003,20 +1041,134 @@ export function OfferteSamenstellenApp({
     });
   }
 
-  function downloadQuoteStub() {
-    const payload = {
-      year,
+  function buildCurrentDraftSnapshot(nextMeta: QuoteDraft["meta"]) {
+    return buildQuoteDraftSnapshot({
+      meta: nextMeta,
+      year: currentYear,
       basis,
-      activeScenario,
       scenarios,
-      exported_at: new Date().toISOString(),
-      note: "V1 export stub: document generator is nog niet gekoppeld.",
+      ui: {
+        step,
+        activeScenario,
+        unitMode,
+        vatMode,
+        activePeriodView,
+      },
+    });
+  }
+
+  function restoreScenarioPresentation(snapshot: QuoteDraftSnapshot): Record<ScenarioId, Scenario> {
+    return {
+      A: {
+        ...snapshot.scenarios.A,
+        blocks: snapshot.scenarios.A.blocks.map((block) => ({
+          ...block,
+          icon: icons[block.type] ?? null,
+          tone: block.tone || tones[block.type],
+        })),
+      },
+      B: {
+        ...snapshot.scenarios.B,
+        blocks: snapshot.scenarios.B.blocks.map((block) => ({
+          ...block,
+          icon: icons[block.type] ?? null,
+          tone: block.tone || tones[block.type],
+        })),
+      },
+      C: {
+        ...snapshot.scenarios.C,
+        blocks: snapshot.scenarios.C.blocks.map((block) => ({
+          ...block,
+          icon: icons[block.type] ?? null,
+          tone: block.tone || tones[block.type],
+        })),
+      },
+    };
+  }
+
+  function hydrateDraftSnapshot(snapshot: QuoteDraftSnapshot) {
+    setCurrentYear(Number(snapshot.year || year) || year);
+    setDraftMeta(snapshot.meta);
+    setBasis(snapshot.basis);
+    setScenarios(restoreScenarioPresentation(snapshot));
+    setStep(snapshot.ui.step);
+    setActiveScenario(snapshot.ui.activeScenario);
+    setUnitMode(snapshot.ui.unitMode);
+    setVatMode(snapshot.ui.vatMode);
+    setActivePeriodView(snapshot.ui.activePeriodView);
+  }
+
+  useEffect(() => {
+    if (!initialDraftId) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingDraft(true);
+    setDraftError(null);
+
+    void loadQuoteDraft(initialDraftId)
+      .then(({ record }) => {
+        if (cancelled) return;
+        const snapshot = record.payload?.draft;
+        if (!snapshot) {
+          throw new Error("Offertepayload bevat geen draft snapshot.");
+        }
+        hydrateDraftSnapshot(snapshot);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setDraftError(error instanceof Error ? error.message : "Offerte kon niet geladen worden.");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingDraft(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialDraftId, year]);
+
+  async function saveQuoteDraft() {
+    setIsSavingDraft(true);
+    setDraftError(null);
+    try {
+      const payload = buildQuotePersistencePayload(buildCurrentDraftSnapshot(draftMeta));
+      const response = draftMeta.draftId
+        ? await updateQuoteDraft(draftMeta.draftId, payload)
+        : await createQuoteDraft(payload);
+      const snapshot = response.record.payload?.draft;
+      if (!snapshot) {
+        throw new Error("Opslaan gaf geen geldige draft snapshot terug.");
+      }
+      hydrateDraftSnapshot(snapshot);
+      if (response.record.id) {
+        router.replace(`/offerte-samenstellen?draft=${encodeURIComponent(response.record.id)}`);
+      }
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : "Offerte kon niet opgeslagen worden.");
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }
+
+  function downloadQuoteStub() {
+    const snapshot = buildCurrentDraftSnapshot(draftMeta);
+    const payload = {
+      ...buildQuotePersistencePayload(snapshot),
+      exportMeta: {
+        activeScenario,
+        exportedAt: new Date().toISOString(),
+        note: "V1 export stub: document generator is nog niet gekoppeld.",
+      },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `offerte-${normalizeText(basis.offerteNaam) || "concept"}.json`;
+    a.download = buildQuoteDownloadFilename(basis.offerteNaam);
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1032,15 +1184,42 @@ export function OfferteSamenstellenApp({
   const rightMetrics = activePeriodView === "intro" && activeMetrics.intro ? activeMetrics.intro : activeMetrics.standard;
 
   const incompatibilityHints = useMemo(() => {
-    const hints: string[] = [];
-    const standardPricing = scenario.blocks.filter((b) => (b.appliesTo ?? "standard") === "standard" && ["Staffel", "Mix", "Korting"].includes(b.type));
-    if (standardPricing.length >= 2) hints.push("Standaardperiode: max 2 prijsregels bereikt.");
-    const standardHasStaffel = standardPricing.some((b) => b.type === "Staffel");
-    const standardHasKorting = standardPricing.some((b) => b.type === "Korting");
-    if (standardHasStaffel && standardHasKorting) hints.push("Standaardperiode: Staffel en korting zijn niet combineerbaar.");
-    if (!hasIntro && standardHasStaffel) hints.push("Introductie toevoegen is geblokkeerd zolang Staffel actief is (verwijder Staffel eerst).");
-    return hints;
+    return buildScenarioConflictHints(scenario);
   }, [scenario.blocks, hasIntro]);
+
+  const optionAvailability = useMemo(() => {
+    const entries = ([
+      "Intro",
+      "Staffel",
+      "Mix",
+      "Korting",
+      "Transport",
+      "Retour",
+      "Proeverij",
+      "Tapverhuur",
+    ] as OptionType[]).map((type) => [
+      type,
+      evaluateOptionAvailability({
+        scenario,
+        type,
+        activePeriodView,
+      }),
+    ]);
+
+    return Object.fromEntries(entries) as Record<
+      OptionType,
+      ReturnType<typeof evaluateOptionAvailability>
+    >;
+  }, [scenario, activePeriodView]);
+
+  const selectedOptionAvailability = selectedOption
+    ? evaluateOptionAvailability({
+        scenario,
+        type: selectedOption,
+        activePeriodView,
+        editingBlockId,
+      })
+    : null;
 
   return (
     <div className="cpq-root">
@@ -1082,11 +1261,19 @@ export function OfferteSamenstellenApp({
             <button onClick={duplicateScenario} className="cpq-button cpq-button-secondary">
               Dupliceer scenario
             </button>
-            <button className="cpq-button cpq-button-primary" type="button">
-              Opslaan
+            <button
+              className="cpq-button cpq-button-primary"
+              type="button"
+              onClick={() => void saveQuoteDraft()}
+              disabled={isSavingDraft || isLoadingDraft}
+            >
+              {isSavingDraft ? "Opslaan..." : "Opslaan"}
             </button>
           </div>
         </div>
+
+        {draftError ? <div className="cpq-alert cpq-alert-warn">{draftError}</div> : null}
+        {isLoadingDraft ? <div className="cpq-alert">Offerte wordt geladen...</div> : null}
 
         <div className="cpq-grid">
           <aside className="cpq-left">
@@ -1119,9 +1306,11 @@ export function OfferteSamenstellenApp({
               <div className="cpq-quick-grid">
                 <QuickCell label="Klant" value={basis.klantNaam || "—"} />
                 <QuickCell label="Kanaal" value={basis.kanaal} />
-                <QuickCell label="Status" value="Concept" />
+                <QuickCell label="Status" value={draftMeta.status === "definitief" ? "Definitief" : "Concept"} />
                 <QuickCell label="Scenario" value={activeScenario} />
                 <QuickCell label="Jaar" value={String(year)} />
+                <QuickCell label="Versie" value={String(draftMeta.version)} />
+                <QuickCell label="Bewaard" value={draftMeta.updatedAt ? new Date(draftMeta.updatedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "Nog niet"} />
               </div>
             </div>
           </aside>
@@ -1145,7 +1334,9 @@ export function OfferteSamenstellenApp({
                 addProductRow={addProductRow}
                 removeBlock={removeBlock}
                 toolbarGroups={toolbarGroups}
-                openOption={setSelectedOption}
+                openOption={openNewOption}
+                editOption={openEditOption}
+                optionAvailability={optionAvailability}
                 onNext={() => setStep("vergelijk")}
                 productOptions={productIndex.options}
                 onSelectRowOption={handleSelectOptionForRow}
@@ -1210,14 +1401,16 @@ export function OfferteSamenstellenApp({
         </div>
 
         {selectedOption ? (
-          <OptionModal
+          <ToolbarOptionDialog
             selectedOption={selectedOption}
             hasIntro={hasIntro}
             activePeriodView={activePeriodView}
             incompatibilityHints={incompatibilityHints}
+            selectedOptionAvailability={selectedOptionAvailability ?? optionAvailability[selectedOption]}
             form={form}
             setForm={setForm}
-            onClose={() => setSelectedOption(null)}
+            productOptions={productIndex.options}
+            onClose={closeOptionDialog}
             onSave={() => applyOptionToScenario(selectedOption)}
           />
         ) : null}
@@ -1301,6 +1494,8 @@ function BuilderStep({
   removeBlock,
   toolbarGroups,
   openOption,
+  editOption,
+  optionAvailability,
   onNext,
   productOptions,
   onSelectRowOption,
@@ -1320,6 +1515,8 @@ function BuilderStep({
   removeBlock: (blockId: string) => void;
   toolbarGroups: ToolbarGroup[];
   openOption: (type: OptionType) => void;
+  editOption: (block: BuilderBlock) => void;
+  optionAvailability: Record<OptionType, { allowed: boolean; reasons: string[] }>;
   onNext: () => void;
   productOptions: ProductOption[];
   onSelectRowOption: (rowId: string, optionId: string) => void;
@@ -1368,18 +1565,22 @@ function BuilderStep({
           {toolbarGroups.map((group) => (
             <div key={group.title} className="cpq-toolbar-group">
               <div className="cpq-toolbar-title">{group.title}</div>
-              {group.items.map((item) => (
+              {group.items.map((item) => {
+                const availability = optionAvailability[item.label];
+                return (
                 <button
                   key={item.label}
                   type="button"
                   onClick={() => openOption(item.label)}
                   className="cpq-tool"
-                  title={item.label}
+                  title={availability.allowed ? item.label : `${item.label} — ${availability.reasons.join(" ")}`}
+                  disabled={!availability.allowed}
                 >
                   <span className="cpq-tool-icon">{item.icon}</span>
                   <span className="cpq-tool-tooltip">{item.label}</span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           ))}
           {hasIntro ? (
@@ -1512,7 +1713,7 @@ function BuilderStep({
                   {block.impact ? <div className="cpq-block-impact">{block.impact}</div> : null}
                 </div>
                 <div className="cpq-block-actions">
-                  <button type="button" className="cpq-button cpq-button-secondary" onClick={() => openOption(block.type)}>
+                  <button type="button" className="cpq-button cpq-button-secondary" onClick={() => editOption(block)}>
                     Bewerken
                   </button>
                   <button type="button" className="cpq-button cpq-button-secondary" onClick={() => removeBlock(block.id)}>
@@ -1654,7 +1855,7 @@ function FinalizeStep({
   );
 }
 
-function OptionModal({
+/* function OptionModal({
   selectedOption,
   hasIntro,
   activePeriodView,
@@ -1846,7 +2047,7 @@ function OptionModal({
       </div>
     </div>
   );
-}
+}*/
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
@@ -1855,10 +2056,6 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
       <input value={value} onChange={(e) => onChange(e.target.value)} className="cpq-input" />
     </label>
   );
-}
-
-function Idea({ text }: { text: string }) {
-  return <div className="cpq-idea">{text}</div>;
 }
 
 function QuickCell({ label, value }: { label: string; value: string }) {
@@ -1886,18 +2083,6 @@ function Kpi({ label, value, strong = false }: { label: string; value: string; s
       <span className={strong ? "cpq-kpi-strong" : "cpq-kpi-value"}>{value}</span>
     </div>
   );
-}
-
-function updateStaffelRow(
-  form: any,
-  setForm: React.Dispatch<React.SetStateAction<any>>,
-  idx: number,
-  key: "from" | "to" | "price",
-  value: string
-) {
-  const nextRows = [...form.staffelRows];
-  nextRows[idx] = { ...nextRows[idx], [key]: value };
-  setForm((prev: any) => ({ ...prev, staffelRows: nextRows }));
 }
 
 function BaseIcon({

@@ -100,7 +100,7 @@ def get_navigation() -> list[NavigationItem]:
             key="prijsvoorstel",
             label="Prijsvoorstel maken",
             description="Maak prijsvoorstellen op basis van liters of producten.",
-            href="/prijsvoorstel",
+            href="/prijsvoorstellen",
             section="Verkoop",
         ),
         NavigationItem(

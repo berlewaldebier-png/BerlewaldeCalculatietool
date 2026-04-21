@@ -7,7 +7,7 @@ from threading import Lock
 
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
-from app.domain import cost_versions_storage, price_quotes_storage
+from app.domain import cost_versions_storage, quote_drafts_storage
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ def invalidate_dashboard_summary_cache() -> None:
 
 def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
     """
-    Count concept/definitief rows inside app_datasets.payload JSON array.
+    Count concept/definitief rows inside a dataset or table-backed storage.
 
     This intentionally bypasses utils.storage normalization and avoids multiple full dataset loads
     just to compute dashboard badges.
@@ -55,8 +55,8 @@ def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
                     """
                 )
                 row = cur.fetchone()
-    elif dataset_name == "prijsvoorstellen":
-        price_quotes_storage.ensure_schema()
+    elif dataset_name == "quote_drafts":
+        quote_drafts_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -64,7 +64,7 @@ def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
                     SELECT
                         COUNT(*) FILTER (WHERE status = 'concept')::int AS concept_count,
                         COUNT(*) FILTER (WHERE status = 'definitief')::int AS definitief_count
-                    FROM price_quotes
+                    FROM quote_drafts
                     """
                 )
                 row = cur.fetchone()
@@ -93,8 +93,8 @@ def _count_statuses_in_dataset(dataset_name: str) -> tuple[int, int]:
 
 
 def _expiring_quotes(*, within_days: int = 14, limit: int = 5) -> tuple[int, list[dict[str, str]]]:
-    """Count and list concept prijsvoorstellen that expire within a window based on `verloopt_op`."""
-    price_quotes_storage.ensure_schema()
+    """Count and list concept offertes that expire within a window based on `valid_until`."""
+    quote_drafts_storage.ensure_schema()
     today = date.today()
     until = today + timedelta(days=int(within_days))
 
@@ -102,41 +102,28 @@ def _expiring_quotes(*, within_days: int = 14, limit: int = 5) -> tuple[int, lis
         with conn.cursor() as cur:
             cur.execute(
                 """
-                WITH proposals AS (
-                    SELECT payload AS elem
-                    FROM price_quotes
-                ),
-                normalized AS (
-                    SELECT
-                        elem->>'id' AS id,
-                        COALESCE(NULLIF(elem->>'offertenummer',''), elem->>'id') AS offertenummer,
-                        COALESCE(NULLIF(elem->>'klantnaam',''), '-') AS klantnaam,
-                        COALESCE(NULLIF(elem->>'status',''), 'concept') AS status,
-                        elem->>'verloopt_op' AS verloopt_op,
-                        CASE
-                            WHEN (elem->>'verloopt_op') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-                                THEN (elem->>'verloopt_op')::date
-                            ELSE NULL
-                        END AS verloopt_date
-                    FROM proposals
-                )
                 SELECT
                     (SELECT COUNT(*)::int
-                     FROM normalized
+                     FROM quote_drafts
                      WHERE status = 'concept'
-                       AND verloopt_date IS NOT NULL
-                       AND verloopt_date >= %s::date
-                       AND verloopt_date <= %s::date
+                       AND valid_until IS NOT NULL
+                       AND valid_until >= %s::date
+                       AND valid_until <= %s::date
                     ) AS total,
                     (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]'::jsonb)
                      FROM (
-                        SELECT id, offertenummer, klantnaam, verloopt_op, status
-                        FROM normalized
+                        SELECT
+                            id,
+                            quote_number AS offertenummer,
+                            customer_name AS klantnaam,
+                            valid_until::text AS verloopt_op,
+                            status
+                        FROM quote_drafts
                         WHERE status = 'concept'
-                          AND verloopt_date IS NOT NULL
-                          AND verloopt_date >= %s::date
-                          AND verloopt_date <= %s::date
-                        ORDER BY verloopt_date ASC, offertenummer ASC
+                          AND valid_until IS NOT NULL
+                          AND valid_until >= %s::date
+                          AND valid_until <= %s::date
+                        ORDER BY valid_until ASC, quote_number ASC
                         LIMIT %s
                      ) AS x
                     ) AS items
@@ -302,7 +289,7 @@ def get_dashboard_summary(ttl_seconds: float = 10.0) -> DashboardSummaryCounts:
 
     # kostprijsversies is the canonical source for (compat) berekeningen counts.
     concept_berekeningen, definitieve_berekeningen = _count_statuses_in_dataset("kostprijsversies")
-    concept_prijsvoorstellen, definitieve_prijsvoorstellen = _count_statuses_in_dataset("prijsvoorstellen")
+    concept_prijsvoorstellen, definitieve_prijsvoorstellen = _count_statuses_in_dataset("quote_drafts")
     klaar_count, klaar_warn = _ready_to_activate_counts()
     aflopend_count, aflopend_items = _expiring_quotes()
     summary = DashboardSummaryCounts(

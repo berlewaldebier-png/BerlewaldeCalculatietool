@@ -33,7 +33,6 @@ from app.utils.storage import (
     load_all_verkoop_records,
     normalize_any_verkoop_record,
     normalize_berekening_record,
-    normalize_prijsvoorstel_record,
     migrate_product_ids_to_master_ids,
     generate_missing_kostprijsproductactiveringen,
     duplicate_productie_to_year,
@@ -49,7 +48,6 @@ from app.utils.storage import (
     save_packaging_component_prices,
     save_packaging_component_price_versions,
     save_verpakkingsonderdelen,
-    save_prijsvoorstellen,
     save_samengestelde_producten,
     save_catalog_products,
 )
@@ -81,7 +79,6 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "kostprijsversies": [],
     "kostprijsproductactiveringen": [],
     "berekeningen": [],
-    "prijsvoorstellen": [],
     "verkoopprijzen": [],
     "adviesprijzen": [],
     "catalog-products": [],
@@ -96,9 +93,6 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "cost-calc-inputs": [],
     "cost-calc-results": [],
     "cost-calc-lines": [],
-    "quotes": [],
-    "quote-lines": [],
-    "quote-staffels": [],
     # Draft storage for "Nieuw jaar voorbereiden" (Phase F+).
     # This allows saving progress without mutating the actual year datasets until commit.
     "new-year-drafts": [],
@@ -262,7 +256,6 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "berekeningen",
         "kostprijsversies",
         "kostprijsproductactiveringen",
-        "prijsvoorstellen",
         "verkoopprijzen",
         "channels",
         "packaging-components",
@@ -281,8 +274,6 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "cost-calc-results",
         "cost-calc-lines",
         "quotes",
-        "quote-lines",
-        "quote-staffels",
         *MODEL_A_DATASET_NAMES,
     }
 
@@ -364,12 +355,6 @@ def load_dataset(name: str) -> Any:
     if name == "adviesprijzen":
         return postgres_storage.load_dataset("adviesprijzen", deepcopy(DATASET_DEFAULTS["adviesprijzen"]))
     payload = postgres_storage.load_dataset(name, default_value)
-    if name == "prijsvoorstellen" and isinstance(payload, list):
-        return [
-            normalize_prijsvoorstel_record(record)
-            for record in payload
-            if isinstance(record, dict)
-        ]
     if name == "verkoopprijzen" and isinstance(payload, list):
         source_records = load_all_verkoop_records() if payload == [] else payload
         return ensure_complete_verkoop_records(
@@ -441,16 +426,6 @@ def save_dataset(name: str, data: Any) -> bool:
         if saved:
             dashboard_service.invalidate_dashboard_summary_cache()
         return saved
-    if name == "prijsvoorstellen" and isinstance(data, list):
-        payload = [
-            normalize_prijsvoorstel_record(record)
-            for record in data
-            if isinstance(record, dict)
-        ]
-        saved = save_prijsvoorstellen(payload)
-        if saved:
-            dashboard_service.invalidate_dashboard_summary_cache()
-        return saved
     if name == "verkoopprijzen" and isinstance(data, list):
         payload = ensure_complete_verkoop_records(
             [
@@ -462,7 +437,7 @@ def save_dataset(name: str, data: Any) -> bool:
         return postgres_storage.save_dataset(name, payload)
     # Default path: store payload as-is after shape validation.
     saved = postgres_storage.save_dataset(name, data)
-    if saved and name in {"kostprijsversies", "berekeningen", "prijsvoorstellen"}:
+    if saved and name in {"kostprijsversies", "berekeningen"}:
         dashboard_service.invalidate_dashboard_summary_cache()
     return saved
 
@@ -554,7 +529,7 @@ def reset_year_setup_keep_cost_data() -> dict[str, bool]:
     Resets (so first-year setup/new-year flows can be tested again):
     - productie, vaste kosten, tarieven/heffingen
     - packaging-component prices (yearly)
-    - verkoopstrategie / verkoopprijzen / quotes / proposals
+    - verkoopstrategie / verkoopprijzen / offerte drafts
     - wizard drafts
 
     Never drops tables; only overwrites dataset rows and truncates normalized year tables.
@@ -575,10 +550,6 @@ def reset_year_setup_keep_cost_data() -> dict[str, bool]:
         "verkoopprijzen",
         "sales-strategy-years",
         "sales-strategy-products",
-        "prijsvoorstellen",
-        "quotes",
-        "quote-lines",
-        "quote-staffels",
         "new-year-drafts",
     }
 
@@ -596,6 +567,13 @@ def reset_year_setup_keep_cost_data() -> dict[str, bool]:
             continue
         # Keep everything else intact.
         results[dataset_name] = True
+
+    try:
+        from app.domain import quote_drafts_storage
+
+        results["quote_drafts"] = bool(quote_drafts_storage.clear_all_drafts().get("deleted", 0) >= 0)
+    except Exception:
+        results["quote_drafts"] = False
 
     dashboard_service.invalidate_dashboard_summary_cache()
     return results
@@ -2146,11 +2124,18 @@ def rollback_year(
                 postgres_storage.save_dataset("variabele-kosten", kept, overwrite=True)
 
         if include_quotes:
-            payload = postgres_storage.load_dataset("prijsvoorstellen", [])
-            kept, removed = _filter_list_by_year(payload)
-            report["results"]["prijsvoorstellen"] = {"removed": removed}
+            from app.domain import quote_drafts_storage
+
+            existing_quotes = quote_drafts_storage.list_drafts(limit=10000)
+            kept_quotes = [row for row in existing_quotes if int(row.get("year", 0) or 0) != year_value]
+            removed = len(existing_quotes) - len(kept_quotes)
+            report["results"]["quote_drafts"] = {"removed": removed}
             if removed and not dry_run:
-                postgres_storage.save_dataset("prijsvoorstellen", kept, overwrite=True)
+                quote_drafts_storage.clear_all_drafts()
+                for row in kept_quotes:
+                    payload = row.get("payload")
+                    if isinstance(payload, dict):
+                        quote_drafts_storage.save_draft(payload, draft_id=str(row.get("id", "") or ""))
 
         if include_cost_versions:
             # Canonical storage (Phase G): normalized cost version tables.
@@ -2205,14 +2190,12 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
     from app.domain import (
         product_registry_storage,
         cost_versions_storage,
-        price_quotes_storage,
         kostprijs_scenario_inkoop_storage,
         kostprijs_activation_storage,
     )
 
     product_registry_storage.ensure_schema()
     cost_versions_storage.ensure_schema()
-    price_quotes_storage.ensure_schema()
     kostprijs_scenario_inkoop_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
 
@@ -2238,7 +2221,6 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
     targets: list[dict[str, str]] = [
         {"constraint": "fk_cost_version_rows_product", "table": "cost_version_product_rows"},
         {"constraint": "fk_kostprijs_scenario_product", "table": "kostprijs_scenario_inkoop_rows"},
-        {"constraint": "fk_price_quote_lines_product", "table": "price_quote_lines"},
         {"constraint": "fk_kostprijs_activations_product", "table": "kostprijs_product_activations"},
     ]
     with postgres_storage.connect() as conn:

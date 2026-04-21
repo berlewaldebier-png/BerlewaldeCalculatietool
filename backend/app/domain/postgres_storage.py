@@ -200,10 +200,6 @@ def _get_table_storage(name: str):
         from app.domain import cost_versions_storage
 
         return cost_versions_storage
-    if name == "prijsvoorstellen":
-        from app.domain import price_quotes_storage
-
-        return price_quotes_storage
     if name == "new-year-drafts":
         from app.domain import new_year_drafts_storage
 

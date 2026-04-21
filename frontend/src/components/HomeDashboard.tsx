@@ -31,7 +31,7 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
   const preferredOrder = [
     "/",
     "/nieuwe-kostprijsberekening",
-    "/offerte-samenstellen",
+    "/prijsvoorstellen",
     "/productie",
     "/vaste-kosten",
     "/tarieven-heffingen",
@@ -55,8 +55,8 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
 
   // CPQ entry is owned by the frontend. The backend navigation list may not contain it yet.
   // We inject it explicitly so it always shows in the dashboard sidebar.
-  if (!byHref.has("/offerte-samenstellen")) {
-    byHref.set("/offerte-samenstellen", { label: "Prijsvoorstel maken", href: "/offerte-samenstellen" });
+  if (!byHref.has("/prijsvoorstellen")) {
+    byHref.set("/prijsvoorstellen", { label: "Prijsvoorstel maken", href: "/prijsvoorstellen" });
   }
 
   const result: DashboardNavItem[] = [];
@@ -97,13 +97,13 @@ function buildAlertCards(summary: DashboardSummary): AlertCard[] {
       title: "Concept prijsvoorstellen",
       value: String(summary.concept_prijsvoorstellen).padStart(2, "0"),
       description: "Offertes in opbouw in de nieuwe CPQ builder",
-      href: "/offerte-samenstellen"
+      href: "/prijsvoorstellen"
     },
     {
       title: "Definitieve prijsvoorstellen",
       value: String(summary.definitieve_prijsvoorstellen),
       description: "Opgeslagen offertes en scenario's",
-      href: "/offerte-samenstellen"
+      href: "/prijsvoorstellen"
     },
     {
       title: "Klaar om te activeren",
@@ -246,7 +246,7 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                   </div>
                 </Link>
 
-                <Link href="/offerte-samenstellen" className="dashboard-quick-card">
+                <Link href="/prijsvoorstellen" className="dashboard-quick-card">
                   <div className="dashboard-quick-card-title">Prijsvoorstel maken</div>
                   <div className="dashboard-quick-card-text">
                     Maak een nieuw prijsvoorstel in de CPQ builder (scenario's en prijsblokken).
@@ -273,7 +273,7 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
               </div>
 
               <Link
-                href={"/offerte-samenstellen" as Route}
+                href={"/prijsvoorstellen" as Route}
                 className="dashboard-attention-list"
               >
                 <div className="dashboard-attention-item">
