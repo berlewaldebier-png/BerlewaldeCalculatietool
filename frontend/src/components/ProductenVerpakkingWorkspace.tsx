@@ -15,6 +15,7 @@ type ProductenVerpakkingWorkspaceProps = {
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   catalogusproducten: GenericRecord[];
+  glasmaten: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
   bieren: GenericRecord[];
   productie?: Record<string, any>;
@@ -150,6 +151,7 @@ export function ProductenVerpakkingWorkspace({
   basisproducten,
   samengesteldeProducten,
   catalogusproducten,
+  glasmaten,
   verpakkingsonderdeelPrijzen,
   bieren,
   productie,
@@ -163,6 +165,7 @@ export function ProductenVerpakkingWorkspace({
     ? samengesteldeProducten
     : [];
   const catalogusproductenRows = Array.isArray(catalogusproducten) ? catalogusproducten : [];
+  const glasmatenRows = Array.isArray(glasmaten) ? glasmaten : [];
   const verpakkingsonderdeelPrijsRows = Array.isArray(verpakkingsonderdeelPrijzen)
     ? verpakkingsonderdeelPrijzen
     : [];
@@ -172,7 +175,7 @@ export function ProductenVerpakkingWorkspace({
   const kostprijsActivationRows = Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [];
 
   const [activeTab, setActiveTab] = useState<
-    "onderdelen" | "basis" | "samengesteld" | "catalogus" | "jaarprijzen" | "kostenoverzicht"
+    "onderdelen" | "basis" | "samengesteld" | "catalogus" | "glasmaten" | "jaarprijzen" | "kostenoverzicht"
   >("onderdelen");
   const [priceStatus, setPriceStatus] = useState("");
   const [isSavingPrices, setIsSavingPrices] = useState(false);
@@ -625,8 +628,8 @@ export function ProductenVerpakkingWorkspace({
         <div className="module-card-header">
           <div className="module-card-title">Producten &amp; verpakkingen</div>
           <div className="module-card-text">
-            Stamdata en jaarprijzen zijn nu uit elkaar getrokken. In de eerste drie tabs beheer je
-            de structuur; in de tab jaarprijzen beheer je prijsverschillen per jaar.
+            Stamdata, glasmaten en jaarprijzen zijn uit elkaar getrokken. In de eerste tabs beheer
+            je de structuur; glasmaten gebruik je later voor glas-economie in offertes en bijlagen.
           </div>
         </div>
 
@@ -658,6 +661,13 @@ export function ProductenVerpakkingWorkspace({
             onClick={() => setActiveTab("catalogus")}
           >
             Verkoopbare artikelen
+          </button>
+          <button
+            type="button"
+            className={`tab-button ${activeTab === "glasmaten" ? "active" : ""}`}
+            onClick={() => setActiveTab("glasmaten")}
+          >
+            Glasmaten
           </button>
           <button
             type="button"
@@ -873,6 +883,37 @@ export function ProductenVerpakkingWorkspace({
           bieren={bierenRows}
           kostprijsversies={kostprijsversieRows}
           kostprijsproductactiveringen={kostprijsActivationRows}
+        />
+      ) : null}
+
+      {activeTab === "glasmaten" ? (
+        <DatasetTableEditor
+          endpoint="/data/dataset/glasmaten"
+          initialRows={glasmatenRows.map((row) => ({
+            id: String(row.id ?? ""),
+            label: String(row.label ?? ""),
+            volume_ml: Number(row.volume_ml ?? 0),
+            sort_order: Number(row.sort_order ?? 0),
+            active: Boolean(row.active),
+            is_default: Boolean(row.is_default),
+          }))}
+          addRowTemplate={{
+            id: "",
+            label: "",
+            volume_ml: 250,
+            sort_order: 0,
+            active: true,
+            is_default: false,
+          }}
+          columns={[
+            { key: "label", label: "Label", width: "180px" },
+            { key: "volume_ml", label: "Inhoud (ml)", type: "number", width: "150px" },
+            { key: "sort_order", label: "Volgorde", type: "number", width: "120px" },
+            { key: "active", label: "Actief", type: "checkbox", width: "120px" },
+            { key: "is_default", label: "Standaard", type: "checkbox", width: "140px" },
+          ]}
+          title="Glasmaten"
+          description="Centrale glasmaten voor offerte-bijlagen en glas-economie. Aantal glazen per verpakking leiden we af uit liters per verpakking gedeeld door deze glasmaat."
         />
       ) : null}
 

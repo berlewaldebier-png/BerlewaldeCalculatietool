@@ -14,7 +14,6 @@ export type OptionAvailability = {
 type EvaluateOptionParams = {
   scenario: QuoteScenario;
   type: OptionType;
-  activePeriodView: "intro" | "standard";
   editingBlockId?: string | null;
 };
 
@@ -24,15 +23,12 @@ function isPricingRule(type: OptionType) {
   return PRICING_RULE_TYPES.includes(type);
 }
 
-function getContextForOption(
-  type: OptionType,
-  activePeriodView: "intro" | "standard"
-): QuoteBlockContext {
+function getContextForOption(type: OptionType): QuoteBlockContext {
   if (type === "Intro") return "intro";
   if (type === "Transport" || type === "Retour" || type === "Proeverij" || type === "Tapverhuur") {
     return "global";
   }
-  return activePeriodView;
+  return "standard";
 }
 
 function getRelevantBlocks(scenario: QuoteScenario, editingBlockId?: string | null): BuilderBlock[] {
@@ -42,27 +38,30 @@ function getRelevantBlocks(scenario: QuoteScenario, editingBlockId?: string | nu
 export function evaluateOptionAvailability({
   scenario,
   type,
-  activePeriodView,
   editingBlockId,
 }: EvaluateOptionParams): OptionAvailability {
   const reasons: string[] = [];
-  const context = getContextForOption(type, activePeriodView);
+  const context = getContextForOption(type);
   const hasIntro = Boolean(scenario.intro?.start && scenario.intro?.end);
   const blocks = getRelevantBlocks(scenario, editingBlockId);
   const blocksInContext = blocks.filter((block) => (block.appliesTo ?? "standard") === context);
   const pricingRulesInContext = blocksInContext.filter((block) => isPricingRule(block.type));
 
   if (type === "Intro") {
-    const hasStaffelWithoutIntro = !hasIntro && blocks.some(
-      (block) => block.type === "Staffel" && (block.appliesTo ?? "standard") === "standard"
-    );
+    const hasStaffelWithoutIntro =
+      !hasIntro &&
+      blocks.some(
+        (block) => block.type === "Staffel" && (block.appliesTo ?? "standard") === "standard"
+      );
     if (hasStaffelWithoutIntro) {
-      reasons.push("Introductie kan pas terug als de bestaande Staffel in de standaardperiode is verwijderd.");
+      reasons.push(
+        "Introductie kan pas terug als de bestaande Staffel in de standaardperiode is verwijderd."
+      );
     }
   }
 
   if (isPricingRule(type) && pricingRulesInContext.length >= 2) {
-    reasons.push(`${context === "intro" ? "Introductie" : "Standaardperiode"} heeft al het maximum van 2 prijsregels bereikt.`);
+    reasons.push("Standaardperiode heeft al het maximum van 2 prijsregels bereikt.");
   }
 
   if (type === "Staffel" && pricingRulesInContext.some((block) => block.type === "Korting")) {
@@ -84,9 +83,7 @@ export function buildScenarioConflictHints(scenario: QuoteScenario): string[] {
   const hints: string[] = [];
   const hasIntro = Boolean(scenario.intro?.start && scenario.intro?.end);
   const standardPricing = scenario.blocks.filter(
-    (block) =>
-      (block.appliesTo ?? "standard") === "standard" &&
-      isPricingRule(block.type)
+    (block) => (block.appliesTo ?? "standard") === "standard" && isPricingRule(block.type)
   );
 
   if (standardPricing.length >= 2) {
@@ -106,4 +103,3 @@ export function buildScenarioConflictHints(scenario: QuoteScenario): string[] {
 
   return hints;
 }
-

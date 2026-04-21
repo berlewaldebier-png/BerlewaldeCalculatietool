@@ -98,7 +98,6 @@ export type QuoteBuilderUiState = {
   activeScenario: ScenarioId;
   unitMode: UnitMode;
   vatMode: VatMode;
-  activePeriodView: "intro" | "standard";
 };
 
 export type QuoteDraftSnapshot = QuoteDraft & {
@@ -140,6 +139,8 @@ export type ProductOption = {
   bierName: string;
   packLabel: string;
   litersPerUnit: number;
+  staffelCompatibilityKey: string;
+  staffelCompatibilityLabel: string;
   costPriceEx: number;
   standardPriceEx: number;
   vatRatePct: number;
@@ -168,16 +169,29 @@ export type StaffelRowInput = {
   price: string;
 };
 
+export type StaffelDiscountMode = "percent" | "absolute" | "free";
+
 export type QuoteFormState = {
   introStart: string;
   introEnd: string;
-  introProducts: string;
   introEligibleRefs: string[];
-  introPromoType: string;
-  introAction: string;
-  introValue: string;
-  staffelProduct: string;
+  introPromoType: "discount" | "x_plus_y" | "threshold_discount";
+  introDiscountMode: "all" | "per_product";
+  introDiscountPercent: string;
+  introDiscountsByProduct: Record<string, string>;
+  introXValue: string;
+  introYValue: string;
+  introApplyMode: "combined" | "single";
+  introSingleProductRef: string;
+  introThresholdType: "liters" | "dozen";
+  introThresholdApplyMode: "all" | "single";
+  introThresholdSingleProductRef: string;
+  introThresholdValue: string;
+  introThresholdDiscount: string;
+  introNote: string;
   staffelEligibleRefs: string[];
+  staffelDiscountMode: StaffelDiscountMode;
+  staffelDiscountValue: string;
   staffelRows: StaffelRowInput[];
   mixCondition: string;
   mixStructure: string;

@@ -4,13 +4,16 @@ import { useMemo, useState } from "react";
 import { formatMoneyEUR } from "@/lib/formatters";
 import {
   calcAdviesprijsInclBtwRange,
-  calcSellInExFromOpslagPct,
   fromInclBtw,
   round2,
   toFiniteNumber,
   toInclBtw
 } from "@/lib/pricingEngine";
 import { VatDisplayToggle, type VatDisplayMode } from "@/components/ui/VatDisplayToggle";
+import {
+  buildSellInLookup,
+  resolveSellInPriceEx,
+} from "@/components/offerte-samenstellen/sellInResolver";
 
 const API_BASE_URL = "/api";
 
@@ -68,39 +71,6 @@ function parseBtwPct(value: unknown) {
 function money(value: number) {
   return formatMoneyEUR(toFiniteNumber(value, 0));
 }
-
-function normalizeChannelMap(raw: unknown) {
-  const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-  const out: Record<string, number | ""> = {};
-  Object.entries(src).forEach(([key, value]) => {
-    const code = String(key ?? "").toLowerCase().trim();
-    if (!code) return;
-    if (value === "" || value === null || value === undefined) {
-      out[code] = "";
-      return;
-    }
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return;
-    out[code] = parsed;
-  });
-  return out;
-}
-
-function getChannelOpslag(row: VerkoopprijzenRow | null | undefined, channelCode: string) {
-  if (!row) return null;
-  const margins = normalizeChannelMap((row as any).sell_in_margins ?? (row as any).kanaalmarges ?? {});
-  const value = margins[channelCode];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function getChannelSellInPriceOverride(row: VerkoopprijzenRow | null | undefined, channelCode: string) {
-  if (!row) return null;
-  const prices = normalizeChannelMap((row as any).sell_in_prices ?? (row as any).kanaalprijzen ?? {});
-  const value = prices[channelCode];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-// sell-in math lives in `lib/pricingEngine.ts`
 
 export function AdviesprijzenWorkspace(props: {
   initialChannels: any[];
@@ -390,35 +360,10 @@ export function AdviesprijzenWorkspace(props: {
     });
   }, [activeActivationsForYear, beerById, kostprijsversieById, catalogusproducten, activePackagingComponentPriceById]);
 
-  const yearStrategy = useMemo(() => {
-    return (
-      verkoopprijzenRows.find((row) => String((row as any).record_type ?? "") === "jaarstrategie" && Number((row as any).jaar ?? 0) === selectedYear) ??
-      null
-    );
-  }, [verkoopprijzenRows, selectedYear]);
-
-  const verpakkingOverrideByProduct = useMemo(() => {
-    const map = new Map<string, VerkoopprijzenRow>();
-    verkoopprijzenRows
-      .filter((row) => String((row as any).record_type ?? "") === "verkoopstrategie_verpakking" && Number((row as any).jaar ?? 0) === selectedYear)
-      .forEach((row) => {
-        const productId = String((row as any).product_id ?? "");
-        if (productId) map.set(productId, row);
-      });
-    return map;
-  }, [verkoopprijzenRows, selectedYear]);
-
-  const productOverrideByScope = useMemo(() => {
-    const map = new Map<string, VerkoopprijzenRow>();
-    verkoopprijzenRows
-      .filter((row) => String((row as any).record_type ?? "") === "verkoopstrategie_product" && Number((row as any).jaar ?? 0) === selectedYear)
-      .forEach((row) => {
-        const bierId = String((row as any).bier_id ?? "");
-        const productId = String((row as any).product_id ?? "");
-        if (bierId && productId) map.set(`${bierId}:${productId}`, row);
-      });
-    return map;
-  }, [verkoopprijzenRows, selectedYear]);
+  const sellInLookup = useMemo(
+    () => buildSellInLookup(verkoopprijzenRows, selectedYear),
+    [verkoopprijzenRows, selectedYear]
+  );
 
   const channelDefaultOpslag = useMemo(() => {
     const map = new Map<string, number>();
@@ -427,23 +372,14 @@ export function AdviesprijzenWorkspace(props: {
   }, [activeChannels]);
 
   function getSellInPriceEx(row: ProductCostRow, channelCode: string) {
-    const productOverride = productOverrideByScope.get(`${row.bierId}:${row.productId}`) ?? null;
-    const verpakkingOverride = verpakkingOverrideByProduct.get(row.productId) ?? null;
-
-    const priceOverride =
-      getChannelSellInPriceOverride(productOverride, channelCode) ??
-      getChannelSellInPriceOverride(verpakkingOverride, channelCode);
-    if (priceOverride !== null) {
-      return { sellInEx: priceOverride, opslagPct: row.kostprijsEx > 0 ? ((priceOverride / row.kostprijsEx) - 1) * 100 : 0, source: "prijs" as const };
-    }
-
-    const opslagOverride =
-      getChannelOpslag(productOverride, channelCode) ??
-      getChannelOpslag(verpakkingOverride, channelCode) ??
-      getChannelOpslag(yearStrategy, channelCode) ??
-      channelDefaultOpslag.get(channelCode) ??
-      0;
-    return { sellInEx: calcSellInExFromOpslagPct(row.kostprijsEx, opslagOverride), opslagPct: opslagOverride, source: "opslag" as const };
+    return resolveSellInPriceEx({
+      bierId: row.bierId,
+      productId: row.productId,
+      costPriceEx: row.kostprijsEx,
+      channelCode,
+      lookup: sellInLookup,
+      channelDefaultOpslag,
+    });
   }
 
   const yearRows = useMemo(() => {

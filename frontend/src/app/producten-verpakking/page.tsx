@@ -9,6 +9,7 @@ export default async function ProductenVerpakkingPage() {
       "base-product-masters",
       "composite-product-masters",
       "catalog-products",
+      "glasmaten",
       "packaging-component-prices",
       "bieren",
       "productie",
@@ -24,6 +25,7 @@ export default async function ProductenVerpakkingPage() {
   const basisproducten = (bootstrap.datasets["base-product-masters"] as any[]) ?? [];
   const samengestelde = (bootstrap.datasets["composite-product-masters"] as any[]) ?? [];
   const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
+  const glasmaten = (bootstrap.datasets["glasmaten"] as any[]) ?? [];
   const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
@@ -42,6 +44,7 @@ export default async function ProductenVerpakkingPage() {
         basisproducten={basisproducten}
         samengesteldeProducten={samengestelde}
         catalogusproducten={catalogusproducten}
+        glasmaten={glasmaten}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
         bieren={bieren}
         productie={productie}

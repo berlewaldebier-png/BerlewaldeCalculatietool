@@ -1,10 +1,14 @@
-import { calcSellInExFromOpslagPct } from "@/lib/pricingEngine";
 import type {
   GenericRecord,
   ProductIndexResult,
   QuoteChannel,
 } from "@/components/offerte-samenstellen/types";
 import { clampNumber, normalizeText } from "@/components/offerte-samenstellen/quoteUtils";
+import {
+  buildChannelDefaultOpslagMap,
+  buildSellInLookup,
+  resolveSellInPriceEx,
+} from "@/components/offerte-samenstellen/sellInResolver";
 
 function channelToStrategyKey(channel: QuoteChannel): string | null {
   if (channel === "Horeca") return "horeca";
@@ -12,9 +16,21 @@ function channelToStrategyKey(channel: QuoteChannel): string | null {
   return null;
 }
 
+function buildStaffelCompatibility(packLabel: string, litersPerUnit: number) {
+  const normalizedPack = normalizeText(packLabel).toLowerCase();
+  const litersKey =
+    Number.isFinite(litersPerUnit) && litersPerUnit > 0 ? litersPerUnit.toFixed(4) : "0";
+
+  return {
+    key: `${normalizedPack}::${litersKey}`,
+    label: packLabel,
+  };
+}
+
 type BuildProductOptionsParams = {
   year: number;
   channel: QuoteChannel;
+  channels: GenericRecord[];
   bieren: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
@@ -53,6 +69,7 @@ export function buildQuoteableProductOptions(
       litersPerUnit: clampNumber((record as any).inhoud_per_eenheid_liter, 0),
     });
   }
+
   for (const record of params.samengesteldeProducten) {
     const id = normalizeText((record as any).id);
     if (!id) continue;
@@ -68,25 +85,8 @@ export function buildQuoteableProductOptions(
     if (id) versionById.set(id, record);
   }
 
-  const verkoopRowsForYear = params.verkoopprijzen.filter(
-    (row) => clampNumber((row as any).jaar, 0) === params.year
-  );
-
-  const productStrategyByKey = new Map<string, GenericRecord>();
-  const packagingStrategyByProductId = new Map<string, GenericRecord>();
-  for (const row of verkoopRowsForYear) {
-    const recordType = normalizeText((row as any).record_type);
-    if (recordType === "verkoopstrategie_product") {
-      const bierId = normalizeText((row as any).bier_id);
-      const productId = normalizeText((row as any).product_id);
-      if (!bierId || !productId) continue;
-      productStrategyByKey.set(`${bierId}:${productId}`, row);
-    } else if (recordType === "verkoopstrategie_verpakking") {
-      const productId = normalizeText((row as any).product_id);
-      if (!productId) continue;
-      packagingStrategyByProductId.set(productId, row);
-    }
-  }
+  const sellInLookup = buildSellInLookup(params.verkoopprijzen, params.year);
+  const channelDefaultOpslag = buildChannelDefaultOpslagMap(params.channels);
 
   const activationRows = params.kostprijsproductactiveringen.filter(
     (row) => clampNumber((row as any).jaar, 0) === params.year
@@ -101,14 +101,15 @@ export function buildQuoteableProductOptions(
     const kostprijsversieId = normalizeText((activation as any).kostprijsversie_id);
     if (!bierId || !productId || !kostprijsversieId) continue;
 
-    const key = `${bierId}:${productId}:${kostprijsversieId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const uniqueKey = `${bierId}:${productId}:${kostprijsversieId}`;
+    if (seen.has(uniqueKey)) continue;
+    seen.add(uniqueKey);
 
     const master = masterByProductId.get(productId);
     const packLabel =
       master?.pack || normalizeText((activation as any).verpakking || productId);
     const litersPerUnit = master?.litersPerUnit ?? 0;
+    const staffelCompatibility = buildStaffelCompatibility(packLabel, litersPerUnit);
 
     const version = versionById.get(kostprijsversieId);
     const snapshot = (version as any)?.resultaat_snapshot as any;
@@ -127,30 +128,14 @@ export function buildQuoteableProductOptions(
 
     let standardPriceEx = 0;
     if (strategyKey) {
-      const productStrategy = productStrategyByKey.get(`${bierId}:${productId}`);
-      const packagingStrategy = packagingStrategyByProductId.get(productId);
-      const priceMap =
-        ((productStrategy as any)?.sell_in_prices as Record<string, unknown>) ||
-        ((productStrategy as any)?.kanaalprijzen as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.sell_in_prices as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.kanaalprijzen as Record<string, unknown>) ||
-        {};
-      const opslagMap =
-        ((productStrategy as any)?.sell_in_margins as Record<string, unknown>) ||
-        ((productStrategy as any)?.kanaalmarges as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.sell_in_margins as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.kanaalmarges as Record<string, unknown>) ||
-        {};
-
-      const explicit = clampNumber(priceMap?.[strategyKey], 0);
-      if (explicit > 0) {
-        standardPriceEx = explicit;
-      } else {
-        const opslagPct = clampNumber(opslagMap?.[strategyKey], 0);
-        if (opslagPct > 0 && costPriceEx > 0) {
-          standardPriceEx = calcSellInExFromOpslagPct(costPriceEx, opslagPct);
-        }
-      }
+      standardPriceEx = resolveSellInPriceEx({
+        bierId,
+        productId,
+        costPriceEx,
+        channelCode: strategyKey,
+        lookup: sellInLookup,
+        channelDefaultOpslag,
+      }).sellInEx;
     }
 
     const bierName = bierNameById.get(bierId) || bierId;
@@ -164,6 +149,8 @@ export function buildQuoteableProductOptions(
       bierName,
       packLabel,
       litersPerUnit,
+      staffelCompatibilityKey: staffelCompatibility.key,
+      staffelCompatibilityLabel: staffelCompatibility.label,
       costPriceEx,
       standardPriceEx,
       vatRatePct,

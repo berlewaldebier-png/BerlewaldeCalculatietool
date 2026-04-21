@@ -82,6 +82,13 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "verkoopprijzen": [],
     "adviesprijzen": [],
     "catalog-products": [],
+    "glasmaten": [
+        {"id": "glas-20cl", "label": "20 cl", "volume_ml": 200, "sort_order": 10, "active": True, "is_default": False},
+        {"id": "glas-25cl", "label": "25 cl", "volume_ml": 250, "sort_order": 20, "active": True, "is_default": True},
+        {"id": "glas-30cl", "label": "30 cl", "volume_ml": 300, "sort_order": 30, "active": True, "is_default": False},
+        {"id": "glas-33cl", "label": "33 cl", "volume_ml": 330, "sort_order": 40, "active": True, "is_default": False},
+        {"id": "glas-50cl", "label": "50 cl", "volume_ml": 500, "sort_order": 50, "active": True, "is_default": False},
+    ],
     "variabele-kosten": {},
     "products": [],
     "product-years": [],

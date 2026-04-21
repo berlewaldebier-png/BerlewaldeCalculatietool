@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -15,6 +15,7 @@ import {
   createInitialBasisData,
   createInitialQuoteDraft,
   createInitialQuoteFormState,
+  inferUnitFromPack,
 } from "@/components/offerte-samenstellen/quoteUtils";
 import {
   buildQuoteDownloadFilename,
@@ -27,8 +28,12 @@ import {
   updateQuoteDraft,
 } from "@/components/offerte-samenstellen/quoteApi";
 import { ToolbarOptionDialog } from "@/components/offerte-samenstellen/ToolbarOptionDialog";
-import type { QuoteDraft, QuoteDraftSnapshot, QuoteFormState } from "@/components/offerte-samenstellen/types";
-import { calcSellInExFromOpslagPct } from "@/lib/pricingEngine";
+import type {
+  ProductOption,
+  QuoteDraft,
+  QuoteDraftSnapshot,
+  QuoteFormState,
+} from "@/components/offerte-samenstellen/types";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -181,201 +186,6 @@ function clampNumber(value: unknown, fallback: number) {
 
 function normalizeText(value: unknown) {
   return String(value ?? "").trim();
-}
-
-function channelToStrategyKey(channel: QuoteChannel): string | null {
-  // This mapping is explicit. If a channel has no strategy key, we do not guess.
-  if (channel === "Horeca") return "horeca";
-  if (channel === "Retail") return "retail";
-  return null; // Events not guaranteed in verkoopstrategie dataset.
-}
-
-function inferUnitFromPack(pack: string): "fust" | "doos" | "fles" {
-  const text = pack.toLowerCase();
-  if (text.includes("fust")) return "fust";
-  if (text.includes("doos")) return "doos";
-  return "fles";
-}
-
-type ProductOption = {
-  optionId: string;
-  bierId: string;
-  productId: string;
-  label: string;
-  bierName: string;
-  packLabel: string;
-  litersPerUnit: number;
-  costPriceEx: number;
-  standardPriceEx: number;
-  vatRatePct: number;
-  kostprijsversieId: string;
-};
-
-function buildProductOptions(params: {
-  year: number;
-  channel: QuoteChannel;
-  bieren: GenericRecord[];
-  kostprijsversies: GenericRecord[];
-  kostprijsproductactiveringen: GenericRecord[];
-  verkoopprijzen: GenericRecord[];
-  basisproducten: GenericRecord[];
-  samengesteldeProducten: GenericRecord[];
-}): { options: ProductOption[]; warnings: string[] } {
-  const warnings: string[] = [];
-  const strategyKey = channelToStrategyKey(params.channel);
-  if (!strategyKey) {
-    warnings.push(
-      `Geen verkoopstrategie-prijzen bekend voor kanaal '${params.channel}'. Standaardprijzen blijven 0 tot je een ondersteund kanaal kiest.`
-    );
-  }
-
-  const bierNameById = new Map<string, string>();
-  for (const record of params.bieren) {
-    const id = normalizeText((record as any).id);
-    if (!id) continue;
-    bierNameById.set(id, normalizeText((record as any).biernaam || (record as any).naam || id));
-  }
-
-  const masterByProductId = new Map<string, { pack: string; litersPerUnit: number }>();
-  for (const record of params.basisproducten) {
-    const id = normalizeText((record as any).id);
-    if (!id) continue;
-    masterByProductId.set(id, {
-      pack: normalizeText((record as any).omschrijving || (record as any).verpakking || id),
-      litersPerUnit: clampNumber((record as any).inhoud_per_eenheid_liter, 0),
-    });
-  }
-  for (const record of params.samengesteldeProducten) {
-    const id = normalizeText((record as any).id);
-    if (!id) continue;
-    masterByProductId.set(id, {
-      pack: normalizeText((record as any).omschrijving || (record as any).verpakking || id),
-      litersPerUnit: clampNumber((record as any).inhoud_per_eenheid_liter, 0),
-    });
-  }
-
-  const versionById = new Map<string, GenericRecord>();
-  for (const record of params.kostprijsversies) {
-    const id = normalizeText((record as any).id);
-    if (id) versionById.set(id, record);
-  }
-
-  const verkoopRowsForYear = params.verkoopprijzen.filter(
-    (row) => clampNumber((row as any).jaar, 0) === params.year
-  );
-
-  const productStrategyByKey = new Map<string, GenericRecord>();
-  const packagingStrategyByProductId = new Map<string, GenericRecord>();
-  for (const row of verkoopRowsForYear) {
-    const recordType = normalizeText((row as any).record_type);
-    if (recordType === "verkoopstrategie_product") {
-      const bierId = normalizeText((row as any).bier_id);
-      const productId = normalizeText((row as any).product_id);
-      if (!bierId || !productId) continue;
-      productStrategyByKey.set(`${bierId}:${productId}`, row);
-    } else if (recordType === "verkoopstrategie_verpakking") {
-      const productId = normalizeText((row as any).product_id);
-      if (!productId) continue;
-      packagingStrategyByProductId.set(productId, row);
-    }
-  }
-
-  const activationRows = params.kostprijsproductactiveringen.filter(
-    (row) => clampNumber((row as any).jaar, 0) === params.year
-  );
-
-  const options: ProductOption[] = [];
-  const seen = new Set<string>();
-
-  for (const activation of activationRows) {
-    const bierId = normalizeText((activation as any).bier_id);
-    const productId = normalizeText((activation as any).product_id);
-    const kostprijsversieId = normalizeText((activation as any).kostprijsversie_id);
-    if (!bierId || !productId || !kostprijsversieId) continue;
-
-    const key = `${bierId}:${productId}:${kostprijsversieId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const master = masterByProductId.get(productId);
-    const packLabel = master?.pack || normalizeText((activation as any).verpakking || productId);
-    const litersPerUnit = master?.litersPerUnit ?? 0;
-
-    const version = versionById.get(kostprijsversieId);
-    const snapshot = (version as any)?.resultaat_snapshot as any;
-    const basisgegevens = (version as any)?.basisgegevens as any;
-    const btwTariefRaw = normalizeText(basisgegevens?.btw_tarief ?? "");
-    const vatRatePct = clampNumber(btwTariefRaw.replace("%", ""), 0) || 0;
-    const products = snapshot?.producten ?? {};
-    const listA = Array.isArray(products?.basisproducten) ? products.basisproducten : [];
-    const listB = Array.isArray(products?.samengestelde_producten) ? products.samengestelde_producten : [];
-    const match = [...listA, ...listB].find((row) => normalizeText(row?.product_id) === productId);
-    const costPriceEx = clampNumber(match?.kostprijs, 0);
-
-    // Verkoopstrategie semantics:
-    // - `sell_in_prices` / `kanaalprijzen`: explicit unit price override (per verpakkingseenheid).
-    // - `sell_in_margins` / `kanaalmarges`: opslag% (source of truth) used to derive sell-in price from cost.
-    // We do not guess between them; we prefer explicit price override, else derive from opslag% if present.
-    let standardPriceEx = 0;
-    if (strategyKey) {
-      const productStrategy = productStrategyByKey.get(`${bierId}:${productId}`);
-      const packagingStrategy = packagingStrategyByProductId.get(productId);
-      const priceMap =
-        ((productStrategy as any)?.sell_in_prices as Record<string, unknown>) ||
-        ((productStrategy as any)?.kanaalprijzen as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.sell_in_prices as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.kanaalprijzen as Record<string, unknown>) ||
-        {};
-      const opslagMap =
-        ((productStrategy as any)?.sell_in_margins as Record<string, unknown>) ||
-        ((productStrategy as any)?.kanaalmarges as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.sell_in_margins as Record<string, unknown>) ||
-        ((packagingStrategy as any)?.kanaalmarges as Record<string, unknown>) ||
-        {};
-
-      const explicit = clampNumber(priceMap?.[strategyKey], 0);
-      if (explicit > 0) {
-        standardPriceEx = explicit;
-      } else {
-        const opslagPct = clampNumber(opslagMap?.[strategyKey], 0);
-        if (opslagPct > 0 && costPriceEx > 0) {
-          standardPriceEx = calcSellInExFromOpslagPct(costPriceEx, opslagPct);
-        }
-      }
-    }
-
-    const bierName = bierNameById.get(bierId) || bierId;
-    const optionId = `beer:${bierId}:product:${productId}`;
-
-    options.push({
-      optionId,
-      bierId,
-      productId,
-      label: `${bierName} · ${packLabel}`,
-      bierName,
-      packLabel,
-      litersPerUnit,
-      costPriceEx,
-      standardPriceEx,
-      vatRatePct,
-      kostprijsversieId,
-    });
-  }
-
-  options.sort((a, b) => a.label.localeCompare(b.label));
-  if (options.length === 0) {
-    warnings.push(
-      `Geen actieve kostprijsproductactiveringen gevonden voor jaar ${params.year}. Draai eerst reset+seed of activeer kostprijzen.`
-    );
-  }
-
-  if (options.length > 0 && options.every((row) => row.vatRatePct === 0)) {
-    warnings.push(
-      "BTW-tarief ontbreekt in kostprijsversies (basisgegevens.btw_tarief). BTW toggle toont dan alleen ex prijzen."
-    );
-  }
-
-  return { options, warnings };
 }
 
 type ScenarioMetrics = {
@@ -575,182 +385,6 @@ type ScenarioMetrics = {
   };
 } */
 
-/* function buildBlock(type: OptionType, form: any, activePeriod: "intro" | "standard"): BuilderBlock {
-  // v1: capture configuration explicitly; keep calculations conservative/placeholder unless unambiguous.
-  switch (type) {
-    case "Intro":
-      return {
-        id: `intro-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: "Introductieperiode",
-        subtitle: `${normalizeText(form.introStart)} t/m ${normalizeText(form.introEnd)}`,
-        lines: [
-          `Producten: ${normalizeText(form.introProducts) || "—"}`,
-          `Promotie: ${normalizeText(form.introAction) || "—"}`,
-        ],
-        tone: tones[type],
-        impact: "Na introductie valt de offerte automatisch terug op de standaardperiode.",
-        appliesTo: "intro",
-        payload: {
-          start: normalizeText(form.introStart),
-          end: normalizeText(form.introEnd),
-          products: normalizeText(form.introProducts),
-          eligibleRefs: Array.isArray(form.introEligibleRefs) ? form.introEligibleRefs.map(String) : [],
-          promoType: normalizeText(form.introPromoType),
-          action: normalizeText(form.introAction),
-          value: normalizeText(form.introValue),
-        },
-      };
-    case "Staffel":
-      return {
-        id: `staffel-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: `Staffel — ${normalizeText(form.staffelProduct) || "Product"}`,
-        subtitle: "Actief voor standaardperiode",
-        lines: Array.isArray(form.staffelRows)
-          ? form.staffelRows.map((row: any) => `${row.from}–${row.to} → € ${row.price}`)
-          : [],
-        tone: tones[type],
-        appliesTo: "standard",
-        payload: {
-          productLabel: normalizeText(form.staffelProduct),
-          eligibleRefs: Array.isArray(form.staffelEligibleRefs) ? form.staffelEligibleRefs.map(String) : [],
-          tiers: Array.isArray(form.staffelRows)
-            ? form.staffelRows
-                .map((row: any) => {
-                  const from = clampNumber(row?.from, 0);
-                  const toRaw = normalizeText(row?.to ?? "");
-                  const to =
-                    !toRaw || toRaw === "∞" || toRaw.toLowerCase() === "inf" ? null : clampNumber(toRaw, 0);
-                  const priceEx = clampNumber(normalizeText(row?.price ?? "").replace(",", "."), 0);
-                  return { from, to, priceEx };
-                })
-                .filter((t: any) => Number.isFinite(t.from) && t.priceEx > 0)
-            : [],
-        },
-      };
-    case "Mix":
-      return {
-        id: `mix-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: "Mix deal",
-        subtitle: "Assortimentsdeal",
-        lines: [
-          `Voorwaarde: ${normalizeText(form.mixCondition) || "—"}`,
-          `Structuur: ${normalizeText(form.mixStructure) || "—"}`,
-        ],
-        tone: tones[type],
-        appliesTo: activePeriod,
-        payload: {
-          condition: normalizeText(form.mixCondition),
-          structure: normalizeText(form.mixStructure),
-          requiredQty: clampNumber(String(form.mixStructure ?? "").split("+")[0], 0),
-          freeQty: clampNumber(String(form.mixStructure ?? "").split("+")[1], 0),
-          eligibleRefs: Array.isArray(form.mixEligibleRefs) ? form.mixEligibleRefs.map(String) : [],
-        },
-      };
-    case "Korting":
-      return {
-        id: `korting-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: "Korting",
-        subtitle: `${normalizeText(form.discountMode) || "Totaal"} korting`,
-        lines: [`${normalizeText(form.discountValue) || "0"}% korting op verkoopprijs`],
-        tone: tones[type],
-        appliesTo: activePeriod,
-        payload: {
-          discountMode: normalizeText(form.discountMode || "Totaal"),
-          discountPct: clampNumber(form.discountValue, 0),
-          eligibleRefs: Array.isArray(form.kortingEligibleRefs) ? form.kortingEligibleRefs.map(String) : [],
-        },
-      };
-    case "Transport": {
-      const distance = clampNumber(form.transportDistanceKm, 0);
-      const rate = clampNumber(form.transportRateEx, 0);
-      const deliveries = Math.max(1, Math.floor(clampNumber(form.transportDeliveries, 1)));
-      const thresholdKm = clampNumber(form.transportThresholdKm, 40);
-      const amountEx = distance > thresholdKm ? distance * 2 * rate * deliveries : 0;
-      const chargedToCustomer = Boolean(form.transportChargedToCustomer ?? false);
-      return {
-        id: `transport-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: "Transport",
-        subtitle: "Verzending vanaf brouwerij",
-        lines: [
-          `${distance} km enkele rit`,
-          `${distance * 2} km retour`,
-          `${deliveries} levering(en)`,
-          `${euro(rate)} per km → ${euro(amountEx)}`,
-          chargedToCustomer ? "Extern doorbelast" : "Intern (marge-impact)",
-        ],
-        tone: tones[type],
-        appliesTo: "global",
-        payload: {
-          distanceKm: distance,
-          rateEx: rate,
-          deliveries,
-          thresholdKm,
-          amountEx,
-          chargedToCustomer,
-        },
-      };
-    }
-    case "Retour": {
-      const pct = clampNumber(form.returnPct, 0);
-      return {
-        id: `retour-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: "Retour / consignatie",
-        subtitle: "Verwachte retouren",
-        lines: [`${pct}% retour verwacht (v1: conservatieve impact)`],
-        tone: tones[type],
-        appliesTo: "global",
-        payload: {
-          returnPct: pct,
-        },
-      };
-    }
-    case "Proeverij": {
-      const costEx = clampNumber(form.tastingCostEx, 0);
-      const isFree = Boolean(form.tastingIsFree ?? true);
-      const priceEx = clampNumber(form.tastingPriceEx, 0);
-      return {
-        id: `proeverij-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: "Proeverij",
-        subtitle: "Extra service",
-        lines: [normalizeText(form.tastingCondition) || "Voorwaarde: —", isFree ? "Gratis" : `Prijs: ${euro(priceEx)}`],
-        tone: tones[type],
-        appliesTo: "global",
-        payload: { costEx, priceEx, isFree, condition: normalizeText(form.tastingCondition) },
-      };
-    }
-    case "Tapverhuur": {
-      const costEx = clampNumber(form.tapCostEx, 0);
-      const isFree = Boolean(form.tapIsFree ?? true);
-      const priceEx = clampNumber(form.tapPriceEx, 0);
-      return {
-        id: `tap-${Date.now()}`,
-        type,
-        icon: icons[type],
-        title: "Tapverhuur",
-        subtitle: "Extra service",
-        lines: [normalizeText(form.tapCondition) || "Voorwaarde: —", isFree ? "Gratis" : `Prijs: ${euro(priceEx)}`],
-        tone: tones[type],
-        appliesTo: "global",
-        payload: { costEx, priceEx, isFree, condition: normalizeText(form.tapCondition) },
-      };
-    }
-  }
-}*/
-
 export function OfferteSamenstellenApp({
   year,
   channels,
@@ -780,6 +414,7 @@ export function OfferteSamenstellenApp({
     return buildQuoteableProductOptions({
       year: currentYear,
       channel: basis.kanaal,
+      channels,
       bieren,
       kostprijsversies,
       kostprijsproductactiveringen,
@@ -790,6 +425,7 @@ export function OfferteSamenstellenApp({
   }, [
     currentYear,
     basis.kanaal,
+    channels,
     bieren,
     kostprijsversies,
     kostprijsproductactiveringen,
@@ -804,45 +440,8 @@ export function OfferteSamenstellenApp({
 
   const [selectedOption, setSelectedOption] = useState<OptionType | null>(null);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
-  const [activePeriodView, setActivePeriodView] = useState<"standard" | "intro">("standard");
 
-  const [form, setForm] = useState<QuoteFormState>({
-    introStart: "",
-    introEnd: "",
-    introProducts: "",
-    introEligibleRefs: [] as string[],
-    introPromoType: "discount",
-    introAction: "",
-    introValue: "",
-    staffelProduct: "",
-    staffelEligibleRefs: [] as string[],
-    staffelRows: [
-      { from: "1", to: "9", price: "25,00" },
-      { from: "10", to: "49", price: "22,00" },
-      { from: "50", to: "∞", price: "20,00" },
-    ],
-    mixCondition: "3 verschillende bieren",
-    mixStructure: "3+2",
-    mixEligibleRefs: [] as string[],
-    discountMode: "Totaal",
-    discountValue: "5",
-    kortingEligibleRefs: [] as string[],
-    transportDistanceKm: "42",
-    transportRateEx: "0,50",
-    transportDeliveries: "1",
-    transportThresholdKm: "40",
-    transportChargedToCustomer: true,
-    returnPct: "10",
-    tastingCondition: "Gratis bij ≥ 10 fusten",
-    tastingIsFree: true,
-    tastingPriceEx: "0",
-    tastingCostEx: "75",
-    tapCondition: "Gratis bij ≥ 5 fusten",
-    tapIsFree: true,
-    tapPriceEx: "0",
-    tapCostEx: "90",
-  });
-
+  const [form, setForm] = useState<QuoteFormState>(() => createInitialQuoteFormState());
   const scenario = scenarios[activeScenario];
   const hasIntro = Boolean(scenario.intro && scenario.intro.start && scenario.intro.end);
 
@@ -850,7 +449,6 @@ export function OfferteSamenstellenApp({
     const availability = evaluateOptionAvailability({
       scenario,
       type,
-      activePeriodView,
     });
     if (!availability.allowed) return;
     setEditingBlockId(null);
@@ -925,20 +523,20 @@ export function OfferteSamenstellenApp({
     const availability = evaluateOptionAvailability({
       scenario,
       type,
-      activePeriodView,
       editingBlockId,
     });
     if (!availability.allowed) {
       return;
     }
 
-    const period: "intro" | "standard" = type === "Intro" ? "intro" : activePeriodView;
+    const period: "intro" | "standard" = type === "Intro" ? "intro" : "standard";
     const block = buildBlockFromForm({
       type,
       form,
       activePeriod: period,
       tones,
       icons,
+      productOptions: productIndex.options,
       existingBlockId: editingBlockId,
     });
 
@@ -1052,7 +650,6 @@ export function OfferteSamenstellenApp({
         activeScenario,
         unitMode,
         vatMode,
-        activePeriodView,
       },
     });
   }
@@ -1095,7 +692,6 @@ export function OfferteSamenstellenApp({
     setActiveScenario(snapshot.ui.activeScenario);
     setUnitMode(snapshot.ui.unitMode);
     setVatMode(snapshot.ui.vatMode);
-    setActivePeriodView(snapshot.ui.activePeriodView);
   }
 
   useEffect(() => {
@@ -1175,13 +771,13 @@ export function OfferteSamenstellenApp({
 
   const steps: { id: StepKey; title: string; desc: string }[] = [
     { id: "basis", title: "Basisgegevens", desc: "Klant, kanaal en naam" },
-    { id: "builder", title: "Offerte maken", desc: "Producten, opties en scenario’s" },
-    { id: "vergelijk", title: "Vergelijken", desc: "Scenario’s naast elkaar" },
+    { id: "builder", title: "Offerte maken", desc: "Producten, opties en scenario's" },
+    { id: "vergelijk", title: "Vergelijken", desc: "Scenario's naast elkaar" },
     { id: "afronden", title: "Afronden", desc: "Export en notities" },
   ];
 
   const activeMetrics = scenarioMetrics[activeScenario];
-  const rightMetrics = activePeriodView === "intro" && activeMetrics.intro ? activeMetrics.intro : activeMetrics.standard;
+  const rightMetrics = activeMetrics.standard;
 
   const incompatibilityHints = useMemo(() => {
     return buildScenarioConflictHints(scenario);
@@ -1202,7 +798,6 @@ export function OfferteSamenstellenApp({
       evaluateOptionAvailability({
         scenario,
         type,
-        activePeriodView,
       }),
     ]);
 
@@ -1210,13 +805,12 @@ export function OfferteSamenstellenApp({
       OptionType,
       ReturnType<typeof evaluateOptionAvailability>
     >;
-  }, [scenario, activePeriodView]);
+  }, [scenario]);
 
   const selectedOptionAvailability = selectedOption
     ? evaluateOptionAvailability({
         scenario,
         type: selectedOption,
-        activePeriodView,
         editingBlockId,
       })
     : null;
@@ -1325,8 +919,6 @@ export function OfferteSamenstellenApp({
                 unitMode={unitMode}
                 vatMode={vatMode}
                 hasIntro={hasIntro}
-                activePeriodView={activePeriodView}
-                setActivePeriodView={setActivePeriodView}
                 scenario={scenario}
                 activeScenario={activeScenario}
                 setActiveScenario={setActiveScenario}
@@ -1404,7 +996,6 @@ export function OfferteSamenstellenApp({
           <ToolbarOptionDialog
             selectedOption={selectedOption}
             hasIntro={hasIntro}
-            activePeriodView={activePeriodView}
             incompatibilityHints={incompatibilityHints}
             selectedOptionAvailability={selectedOptionAvailability ?? optionAvailability[selectedOption]}
             form={form}
@@ -1484,8 +1075,6 @@ function BuilderStep({
   unitMode,
   vatMode,
   hasIntro,
-  activePeriodView,
-  setActivePeriodView,
   scenario,
   activeScenario,
   setActiveScenario,
@@ -1505,8 +1094,6 @@ function BuilderStep({
   unitMode: UnitMode;
   vatMode: VatMode;
   hasIntro: boolean;
-  activePeriodView: "intro" | "standard";
-  setActivePeriodView: (next: "intro" | "standard") => void;
   scenario: Scenario;
   activeScenario: ScenarioId;
   setActiveScenario: (id: ScenarioId) => void;
@@ -1523,12 +1110,20 @@ function BuilderStep({
   warnings: string[];
   incompatibilityHints: string[];
 }) {
+  const introBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "intro");
+  const standardBlocks = scenario.blocks.filter(
+    (block) => (block.appliesTo ?? "standard") === "standard"
+  );
+  const globalBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "global");
+
   return (
     <div className="cpq-stack">
       <div className="cpq-builder-header">
         <div>
           <h2 className="cpq-card-title">Offerte maken</h2>
-          <p className="cpq-card-subtitle">Start simpel met producten en breid uit met blokken via de toolbar.</p>
+          <p className="cpq-card-subtitle">
+            Start simpel met producten en breid uit met blokken via de toolbar.
+          </p>
         </div>
         <div className="cpq-toggle-strip" role="group" aria-label="Scenario">
           {(["A", "B", "C"] as ScenarioId[]).map((id) => (
@@ -1546,16 +1141,16 @@ function BuilderStep({
 
       {warnings.length > 0 ? (
         <div className="cpq-alert">
-          {warnings.map((w) => (
-            <div key={w}>{w}</div>
+          {warnings.map((warning) => (
+            <div key={warning}>{warning}</div>
           ))}
         </div>
       ) : null}
 
       {incompatibilityHints.length > 0 ? (
         <div className="cpq-alert cpq-alert-warn">
-          {incompatibilityHints.map((w) => (
-            <div key={w}>{w}</div>
+          {incompatibilityHints.map((warning) => (
+            <div key={warning}>{warning}</div>
           ))}
         </div>
       ) : null}
@@ -1568,42 +1163,25 @@ function BuilderStep({
               {group.items.map((item) => {
                 const availability = optionAvailability[item.label];
                 return (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => openOption(item.label)}
-                  className="cpq-tool"
-                  title={availability.allowed ? item.label : `${item.label} — ${availability.reasons.join(" ")}`}
-                  disabled={!availability.allowed}
-                >
-                  <span className="cpq-tool-icon">{item.icon}</span>
-                  <span className="cpq-tool-tooltip">{item.label}</span>
-                </button>
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => openOption(item.label)}
+                    className="cpq-tool"
+                    title={
+                      availability.allowed
+                        ? item.label
+                        : `${item.label} — ${availability.reasons.join(" ")}`
+                    }
+                    disabled={!availability.allowed}
+                  >
+                    <span className="cpq-tool-icon">{item.icon}</span>
+                    <span className="cpq-tool-tooltip">{item.label}</span>
+                  </button>
                 );
               })}
             </div>
           ))}
-          {hasIntro ? (
-            <div className="cpq-toolbar-group cpq-toolbar-right">
-              <div className="cpq-toolbar-title">Periode</div>
-              <div className="cpq-toggle-strip" role="group" aria-label="Periode">
-                <button
-                  type="button"
-                  className={`cpq-toggle${activePeriodView === "intro" ? " active" : ""}`}
-                  onClick={() => setActivePeriodView("intro")}
-                >
-                  Introductie
-                </button>
-                <button
-                  type="button"
-                  className={`cpq-toggle${activePeriodView === "standard" ? " active" : ""}`}
-                  onClick={() => setActivePeriodView("standard")}
-                >
-                  Standaard
-                </button>
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -1611,7 +1189,10 @@ function BuilderStep({
         <div className="cpq-card-header cpq-card-header-row">
           <div>
             <h3 className="cpq-card-title">Basisofferte</h3>
-            <p className="cpq-card-subtitle">Basisprijs komt uit verkoopstrategie (sell-in, ex). BTW-toggle is alleen weergave.</p>
+            <p className="cpq-card-subtitle">
+              Basisprijs komt uit verkoopstrategie (sell-in, ex). BTW-toggle is alleen
+              weergave.
+            </p>
           </div>
           <button onClick={addProductRow} className="cpq-button cpq-button-secondary" type="button">
             + Product toevoegen
@@ -1632,17 +1213,27 @@ function BuilderStep({
             </thead>
             <tbody>
               {scenario.products.map((product) => {
-                const display = unitMode === "liters" ? `${(product.qty * product.litersPerUnit).toFixed(1)} L` : `${product.qty} ${product.unit}`;
-                const vatFactor = vatMode === "incl" ? 1 + Math.max(0, clampNumber(product.vatRatePct, 0)) / 100 : 1;
+                const display =
+                  unitMode === "liters"
+                    ? `${(product.qty * product.litersPerUnit).toFixed(1)} L`
+                    : `${product.qty} ${product.unit}`;
+                const vatFactor =
+                  vatMode === "incl" ? 1 + Math.max(0, clampNumber(product.vatRatePct, 0)) / 100 : 1;
                 const unitPrice = product.standardPriceEx * vatFactor;
                 const totalPrice = product.qty * product.standardPriceEx * vatFactor;
-                const qtyInputValue = unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
+                const qtyInputValue =
+                  unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
+
                 return (
                   <tr key={product.id}>
                     <td>
                       <select
                         className="cpq-select"
-                        value={product.source?.bier_id && product.source?.product_id ? `beer:${product.source.bier_id}:product:${product.source.product_id}` : ""}
+                        value={
+                          product.source?.bier_id && product.source?.product_id
+                            ? `beer:${product.source.bier_id}:product:${product.source.product_id}`
+                            : ""
+                        }
                         onChange={(e) => onSelectRowOption(product.id, e.target.value)}
                       >
                         <option value="">Kies product…</option>
@@ -1662,8 +1253,8 @@ function BuilderStep({
                         onChange={(e) => {
                           const raw = Math.max(0, clampNumber(e.target.value, 0));
                           if (unitMode === "liters") {
-                            const lpu = Math.max(0, clampNumber(product.litersPerUnit, 0));
-                            const nextQty = lpu > 0 ? raw / lpu : 0;
+                            const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
+                            const nextQty = litersPerUnit > 0 ? raw / litersPerUnit : 0;
                             updateProduct(product.id, { qty: nextQty });
                             return;
                           }
@@ -1691,38 +1282,77 @@ function BuilderStep({
       </section>
 
       <div className="cpq-stack">
-        {scenario.blocks
-          .filter((block) => {
-            const period = block.appliesTo ?? "standard";
-            if (period === "global") return true;
-            if (!hasIntro) return period === "standard";
-            return period === activePeriodView;
-          })
-          .map((block) => (
-            <section key={block.id} className={`cpq-block ${block.tone}`}>
+        {hasIntro ? (
+          <section className="cpq-card">
+            <div className="cpq-card-header">
+              <div>
+                <h3 className="cpq-card-title">Introductie</h3>
+                <p className="cpq-card-subtitle">
+                  Deze periode staat boven de standaardperiode en loopt tijdelijk mee.
+                </p>
+              </div>
+            </div>
+            <div className="cpq-stack">
+              {introBlocks.map((block) => (
+                <BuilderBlockCard key={block.id} block={block} onEdit={editOption} onRemove={removeBlock} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="cpq-card">
+          <div className="cpq-card-header">
+            <div>
+              <h3 className="cpq-card-title">Standaardperiode</h3>
+              <p className="cpq-card-subtitle">
+                {hasIntro
+                  ? "Na de introductie gelden automatisch de standaardprijzen en voorwaarden. Extra afspraken kun je hieronder toevoegen."
+                  : "Hier gelden de standaardprijzen en voorwaarden van de offerte."}
+              </p>
+            </div>
+          </div>
+
+          <div className="cpq-stack">
+            <section className="cpq-block tone-neutral">
               <div className="cpq-block-row">
-                <div className="cpq-block-icon">{block.icon}</div>
                 <div className="cpq-block-body">
-                  <div className="cpq-block-title">{block.title}</div>
-                  <div className="cpq-block-subtitle">{block.subtitle}</div>
+                  <div className="cpq-block-title">Standaardafspraken</div>
+                  <div className="cpq-block-subtitle">{hasIntro ? "Na de introductie" : "Direct actief"}</div>
                   <ul className="cpq-block-list">
-                    {block.lines.map((line) => (
-                      <li key={line}>{line}</li>
-                    ))}
+                    <li>Standaardprijzen uit verkoopstrategie blijven van toepassing.</li>
+                    <li>Standaardvoorwaarden blijven gelden totdat extra afspraken worden toegevoegd.</li>
                   </ul>
-                  {block.impact ? <div className="cpq-block-impact">{block.impact}</div> : null}
-                </div>
-                <div className="cpq-block-actions">
-                  <button type="button" className="cpq-button cpq-button-secondary" onClick={() => editOption(block)}>
-                    Bewerken
-                  </button>
-                  <button type="button" className="cpq-button cpq-button-secondary" onClick={() => removeBlock(block.id)}>
-                    Verwijderen
-                  </button>
                 </div>
               </div>
             </section>
-          ))}
+
+            {standardBlocks.map((block) => (
+              <BuilderBlockCard key={block.id} block={block} onEdit={editOption} onRemove={removeBlock} />
+            ))}
+
+            {standardBlocks.length === 0 && globalBlocks.length === 0 ? (
+              <div className="cpq-empty">Nog geen extra afspraken toegevoegd.</div>
+            ) : null}
+          </div>
+        </section>
+
+        {globalBlocks.length > 0 ? (
+          <section className="cpq-card">
+            <div className="cpq-card-header">
+              <div>
+                <h3 className="cpq-card-title">Quotebrede afspraken</h3>
+                <p className="cpq-card-subtitle">
+                  Deze afspraken gelden bovenop de standaardperiode.
+                </p>
+              </div>
+            </div>
+            <div className="cpq-stack">
+              {globalBlocks.map((block) => (
+                <BuilderBlockCard key={block.id} block={block} onEdit={editOption} onRemove={removeBlock} />
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
 
       <div className="cpq-actions">
@@ -1734,6 +1364,41 @@ function BuilderStep({
   );
 }
 
+function BuilderBlockCard({
+  block,
+  onEdit,
+  onRemove,
+}: {
+  block: BuilderBlock;
+  onEdit: (block: BuilderBlock) => void;
+  onRemove: (blockId: string) => void;
+}) {
+  return (
+    <section className={`cpq-block ${block.tone}`}>
+      <div className="cpq-block-row">
+        <div className="cpq-block-icon">{block.icon}</div>
+        <div className="cpq-block-body">
+          <div className="cpq-block-title">{block.title}</div>
+          <div className="cpq-block-subtitle">{block.subtitle}</div>
+          <ul className="cpq-block-list">
+            {block.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          {block.impact ? <div className="cpq-block-impact">{block.impact}</div> : null}
+        </div>
+        <div className="cpq-block-actions">
+          <button type="button" className="cpq-button cpq-button-secondary" onClick={() => onEdit(block)}>
+            Bewerken
+          </button>
+          <button type="button" className="cpq-button cpq-button-secondary" onClick={() => onRemove(block.id)}>
+            Verwijderen
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
 function CompareStep({
   scenarios,
   metrics,
@@ -1754,7 +1419,7 @@ function CompareStep({
       <div className="cpq-card-header">
         <div>
           <h2 className="cpq-card-title">Vergelijken</h2>
-          <p className="cpq-card-subtitle">Vergelijk scenario’s zonder verborgen aannames: we tonen standaard en (optioneel) introductie apart.</p>
+          <p className="cpq-card-subtitle">Vergelijk scenario's zonder verborgen aannames: we tonen standaard en (optioneel) introductie apart.</p>
         </div>
       </div>
 
@@ -1855,199 +1520,6 @@ function FinalizeStep({
   );
 }
 
-/* function OptionModal({
-  selectedOption,
-  hasIntro,
-  activePeriodView,
-  incompatibilityHints,
-  form,
-  setForm,
-  onClose,
-  onSave,
-}: {
-  selectedOption: OptionType;
-  hasIntro: boolean;
-  activePeriodView: "intro" | "standard";
-  incompatibilityHints: string[];
-  form: any;
-  setForm: React.Dispatch<React.SetStateAction<any>>;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const title = selectedOption;
-  const contextLabel =
-    selectedOption === "Intro" ? "Introductieperiode" : hasIntro ? (activePeriodView === "intro" ? "Introductie" : "Standaard") : "Standaard";
-
-  return (
-    <div className="cpq-modal-overlay" role="dialog" aria-modal="true">
-      <div className="cpq-modal">
-        <div className="cpq-modal-header">
-          <div>
-            <div className="cpq-kicker">Optie toevoegen</div>
-            <h3 className="cpq-modal-title">
-              {title} <span className="cpq-muted">({contextLabel})</span>
-            </h3>
-          </div>
-          <button onClick={onClose} className="cpq-icon-button" type="button">
-            ×
-          </button>
-        </div>
-
-        <div className="cpq-modal-body">
-          {incompatibilityHints.length > 0 ? (
-            <div className="cpq-alert cpq-alert-warn">
-              {incompatibilityHints.map((w) => (
-                <div key={w}>{w}</div>
-              ))}
-            </div>
-          ) : null}
-
-          {selectedOption === "Intro" ? (
-            <>
-              <Field label="Startdatum (YYYY-MM-DD)" value={form.introStart} onChange={(v) => setForm((prev: any) => ({ ...prev, introStart: v }))} />
-              <Field label="Einddatum (YYYY-MM-DD)" value={form.introEnd} onChange={(v) => setForm((prev: any) => ({ ...prev, introEnd: v }))} />
-              <Field label="Producten (vrije tekst v1)" value={form.introProducts} onChange={(v) => setForm((prev: any) => ({ ...prev, introProducts: v }))} />
-              <Field label="Promotietype" value={form.introPromoType} onChange={(v) => setForm((prev: any) => ({ ...prev, introPromoType: v }))} />
-              <Field label="Actie" value={form.introAction} onChange={(v) => setForm((prev: any) => ({ ...prev, introAction: v }))} />
-              <Field label="Waarde" value={form.introValue} onChange={(v) => setForm((prev: any) => ({ ...prev, introValue: v }))} />
-              <Idea text="V1: promotie-varianten worden nog niet allemaal exact doorgerekend; de configuratie wordt wel opgeslagen als block." />
-            </>
-          ) : null}
-
-          {selectedOption === "Staffel" ? (
-            <>
-              <Field label="Product (vrije tekst v1)" value={form.staffelProduct} onChange={(v) => setForm((prev: any) => ({ ...prev, staffelProduct: v }))} />
-              <div className="cpq-field">
-                <div className="cpq-label">Staffelregels</div>
-                <div className="cpq-staffel-grid">
-                  {form.staffelRows.map((row: any, idx: number) => (
-                    <div key={idx} className="cpq-staffel-row">
-                      <input
-                        className="cpq-input"
-                        value={row.from}
-                        onChange={(e) => updateStaffelRow(form, setForm, idx, "from", e.target.value)}
-                        placeholder="Vanaf"
-                      />
-                      <input
-                        className="cpq-input"
-                        value={row.to}
-                        onChange={(e) => updateStaffelRow(form, setForm, idx, "to", e.target.value)}
-                        placeholder="Tot"
-                      />
-                      <input
-                        className="cpq-input"
-                        value={row.price}
-                        onChange={(e) => updateStaffelRow(form, setForm, idx, "price", e.target.value)}
-                        placeholder="Prijs"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <Idea text="V1: staffel wordt opgeslagen als block. Exacte doorrekening volgt (business rule details en unit-basis)." />
-            </>
-          ) : null}
-
-          {selectedOption === "Mix" ? (
-            <>
-              <Field label="Voorwaarde" value={form.mixCondition} onChange={(v) => setForm((prev: any) => ({ ...prev, mixCondition: v }))} />
-              <Field label="Structuur (bijv. 3+2)" value={form.mixStructure} onChange={(v) => setForm((prev: any) => ({ ...prev, mixStructure: v }))} />
-              <Field label="Producten (vrije tekst v1)" value={form.mixProducts} onChange={(v) => setForm((prev: any) => ({ ...prev, mixProducts: v }))} />
-              <Idea text="V1: mix deal wordt als block opgeslagen; exacte berekening is afhankelijk van geselecteerde producten en gratis-logica." />
-            </>
-          ) : null}
-
-          {selectedOption === "Korting" ? (
-            <>
-              <Field label="Type korting" value={form.discountMode} onChange={(v) => setForm((prev: any) => ({ ...prev, discountMode: v }))} />
-              <Field label="Waarde (%)" value={form.discountValue} onChange={(v) => setForm((prev: any) => ({ ...prev, discountValue: v }))} />
-              <Idea text="Korting wordt toegepast op de verkoopprijs. In v1 wordt regel vs totaal nog niet apart verdeeld." />
-            </>
-          ) : null}
-
-          {selectedOption === "Transport" ? (
-            <>
-              <Field label="Afstand (km enkele rit)" value={form.transportDistanceKm} onChange={(v) => setForm((prev: any) => ({ ...prev, transportDistanceKm: v }))} />
-              <Field label="Prijs per km (ex)" value={form.transportRateEx} onChange={(v) => setForm((prev: any) => ({ ...prev, transportRateEx: v }))} />
-              <Field label="Leveringen" value={form.transportDeliveries} onChange={(v) => setForm((prev: any) => ({ ...prev, transportDeliveries: v }))} />
-              <Field label="Drempel (km)" value={form.transportThresholdKm} onChange={(v) => setForm((prev: any) => ({ ...prev, transportThresholdKm: v }))} />
-              <div className="cpq-form-row">
-                <div className="cpq-label">Doorbelasten?</div>
-                <div className="cpq-toggle-strip" role="group" aria-label="Transport doorbelasten">
-                  <button type="button" className={`cpq-toggle${form.transportChargedToCustomer ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, transportChargedToCustomer: true }))}>
-                    Ja
-                  </button>
-                  <button type="button" className={`cpq-toggle${!form.transportChargedToCustomer ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, transportChargedToCustomer: false }))}>
-                    Nee (intern)
-                  </button>
-                </div>
-              </div>
-              <Idea text="Regel: afstand > 40km => transportkosten. Als niet doorbelast, telt het als interne kost (marge-impact)." />
-            </>
-          ) : null}
-
-          {selectedOption === "Retour" ? (
-            <>
-              <Field label="Retourpercentage (%)" value={form.returnPct} onChange={(v) => setForm((prev: any) => ({ ...prev, returnPct: v }))} />
-              <Idea text="V1: conservatieve impact: omzet omlaag, kosten gelijk. Exacte return-logica volgt later." />
-            </>
-          ) : null}
-
-          {selectedOption === "Proeverij" ? (
-            <>
-              <Field label="Voorwaarde" value={form.tastingCondition} onChange={(v) => setForm((prev: any) => ({ ...prev, tastingCondition: v }))} />
-              <Field label="Interne kost (ex)" value={form.tastingCostEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tastingCostEx: v }))} />
-              <div className="cpq-form-row">
-                <div className="cpq-label">Gratis?</div>
-                <div className="cpq-toggle-strip" role="group" aria-label="Proeverij gratis">
-                  <button type="button" className={`cpq-toggle${form.tastingIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tastingIsFree: true }))}>
-                    Ja
-                  </button>
-                  <button type="button" className={`cpq-toggle${!form.tastingIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tastingIsFree: false }))}>
-                    Nee
-                  </button>
-                </div>
-              </div>
-              {!form.tastingIsFree ? (
-                <Field label="Prijs (ex)" value={form.tastingPriceEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tastingPriceEx: v }))} />
-              ) : null}
-            </>
-          ) : null}
-
-          {selectedOption === "Tapverhuur" ? (
-            <>
-              <Field label="Voorwaarde" value={form.tapCondition} onChange={(v) => setForm((prev: any) => ({ ...prev, tapCondition: v }))} />
-              <Field label="Interne kost (ex)" value={form.tapCostEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tapCostEx: v }))} />
-              <div className="cpq-form-row">
-                <div className="cpq-label">Gratis?</div>
-                <div className="cpq-toggle-strip" role="group" aria-label="Tapverhuur gratis">
-                  <button type="button" className={`cpq-toggle${form.tapIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tapIsFree: true }))}>
-                    Ja
-                  </button>
-                  <button type="button" className={`cpq-toggle${!form.tapIsFree ? " active" : ""}`} onClick={() => setForm((p: any) => ({ ...p, tapIsFree: false }))}>
-                    Nee
-                  </button>
-                </div>
-              </div>
-              {!form.tapIsFree ? (
-                <Field label="Prijs (ex)" value={form.tapPriceEx} onChange={(v) => setForm((prev: any) => ({ ...prev, tapPriceEx: v }))} />
-              ) : null}
-            </>
-          ) : null}
-        </div>
-
-        <div className="cpq-modal-footer">
-          <button onClick={onClose} className="cpq-button cpq-button-secondary" type="button">
-            Annuleren
-          </button>
-          <button onClick={onSave} className="cpq-button cpq-button-primary" type="button">
-            Opslaan
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}*/
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
@@ -2183,3 +1655,6 @@ function IconTent() {
     </BaseIcon>
   );
 }
+
+
+

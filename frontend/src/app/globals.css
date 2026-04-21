@@ -3023,6 +3023,10 @@ a {
   gap: 0.35rem;
 }
 
+.cpq-multiselect-field {
+  position: relative;
+}
+
 .cpq-label {
   font-size: 0.82rem;
   font-weight: 900;
@@ -3035,6 +3039,16 @@ a {
   border-radius: 18px;
   padding: 0.75rem 0.85rem;
   color: var(--muted);
+}
+
+.cpq-info-card {
+  border: 1px solid rgba(214, 223, 243, 1);
+  background: rgba(246, 249, 255, 0.96);
+  border-radius: 18px;
+  padding: 0.7rem 0.9rem;
+  color: rgba(60, 73, 108, 0.96);
+  font-size: 0.88rem;
+  line-height: 1.35;
 }
 
 .cpq-modal-backdrop {
@@ -3051,11 +3065,18 @@ a {
 .cpq-modal {
   width: 100%;
   max-width: 820px;
+  max-height: min(92vh, 1040px);
   border-radius: 26px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 26px 80px rgba(10, 18, 34, 0.24);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cpq-modal-wide {
+  max-width: 1120px;
 }
 
 .cpq-modal-header {
@@ -3083,6 +3104,609 @@ a {
   padding: 1rem 1.1rem;
   display: grid;
   gap: 0.85rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.cpq-intro-layout {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.cpq-intro-main,
+.cpq-intro-side {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.cpq-intro-date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.cpq-intro-section {
+  padding-top: 0.25rem;
+}
+
+.cpq-intro-promo-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.cpq-intro-side-card {
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 24px;
+  padding: 1.25rem;
+}
+
+.cpq-intro-side-card-muted {
+  background: rgba(250, 251, 255, 0.92);
+}
+
+.cpq-intro-promo-card {
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(250, 251, 255, 0.92);
+  border-radius: 24px;
+  padding: 1.25rem;
+}
+
+.cpq-intro-promo-header {
+  margin-bottom: 1rem;
+}
+
+.cpq-intro-promo-title,
+.cpq-intro-card-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: rgba(24, 34, 58, 0.96);
+}
+
+.cpq-intro-promo-description,
+.cpq-intro-summary-subtitle,
+.cpq-intro-impact-product-subtitle {
+  margin-top: 0.25rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.cpq-intro-promo-content,
+.cpq-intro-field-stack,
+.cpq-intro-copy-stack,
+.cpq-intro-impact-stack,
+.cpq-intro-impact-sections {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.cpq-intro-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.cpq-intro-note {
+  border-radius: 16px;
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 0.85rem 0.95rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: rgba(24, 34, 58, 0.9);
+}
+
+.cpq-intro-help-head,
+.cpq-intro-summary-head,
+.cpq-intro-impact-product-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cpq-intro-preview {
+  margin-top: 0.85rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: rgba(24, 34, 58, 0.9);
+}
+
+.cpq-intro-summary-card,
+.cpq-intro-impact-product-card {
+  border-radius: 22px;
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(250, 251, 255, 0.92);
+  padding: 1rem;
+}
+
+.cpq-intro-summary-grid,
+.cpq-intro-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.cpq-intro-summary-grid-glass {
+  margin-top: 0.75rem;
+}
+
+.cpq-intro-summary-metric,
+.cpq-intro-metric {
+  border-radius: 16px;
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 0.8rem 0.9rem;
+}
+
+.cpq-intro-summary-metric-label,
+.cpq-intro-metric-label,
+.cpq-intro-section-label {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cpq-intro-summary-metric-value {
+  margin-top: 0.35rem;
+  font-size: 1.08rem;
+  font-weight: 800;
+  color: rgba(24, 34, 58, 0.96);
+}
+
+.cpq-intro-metric-value {
+  margin-top: 0.3rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: rgba(24, 34, 58, 0.94);
+}
+
+.cpq-staffel-layout {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.cpq-staffel-layout.is-help-open {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cpq-staffel-main,
+.cpq-staffel-side {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.cpq-staffel-side-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cpq-staffel-hide-help {
+  min-height: 36px;
+}
+
+.cpq-staffel-section {
+  padding-top: 0.1rem;
+}
+
+.cpq-staffel-picker .cpq-multiselect-tags {
+  display: none;
+}
+
+.cpq-staffel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cpq-staffel-summary-card {
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 18px;
+  padding: 0.7rem 0.85rem;
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.cpq-staffel-summary-line {
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: rgba(60, 73, 108, 0.96);
+}
+
+.cpq-staffel-selected-summary {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.cpq-staffel-selected-card {
+  border-radius: 14px;
+  background: rgba(246, 249, 255, 0.92);
+  padding: 0.6rem 0.7rem;
+  min-width: 0;
+}
+
+.cpq-staffel-selected-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: rgba(24, 34, 58, 0.96);
+  word-break: break-word;
+}
+
+.cpq-staffel-selected-meta {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  font-size: 0.79rem;
+  color: var(--muted);
+}
+
+.cpq-staffel-info-button {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(214, 223, 243, 1);
+  background: rgba(255, 255, 255, 0.98);
+  color: rgba(70, 97, 191, 1);
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.cpq-staffel-info-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(151, 171, 233, 1);
+}
+
+.cpq-staffel-info-button.is-active {
+  background: rgba(241, 245, 255, 1);
+  border-color: rgba(112, 137, 223, 1);
+  box-shadow: 0 0 0 3px rgba(112, 137, 223, 0.14);
+}
+
+.cpq-staffel-mode-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.cpq-staffel-mode-button {
+  display: grid;
+  gap: 0.18rem;
+  text-align: left;
+  border-radius: 18px;
+  border: 1px solid rgba(217, 224, 237, 1);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 0.8rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.cpq-staffel-mode-button:last-child {
+  grid-column: 1 / -1;
+}
+
+.cpq-staffel-mode-button:hover {
+  border-color: rgba(169, 185, 232, 1);
+  transform: translateY(-1px);
+}
+
+.cpq-staffel-mode-button.active {
+  border-color: rgba(112, 137, 223, 1);
+  box-shadow: 0 0 0 3px rgba(112, 137, 223, 0.16);
+  background: rgba(244, 247, 255, 1);
+}
+
+.cpq-staffel-mode-title {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: rgba(24, 34, 58, 0.96);
+}
+
+.cpq-staffel-mode-description {
+  font-size: 0.77rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.cpq-staffel-table-wrap {
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  min-width: 0;
+}
+
+.cpq-staffel-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 0;
+}
+
+.cpq-staffel-master-wrap {
+  overflow-x: clip;
+}
+
+.cpq-staffel-master-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.cpq-staffel-master-table th:nth-child(1),
+.cpq-staffel-master-table td:nth-child(1),
+.cpq-staffel-master-table th:nth-child(2),
+.cpq-staffel-master-table td:nth-child(2) {
+  width: 140px;
+}
+
+.cpq-staffel-product-table {
+  min-width: 0;
+}
+
+.cpq-staffel-product-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.cpq-staffel-table th,
+.cpq-staffel-table td {
+  padding: 0.85rem 0.9rem;
+  border-bottom: 1px solid rgba(236, 240, 247, 1);
+  vertical-align: top;
+  text-align: left;
+}
+
+.cpq-staffel-table thead th {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: rgba(82, 95, 129, 1);
+  background: rgba(249, 250, 253, 0.96);
+}
+
+.cpq-staffel-action-cell {
+  width: 44px;
+}
+
+.cpq-staffel-delete-button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  color: rgba(138, 44, 44, 1);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.cpq-staffel-delete-button:hover:not(:disabled) {
+  background: rgba(255, 244, 244, 1);
+  border-color: rgba(230, 173, 173, 1);
+  transform: translateY(-1px);
+}
+
+.cpq-staffel-delete-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cpq-staffel-cell-error {
+  border-color: rgba(225, 96, 96, 0.82);
+  box-shadow: 0 0 0 3px rgba(225, 96, 96, 0.12);
+}
+
+.cpq-staffel-row-error {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: rgba(186, 52, 52, 1);
+}
+
+.cpq-staffel-side-card {
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 24px;
+  padding: 1.25rem;
+}
+
+.cpq-staffel-side-card-muted {
+  background: rgba(250, 251, 255, 0.92);
+}
+
+.cpq-staffel-readonly-stack {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+.cpq-staffel-product-card {
+  border-radius: 24px;
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 1rem;
+  min-width: 0;
+}
+
+.cpq-staffel-product-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.cpq-staffel-product-card-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: rgba(24, 34, 58, 0.96);
+}
+
+.cpq-staffel-product-card-subtitle {
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.cpq-staffel-product-metrics-table {
+  min-width: 1260px;
+}
+
+.cpq-multiselect-trigger {
+  width: 100%;
+  min-height: 48px;
+  border-radius: 18px;
+  border: 1px solid rgba(217, 224, 237, 1);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: rgba(24, 34, 58, 0.92);
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.cpq-multiselect-chevron {
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.cpq-multiselect-chevron.open {
+  transform: rotate(180deg);
+}
+
+.cpq-multiselect-popover {
+  position: absolute;
+  top: calc(100% + 0.75rem);
+  left: 0;
+  right: 0;
+  border-radius: 22px;
+  border: 1px solid rgba(217, 224, 237, 1);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 0.9rem;
+  box-shadow: 0 14px 32px rgba(10, 18, 34, 0.08);
+  z-index: 12;
+}
+
+.cpq-multiselect-meta {
+  margin-top: 0.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.cpq-multiselect-close {
+  border: 0;
+  background: transparent;
+  color: rgba(70, 97, 191, 1);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cpq-multiselect-results {
+  margin-top: 0.75rem;
+  max-height: min(220px, 32vh);
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(228, 233, 242, 1);
+  background: rgba(250, 251, 255, 0.72);
+  padding: 0.4rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.cpq-multiselect-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  border-radius: 14px;
+  padding: 0.7rem 0.75rem;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.cpq-multiselect-option:hover {
+  background: rgba(244, 247, 255, 1);
+}
+
+.cpq-multiselect-option-label {
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: rgba(24, 34, 58, 0.94);
+  word-break: break-word;
+}
+
+.cpq-multiselect-tags {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.cpq-multiselect-tag {
+  border-radius: 999px;
+  background: rgba(239, 243, 255, 1);
+  color: rgba(47, 63, 109, 1);
+  padding: 0.38rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+@media (min-width: 960px) {
+  .cpq-intro-layout {
+    grid-template-columns: minmax(0, 1.4fr) 320px;
+    align-items: start;
+  }
+
+  .cpq-staffel-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .cpq-staffel-layout.is-help-open {
+    grid-template-columns: minmax(0, 1fr) 280px;
+    align-items: start;
+  }
+}
+
+@media (max-width: 639px) {
+  .cpq-intro-date-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cpq-intro-two-col,
+  .cpq-intro-summary-grid,
+  .cpq-intro-metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cpq-staffel-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cpq-staffel-product-metrics-table {
+    min-width: 980px;
+  }
 }
 
 .cpq-modal-footer {

@@ -5,6 +5,7 @@ import {
   computeGratisFreeByRefFromPaidRows,
 } from "@/lib/pricingEngine";
 import { clampNumber } from "@/components/offerte-samenstellen/quoteUtils";
+import { formatStaffelInput, getDerivedStaffelPrice } from "@/components/offerte-samenstellen/staffelUtils";
 import type { QuoteScenario, ScenarioMetrics } from "@/components/offerte-samenstellen/types";
 
 export function calculateScenarioMetrics(
@@ -70,6 +71,10 @@ export function calculateScenarioMetrics(
     const tiersRaw = Array.isArray(staffelBlock.payload?.tiers)
       ? (staffelBlock.payload?.tiers as Array<Record<string, unknown>>)
       : [];
+    const discountMode = String(staffelBlock.payload?.discountMode ?? "absolute");
+    const discountValue = formatStaffelInput(
+      clampNumber(staffelBlock.payload?.discountValue, 0)
+    );
     const eligible = new Set<string>(
       Array.isArray(staffelBlock.payload?.eligibleRefs)
         ? (staffelBlock.payload?.eligibleRefs as unknown[]).map(String)
@@ -82,7 +87,7 @@ export function calculateScenarioMetrics(
       for (const row of lines) {
         if (!eligible.has(row.ref)) continue;
 
-        const tier = tiersRaw.find((candidate) => {
+        const tierIndex = tiersRaw.findIndex((candidate) => {
           const from = clampNumber(candidate?.from, 0);
           const to =
             candidate?.to === null ||
@@ -94,7 +99,36 @@ export function calculateScenarioMetrics(
           return row.qtyPaid >= from && row.qtyPaid <= to;
         });
 
-        const nextPrice = tier ? clampNumber(tier.priceEx, 0) : 0;
+        const tier = tierIndex >= 0 ? tiersRaw[tierIndex] : null;
+        const nextPrice =
+          tierIndex >= 0
+            ? getDerivedStaffelPrice(
+                {
+                  optionId: row.ref,
+                  bierId: "",
+                  productId: "",
+                  label: row.ref,
+                  bierName: "",
+                  packLabel: "",
+                  litersPerUnit: 0,
+                  staffelCompatibilityKey: "",
+                  staffelCompatibilityLabel: "",
+                  costPriceEx: row.costPriceEx,
+                  standardPriceEx: row.unitPriceEx,
+                  vatRatePct: 0,
+                  kostprijsversieId: "",
+                },
+                tierIndex,
+                {
+                  from: String(tier?.from ?? ""),
+                  to:
+                    tier?.to === null || tier?.to === undefined ? "" : String(tier.to),
+                  price: String(tier?.priceEx ?? ""),
+                },
+                discountMode as "percent" | "absolute" | "free",
+                discountValue
+              ) ?? 0
+            : 0;
         if (nextPrice > 0) {
           unitPriceByRef.set(row.ref, nextPrice);
         }

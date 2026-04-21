@@ -1,12 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import type { OptionAvailability } from "@/components/offerte-samenstellen/conflictRules";
-import { IntroForm } from "@/components/offerte-samenstellen/forms/IntroForm";
+import { IntroForm, getIntroFormError } from "@/components/offerte-samenstellen/forms/IntroForm";
 import { KortingForm } from "@/components/offerte-samenstellen/forms/KortingForm";
 import { MixDealForm } from "@/components/offerte-samenstellen/forms/MixDealForm";
 import { ProeverijForm } from "@/components/offerte-samenstellen/forms/ProeverijForm";
 import { RetourForm } from "@/components/offerte-samenstellen/forms/RetourForm";
-import { StaffelForm } from "@/components/offerte-samenstellen/forms/StaffelForm";
+import { StaffelForm, getStaffelFormError } from "@/components/offerte-samenstellen/forms/StaffelForm";
 import { TapverhuurForm } from "@/components/offerte-samenstellen/forms/TapverhuurForm";
 import { TransportForm } from "@/components/offerte-samenstellen/forms/TransportForm";
 import type {
@@ -18,7 +18,6 @@ import type {
 type Props = {
   selectedOption: OptionType;
   hasIntro: boolean;
-  activePeriodView: "intro" | "standard";
   incompatibilityHints: string[];
   selectedOptionAvailability: OptionAvailability;
   form: QuoteFormState;
@@ -28,10 +27,19 @@ type Props = {
   onSave: () => void;
 };
 
+function getContextLabel(selectedOption: OptionType, hasIntro: boolean) {
+  if (selectedOption === "Intro") {
+    return "Introductieperiode";
+  }
+  if (hasIntro) {
+    return "Standaardperiode na introductie";
+  }
+  return "Standaardperiode";
+}
+
 export function ToolbarOptionDialog({
   selectedOption,
   hasIntro,
-  activePeriodView,
   incompatibilityHints,
   selectedOptionAvailability,
   form,
@@ -40,18 +48,17 @@ export function ToolbarOptionDialog({
   onClose,
   onSave,
 }: Props) {
-  const contextLabel =
-    selectedOption === "Intro"
-      ? "Introductieperiode"
-      : hasIntro
-        ? activePeriodView === "intro"
-          ? "Introductie"
-          : "Standaard"
-        : "Standaard";
+  const introError = selectedOption === "Intro" ? getIntroFormError(form) : "";
+  const staffelError =
+    selectedOption === "Staffel" ? getStaffelFormError(form, productOptions) : "";
+  const saveBlockedReason =
+    introError || staffelError || selectedOptionAvailability.reasons[0] || "";
+  const canSave = selectedOptionAvailability.allowed && !introError && !staffelError;
+  const contextLabel = getContextLabel(selectedOption, hasIntro);
 
   return (
     <div className="cpq-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="cpq-modal">
+      <div className={`cpq-modal${selectedOption === "Intro" || selectedOption === "Staffel" ? " cpq-modal-wide" : ""}`}>
         <div className="cpq-modal-header">
           <div>
             <div className="cpq-kicker">Optie toevoegen</div>
@@ -115,8 +122,8 @@ export function ToolbarOptionDialog({
             onClick={onSave}
             className="cpq-button cpq-button-primary"
             type="button"
-            disabled={!selectedOptionAvailability.allowed}
-            title={selectedOptionAvailability.allowed ? "Opslaan" : selectedOptionAvailability.reasons.join(" ")}
+            disabled={!canSave}
+            title={canSave ? "Opslaan" : saveBlockedReason}
           >
             Opslaan
           </button>
