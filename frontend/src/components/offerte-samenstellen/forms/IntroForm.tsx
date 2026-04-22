@@ -6,14 +6,13 @@ import {
   ErrorField,
   Field,
   Idea,
-  SearchableMultiSelectField,
   SelectField,
 } from "@/components/offerte-samenstellen/forms/FormControls";
+import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
 import {
   buildIntroFinancialLines,
   buildIntroFinancialSummary,
 } from "@/components/offerte-samenstellen/introUtils";
-import { euro, inferUnitFromPack } from "@/components/offerte-samenstellen/quoteUtils";
 import type { ProductOption, QuoteFormState } from "@/components/offerte-samenstellen/types";
 
 type Props = {
@@ -35,15 +34,6 @@ function formatNumberNl(value: number, maximumFractionDigits = 2) {
 
 function resolveSelectedProducts(products: ProductOption[], refs: string[]) {
   return products.filter((product) => refs.includes(product.optionId));
-}
-
-function getDefaultGlassLabel(product: ProductOption) {
-  return inferUnitFromPack(product.packLabel) === "fust" ? "25 cl" : "33 cl";
-}
-
-function getGlassesPerPack(product: ProductOption) {
-  const glassSizeMl = inferUnitFromPack(product.packLabel) === "fust" ? 250 : 330;
-  return product.litersPerUnit > 0 ? (product.litersPerUnit * 1000) / glassSizeMl : 0;
 }
 
 export function getIntroFormError(form: QuoteFormState, today: string = todayIso()) {
@@ -157,7 +147,7 @@ function buildPreviewLines(form: QuoteFormState, selectedProducts: ProductOption
     `Toepassing: ${
       form.introThresholdApplyMode === "all"
         ? "Alle geselecteerde producten"
-        : `Eén product: ${thresholdProductLabel || "—"}`
+        : `Één product: ${thresholdProductLabel || "—"}`
     }`,
     `Korting: ${form.introThresholdDiscount || "—"}%`,
     `Producten: ${productSummary}`,
@@ -229,11 +219,6 @@ export function IntroForm({ form, setForm, products }: Props) {
     [financialLines]
   );
 
-  const selectableProducts = useMemo(
-    () => products.map((product) => ({ id: product.optionId, label: product.label })),
-    [products]
-  );
-
   return (
     <div className="cpq-intro-layout">
       <div className="cpq-intro-main">
@@ -272,17 +257,13 @@ export function IntroForm({ form, setForm, products }: Props) {
         </div>
 
         <div className="cpq-intro-section">
-          <SearchableMultiSelectField
-            label="Producten die meedoen"
-            items={selectableProducts}
-            selected={form.introEligibleRefs}
-            onToggle={(id) => {
+          <div className="cpq-label">Producten die meedoen</div>
+          <ProductPickerTable
+            products={products}
+            selectedRefs={form.introEligibleRefs}
+            emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze introductie."
+            onChange={(nextEligibleRefs) => {
               setForm((prev) => {
-                const exists = prev.introEligibleRefs.includes(id);
-                const nextEligibleRefs = exists
-                  ? prev.introEligibleRefs.filter((item) => item !== id)
-                  : [...prev.introEligibleRefs, id];
-
                 const nextDiscountsByProduct = Object.fromEntries(
                   Object.entries(prev.introDiscountsByProduct).filter(([key]) =>
                     nextEligibleRefs.includes(key)
@@ -306,35 +287,6 @@ export function IntroForm({ form, setForm, products }: Props) {
             }}
           />
         </div>
-
-        {selectedProducts.length > 0 ? (
-          <div className="cpq-intro-section">
-            <div className="cpq-staffel-table-wrap">
-              <table className="cpq-staffel-table cpq-staffel-product-table">
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Verkoopprijs</th>
-                    <th>Kostprijs</th>
-                    <th>Standaard glas</th>
-                    <th>Glazen / verpakking</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedProducts.map((product) => (
-                    <tr key={product.optionId}>
-                      <td>{product.label}</td>
-                      <td>{euro(product.standardPriceEx)}</td>
-                      <td>{euro(product.costPriceEx)}</td>
-                      <td>{getDefaultGlassLabel(product)}</td>
-                      <td>{formatNumberNl(getGlassesPerPack(product))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : null}
 
         <div className="cpq-intro-section cpq-intro-promo-stack">
           <SelectField
@@ -708,7 +660,10 @@ export function IntroForm({ form, setForm, products }: Props) {
                         <IntroMetric label="Actiekosten" value={line.customerAdvantageLabel} />
                         <IntroMetric label="Kostprijs" value={line.costPriceLabel} />
                         <IntroMetric label="Brutomarge" value={line.newMarginLabel} />
-                        <IntroMetric label="Marge %" value={`${formatNumberNl(line.marginPct, 1)}%`} />
+                        <IntroMetric
+                          label="Marge %"
+                          value={`${formatNumberNl(line.marginPct, 1)}%`}
+                        />
                         <IntroMetric label="Standaard marge" value={line.standardMarginLabel} />
                         <IntroMetric label="Marge-impact" value={line.marginImpactLabel} />
                       </div>
@@ -719,8 +674,14 @@ export function IntroForm({ form, setForm, products }: Props) {
                       <div className="cpq-intro-metric-grid">
                         <IntroMetric label="Standaard glas" value={line.glassLabel} />
                         <IntroMetric label="Glazen / verpakking" value={line.glassesPerPackLabel} />
-                        <IntroMetric label="Glasprijs zonder actie" value={line.standardGlassRevenueLabel} />
-                        <IntroMetric label="Glasprijs met actie" value={line.revenuePerGlassLabel} />
+                        <IntroMetric
+                          label="Glasprijs zonder actie"
+                          value={line.standardGlassRevenueLabel}
+                        />
+                        <IntroMetric
+                          label="Glasprijs met actie"
+                          value={line.revenuePerGlassLabel}
+                        />
                         <IntroMetric label="Kostprijs per glas" value={line.costPerGlassLabel} />
                         <IntroMetric label="Marge per glas" value={line.marginPerGlassLabel} />
                         <IntroMetric
@@ -741,4 +702,3 @@ export function IntroForm({ form, setForm, products }: Props) {
     </div>
   );
 }
-

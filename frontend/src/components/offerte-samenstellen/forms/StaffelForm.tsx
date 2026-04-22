@@ -5,13 +5,11 @@ import {
   EmptyHint,
   ErrorField,
   Idea,
-  SearchableMultiSelectField,
 } from "@/components/offerte-samenstellen/forms/FormControls";
+import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
 import { euro } from "@/components/offerte-samenstellen/quoteUtils";
 import {
-  buildSelectableProducts,
   calculateProductStaffelMetrics,
-  filterProductsForStaffel,
   getStaffelCompatibilityInfo,
   getSuggestedSharedPrice,
   resolveSelectedProducts,
@@ -91,6 +89,29 @@ function removeStaffelRow(prev: QuoteFormState, index: number) {
   return updateRows(prev, nextRows);
 }
 
+function updateSelectedProducts(
+  prev: QuoteFormState,
+  nextRefs: string[],
+  products: ProductOption[]
+) {
+  const nextSelectedProducts = resolveSelectedProducts(products, nextRefs);
+  const nextRows =
+    nextSelectedProducts.length > 0
+      ? ensureSuggestedFirstPrice(
+          prev.staffelRows,
+          nextSelectedProducts,
+          prev.staffelDiscountMode,
+          prev.staffelDiscountValue
+        )
+      : prev.staffelRows;
+
+  return {
+    ...prev,
+    staffelEligibleRefs: nextRefs,
+    staffelRows: nextRows,
+  };
+}
+
 export function getStaffelFormError(form: QuoteFormState, products: ProductOption[] = []) {
   if (form.staffelEligibleRefs.length === 0) {
     return "Selecteer minstens een product voor de staffel.";
@@ -139,23 +160,7 @@ function StaffelModeButton({
 
 export function StaffelForm({ form, setForm, products }: Props) {
   const [showHelp, setShowHelp] = useState(false);
-  const compatibilityInfo = useMemo(
-    () => getStaffelCompatibilityInfo(products, form.staffelEligibleRefs),
-    [products, form.staffelEligibleRefs]
-  );
-  const availableProducts = useMemo(
-    () =>
-      filterProductsForStaffel(
-        products,
-        form.staffelEligibleRefs,
-        compatibilityInfo.compatibilityKey
-      ),
-    [products, form.staffelEligibleRefs, compatibilityInfo.compatibilityKey]
-  );
-  const selectableProducts = useMemo(
-    () => buildSelectableProducts(availableProducts),
-    [availableProducts]
-  );
+
   const selectedProducts = useMemo(
     () => resolveSelectedProducts(products, form.staffelEligibleRefs),
     [products, form.staffelEligibleRefs]
@@ -189,59 +194,17 @@ export function StaffelForm({ form, setForm, products }: Props) {
         </div>
 
         <div className="cpq-staffel-section cpq-staffel-picker">
-          <SearchableMultiSelectField
-            label="Producten voor deze staffel"
-            items={selectableProducts}
-            selected={form.staffelEligibleRefs}
-            onToggle={(id) => {
-              setForm((prev) => {
-                const exists = prev.staffelEligibleRefs.includes(id);
-                const nextRefs = exists
-                  ? prev.staffelEligibleRefs.filter((item) => item !== id)
-                  : [...prev.staffelEligibleRefs, id];
-                const nextSelectedProducts = resolveSelectedProducts(products, nextRefs);
-                const nextRows =
-                  nextSelectedProducts.length > 0
-                    ? ensureSuggestedFirstPrice(
-                        prev.staffelRows,
-                        nextSelectedProducts,
-                        prev.staffelDiscountMode,
-                        prev.staffelDiscountValue
-                      )
-                    : prev.staffelRows;
-
-                return {
-                  ...prev,
-                  staffelEligibleRefs: nextRefs,
-                  staffelRows: nextRows,
-                };
-              });
-            }}
+          <div className="cpq-label">Producten voor deze staffel</div>
+          <ProductPickerTable
+            products={products}
+            selectedRefs={form.staffelEligibleRefs}
+            strictCompatibility
+            emptyHint="Voeg eerst een bierstijl en verpakking toe om de staffel te starten."
+            onChange={(nextRefs) =>
+              setForm((prev) => updateSelectedProducts(prev, nextRefs, products))
+            }
           />
         </div>
-
-        {selectedProducts.length > 0 ? (
-          <div className="cpq-staffel-section">
-            <div className="cpq-staffel-summary-card">
-              {compatibilityInfo.compatibilityLabel ? (
-                <div className="cpq-staffel-summary-line">
-                  Staffel geldt voor: <strong>{compatibilityInfo.compatibilityLabel}</strong>
-                </div>
-              ) : null}
-              <div className="cpq-staffel-selected-summary">
-                {selectedProducts.map((product) => (
-                  <div key={product.optionId} className="cpq-staffel-selected-card">
-                    <div className="cpq-staffel-selected-name">{product.label}</div>
-                    <div className="cpq-staffel-selected-meta">
-                      <span>Verkoopprijs {euro(product.standardPriceEx)}</span>
-                      <span>Kostprijs {euro(product.costPriceEx)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : null}
 
         <div className="cpq-staffel-section">
           <div className="cpq-label">Prijslogica</div>
@@ -289,7 +252,9 @@ export function StaffelForm({ form, setForm, products }: Props) {
                   }))
                 }
                 className="cpq-input"
-                placeholder={form.staffelDiscountMode === "percent" ? "Bijv. 2,5" : "Bijv. 0,50"}
+                placeholder={
+                  form.staffelDiscountMode === "percent" ? "Bijv. 2,5" : "Bijv. 0,50"
+                }
               />
             </label>
           </div>
@@ -458,8 +423,8 @@ export function StaffelForm({ form, setForm, products }: Props) {
             <div className="text-sm font-semibold text-slate-900">Hoe werkt deze staffel?</div>
             <div className="mt-3 space-y-2 text-sm text-slate-600">
               <p>
-                De staffel volgt de verpakking en liters van het eerst gekozen product. Daarna
-                kun je alleen compatibele producten toevoegen.
+                Het eerste product bepaalt de verpakking van de staffel. Daarna kun je alleen
+                stijlen toevoegen die in diezelfde verpakking beschikbaar zijn.
               </p>
               <p>
                 Zodra je een waarde invult bij <strong>Tot en met</strong>, maken we automatisch
@@ -497,7 +462,13 @@ export function StaffelForm({ form, setForm, products }: Props) {
 
 function TrashIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="cpq-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+    <svg
+      viewBox="0 0 24 24"
+      className="cpq-icon"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
       <path d="M5 7h14" />
       <path d="M9 7V5.8c0-.4.4-.8.8-.8h4.4c.4 0 .8.4.8.8V7" />
       <path d="M8 7l.7 11.2c0 .5.4.8.9.8h4.8c.5 0 .9-.3.9-.8L16 7" />

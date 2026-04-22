@@ -3,9 +3,9 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   Field,
   Idea,
-  MultiSelectField,
   SelectField,
 } from "@/components/offerte-samenstellen/forms/FormControls";
+import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
 import type { ProductOption, QuoteFormState } from "@/components/offerte-samenstellen/types";
 
 type Props = {
@@ -30,19 +30,20 @@ export function KortingForm({ form, setForm, products }: Props) {
       />
 
       {isLineScope ? (
-        <MultiSelectField
-          label="Producten"
-          items={products.map((product) => ({ id: product.optionId, label: product.label }))}
-          selected={form.kortingEligibleRefs}
-          onToggle={(id) =>
-            setForm((prev) => ({
-              ...prev,
-              kortingEligibleRefs: prev.kortingEligibleRefs.includes(id)
-                ? prev.kortingEligibleRefs.filter((item) => item !== id)
-                : [...prev.kortingEligibleRefs, id],
-            }))
-          }
-        />
+        <div className="cpq-field">
+          <div className="cpq-label">Producten</div>
+          <ProductPickerTable
+            products={products}
+            selectedRefs={form.kortingEligibleRefs}
+            emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze korting."
+            onChange={(nextRefs) =>
+              setForm((prev) => ({
+                ...prev,
+                kortingEligibleRefs: nextRefs,
+              }))
+            }
+          />
+        </div>
       ) : null}
 
       <Field

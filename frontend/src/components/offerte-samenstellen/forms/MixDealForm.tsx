@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
-import { Field, Idea, MultiSelectField } from "@/components/offerte-samenstellen/forms/FormControls";
+import { Field, Idea } from "@/components/offerte-samenstellen/forms/FormControls";
+import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
 import type { ProductOption, QuoteFormState } from "@/components/offerte-samenstellen/types";
 
 type Props = {
@@ -24,19 +25,20 @@ export function MixDealForm({ form, setForm, products }: Props) {
         placeholder="Bijv. 3+2"
       />
 
-      <MultiSelectField
-        label="Deelnemende producten"
-        items={products.map((product) => ({ id: product.optionId, label: product.label }))}
-        selected={form.mixEligibleRefs}
-        onToggle={(id) =>
-          setForm((prev) => ({
-            ...prev,
-            mixEligibleRefs: prev.mixEligibleRefs.includes(id)
-              ? prev.mixEligibleRefs.filter((item) => item !== id)
-              : [...prev.mixEligibleRefs, id],
-          }))
-        }
-      />
+      <div className="cpq-field">
+        <div className="cpq-label">Deelnemende producten</div>
+        <ProductPickerTable
+          products={products}
+          selectedRefs={form.mixEligibleRefs}
+          emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze mixdeal."
+          onChange={(nextRefs) =>
+            setForm((prev) => ({
+              ...prev,
+              mixEligibleRefs: nextRefs,
+            }))
+          }
+        />
+      </div>
       <Idea text="V1: mix deals worden berekend als eenvoudige X+Y gratis configuratie over de geselecteerde producten." />
     </div>
   );
