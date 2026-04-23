@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:pricing": "node ./node_modules/typescript/bin/tsc -p ./scripts/tsconfig.pricing.json && node ./.tmp/pricing-tests/scripts/pricingEngine.contracttest.js && node ./.tmp/pricing-tests/scripts/quoteBuilderGuards.contracttest.js"
+    "test:pricing": "node ./node_modules/typescript/bin/tsc -p ./scripts/tsconfig.pricing.json && node ./.tmp/pricing-tests/scripts/pricingEngine.contracttest.js && node ./.tmp/pricing-tests/scripts/quoteBuilderGuards.contracttest.js && node ./.tmp/pricing-tests/scripts/quoteScenarioCalculations.contracttest.js"
   },
   "dependencies": {
     "next": "15.3.0",

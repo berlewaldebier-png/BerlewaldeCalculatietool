@@ -2,6 +2,12 @@
   "compilerOptions": {
     "outDir": "../.tmp/pricing-tests",
     "rootDir": "..",
+    "baseUrl": "..",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
     "module": "CommonJS",
     "moduleResolution": "Node",
     "target": "ES2022",
@@ -16,7 +22,9 @@
   "include": [
     "./pricingEngine.contracttest.ts",
     "./quoteBuilderGuards.contracttest.ts",
+    "./quoteScenarioCalculations.contracttest.ts",
     "../src/lib/pricingEngine.ts",
-    "../src/lib/quoteBuilderGuards.ts"
+    "../src/lib/quoteBuilderGuards.ts",
+    "../src/lib/quoteScenarioPricing.ts"
   ]
 }
