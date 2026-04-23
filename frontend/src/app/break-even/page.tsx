@@ -24,7 +24,7 @@ export default async function BreakEvenPage() {
   return (
     <PageShell
       title="Break-even analyseren"
-      subtitle="Beheer scenario's voor productmix, prijs en vaste kosten. Een actieve versie kan later offertes voeden."
+      subtitle="Leg eerst de break-even basis vast en test daarna scenario's voor mix, prijs en kosten. De actieve versie voedt offertes."
       activePath="/break-even"
       navigation={bootstrap.navigation ?? []}
     >

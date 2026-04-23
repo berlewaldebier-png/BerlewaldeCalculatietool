@@ -3,11 +3,14 @@ import { buildProductFacts } from "@/lib/productFacts";
 type GenericRecord = Record<string, unknown>;
 
 export type BreakEvenMixMode = "product" | "packaging";
+export type BreakEvenConfigKind = "basis" | "scenario";
 
 export type BreakEvenConfig = {
   id: string;
   jaar: number;
   naam: string;
+  kind: BreakEvenConfigKind;
+  parent_config_id: string | null;
   is_active_for_quotes: boolean;
   mix_mode: BreakEvenMixMode;
   product_mix: Record<string, number>;
@@ -74,12 +77,17 @@ export type BreakEvenResult = {
   warnings: string[];
 };
 
-export function createBreakEvenConfig(year: number): BreakEvenConfig {
+export function createBreakEvenConfig(
+  year: number,
+  kind: BreakEvenConfigKind = "basis"
+): BreakEvenConfig {
   const now = new Date().toISOString();
   return {
     id: `be-${Date.now()}`,
     jaar: year,
-    naam: `Break-even ${year}`,
+    naam: kind === "scenario" ? `Scenario ${year}` : `Break-even basis ${year}`,
+    kind,
+    parent_config_id: null,
     is_active_for_quotes: false,
     mix_mode: "product",
     product_mix: {},
@@ -96,11 +104,15 @@ export function normalizeBreakEvenConfig(row: unknown, fallbackYear: number): Br
   const jaar = toNumber(source.jaar, fallbackYear);
   const id = String(source.id ?? "").trim() || `be-${jaar}-${Math.random().toString(16).slice(2)}`;
   const mixMode = source.mix_mode === "packaging" ? "packaging" : "product";
+  const kind = source.kind === "scenario" ? "scenario" : "basis";
+  const parentConfigId = String(source.parent_config_id ?? "").trim() || null;
 
   return {
     id,
     jaar,
     naam: String(source.naam ?? `Break-even ${jaar}`),
+    kind,
+    parent_config_id: kind === "scenario" ? parentConfigId : null,
     is_active_for_quotes: Boolean(source.is_active_for_quotes),
     mix_mode: mixMode,
     product_mix: normalizeNumberMap(source.product_mix),
@@ -114,6 +126,20 @@ export function normalizeBreakEvenConfig(row: unknown, fallbackYear: number): Br
 
 export function normalizeConfigList(rows: unknown, fallbackYear: number) {
   return (Array.isArray(rows) ? rows : []).map((row) => normalizeBreakEvenConfig(row, fallbackYear));
+}
+
+export function createScenarioFromBase(base: BreakEvenConfig) {
+  const now = new Date().toISOString();
+  return {
+    ...base,
+    id: `be-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    naam: `${base.naam} scenario`,
+    kind: "scenario" as const,
+    parent_config_id: base.id,
+    is_active_for_quotes: false,
+    created_at: now,
+    updated_at: now,
+  };
 }
 
 export function buildBreakEvenProductLines(params: {

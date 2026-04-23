@@ -8,6 +8,7 @@ import {
   calculateBreakEvenPackSummaries,
   calculateBreakEvenResult,
   createBreakEvenConfig,
+  createScenarioFromBase,
   formatMoney,
   formatNumber,
   normalizeConfigList,
@@ -51,6 +52,7 @@ export function BreakEvenWorkspace({
     });
     return Array.from(set).sort((a, b) => b - a);
   }, [vasteKosten, kostprijsproductactiveringen]);
+
   const fallbackYear = years[0] ?? new Date().getFullYear();
   const [configs, setConfigs] = useState<BreakEvenConfig[]>(() =>
     normalizeConfigList(initialConfigs, fallbackYear)
@@ -63,6 +65,12 @@ export function BreakEvenWorkspace({
   const [isSaving, setIsSaving] = useState(false);
 
   const activeConfig = configs.find((config) => config.id === activeConfigId) ?? null;
+  const activeBaseConfig = useMemo(() => {
+    if (!activeConfig) return null;
+    if (activeConfig.kind === "basis") return activeConfig;
+    return configs.find((config) => config.id === activeConfig.parent_config_id) ?? null;
+  }, [activeConfig, configs]);
+
   const selectedYear = activeConfig?.jaar ?? fallbackYear;
   const productLines = useMemo(
     () =>
@@ -87,6 +95,7 @@ export function BreakEvenWorkspace({
       samengesteldeProducten,
     ]
   );
+
   const packTypes = useMemo(
     () => calculateBreakEvenPackSummaries(productLines, activeConfig?.price_overrides ?? {}),
     [productLines, activeConfig?.price_overrides]
@@ -94,6 +103,10 @@ export function BreakEvenWorkspace({
   const result = activeConfig
     ? calculateBreakEvenResult(activeConfig, productLines, vasteKosten)
     : null;
+  const baseResult = useMemo(() => {
+    if (!activeBaseConfig) return null;
+    return calculateBreakEvenResult(activeBaseConfig, productLines, vasteKosten);
+  }, [activeBaseConfig, productLines, vasteKosten]);
   const resultLineByKey = useMemo(
     () => new Map((result?.mixLines ?? []).map((line) => [line.key, line])),
     [result]
@@ -105,6 +118,22 @@ export function BreakEvenWorkspace({
       ),
     [productLines]
   );
+
+  const groupedConfigs = useMemo(() => {
+    const bases = configs
+      .filter((config) => config.kind === "basis")
+      .sort((a, b) => {
+        if (b.jaar !== a.jaar) return b.jaar - a.jaar;
+        return a.naam.localeCompare(b.naam);
+      });
+
+    return bases.map((base) => ({
+      base,
+      scenarios: configs
+        .filter((config) => config.kind === "scenario" && config.parent_config_id === base.id)
+        .sort((a, b) => a.naam.localeCompare(b.naam)),
+    }));
+  }, [configs]);
 
   function updateConfig(patch: Partial<BreakEvenConfig>) {
     if (!activeConfig) return;
@@ -133,18 +162,23 @@ export function BreakEvenWorkspace({
     if (!activeConfig) return;
     const next = { ...activeConfig.price_overrides };
     const parsed = Number(String(value || "").replace(",", "."));
-    if (Number.isFinite(parsed) && parsed > 0) {
-      next[ref] = parsed;
-    } else {
-      delete next[ref];
-    }
+    if (Number.isFinite(parsed) && parsed > 0) next[ref] = parsed;
+    else delete next[ref];
     updateConfig({ price_overrides: next });
   }
 
-  function addConfig() {
-    const config = createBreakEvenConfig(fallbackYear);
+  function addBaseConfig() {
+    const config = createBreakEvenConfig(fallbackYear, "basis");
     setConfigs((current) => [config, ...current]);
     setActiveConfigId(config.id);
+  }
+
+  function addScenarioConfig() {
+    const base = activeBaseConfig ?? activeConfig;
+    if (!base) return;
+    const scenario = createScenarioFromBase(base.kind === "basis" ? base : activeBaseConfig ?? base);
+    setConfigs((current) => [scenario, ...current]);
+    setActiveConfigId(scenario.id);
   }
 
   function useForQuotes() {
@@ -168,7 +202,7 @@ export function BreakEvenWorkspace({
         body: JSON.stringify(configs),
       });
       if (!response.ok) throw new Error(await response.text());
-      setStatus("Break-even configuraties opgeslagen.");
+      setStatus("Break-even basis en scenario's opgeslagen.");
     } catch (error) {
       setStatus(`Opslaan mislukt: ${error instanceof Error ? error.message : "onbekende fout"}`);
     } finally {
@@ -180,15 +214,23 @@ export function BreakEvenWorkspace({
     <div className="break-even-page">
       <section className="module-card break-even-hero">
         <div>
-          <div className="module-card-title">Break-even configuraties</div>
+          <div className="module-card-title">Break-even basis en scenario&apos;s</div>
           <div className="module-card-text">
-            Handmatige mixscenario&apos;s op basis van liters. De actieve versie wordt later gebruikt
-            door conceptoffertes en nieuwe offertes.
+            Leg eerst je verwachte basis voor het jaar vast. Maak daarna scenario&apos;s om koerswijzigingen
+            te testen. De actieve versie van een jaar voedt conceptoffertes en nieuwe offertes.
           </div>
         </div>
         <div className="break-even-actions">
-          <button className="cpq-button cpq-button-secondary" type="button" onClick={addConfig}>
-            Nieuwe configuratie
+          <button className="cpq-button cpq-button-secondary" type="button" onClick={addBaseConfig}>
+            Nieuwe basis
+          </button>
+          <button
+            className="cpq-button cpq-button-secondary"
+            type="button"
+            onClick={addScenarioConfig}
+            disabled={!activeConfig}
+          >
+            Scenario maken
           </button>
           <button
             className="cpq-button cpq-button-primary"
@@ -206,27 +248,42 @@ export function BreakEvenWorkspace({
       {configs.length === 0 ? (
         <section className="module-card">
           <div className="placeholder-block">
-            <strong>Nog geen break-even configuraties</strong>
-            Maak een eerste configuratie om productmix, prijs en vaste kosten te simuleren.
+            <strong>Nog geen break-even basis</strong>
+            Maak eerst een basis om de verwachte mix, prijs en vaste kosten voor een jaar vast te leggen.
           </div>
         </section>
       ) : (
         <div className="break-even-layout">
           <aside className="module-card break-even-config-list">
-            <div className="module-card-title">Configuraties</div>
-            {configs.map((config) => (
-              <button
-                key={config.id}
-                type="button"
-                className={`break-even-config-button${config.id === activeConfigId ? " active" : ""}`}
-                onClick={() => setActiveConfigId(config.id)}
-              >
-                <span>{config.naam}</span>
-                <small>
-                  {config.jaar}
-                  {config.is_active_for_quotes ? " - actief voor offertes" : ""}
-                </small>
-              </button>
+            <div className="module-card-title">Jaarbasis en scenario&apos;s</div>
+            {groupedConfigs.map(({ base, scenarios }) => (
+              <div key={base.id} className="break-even-config-group">
+                <button
+                  type="button"
+                  className={`break-even-config-button${base.id === activeConfigId ? " active" : ""}`}
+                  onClick={() => setActiveConfigId(base.id)}
+                >
+                  <span>{base.naam}</span>
+                  <small>
+                    {base.jaar}
+                    {base.is_active_for_quotes ? " - actief voor offertes" : " - basis"}
+                  </small>
+                </button>
+                {scenarios.map((scenario) => (
+                  <button
+                    key={scenario.id}
+                    type="button"
+                    className={`break-even-config-button break-even-config-button-child${scenario.id === activeConfigId ? " active" : ""}`}
+                    onClick={() => setActiveConfigId(scenario.id)}
+                  >
+                    <span>{scenario.naam}</span>
+                    <small>
+                      scenario
+                      {scenario.is_active_for_quotes ? " - actief voor offertes" : ""}
+                    </small>
+                  </button>
+                ))}
+              </div>
             ))}
           </aside>
 
@@ -235,9 +292,13 @@ export function BreakEvenWorkspace({
               <section className="module-card">
                 <div className="module-card-header break-even-header">
                   <div>
-                    <div className="module-card-title">Scenario-instellingen</div>
+                    <div className="module-card-title">
+                      {activeConfig.kind === "basis" ? "Basis-instellingen" : "Scenario-instellingen"}
+                    </div>
                     <div className="module-card-text">
-                      Productmix is leidend als mixmodus op product staat. Verpakkingstype is bedoeld voor snelle scenario&apos;s.
+                      {activeConfig.kind === "basis"
+                        ? "Dit is je verwachte break-even basis voor het gekozen jaar."
+                        : `Dit scenario vergelijkt een koersvariant met ${activeBaseConfig?.naam ?? "de basis"}.`}
                     </div>
                   </div>
                   <button className="cpq-button cpq-button-secondary" type="button" onClick={useForQuotes}>
@@ -273,7 +334,9 @@ export function BreakEvenWorkspace({
                       className="cpq-select"
                       value={activeConfig.mix_mode}
                       onChange={(event) =>
-                        updateConfig({ mix_mode: event.target.value === "packaging" ? "packaging" : "product" })
+                        updateConfig({
+                          mix_mode: event.target.value === "packaging" ? "packaging" : "product",
+                        })
                       }
                     >
                       <option value="product">Productniveau</option>
@@ -286,10 +349,18 @@ export function BreakEvenWorkspace({
                       className="cpq-input"
                       type="number"
                       value={activeConfig.fixed_cost_adjustment}
-                      onChange={(event) => updateConfig({ fixed_cost_adjustment: Number(event.target.value) || 0 })}
+                      onChange={(event) =>
+                        updateConfig({ fixed_cost_adjustment: Number(event.target.value) || 0 })
+                      }
                     />
                   </label>
                 </div>
+                {activeConfig.kind === "scenario" && activeBaseConfig ? (
+                  <div className="cpq-alert">
+                    Scenario gebaseerd op <strong>{activeBaseConfig.naam}</strong>. Als deze koers de nieuwe werkelijkheid wordt,
+                    kun je dit scenario activeren voor offertes.
+                  </div>
+                ) : null}
               </section>
 
               <section className="module-card">
@@ -303,6 +374,24 @@ export function BreakEvenWorkspace({
                   <MetricCard label="Contributie / liter" value={formatMoney(result.weightedContributionPerLiter)} />
                   <MetricCard label="Contributiemarge" value={`${formatNumber(result.contributionMarginPct, 1)}%`} />
                 </div>
+                {activeConfig.kind === "scenario" && baseResult ? (
+                  <div className="break-even-metric-grid" style={{ marginTop: 16 }}>
+                    <MetricCard
+                      label="Delta BE omzet"
+                      value={formatDelta(result.breakEvenRevenue - baseResult.breakEvenRevenue)}
+                    />
+                    <MetricCard
+                      label="Delta BE liters"
+                      value={formatDelta(result.breakEvenLiters - baseResult.breakEvenLiters, " L")}
+                    />
+                    <MetricCard
+                      label="Delta contributie / L"
+                      value={formatDelta(
+                        result.weightedContributionPerLiter - baseResult.weightedContributionPerLiter
+                      )}
+                    />
+                  </div>
+                ) : null}
                 {result.warnings.length > 0 ? (
                   <div className="cpq-alert cpq-alert-warn break-even-warnings">
                     {result.warnings.map((warning) => (
@@ -324,7 +413,12 @@ export function BreakEvenWorkspace({
 
               <section className="module-card">
                 <div className="module-card-title">
-                  {activeConfig.mix_mode === "packaging" ? "Mix per verpakkingstype" : "Mix per product"}
+                  {activeConfig.mix_mode === "packaging"
+                    ? "Verwachte mix per verpakkingstype"
+                    : "Verwachte mix per product"}
+                </div>
+                <div className="module-card-text" style={{ marginBottom: 12 }}>
+                  Deze mix vormt {activeConfig.kind === "basis" ? "de basisverwachting" : "de scenario-variant"} voor {activeConfig.jaar}.
                 </div>
                 <div className="data-table">
                   <table>
@@ -340,20 +434,37 @@ export function BreakEvenWorkspace({
                       </tr>
                     </thead>
                     <tbody>
-                      {(activeConfig.mix_mode === "packaging" ? packTypes.map((pack) => pack.key) : productLines.map((line) => line.ref)).map((key) => {
+                      {(activeConfig.mix_mode === "packaging"
+                        ? packTypes.map((pack) => pack.key)
+                        : productLines.map((line) => line.ref)
+                      ).map((key) => {
                         const line = productLines.find((candidate) => candidate.ref === key);
                         const packSummary = packTypes.find((pack) => pack.key === key);
                         const resultLine = resultLineByKey.get(key);
-                        const displayLabel = activeConfig.mix_mode === "packaging" ? packSummary?.label ?? key : line?.label ?? key;
+                        const displayLabel =
+                          activeConfig.mix_mode === "packaging"
+                            ? packSummary?.label ?? key
+                            : line?.label ?? key;
                         const mixValue =
                           activeConfig.mix_mode === "packaging"
                             ? activeConfig.packaging_mix[key] ?? 0
                             : activeConfig.product_mix[key] ?? 0;
-                        const sellInPerLiter = resultLine?.sellInPerLiter ?? line?.sellInPerLiter ?? packSummary?.sellInPerLiter ?? 0;
+                        const sellInPerLiter =
+                          resultLine?.sellInPerLiter ??
+                          line?.sellInPerLiter ??
+                          packSummary?.sellInPerLiter ??
+                          0;
                         const variableCostPerLiter =
-                          resultLine?.variableCostPerLiter ?? line?.variableCostPerLiter ?? packSummary?.variableCostPerLiter ?? 0;
+                          resultLine?.variableCostPerLiter ??
+                          line?.variableCostPerLiter ??
+                          packSummary?.variableCostPerLiter ??
+                          0;
                         const contributionPerLiter =
-                          resultLine?.contributionPerLiter ?? line?.contributionPerLiter ?? packSummary?.contributionPerLiter ?? 0;
+                          resultLine?.contributionPerLiter ??
+                          line?.contributionPerLiter ??
+                          packSummary?.contributionPerLiter ??
+                          0;
+
                         return (
                           <tr key={key}>
                             <td>{displayLabel}</td>
@@ -409,4 +520,11 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 
 function formatMoneyOrMissing(value: number) {
   return value > 0 ? formatMoney(value) : "Niet bekend";
+}
+
+function formatDelta(value: number, suffix = "") {
+  const prefix = value > 0 ? "+" : "";
+  if (!Number.isFinite(value)) return "-";
+  if (suffix) return `${prefix}${formatNumber(value, 0)}${suffix}`;
+  return `${prefix}${formatMoney(value)}`;
 }
