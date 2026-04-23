@@ -23,7 +23,9 @@ export default async function OfferteSamenstellenPage({
       "samengestelde-producten",
       "catalog-products",
       "packaging-components",
-      "packaging-component-prices"
+      "packaging-component-prices",
+      "break-even-configuraties",
+      "vaste-kosten"
     ],
     true,
     "/offerte-samenstellen"
@@ -41,6 +43,8 @@ export default async function OfferteSamenstellenPage({
   const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
   const verpakkingsonderdelen = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
   const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
+  const breakEvenConfiguraties = bootstrap.datasets["break-even-configuraties"] ?? [];
+  const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
 
   const yearOptions = Object.keys(productie)
     .map((year) => Number(year))
@@ -71,6 +75,8 @@ export default async function OfferteSamenstellenPage({
         catalogusproducten={catalogusproducten}
         verpakkingsonderdelen={verpakkingsonderdelen}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
+        breakEvenConfiguraties={breakEvenConfiguraties}
+        vasteKosten={vasteKosten}
         initialMode={mode}
         initialDraftId={draftId}
       />

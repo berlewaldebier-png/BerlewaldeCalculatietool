@@ -91,6 +91,21 @@ export type QuoteDraft = {
   year: number;
   basis: BasisData;
   scenarios: Record<ScenarioId, QuoteScenario>;
+  breakEven: QuoteBreakEvenSnapshot | null;
+};
+
+export type QuoteBreakEvenSnapshot = {
+  configId: string;
+  configName: string;
+  year: number;
+  breakEvenRevenue: number;
+  breakEvenLiters: number;
+  weightedSellInPerLiter: number;
+  weightedVariableCostPerLiter: number;
+  weightedContributionPerLiter: number;
+  contributionMarginPct: number;
+  mixTotalPct: number;
+  calculatedAt: string;
 };
 
 export type QuoteBuilderUiState = {
@@ -230,6 +245,8 @@ export type OfferteSamenstellenProps = {
   catalogusproducten: GenericRecord[];
   verpakkingsonderdelen: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
+  breakEvenConfiguraties: unknown;
+  vasteKosten: Record<string, unknown>;
   initialMode?: string;
   initialDraftId?: string | null;
 };

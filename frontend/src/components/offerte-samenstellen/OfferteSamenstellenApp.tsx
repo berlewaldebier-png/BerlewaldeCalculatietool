@@ -30,8 +30,16 @@ import {
   updateQuoteDraft,
 } from "@/components/offerte-samenstellen/quoteApi";
 import { ToolbarOptionDialog } from "@/components/offerte-samenstellen/ToolbarOptionDialog";
+import {
+  buildBreakEvenProductLines,
+  calculateBreakEvenResult,
+  normalizeConfigList,
+  type BreakEvenConfig,
+  type BreakEvenResult,
+} from "@/components/break-even/breakEvenUtils";
 import type {
   ProductOption,
+  QuoteBreakEvenSnapshot,
   QuoteDraft,
   QuoteDraftSnapshot,
   QuoteFormState,
@@ -129,6 +137,8 @@ type Props = {
   catalogusproducten: GenericRecord[];
   verpakkingsonderdelen: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
+  breakEvenConfiguraties: unknown;
+  vasteKosten: Record<string, unknown>;
   initialMode?: string;
   initialDraftId?: string | null;
 };
@@ -209,191 +219,25 @@ type ScenarioMetrics = {
   notes: string[];
 };
 
-/* function calculateScenarioMetrics(scenario: Scenario, activePeriod: "standard" | "intro"): ScenarioMetrics {
-  const notes: string[] = [];
-
-  const periodBlocks = scenario.blocks.filter(
-    (b) => (b.appliesTo ?? "standard") === activePeriod || (b.appliesTo ?? "standard") === "global"
-  );
-
-  const staffelBlock = periodBlocks.find((b) => b.type === "Staffel");
-  const discountBlock = periodBlocks.find((b) => b.type === "Korting");
-  const mixBlock = periodBlocks.find((b) => b.type === "Mix");
-  const returnBlock = periodBlocks.find((b) => b.type === "Retour");
-  const introBlock = periodBlocks.find((b) => b.type === "Intro");
-
-  if (introBlock) {
-    // We capture intro config fully, but promo variants are still being expanded. Keep it explicit.
-    notes.push("Introductieperiode: berekening is beperkt tot eenvoudige korting of X+Y gratis (v1).");
-  }
-
-  const lines = scenario.products
-    .filter((p) => p.qty > 0)
-    .map((p) => {
-      const ref =
-        p.source?.bier_id && p.source?.product_id
-          ? `beer:${String(p.source.bier_id)}:product:${String(p.source.product_id)}`
-          : p.id;
-      return {
-        ref,
-        qtyPaid: Math.max(0, clampNumber(p.qty, 0)),
-        unitPriceEx: Math.max(0, clampNumber(p.standardPriceEx, 0)),
-        costPriceEx: Math.max(0, clampNumber(p.costPriceEx, 0)),
-      };
-    })
-    .filter((row) => row.ref && row.qtyPaid > 0);
-
-  if (lines.length === 0) {
-    return {
-      revenueEx: 0,
-      costEx: 0,
-      extraCostEx: 0,
-      transportCostEx: 0,
-      marginPct: 0,
-      breakEvenCurrent: null,
-      breakEvenProjected: null,
-      notes,
-    };
-  }
-
-  // 1) Determine unit prices, including staffel overrides.
-  const unitPriceByRef = new Map<string, number>();
-  for (const row of lines) unitPriceByRef.set(row.ref, row.unitPriceEx);
-
-  if (staffelBlock) {
-    const tiersRaw = Array.isArray(staffelBlock.payload?.tiers) ? (staffelBlock.payload?.tiers as any[]) : [];
-    const eligible = new Set<string>(Array.isArray(staffelBlock.payload?.eligibleRefs) ? (staffelBlock.payload?.eligibleRefs as any[]).map(String) : []);
-    if (tiersRaw.length === 0 || eligible.size === 0) {
-      notes.push("Staffel is actief maar mist tiers/productselectie (v1).");
-    } else {
-      for (const row of lines) {
-        if (!eligible.has(row.ref)) continue;
-        const qty = row.qtyPaid;
-        const tier = tiersRaw.find((t) => {
-          const from = clampNumber(t?.from, 0);
-          const to = t?.to === null || t?.to === undefined || String(t?.to).trim() === "" ? Number.POSITIVE_INFINITY : clampNumber(t?.to, Number.POSITIVE_INFINITY);
-          return qty >= from && qty <= to;
-        });
-        const nextPrice = tier ? clampNumber((tier as any).priceEx, 0) : 0;
-        if (nextPrice > 0) {
-          unitPriceByRef.set(row.ref, nextPrice);
-        }
-      }
-    }
-  }
-
-  // 2) Apply % discount (exclusive with staffel/mix in same context by guardrails).
-  const discountPct = discountBlock ? clampNumber(discountBlock.payload?.discountPct, 0) : 0;
-  const hasStaffel = Boolean(staffelBlock);
-  const hasMix = Boolean(mixBlock);
-  if (discountPct > 0 && (hasStaffel || hasMix)) {
-    notes.push("Korting is genegeerd: korting is niet combineerbaar met staffel/mix in dezelfde periode.");
-  } else if (discountPct > 0) {
-    for (const row of lines) {
-      const current = unitPriceByRef.get(row.ref) ?? row.unitPriceEx;
-      unitPriceByRef.set(row.ref, applyDiscountPct(current, discountPct));
-    }
-  }
-
-  // 3) Mix/X+Y gratis (implemented as cheapest-free allocation across eligible refs).
-  let freeByRef = new Map<string, number>();
-  if (mixBlock) {
-    const requiredQty = clampNumber(mixBlock.payload?.requiredQty, 0);
-    const freeQty = clampNumber(mixBlock.payload?.freeQty, 0);
-    const eligibleRefs = Array.isArray(mixBlock.payload?.eligibleRefs) ? (mixBlock.payload?.eligibleRefs as any[]).map(String) : [];
-    if (requiredQty <= 0 || freeQty <= 0) {
-      notes.push("Mix deal mist geldige X+Y configuratie (v1).");
-    } else {
-      const rows = lines.map((row) => ({
-        included: eligibleRefs.length === 0 ? true : eligibleRefs.includes(row.ref),
-        ref: row.ref,
-        qtyPaid: row.qtyPaid,
-        unitPriceEx: unitPriceByRef.get(row.ref) ?? row.unitPriceEx,
-      }));
-      const { freeByRef: computed } = computeGratisFreeByRefFromPaidRows({
-        rows,
-        requiredQty,
-        freeQty,
-        eligibleRefs,
-      });
-      freeByRef = computed;
-    }
-  }
-
-  // 4) Compute offer totals for product lines.
-  let revenueEx = 0;
-  let costEx = 0;
-  for (const row of lines) {
-    const unitPriceEx = unitPriceByRef.get(row.ref) ?? row.unitPriceEx;
-    const freeQty = freeByRef.get(row.ref) ?? 0;
-    if (freeQty > 0) {
-      const totals = calcOfferLineTotalsWithGratis({
-        kostprijsEx: row.costPriceEx,
-        offerPriceEx: unitPriceEx,
-        qty: row.qtyPaid,
-        freeQty,
-      });
-      revenueEx += totals.omzet;
-      costEx += totals.kosten;
-      continue;
-    }
-    const totals = calcOfferLineTotals({
-      kostprijsEx: row.costPriceEx,
-      offerPriceEx: unitPriceEx,
-      qty: row.qtyPaid,
-      kortingPct: 0,
-      feeExPerUnit: 0,
-      retourPct: 0,
-    });
-    revenueEx += totals.omzet;
-    costEx += totals.kosten;
-  }
-
-  // 5) Return/consignation (v1 conservative: reduce revenue only).
-  const returnPct = returnBlock ? clampNumber(returnBlock.payload?.returnPct, 0) : 0;
-  if (returnPct > 0) {
-    const retourEur = revenueEx * Math.max(0, Math.min(100, returnPct)) / 100;
-    revenueEx = Math.max(0, revenueEx - retourEur);
-    notes.push("Retour-effect is conservatief: omzet wordt verlaagd, kosten blijven gelijk (v1).");
-  }
-
-  // 6) Transport and extras.
-  let extraCostEx = 0;
-  let transportCostEx = 0;
-  for (const block of periodBlocks) {
-    if (block.type === "Transport") {
-      const charged = Boolean(block.payload?.chargedToCustomer ?? false);
-      const amount = clampNumber(block.payload?.amountEx, 0);
-      if (amount <= 0) continue;
-      if (charged) revenueEx += amount;
-      else transportCostEx += amount;
-      continue;
-    }
-
-    if (block.type === "Proeverij" || block.type === "Tapverhuur") {
-      const priceEx = clampNumber(block.payload?.priceEx, 0);
-      const costLocal = clampNumber(block.payload?.costEx, 0);
-      const isFree = Boolean(block.payload?.isFree ?? false);
-      if (!isFree) revenueEx += priceEx;
-      extraCostEx += costLocal;
-      continue;
-    }
-  }
-
-  costEx += extraCostEx + transportCostEx;
-  const marginPct = revenueEx > 0 ? ((revenueEx - costEx) / revenueEx) * 100 : 0;
-
+function buildBreakEvenSnapshot(
+  config: BreakEvenConfig | null,
+  result: BreakEvenResult | null
+): QuoteBreakEvenSnapshot | null {
+  if (!config || !result) return null;
   return {
-    revenueEx: Math.max(0, revenueEx),
-    costEx: Math.max(0, costEx),
-    extraCostEx,
-    transportCostEx,
-    marginPct,
-    breakEvenCurrent: null,
-    breakEvenProjected: null,
-    notes,
+    configId: config.id,
+    configName: config.naam,
+    year: config.jaar,
+    breakEvenRevenue: result.breakEvenRevenue,
+    breakEvenLiters: result.breakEvenLiters,
+    weightedSellInPerLiter: result.weightedSellInPerLiter,
+    weightedVariableCostPerLiter: result.weightedVariableCostPerLiter,
+    weightedContributionPerLiter: result.weightedContributionPerLiter,
+    contributionMarginPct: result.contributionMarginPct,
+    mixTotalPct: result.mixTotalPct,
+    calculatedAt: new Date().toISOString(),
   };
-} */
+}
 
 export function OfferteSamenstellenApp({
   year,
@@ -404,6 +248,8 @@ export function OfferteSamenstellenApp({
   verkoopprijzen,
   basisproducten,
   samengesteldeProducten,
+  breakEvenConfiguraties,
+  vasteKosten,
   initialMode,
   initialDraftId,
 }: Props) {
@@ -443,6 +289,44 @@ export function OfferteSamenstellenApp({
     basisproducten,
     samengesteldeProducten,
   ]);
+
+  const breakEvenConfigs = useMemo(
+    () => normalizeConfigList(breakEvenConfiguraties, currentYear),
+    [breakEvenConfiguraties, currentYear]
+  );
+
+  const activeBreakEvenConfig = useMemo<BreakEvenConfig | null>(() => {
+    return breakEvenConfigs.find((config) => config.jaar === currentYear && config.is_active_for_quotes) ?? null;
+  }, [breakEvenConfigs, currentYear]);
+
+  const breakEvenProductLines = useMemo(
+    () =>
+      buildBreakEvenProductLines({
+        year: currentYear,
+        channels,
+        bieren,
+        kostprijsversies,
+        kostprijsproductactiveringen,
+        verkoopprijzen,
+        basisproducten,
+        samengesteldeProducten,
+      }),
+    [
+      currentYear,
+      channels,
+      bieren,
+      kostprijsversies,
+      kostprijsproductactiveringen,
+      verkoopprijzen,
+      basisproducten,
+      samengesteldeProducten,
+    ]
+  );
+
+  const breakEvenResult = useMemo<BreakEvenResult | null>(() => {
+    if (!activeBreakEvenConfig) return null;
+    return calculateBreakEvenResult(activeBreakEvenConfig, breakEvenProductLines, vasteKosten);
+  }, [activeBreakEvenConfig, breakEvenProductLines, vasteKosten]);
 
   const [scenarios, setScenarios] = useState<Record<ScenarioId, Scenario>>(
     () => createInitialQuoteDraft(year).scenarios
@@ -648,6 +532,7 @@ export function OfferteSamenstellenApp({
       year: currentYear,
       basis,
       scenarios,
+      breakEven: buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult),
       ui: {
         step,
         activeScenario,
@@ -781,6 +666,10 @@ export function OfferteSamenstellenApp({
 
   const activeMetrics = scenarioMetrics[activeScenario];
   const rightMetrics = activeMetrics.standard;
+  const breakEvenCoveragePct =
+    breakEvenResult && breakEvenResult.breakEvenRevenue > 0
+      ? (rightMetrics.revenueEx / breakEvenResult.breakEvenRevenue) * 100
+      : null;
 
   const incompatibilityHints = useMemo(() => {
     return buildScenarioConflictHints(scenario);
@@ -895,6 +784,10 @@ export function OfferteSamenstellenApp({
                 <QuickCell label="Status" value={draftMeta.status === "definitief" ? "Definitief" : "Concept"} />
                 <QuickCell label="Voorstel" value={activeScenario} />
                 <QuickCell label="Jaar" value={String(year)} />
+                <QuickCell
+                  label="Break-even"
+                  value={activeBreakEvenConfig ? activeBreakEvenConfig.naam : "Geen actieve versie"}
+                />
                 <QuickCell label="Versie" value={String(draftMeta.version)} />
                 <QuickCell label="Bewaard" value={draftMeta.updatedAt ? new Date(draftMeta.updatedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "Nog niet"} />
               </div>
@@ -1000,7 +893,26 @@ export function OfferteSamenstellenApp({
                   label="Marge %"
                   value={`${Math.round(rightMetrics.marginPct)}%`}
                 />
+                <LiveSummaryMetric
+                  label="Break-even omzet"
+                  value={breakEvenResult ? euro(breakEvenResult.breakEvenRevenue) : "Niet ingesteld"}
+                />
+                <LiveSummaryMetric
+                  label="BE dekking"
+                  value={breakEvenCoveragePct === null ? "-" : `${Math.round(breakEvenCoveragePct)}%`}
+                />
               </div>
+              {activeBreakEvenConfig && breakEvenResult ? (
+                <p className="cpq-panel-text cpq-break-even-note">
+                  Actieve break-even: {activeBreakEvenConfig.naam}. Conceptoffertes gebruiken
+                  de actieve versie; bij opslaan wordt een snapshot meegeschreven.
+                </p>
+              ) : (
+                <p className="cpq-panel-text cpq-break-even-note">
+                  Geen actieve break-even configuratie voor {currentYear}. De offerte blijft werken,
+                  maar toont nog geen break-even referentie.
+                </p>
+              )}
             </div>
 
             <div className="cpq-panel">

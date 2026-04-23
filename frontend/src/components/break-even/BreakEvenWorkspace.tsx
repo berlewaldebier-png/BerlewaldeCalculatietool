@@ -98,6 +98,13 @@ export function BreakEvenWorkspace({
     () => new Map((result?.mixLines ?? []).map((line) => [line.key, line])),
     [result]
   );
+  const productLineWarnings = useMemo(
+    () =>
+      productLines.flatMap((line) =>
+        line.warnings.map((warning) => `${line.label}: ${warning}`)
+      ),
+    [productLines]
+  );
 
   function updateConfig(patch: Partial<BreakEvenConfig>) {
     if (!activeConfig) return;
@@ -303,6 +310,16 @@ export function BreakEvenWorkspace({
                     ))}
                   </div>
                 ) : null}
+                {productLineWarnings.length > 0 ? (
+                  <div className="cpq-alert cpq-alert-warn break-even-warnings">
+                    {productLineWarnings.slice(0, 6).map((warning) => (
+                      <div key={warning}>{warning}</div>
+                    ))}
+                    {productLineWarnings.length > 6 ? (
+                      <div>En nog {productLineWarnings.length - 6} productwaarschuwing(en).</div>
+                    ) : null}
+                  </div>
+                ) : null}
               </section>
 
               <section className="module-card">
@@ -362,9 +379,9 @@ export function BreakEvenWorkspace({
                                 />
                               </td>
                             ) : null}
-                            <td>{formatMoney(sellInPerLiter)}</td>
-                            <td>{formatMoney(variableCostPerLiter)}</td>
-                            <td>{formatMoney(contributionPerLiter)}</td>
+                            <td>{formatMoneyOrMissing(sellInPerLiter)}</td>
+                            <td>{formatMoneyOrMissing(variableCostPerLiter)}</td>
+                            <td>{formatMoneyOrMissing(contributionPerLiter)}</td>
                             <td>{formatMoney(resultLine?.weightedContributionPerLiter ?? 0)}</td>
                           </tr>
                         );
@@ -388,4 +405,8 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <div className="cpq-live-summary-metric-value">{value}</div>
     </div>
   );
+}
+
+function formatMoneyOrMissing(value: number) {
+  return value > 0 ? formatMoney(value) : "Niet bekend";
 }

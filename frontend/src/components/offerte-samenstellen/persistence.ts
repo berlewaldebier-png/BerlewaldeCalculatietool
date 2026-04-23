@@ -1,6 +1,7 @@
 import type {
   BasisData,
   BuilderBlock,
+  QuoteBreakEvenSnapshot,
   QuoteBuilderUiState,
   QuoteDraftMeta,
   QuoteDraftSnapshot,
@@ -10,13 +11,14 @@ import type {
 } from "@/components/offerte-samenstellen/types";
 import { normalizeText } from "@/components/offerte-samenstellen/quoteUtils";
 
-export const QUOTE_DRAFT_SCHEMA_VERSION = 1;
+export const QUOTE_DRAFT_SCHEMA_VERSION = 2;
 
 type BuildQuoteDraftSnapshotParams = {
   meta: QuoteDraftMeta;
   year: number;
   basis: BasisData;
   scenarios: Record<ScenarioId, QuoteScenario>;
+  breakEven: QuoteBreakEvenSnapshot | null;
   ui: QuoteBuilderUiState;
 };
 
@@ -25,6 +27,7 @@ export function buildQuoteDraftSnapshot({
   year,
   basis,
   scenarios,
+  breakEven,
   ui,
 }: BuildQuoteDraftSnapshotParams): QuoteDraftSnapshot {
   return {
@@ -32,6 +35,7 @@ export function buildQuoteDraftSnapshot({
     year,
     basis,
     scenarios,
+    breakEven,
     ui,
   };
 }

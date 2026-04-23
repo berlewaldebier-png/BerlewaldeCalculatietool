@@ -71,6 +71,7 @@ export function createInitialQuoteDraft(year: number): QuoteDraft {
       B: createEmptyScenario("B"),
       C: createEmptyScenario("C"),
     },
+    breakEven: null,
   };
 }
 
