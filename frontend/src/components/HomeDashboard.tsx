@@ -32,6 +32,7 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
     "/",
     "/nieuwe-kostprijsberekening",
     "/prijsvoorstellen",
+    "/break-even",
     "/productie",
     "/vaste-kosten",
     "/tarieven-heffingen",
@@ -57,6 +58,9 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
   // We inject it explicitly so it always shows in the dashboard sidebar.
   if (!byHref.has("/prijsvoorstellen")) {
     byHref.set("/prijsvoorstellen", { label: "Prijsvoorstel maken", href: "/prijsvoorstellen" });
+  }
+  if (!byHref.has("/break-even")) {
+    byHref.set("/break-even", { label: "Break-even analyseren", href: "/break-even" });
   }
 
   const result: DashboardNavItem[] = [];
@@ -252,6 +256,13 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                   <div className="dashboard-quick-card-title">Prijsvoorstel maken</div>
                   <div className="dashboard-quick-card-text">
                     Maak een nieuw prijsvoorstel in de CPQ builder (scenario's en prijsblokken).
+                  </div>
+                </Link>
+
+                <Link href="/break-even" className="dashboard-quick-card">
+                  <div className="dashboard-quick-card-title">Break-even analyseren</div>
+                  <div className="dashboard-quick-card-text">
+                    Bouw productmix-scenario&apos;s en bepaal welke break-even versie offertes gebruiken.
                   </div>
                 </Link>
 

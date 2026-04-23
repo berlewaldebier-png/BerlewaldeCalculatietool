@@ -81,6 +81,7 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "berekeningen": [],
     "verkoopprijzen": [],
     "adviesprijzen": [],
+    "break-even-configuraties": [],
     "catalog-products": [],
     "glasmaten": [
         {"id": "glas-20cl", "label": "20 cl", "volume_ml": 200, "sort_order": 10, "active": True, "is_default": False},
@@ -257,6 +258,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "samengestelde-producten",
         "bieren",
         "adviesprijzen",
+        "break-even-configuraties",
         "catalog-products",
         "kostprijs-scenario-inkoop",
         "kostprijs-activatie-drafts",

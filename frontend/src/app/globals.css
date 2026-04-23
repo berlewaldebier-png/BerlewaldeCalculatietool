@@ -1055,6 +1055,79 @@ a {
   gap: 1rem;
 }
 
+.break-even-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.break-even-hero,
+.break-even-header,
+.break-even-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.break-even-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.break-even-config-list {
+  display: grid;
+  gap: 0.65rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.break-even-config-button {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  text-align: left;
+  padding: 0.75rem 0.85rem;
+  cursor: pointer;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.break-even-config-button.active {
+  border-color: var(--accent-border);
+  background: rgba(241, 245, 255, 0.98);
+  box-shadow: 0 0 0 3px rgba(131, 163, 255, 0.12);
+}
+
+.break-even-config-button span {
+  font-weight: 800;
+}
+
+.break-even-config-button small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.break-even-main {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.break-even-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.break-even-warnings {
+  margin-top: 0.85rem;
+}
+
 .proposal-hub-hero {
   display: flex;
   align-items: center;
@@ -2352,9 +2425,18 @@ a {
   .landing-hero,
   .dashboard-shell,
   .dashboard-lower-grid,
+  .break-even-layout,
   .wizard-page-grid,
   .wizard-shell,
   .quote-builder-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .break-even-config-list {
+    position: static;
+  }
+
+  .break-even-metric-grid {
     grid-template-columns: 1fr;
   }
 
