@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { API_BASE_URL } from "@/lib/api";
 import {
   buildBreakEvenProductLines,
+  calculateBreakEvenPackSummaries,
   calculateBreakEvenResult,
   createBreakEvenConfig,
   formatMoney,
@@ -87,38 +88,16 @@ export function BreakEvenWorkspace({
     ]
   );
   const packTypes = useMemo(
-    () => Array.from(new Set(productLines.map((line) => line.packType))).sort(),
-    [productLines]
+    () => calculateBreakEvenPackSummaries(productLines, activeConfig?.price_overrides ?? {}),
+    [productLines, activeConfig?.price_overrides]
   );
-  const packSummaries = useMemo(() => {
-    const groups = new Map<
-      string,
-      { liters: number; sellIn: number; variable: number; sellInPerLiter: number; variableCostPerLiter: number; contributionPerLiter: number }
-    >();
-    productLines.forEach((line) => {
-      const current = groups.get(line.packType) ?? {
-        liters: 0,
-        sellIn: 0,
-        variable: 0,
-        sellInPerLiter: 0,
-        variableCostPerLiter: 0,
-        contributionPerLiter: 0,
-      };
-      current.liters += line.litersPerUnit;
-      current.sellIn += activeConfig?.price_overrides[line.ref] || line.sellInEx;
-      current.variable += line.variableCostEx;
-      groups.set(line.packType, current);
-    });
-    groups.forEach((group) => {
-      group.sellInPerLiter = group.liters > 0 ? group.sellIn / group.liters : 0;
-      group.variableCostPerLiter = group.liters > 0 ? group.variable / group.liters : 0;
-      group.contributionPerLiter = group.sellInPerLiter - group.variableCostPerLiter;
-    });
-    return groups;
-  }, [productLines, activeConfig?.price_overrides]);
   const result = activeConfig
     ? calculateBreakEvenResult(activeConfig, productLines, vasteKosten)
     : null;
+  const resultLineByKey = useMemo(
+    () => new Map((result?.mixLines ?? []).map((line) => [line.key, line])),
+    [result]
+  );
 
   function updateConfig(patch: Partial<BreakEvenConfig>) {
     if (!activeConfig) return;
@@ -196,8 +175,8 @@ export function BreakEvenWorkspace({
         <div>
           <div className="module-card-title">Break-even configuraties</div>
           <div className="module-card-text">
-            Fase 1: handmatige mixscenario&apos;s op basis van liters. De actieve versie
-            wordt later gebruikt door conceptoffertes en nieuwe offertes.
+            Handmatige mixscenario&apos;s op basis van liters. De actieve versie wordt later gebruikt
+            door conceptoffertes en nieuwe offertes.
           </div>
         </div>
         <div className="break-even-actions">
@@ -315,6 +294,7 @@ export function BreakEvenWorkspace({
                   <MetricCard label="Verkoopprijs / liter" value={formatMoney(result.weightedSellInPerLiter)} />
                   <MetricCard label="Variabele kosten / liter" value={formatMoney(result.weightedVariableCostPerLiter)} />
                   <MetricCard label="Contributie / liter" value={formatMoney(result.weightedContributionPerLiter)} />
+                  <MetricCard label="Contributiemarge" value={`${formatNumber(result.contributionMarginPct, 1)}%`} />
                 </div>
                 {result.warnings.length > 0 ? (
                   <div className="cpq-alert cpq-alert-warn break-even-warnings">
@@ -339,17 +319,24 @@ export function BreakEvenWorkspace({
                         <th>Sell-in / L</th>
                         <th>Variabel / L</th>
                         <th>Contributie / L</th>
+                        <th>Gewogen bijdrage / L</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(activeConfig.mix_mode === "packaging" ? packTypes : productLines.map((line) => line.ref)).map((key) => {
+                      {(activeConfig.mix_mode === "packaging" ? packTypes.map((pack) => pack.key) : productLines.map((line) => line.ref)).map((key) => {
                         const line = productLines.find((candidate) => candidate.ref === key);
-                        const packSummary = packSummaries.get(key);
-                        const displayLabel = activeConfig.mix_mode === "packaging" ? key : line?.label ?? key;
+                        const packSummary = packTypes.find((pack) => pack.key === key);
+                        const resultLine = resultLineByKey.get(key);
+                        const displayLabel = activeConfig.mix_mode === "packaging" ? packSummary?.label ?? key : line?.label ?? key;
                         const mixValue =
                           activeConfig.mix_mode === "packaging"
                             ? activeConfig.packaging_mix[key] ?? 0
                             : activeConfig.product_mix[key] ?? 0;
+                        const sellInPerLiter = resultLine?.sellInPerLiter ?? line?.sellInPerLiter ?? packSummary?.sellInPerLiter ?? 0;
+                        const variableCostPerLiter =
+                          resultLine?.variableCostPerLiter ?? line?.variableCostPerLiter ?? packSummary?.variableCostPerLiter ?? 0;
+                        const contributionPerLiter =
+                          resultLine?.contributionPerLiter ?? line?.contributionPerLiter ?? packSummary?.contributionPerLiter ?? 0;
                         return (
                           <tr key={key}>
                             <td>{displayLabel}</td>
@@ -375,9 +362,10 @@ export function BreakEvenWorkspace({
                                 />
                               </td>
                             ) : null}
-                            <td>{line ? formatMoney(line.sellInPerLiter) : packSummary ? formatMoney(packSummary.sellInPerLiter) : "-"}</td>
-                            <td>{line ? formatMoney(line.variableCostPerLiter) : packSummary ? formatMoney(packSummary.variableCostPerLiter) : "-"}</td>
-                            <td>{line ? formatMoney(line.contributionPerLiter) : packSummary ? formatMoney(packSummary.contributionPerLiter) : "-"}</td>
+                            <td>{formatMoney(sellInPerLiter)}</td>
+                            <td>{formatMoney(variableCostPerLiter)}</td>
+                            <td>{formatMoney(contributionPerLiter)}</td>
+                            <td>{formatMoney(resultLine?.weightedContributionPerLiter ?? 0)}</td>
                           </tr>
                         );
                       })}

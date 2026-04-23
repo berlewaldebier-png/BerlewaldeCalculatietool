@@ -40,15 +40,41 @@ export type BreakEvenProductLine = {
   warnings: string[];
 };
 
-export type BreakEvenResult = {
-  fixedCostsTotal: number;
-  adjustedFixedCostsTotal: number;
+export type BreakEvenPackSummary = {
+  key: string;
+  label: string;
+  productCount: number;
+  liters: number;
+  sellInPerLiter: number;
+  variableCostPerLiter: number;
+  contributionPerLiter: number;
+};
+
+export type BreakEvenMixLine = {
+  key: string;
+  label: string;
+  mixPct: number;
+  sellInPerLiter: number;
+  variableCostPerLiter: number;
+  contributionPerLiter: number;
   weightedSellInPerLiter: number;
   weightedVariableCostPerLiter: number;
   weightedContributionPerLiter: number;
+  warnings: string[];
+};
+
+export type BreakEvenResult = {
+  fixedCostsTotal: number;
+  adjustedFixedCostsTotal: number;
+  fixedCostAdjustment: number;
+  weightedSellInPerLiter: number;
+  weightedVariableCostPerLiter: number;
+  weightedContributionPerLiter: number;
+  contributionMarginPct: number;
   breakEvenLiters: number;
   breakEvenRevenue: number;
   mixTotalPct: number;
+  mixLines: BreakEvenMixLine[];
   warnings: string[];
 };
 
@@ -209,29 +235,47 @@ export function calculateBreakEvenResult(
   const adjustedFixedCostsTotal = Math.max(0, fixedCostsTotal + config.fixed_cost_adjustment);
   const mixEntries = config.mix_mode === "packaging" ? config.packaging_mix : config.product_mix;
   const warnings: string[] = [];
+  const mixLines: BreakEvenMixLine[] = [];
   let mixTotalPct = 0;
   let weightedSellInPerLiter = 0;
   let weightedVariableCostPerLiter = 0;
   let weightedContributionPerLiter = 0;
 
+  if (lines.length === 0) {
+    warnings.push(`Geen actieve kostprijsproducten gevonden voor ${config.jaar}.`);
+  }
+  if (fixedCostsTotal <= 0) {
+    warnings.push(`Geen vaste kosten gevonden voor ${config.jaar}.`);
+  }
+
   if (config.mix_mode === "packaging") {
-    const byPack = groupByPackType(lines, config.price_overrides);
+    const packSummaries = calculateBreakEvenPackSummaries(lines, config.price_overrides);
+    const byPack = new Map(packSummaries.map((summary) => [summary.key, summary]));
     Object.entries(mixEntries).forEach(([packType, pct]) => {
       const mixPct = Math.max(0, toNumber(pct, 0));
       const group = byPack.get(packType);
-      if (!group || mixPct <= 0) return;
+      if (!group) {
+        warnings.push(`Verpakkingstype "${packType}" staat nog in de mix, maar bestaat niet meer voor ${config.jaar}.`);
+        return;
+      }
+      if (mixPct <= 0) return;
       const weight = mixPct / 100;
       mixTotalPct += mixPct;
       weightedSellInPerLiter += weight * group.sellInPerLiter;
       weightedVariableCostPerLiter += weight * group.variableCostPerLiter;
       weightedContributionPerLiter += weight * group.contributionPerLiter;
+      mixLines.push(createMixLine(packType, group.label, mixPct, group, group.productCount <= 0 ? ["Geen producten gevonden."] : []));
     });
   } else {
     const byRef = new Map(lines.map((line) => [line.ref, line]));
     Object.entries(mixEntries).forEach(([ref, pct]) => {
       const mixPct = Math.max(0, toNumber(pct, 0));
       const line = byRef.get(ref);
-      if (!line || mixPct <= 0) return;
+      if (!line) {
+        warnings.push(`Product "${ref}" staat nog in de mix, maar bestaat niet meer voor ${config.jaar}.`);
+        return;
+      }
+      if (mixPct <= 0) return;
       const sellIn = config.price_overrides[ref] || line.sellInEx;
       const sellInPerLiter = line.litersPerUnit > 0 ? sellIn / line.litersPerUnit : 0;
       const contribution = sellInPerLiter - line.variableCostPerLiter;
@@ -240,10 +284,27 @@ export function calculateBreakEvenResult(
       weightedSellInPerLiter += weight * sellInPerLiter;
       weightedVariableCostPerLiter += weight * line.variableCostPerLiter;
       weightedContributionPerLiter += weight * contribution;
+      line.warnings.forEach((warning) => warnings.push(`${line.label}: ${warning}`));
+      mixLines.push(
+        createMixLine(
+          ref,
+          line.label,
+          mixPct,
+          {
+            sellInPerLiter,
+            variableCostPerLiter: line.variableCostPerLiter,
+            contributionPerLiter: contribution,
+          },
+          line.warnings
+        )
+      );
     });
   }
 
-  if (Math.round(mixTotalPct) !== 100) {
+  if (mixLines.length === 0) {
+    warnings.push("Vul minimaal een mixregel groter dan 0% in.");
+  }
+  if (Math.abs(mixTotalPct - 100) > 0.01) {
     warnings.push(`Mix telt op tot ${round(mixTotalPct)}% in plaats van 100%.`);
   }
   if (weightedContributionPerLiter <= 0) {
@@ -253,16 +314,21 @@ export function calculateBreakEvenResult(
   const breakEvenLiters =
     weightedContributionPerLiter > 0 ? adjustedFixedCostsTotal / weightedContributionPerLiter : 0;
   const breakEvenRevenue = breakEvenLiters * weightedSellInPerLiter;
+  const contributionMarginPct =
+    weightedSellInPerLiter > 0 ? (weightedContributionPerLiter / weightedSellInPerLiter) * 100 : 0;
 
   return {
     fixedCostsTotal,
     adjustedFixedCostsTotal,
+    fixedCostAdjustment: config.fixed_cost_adjustment,
     weightedSellInPerLiter,
     weightedVariableCostPerLiter,
     weightedContributionPerLiter,
+    contributionMarginPct,
     breakEvenLiters,
     breakEvenRevenue,
     mixTotalPct,
+    mixLines,
     warnings,
   };
 }
@@ -272,15 +338,31 @@ export function calculateFixedCostsTotal(vasteKosten: Record<string, unknown>, y
   return rows.reduce((sum, row) => sum + toNumber((row as any).bedrag_per_jaar, 0), 0);
 }
 
-function groupByPackType(lines: BreakEvenProductLine[], priceOverrides: Record<string, number>) {
+export function calculateBreakEvenPackSummaries(
+  lines: BreakEvenProductLine[],
+  priceOverrides: Record<string, number>
+) {
   const groups = new Map<
     string,
-    { liters: number; sellIn: number; variable: number; sellInPerLiter: number; variableCostPerLiter: number; contributionPerLiter: number }
+    {
+      key: string;
+      label: string;
+      productCount: number;
+      liters: number;
+      sellIn: number;
+      variable: number;
+      sellInPerLiter: number;
+      variableCostPerLiter: number;
+      contributionPerLiter: number;
+    }
   >();
 
   lines.forEach((line) => {
     if (line.litersPerUnit <= 0) return;
     const current = groups.get(line.packType) ?? {
+      key: line.packType,
+      label: formatPackTypeLabel(line.packType),
+      productCount: 0,
       liters: 0,
       sellIn: 0,
       variable: 0,
@@ -288,6 +370,7 @@ function groupByPackType(lines: BreakEvenProductLine[], priceOverrides: Record<s
       variableCostPerLiter: 0,
       contributionPerLiter: 0,
     };
+    current.productCount += 1;
     current.liters += line.litersPerUnit;
     current.sellIn += priceOverrides[line.ref] || line.sellInEx;
     current.variable += line.variableCostEx;
@@ -300,7 +383,7 @@ function groupByPackType(lines: BreakEvenProductLine[], priceOverrides: Record<s
     group.contributionPerLiter = group.sellInPerLiter - group.variableCostPerLiter;
   });
 
-  return groups;
+  return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export function inferPackType(packLabel: string) {
@@ -343,4 +426,37 @@ function text(value: unknown) {
 
 function round(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function createMixLine(
+  key: string,
+  label: string,
+  mixPct: number,
+  values: {
+    sellInPerLiter: number;
+    variableCostPerLiter: number;
+    contributionPerLiter: number;
+  },
+  warnings: string[]
+): BreakEvenMixLine {
+  const weight = mixPct / 100;
+  return {
+    key,
+    label,
+    mixPct,
+    sellInPerLiter: values.sellInPerLiter,
+    variableCostPerLiter: values.variableCostPerLiter,
+    contributionPerLiter: values.contributionPerLiter,
+    weightedSellInPerLiter: weight * values.sellInPerLiter,
+    weightedVariableCostPerLiter: weight * values.variableCostPerLiter,
+    weightedContributionPerLiter: weight * values.contributionPerLiter,
+    warnings: [...warnings],
+  };
+}
+
+function formatPackTypeLabel(packType: string) {
+  if (packType === "doos") return "Doos";
+  if (packType === "fust") return "Fust";
+  if (packType === "fles") return "Fles";
+  return packType;
 }
