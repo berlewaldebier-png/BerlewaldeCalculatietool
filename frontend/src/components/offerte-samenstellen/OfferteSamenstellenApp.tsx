@@ -319,19 +319,28 @@ export function OfferteSamenstellenApp({
 
   const scenarioMetrics = useMemo(() => {
     const ids: ScenarioId[] = ["A", "B", "C"];
-    const result: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }> = {
-      A: { standard: calculateScenarioMetricsForScenario(scenarios.A, "standard", effectiveBreakEvenSnapshot), intro: null },
-      B: { standard: calculateScenarioMetricsForScenario(scenarios.B, "standard", effectiveBreakEvenSnapshot), intro: null },
-      C: { standard: calculateScenarioMetricsForScenario(scenarios.C, "standard", effectiveBreakEvenSnapshot), intro: null },
-    };
-    for (const id of ids) {
-      const sc = scenarios[id];
-      result[id] = {
-        standard: calculateScenarioMetricsForScenario(sc, "standard", effectiveBreakEvenSnapshot),
-        intro: sc.intro ? calculateScenarioMetricsForScenario(sc, "intro", effectiveBreakEvenSnapshot) : null,
-      };
-    }
-    return result;
+    return Object.fromEntries(
+      ids.map((id) => {
+        const sc = scenarios[id];
+        return [
+          id,
+          {
+            standard: calculateScenarioMetricsForScenario(
+              sc,
+              "standard",
+              effectiveBreakEvenSnapshot
+            ),
+            intro: sc.intro
+              ? calculateScenarioMetricsForScenario(
+                  sc,
+                  "intro",
+                  effectiveBreakEvenSnapshot
+                )
+              : null,
+          },
+        ];
+      })
+    ) as Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }>;
   }, [effectiveBreakEvenSnapshot, scenarios]);
 
   function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
@@ -495,32 +504,20 @@ export function OfferteSamenstellenApp({
   }
 
   function restoreScenarioPresentation(snapshot: QuoteDraftSnapshot): Record<ScenarioId, Scenario> {
-    return {
-      A: {
-        ...snapshot.scenarios.A,
-        blocks: snapshot.scenarios.A.blocks.map((block) => ({
-          ...block,
-          icon: icons[block.type] ?? null,
-          tone: block.tone || tones[block.type],
-        })),
-      },
-      B: {
-        ...snapshot.scenarios.B,
-        blocks: snapshot.scenarios.B.blocks.map((block) => ({
-          ...block,
-          icon: icons[block.type] ?? null,
-          tone: block.tone || tones[block.type],
-        })),
-      },
-      C: {
-        ...snapshot.scenarios.C,
-        blocks: snapshot.scenarios.C.blocks.map((block) => ({
-          ...block,
-          icon: icons[block.type] ?? null,
-          tone: block.tone || tones[block.type],
-        })),
-      },
-    };
+    const ids: ScenarioId[] = ["A", "B", "C"];
+    return Object.fromEntries(
+      ids.map((id) => [
+        id,
+        {
+          ...snapshot.scenarios[id],
+          blocks: snapshot.scenarios[id].blocks.map((block) => ({
+            ...block,
+            icon: icons[block.type] ?? null,
+            tone: block.tone || tones[block.type],
+          })),
+        },
+      ])
+    ) as Record<ScenarioId, Scenario>;
   }
 
   function hydrateDraftSnapshot(snapshot: QuoteDraftSnapshot) {

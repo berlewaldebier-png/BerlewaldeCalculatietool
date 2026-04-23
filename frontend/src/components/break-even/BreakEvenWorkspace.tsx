@@ -139,12 +139,20 @@ export function BreakEvenWorkspace({
     }));
   }, [configs]);
 
+  function withTimestamp<T extends BreakEvenConfig>(config: T, patch: Partial<BreakEvenConfig>) {
+    return {
+      ...config,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
   function updateConfig(patch: Partial<BreakEvenConfig>) {
     if (!activeConfig) return;
     setConfigs((current) =>
       current.map((config) =>
         config.id === activeConfig.id
-          ? { ...config, ...patch, updated_at: new Date().toISOString() }
+          ? withTimestamp(config, patch)
           : config
       )
     );
@@ -180,7 +188,7 @@ export function BreakEvenWorkspace({
   function addScenarioConfig() {
     const base = activeBaseConfig ?? activeConfig;
     if (!base) return;
-    const scenario = createScenarioFromBase(base.kind === "basis" ? base : activeBaseConfig ?? base);
+    const scenario = createScenarioFromBase(base);
     setConfigs((current) => [scenario, ...current]);
     setActiveConfigId(scenario.id);
   }
@@ -217,9 +225,12 @@ export function BreakEvenWorkspace({
     if (!activeConfig) return;
     setConfigs((current) =>
       current.map((config) => ({
-        ...config,
-        is_active_for_quotes: config.jaar === activeConfig.jaar ? config.id === activeConfig.id : config.is_active_for_quotes,
-        updated_at: new Date().toISOString(),
+        ...withTimestamp(config, {
+          is_active_for_quotes:
+            config.jaar === activeConfig.jaar
+              ? config.id === activeConfig.id
+              : config.is_active_for_quotes,
+        }),
       }))
     );
   }
@@ -241,22 +252,18 @@ export function BreakEvenWorkspace({
     setConfigs((current) =>
       current.map((config) => {
         if (config.id === activeConfig.id) {
-          return {
-            ...config,
+          return withTimestamp(config, {
             kind: "basis" as const,
             parent_config_id: null,
             naam: normalizePromotedBaseName(config.naam, config.jaar),
             is_active_for_quotes: true,
-            updated_at: new Date().toISOString(),
-          };
+          });
         }
 
         if (config.jaar === activeConfig.jaar && config.id !== activeConfig.id) {
-          return {
-            ...config,
+          return withTimestamp(config, {
             is_active_for_quotes: false,
-            updated_at: new Date().toISOString(),
-          };
+          });
         }
 
         return config;
