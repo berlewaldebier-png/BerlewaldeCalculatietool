@@ -327,6 +327,10 @@ export function OfferteSamenstellenApp({
     if (!activeBreakEvenConfig) return null;
     return calculateBreakEvenResult(activeBreakEvenConfig, breakEvenProductLines, vasteKosten);
   }, [activeBreakEvenConfig, breakEvenProductLines, vasteKosten]);
+  const currentBreakEvenSnapshot = useMemo(
+    () => buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult),
+    [activeBreakEvenConfig, breakEvenResult]
+  );
 
   const [scenarios, setScenarios] = useState<Record<ScenarioId, Scenario>>(
     () => createInitialQuoteDraft(year).scenarios
@@ -369,19 +373,19 @@ export function OfferteSamenstellenApp({
   const scenarioMetrics = useMemo(() => {
     const ids: ScenarioId[] = ["A", "B", "C"];
     const result: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }> = {
-      A: { standard: calculateScenarioMetricsForScenario(scenarios.A, "standard"), intro: null },
-      B: { standard: calculateScenarioMetricsForScenario(scenarios.B, "standard"), intro: null },
-      C: { standard: calculateScenarioMetricsForScenario(scenarios.C, "standard"), intro: null },
+      A: { standard: calculateScenarioMetricsForScenario(scenarios.A, "standard", currentBreakEvenSnapshot), intro: null },
+      B: { standard: calculateScenarioMetricsForScenario(scenarios.B, "standard", currentBreakEvenSnapshot), intro: null },
+      C: { standard: calculateScenarioMetricsForScenario(scenarios.C, "standard", currentBreakEvenSnapshot), intro: null },
     };
     for (const id of ids) {
       const sc = scenarios[id];
       result[id] = {
-        standard: calculateScenarioMetricsForScenario(sc, "standard"),
-        intro: sc.intro ? calculateScenarioMetricsForScenario(sc, "intro") : null,
+        standard: calculateScenarioMetricsForScenario(sc, "standard", currentBreakEvenSnapshot),
+        intro: sc.intro ? calculateScenarioMetricsForScenario(sc, "intro", currentBreakEvenSnapshot) : null,
       };
     }
     return result;
-  }, [scenarios]);
+  }, [currentBreakEvenSnapshot, scenarios]);
 
   function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
     setScenarios((prev) => ({
@@ -532,7 +536,7 @@ export function OfferteSamenstellenApp({
       year: currentYear,
       basis,
       scenarios,
-      breakEven: buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult),
+      breakEven: currentBreakEvenSnapshot,
       ui: {
         step,
         activeScenario,
@@ -667,8 +671,8 @@ export function OfferteSamenstellenApp({
   const activeMetrics = scenarioMetrics[activeScenario];
   const rightMetrics = activeMetrics.standard;
   const breakEvenCoveragePct =
-    breakEvenResult && breakEvenResult.breakEvenRevenue > 0
-      ? (rightMetrics.revenueEx / breakEvenResult.breakEvenRevenue) * 100
+    rightMetrics.breakEvenCurrent && rightMetrics.breakEvenCurrent > 0
+      ? (rightMetrics.revenueEx / rightMetrics.breakEvenCurrent) * 100
       : null;
 
   const incompatibilityHints = useMemo(() => {
@@ -895,12 +899,15 @@ export function OfferteSamenstellenApp({
                 />
                 <LiveSummaryMetric
                   label="Break-even omzet"
-                  value={breakEvenResult ? euro(breakEvenResult.breakEvenRevenue) : "Niet ingesteld"}
+                  value={rightMetrics.breakEvenCurrent === null ? "Niet ingesteld" : euro(rightMetrics.breakEvenCurrent)}
                 />
                 <LiveSummaryMetric
-                  label="BE dekking"
-                  value={breakEvenCoveragePct === null ? "-" : `${Math.round(breakEvenCoveragePct)}%`}
+                  label="Boven / onder BE"
+                  value={rightMetrics.breakEvenProjected === null ? "-" : euro(rightMetrics.breakEvenProjected)}
                 />
+              </div>
+              <div className="cpq-panel-text">
+                BE-dekking: {breakEvenCoveragePct === null ? "niet beschikbaar" : `${Math.round(breakEvenCoveragePct)}%`}
               </div>
               {activeBreakEvenConfig && breakEvenResult ? (
                 <p className="cpq-panel-text cpq-break-even-note">
@@ -1426,6 +1433,14 @@ function CompareStep({
                 <Metric label="Omzet" value={euro(m.standard.revenueEx)} />
                 <Metric label="Kosten" value={euro(m.standard.costEx)} />
                 <Metric label="Marge" value={`${Math.round(m.standard.marginPct)}%`} />
+                <Metric
+                  label="Break-even omzet"
+                  value={m.standard.breakEvenCurrent === null ? "Niet ingesteld" : euro(m.standard.breakEvenCurrent)}
+                />
+                <Metric
+                  label="Boven / onder BE"
+                  value={m.standard.breakEvenProjected === null ? "-" : euro(m.standard.breakEvenProjected)}
+                />
               </div>
 
               {m.intro ? (
@@ -1434,6 +1449,10 @@ function CompareStep({
                   <Metric label="Omzet" value={euro(m.intro.revenueEx)} />
                   <Metric label="Kosten" value={euro(m.intro.costEx)} />
                   <Metric label="Marge" value={`${Math.round(m.intro.marginPct)}%`} />
+                  <Metric
+                    label="Boven / onder BE"
+                    value={m.intro.breakEvenProjected === null ? "-" : euro(m.intro.breakEvenProjected)}
+                  />
                 </div>
               ) : null}
             </button>
@@ -1492,6 +1511,14 @@ function FinalizeStep({
           <Metric label="Voorstel" value={scenario.name} />
           <Metric label="Omzet (ex)" value={euro(metrics.revenueEx)} />
           <Metric label="Marge" value={`${Math.round(metrics.marginPct)}%`} />
+          <Metric
+            label="Break-even omzet"
+            value={metrics.breakEvenCurrent === null ? "Niet ingesteld" : euro(metrics.breakEvenCurrent)}
+          />
+          <Metric
+            label="Boven / onder BE"
+            value={metrics.breakEvenProjected === null ? "-" : euro(metrics.breakEvenProjected)}
+          />
         </div>
         <div className="cpq-final-card">
           <h3 className="cpq-panel-title">Opmerking</h3>

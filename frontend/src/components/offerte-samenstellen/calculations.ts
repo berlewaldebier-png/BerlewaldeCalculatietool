@@ -6,11 +6,16 @@ import {
 } from "@/lib/pricingEngine";
 import { clampNumber } from "@/components/offerte-samenstellen/quoteUtils";
 import { formatStaffelInput, getDerivedStaffelPrice } from "@/components/offerte-samenstellen/staffelUtils";
-import type { QuoteScenario, ScenarioMetrics } from "@/components/offerte-samenstellen/types";
+import type {
+  QuoteBreakEvenSnapshot,
+  QuoteScenario,
+  ScenarioMetrics,
+} from "@/components/offerte-samenstellen/types";
 
 export function calculateScenarioMetrics(
   scenario: QuoteScenario,
-  activePeriod: "standard" | "intro"
+  activePeriod: "standard" | "intro",
+  breakEven: QuoteBreakEvenSnapshot | null = null
 ): ScenarioMetrics {
   const notes: string[] = [];
 
@@ -56,8 +61,9 @@ export function calculateScenarioMetrics(
       extraCostEx: 0,
       transportCostEx: 0,
       marginPct: 0,
-      breakEvenCurrent: null,
-      breakEvenProjected: null,
+      breakEvenCurrent: breakEven?.breakEvenRevenue ?? null,
+      breakEvenProjected:
+        typeof breakEven?.breakEvenRevenue === "number" ? -breakEven.breakEvenRevenue : null,
       notes,
     };
   }
@@ -250,6 +256,15 @@ export function calculateScenarioMetrics(
 
   costEx += extraCostEx + transportCostEx;
   const marginPct = revenueEx > 0 ? ((revenueEx - costEx) / revenueEx) * 100 : 0;
+  const breakEvenCurrent = breakEven?.breakEvenRevenue ?? null;
+  const breakEvenProjected =
+    typeof breakEvenCurrent === "number" ? revenueEx - breakEvenCurrent : null;
+
+  if (breakEvenCurrent === null) {
+    notes.push("Geen actieve break-even versie gekoppeld aan deze offerte.");
+  } else if (breakEvenProjected !== null && breakEvenProjected < 0) {
+    notes.push("Scenario ligt onder de huidige break-even omzet.");
+  }
 
   return {
     revenueEx: Math.max(0, revenueEx),
@@ -257,8 +272,8 @@ export function calculateScenarioMetrics(
     extraCostEx,
     transportCostEx,
     marginPct,
-    breakEvenCurrent: null,
-    breakEvenProjected: null,
+    breakEvenCurrent,
+    breakEvenProjected,
     notes,
   };
 }
