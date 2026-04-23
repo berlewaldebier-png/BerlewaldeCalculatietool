@@ -183,6 +183,28 @@ export function createScenarioFromBase(base: BreakEvenConfig) {
   };
 }
 
+export function deriveScenarioTypeFromAdjustments(
+  adjustments: BreakEvenScenarioAdjustment[]
+): BreakEvenScenarioType {
+  const hasPricing = adjustments.some((adjustment) => adjustment.type === "price_pct");
+  const hasCosts = adjustments.some(
+    (adjustment) =>
+      adjustment.type === "fixed_cost_eur" ||
+      adjustment.type === "fixed_cost_pct" ||
+      adjustment.type === "variable_cost_pct"
+  );
+  const hasVolume = adjustments.some(
+    (adjustment) => adjustment.type === "volume_mix_pct"
+  );
+
+  const groupCount = [hasPricing, hasCosts, hasVolume].filter(Boolean).length;
+  if (groupCount === 0) return "custom";
+  if (groupCount > 1) return "combined";
+  if (hasPricing) return "pricing";
+  if (hasCosts) return "costs";
+  return "volume";
+}
+
 export function buildBreakEvenProductLines(params: {
   year: number;
   channels: GenericRecord[];
