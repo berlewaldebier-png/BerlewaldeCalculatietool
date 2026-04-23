@@ -177,6 +177,13 @@ export type ScenarioMetrics = {
   breakEvenCurrent: number | null;
   breakEvenProjected: number | null;
   breakEvenCoveragePct: number | null;
+  pricingByRef: Record<
+    string,
+    {
+      baseUnitPriceEx: number;
+      offerUnitPriceEx: number;
+    }
+  >;
   notes: string[];
 };
 

@@ -777,6 +777,7 @@ export function OfferteSamenstellenApp({
                 vatMode={vatMode}
                 hasIntro={hasIntro}
                 scenario={scenario}
+                metrics={activeMetrics.standard}
                 activeScenario={activeScenario}
                 setActiveScenario={setActiveScenario}
                 updateProduct={updateProduct}
@@ -1000,6 +1001,7 @@ function BuilderStep({
   vatMode,
   hasIntro,
   scenario,
+  metrics,
   activeScenario,
   setActiveScenario,
   updateProduct,
@@ -1022,6 +1024,7 @@ function BuilderStep({
   vatMode: VatMode;
   hasIntro: boolean;
   scenario: Scenario;
+  metrics: ScenarioMetrics;
   activeScenario: ScenarioId;
   setActiveScenario: (id: ScenarioId) => void;
   updateProduct: (productId: string, patch: Partial<QuoteProduct>) => void;
@@ -1137,24 +1140,31 @@ function BuilderStep({
               <thead>
                 <tr>
                   <th>Bier</th>
-                  <th>Verpakking</th>
                   <th>Aantal</th>
                   <th>Weergave</th>
-                  <th>Stukprijs</th>
+                  <th>Kostprijs</th>
+                  <th>Verkoopprijs</th>
+                  <th>Verkoopprijs actie</th>
                   <th>Totaal</th>
                   <th className="cpq-table-action-cell" aria-label="Acties" />
                 </tr>
               </thead>
               <tbody>
                 {scenario.products.map((product) => {
+                  const productRef = getProductRef(product);
+                  const pricing = metrics.pricingByRef[productRef];
                   const display =
                     unitMode === "liters"
                       ? `${(product.qty * product.litersPerUnit).toFixed(1)} L`
                       : `${product.qty} ${product.unit}`;
                   const vatFactor =
                     vatMode === "incl" ? 1 + Math.max(0, clampNumber(product.vatRatePct, 0)) / 100 : 1;
-                  const unitPrice = product.standardPriceEx * vatFactor;
-                  const totalPrice = product.qty * product.standardPriceEx * vatFactor;
+                  const baseUnitPriceEx = pricing?.baseUnitPriceEx ?? product.standardPriceEx;
+                  const offerUnitPriceEx = pricing?.offerUnitPriceEx ?? product.standardPriceEx;
+                  const costUnitPrice = product.costPriceEx * vatFactor;
+                  const baseUnitPrice = baseUnitPriceEx * vatFactor;
+                  const offerUnitPrice = offerUnitPriceEx * vatFactor;
+                  const totalPrice = product.qty * offerUnitPriceEx * vatFactor;
                   const qtyInputValue =
                     unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
 
@@ -1178,7 +1188,6 @@ function BuilderStep({
                           ))}
                         </select>
                       </td>
-                      <td className="cpq-muted">{product.pack || "—"}</td>
                       <td>
                         <input
                           type="number"
@@ -1198,7 +1207,9 @@ function BuilderStep({
                         />
                       </td>
                       <td className="cpq-muted">{display}</td>
-                      <td>{euro(unitPrice)}</td>
+                      <td>{euro(costUnitPrice)}</td>
+                      <td>{euro(baseUnitPrice)}</td>
+                      <td>{euro(offerUnitPrice)}</td>
                       <td className="cpq-strong">{euro(totalPrice)}</td>
                       <td className="cpq-table-action-cell">
                         <button
@@ -1216,7 +1227,7 @@ function BuilderStep({
                 })}
                 {scenario.products.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="cpq-empty">
+                    <td colSpan={8} className="cpq-empty">
                       Nog geen producten toegevoegd.
                     </td>
                   </tr>

@@ -66,6 +66,7 @@ export function calculateScenarioMetrics(
       breakEvenProjected:
         typeof breakEven?.breakEvenRevenue === "number" ? -breakEven.breakEvenRevenue : null,
       breakEvenCoveragePct: 0,
+      pricingByRef: {},
       notes,
     };
   }
@@ -293,6 +294,16 @@ export function calculateScenarioMetrics(
     notes.push("Scenario ligt onder de huidige break-even omzet.");
   }
 
+  const pricingByRef = Object.fromEntries(
+    lines.map((row) => [
+      row.ref,
+      {
+        baseUnitPriceEx: row.unitPriceEx,
+        offerUnitPriceEx: unitPriceByRef.get(row.ref) ?? row.unitPriceEx,
+      },
+    ])
+  );
+
   return {
     revenueEx: Math.max(0, revenueEx),
     costEx: Math.max(0, costEx),
@@ -302,6 +313,7 @@ export function calculateScenarioMetrics(
     breakEvenCurrent,
     breakEvenProjected,
     breakEvenCoveragePct,
+    pricingByRef,
     notes,
   };
 }
