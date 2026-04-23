@@ -175,6 +175,7 @@ export type ScenarioMetrics = {
   marginPct: number;
   breakEvenCurrent: number | null;
   breakEvenProjected: number | null;
+  breakEvenCoveragePct: number | null;
   notes: string[];
 };
 

@@ -64,6 +64,7 @@ export function calculateScenarioMetrics(
       breakEvenCurrent: breakEven?.breakEvenRevenue ?? null,
       breakEvenProjected:
         typeof breakEven?.breakEvenRevenue === "number" ? -breakEven.breakEvenRevenue : null,
+      breakEvenCoveragePct: 0,
       notes,
     };
   }
@@ -259,6 +260,10 @@ export function calculateScenarioMetrics(
   const breakEvenCurrent = breakEven?.breakEvenRevenue ?? null;
   const breakEvenProjected =
     typeof breakEvenCurrent === "number" ? revenueEx - breakEvenCurrent : null;
+  const breakEvenCoveragePct =
+    typeof breakEvenCurrent === "number" && breakEvenCurrent > 0
+      ? (revenueEx / breakEvenCurrent) * 100
+      : null;
 
   if (breakEvenCurrent === null) {
     notes.push("Geen actieve break-even versie gekoppeld aan deze offerte.");
@@ -274,6 +279,7 @@ export function calculateScenarioMetrics(
     marginPct,
     breakEvenCurrent,
     breakEvenProjected,
+    breakEvenCoveragePct,
     notes,
   };
 }

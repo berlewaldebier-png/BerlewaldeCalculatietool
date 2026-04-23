@@ -43,6 +43,7 @@ import type {
   QuoteDraft,
   QuoteDraftSnapshot,
   QuoteFormState,
+  ScenarioMetrics,
 } from "@/components/offerte-samenstellen/types";
 
 type GenericRecord = Record<string, unknown>;
@@ -207,17 +208,6 @@ function clampNumber(value: unknown, fallback: number) {
 function normalizeText(value: unknown) {
   return String(value ?? "").trim();
 }
-
-type ScenarioMetrics = {
-  revenueEx: number;
-  costEx: number;
-  extraCostEx: number;
-  transportCostEx: number;
-  marginPct: number;
-  breakEvenCurrent: number | null;
-  breakEvenProjected: number | null;
-  notes: string[];
-};
 
 function buildBreakEvenSnapshot(
   config: BreakEvenConfig | null,
@@ -670,10 +660,6 @@ export function OfferteSamenstellenApp({
 
   const activeMetrics = scenarioMetrics[activeScenario];
   const rightMetrics = activeMetrics.standard;
-  const breakEvenCoveragePct =
-    rightMetrics.breakEvenCurrent && rightMetrics.breakEvenCurrent > 0
-      ? (rightMetrics.revenueEx / rightMetrics.breakEvenCurrent) * 100
-      : null;
 
   const incompatibilityHints = useMemo(() => {
     return buildScenarioConflictHints(scenario);
@@ -897,6 +883,15 @@ export function OfferteSamenstellenApp({
                   label="Marge %"
                   value={`${Math.round(rightMetrics.marginPct)}%`}
                 />
+              </div>
+            </div>
+
+            <div className="cpq-panel">
+              <div className="cpq-live-summary-head">
+                <div className="cpq-panel-title">Live break-even</div>
+                <div className="cpq-panel-subtitle">Impact van dit voorstel</div>
+              </div>
+              <div className="cpq-live-summary-grid">
                 <LiveSummaryMetric
                   label="Break-even omzet"
                   value={rightMetrics.breakEvenCurrent === null ? "Niet ingesteld" : euro(rightMetrics.breakEvenCurrent)}
@@ -905,9 +900,14 @@ export function OfferteSamenstellenApp({
                   label="Boven / onder BE"
                   value={rightMetrics.breakEvenProjected === null ? "-" : euro(rightMetrics.breakEvenProjected)}
                 />
-              </div>
-              <div className="cpq-panel-text">
-                BE-dekking: {breakEvenCoveragePct === null ? "niet beschikbaar" : `${Math.round(breakEvenCoveragePct)}%`}
+                <LiveSummaryMetric
+                  label="BE-dekking"
+                  value={
+                    rightMetrics.breakEvenCoveragePct === null
+                      ? "Niet beschikbaar"
+                      : `${Math.round(rightMetrics.breakEvenCoveragePct)}%`
+                  }
+                />
               </div>
               {activeBreakEvenConfig && breakEvenResult ? (
                 <p className="cpq-panel-text cpq-break-even-note">
@@ -1441,6 +1441,14 @@ function CompareStep({
                   label="Boven / onder BE"
                   value={m.standard.breakEvenProjected === null ? "-" : euro(m.standard.breakEvenProjected)}
                 />
+                <Metric
+                  label="BE-dekking"
+                  value={
+                    m.standard.breakEvenCoveragePct === null
+                      ? "Niet beschikbaar"
+                      : `${Math.round(m.standard.breakEvenCoveragePct)}%`
+                  }
+                />
               </div>
 
               {m.intro ? (
@@ -1452,6 +1460,14 @@ function CompareStep({
                   <Metric
                     label="Boven / onder BE"
                     value={m.intro.breakEvenProjected === null ? "-" : euro(m.intro.breakEvenProjected)}
+                  />
+                  <Metric
+                    label="BE-dekking"
+                    value={
+                      m.intro.breakEvenCoveragePct === null
+                        ? "Niet beschikbaar"
+                        : `${Math.round(m.intro.breakEvenCoveragePct)}%`
+                    }
                   />
                 </div>
               ) : null}
@@ -1518,6 +1534,14 @@ function FinalizeStep({
           <Metric
             label="Boven / onder BE"
             value={metrics.breakEvenProjected === null ? "-" : euro(metrics.breakEvenProjected)}
+          />
+          <Metric
+            label="BE-dekking"
+            value={
+              metrics.breakEvenCoveragePct === null
+                ? "Niet beschikbaar"
+                : `${Math.round(metrics.breakEvenCoveragePct)}%`
+            }
           />
         </div>
         <div className="cpq-final-card">
