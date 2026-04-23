@@ -62,6 +62,9 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
     case "Staffel":
       return {
         ...initial,
+        staffelUseBaseOfferProducts: Boolean(
+          payload.useBaseOfferProducts ?? initial.staffelUseBaseOfferProducts
+        ),
         staffelEligibleRefs: asStringArray(payload.eligibleRefs),
         staffelDiscountMode: String(
           payload.discountMode ?? initial.staffelDiscountMode
@@ -92,6 +95,9 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
     case "Korting":
       return {
         ...initial,
+        kortingUseBaseOfferProducts: Boolean(
+          payload.useBaseOfferProducts ?? initial.kortingUseBaseOfferProducts
+        ),
         discountMode: String(payload.discountMode ?? initial.discountMode),
         discountValue: String(payload.discountPct ?? initial.discountValue),
         kortingEligibleRefs: asStringArray(payload.eligibleRefs),

@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import type { OptionAvailability } from "@/components/offerte-samenstellen/conflictRules";
 import { IntroForm, getIntroFormError } from "@/components/offerte-samenstellen/forms/IntroForm";
-import { KortingForm } from "@/components/offerte-samenstellen/forms/KortingForm";
+import { KortingForm, getKortingFormError } from "@/components/offerte-samenstellen/forms/KortingForm";
 import { MixDealForm } from "@/components/offerte-samenstellen/forms/MixDealForm";
 import { ProeverijForm } from "@/components/offerte-samenstellen/forms/ProeverijForm";
 import { RetourForm } from "@/components/offerte-samenstellen/forms/RetourForm";
@@ -23,6 +23,7 @@ type Props = {
   form: QuoteFormState;
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   productOptions: ProductOption[];
+  baseOfferRefs: string[];
   onClose: () => void;
   onSave: () => void;
 };
@@ -45,15 +46,18 @@ export function ToolbarOptionDialog({
   form,
   setForm,
   productOptions,
+  baseOfferRefs,
   onClose,
   onSave,
 }: Props) {
   const introError = selectedOption === "Intro" ? getIntroFormError(form) : "";
   const staffelError =
-    selectedOption === "Staffel" ? getStaffelFormError(form, productOptions) : "";
+    selectedOption === "Staffel" ? getStaffelFormError(form, productOptions, baseOfferRefs) : "";
+  const kortingError =
+    selectedOption === "Korting" ? getKortingFormError(form, baseOfferRefs) : "";
   const saveBlockedReason =
-    introError || staffelError || selectedOptionAvailability.reasons[0] || "";
-  const canSave = selectedOptionAvailability.allowed && !introError && !staffelError;
+    introError || staffelError || kortingError || selectedOptionAvailability.reasons[0] || "";
+  const canSave = selectedOptionAvailability.allowed && !introError && !staffelError && !kortingError;
   const contextLabel = getContextLabel(selectedOption, hasIntro);
 
   return (
@@ -92,13 +96,23 @@ export function ToolbarOptionDialog({
             <IntroForm form={form} setForm={setForm} products={productOptions} />
           ) : null}
           {selectedOption === "Staffel" ? (
-            <StaffelForm form={form} setForm={setForm} products={productOptions} />
+            <StaffelForm
+              form={form}
+              setForm={setForm}
+              products={productOptions}
+              baseOfferRefs={baseOfferRefs}
+            />
           ) : null}
           {selectedOption === "Mix" ? (
             <MixDealForm form={form} setForm={setForm} products={productOptions} />
           ) : null}
           {selectedOption === "Korting" ? (
-            <KortingForm form={form} setForm={setForm} products={productOptions} />
+            <KortingForm
+              form={form}
+              setForm={setForm}
+              products={productOptions}
+              baseOfferRefs={baseOfferRefs}
+            />
           ) : null}
           {selectedOption === "Transport" ? (
             <TransportForm form={form} setForm={setForm} />

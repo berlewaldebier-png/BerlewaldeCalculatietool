@@ -60,8 +60,8 @@ export function evaluateOptionAvailability({
     }
   }
 
-  if (isPricingRule(type) && pricingRulesInContext.length >= 2) {
-    reasons.push("Standaardperiode heeft al het maximum van 2 prijsregels bereikt.");
+  if (isPricingRule(type) && pricingRulesInContext.length >= 1) {
+    reasons.push("Een voorstel kan in de standaardperiode maar één pricingactie hebben.");
   }
 
   if (type === "Staffel" && pricingRulesInContext.some((block) => block.type === "Korting")) {
@@ -86,8 +86,8 @@ export function buildScenarioConflictHints(scenario: QuoteScenario): string[] {
     (block) => (block.appliesTo ?? "standard") === "standard" && isPricingRule(block.type)
   );
 
-  if (standardPricing.length >= 2) {
-    hints.push("Standaardperiode: max 2 prijsregels bereikt.");
+  if (standardPricing.length >= 1) {
+    hints.push("Standaardperiode: er kan maar één pricingactie actief zijn.");
   }
 
   const standardHasStaffel = standardPricing.some((block) => block.type === "Staffel");

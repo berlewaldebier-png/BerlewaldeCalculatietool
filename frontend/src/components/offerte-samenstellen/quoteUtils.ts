@@ -1,7 +1,9 @@
 import type {
   BasisData,
   QuoteDraft,
+  QuoteProduct,
   QuoteFormState,
+  ProductOption,
   QuoteProductUnit,
   QuoteScenario,
   ScenarioId,
@@ -45,7 +47,7 @@ export function createInitialBasisData(): BasisData {
 export function createEmptyScenario(id: ScenarioId): QuoteScenario {
   return {
     id,
-    name: `Scenario ${id}`,
+    name: `Voorstel ${id}`,
     products: [],
     blocks: [],
     note: "",
@@ -91,6 +93,7 @@ export function createInitialQuoteFormState(): QuoteFormState {
     introThresholdValue: "",
     introThresholdDiscount: "",
     introNote: "",
+    staffelUseBaseOfferProducts: true,
     staffelEligibleRefs: [],
     staffelDiscountMode: "absolute",
     staffelDiscountValue: "0,50",
@@ -102,6 +105,7 @@ export function createInitialQuoteFormState(): QuoteFormState {
     mixStructure: "3+2",
     mixEligibleRefs: [],
     mixProducts: "",
+    kortingUseBaseOfferProducts: true,
     discountMode: "Totaal",
     discountValue: "5",
     kortingEligibleRefs: [],
@@ -120,4 +124,21 @@ export function createInitialQuoteFormState(): QuoteFormState {
     tapPriceEx: "0",
     tapCostEx: "90",
   };
+}
+
+export function getProductRef(product: QuoteProduct) {
+  if (product.source?.bier_id && product.source?.product_id) {
+    return `beer:${String(product.source.bier_id)}:product:${String(product.source.product_id)}`;
+  }
+  return String(product.id ?? "").trim();
+}
+
+export function resolveScenarioProductRefs(
+  scenarioProducts: QuoteProduct[],
+  productOptions: ProductOption[]
+) {
+  const optionIds = new Set(productOptions.map((option) => option.optionId));
+  return scenarioProducts
+    .map((product) => getProductRef(product))
+    .filter((ref) => ref && optionIds.has(ref));
 }

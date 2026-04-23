@@ -189,6 +189,7 @@ export type QuoteFormState = {
   introThresholdValue: string;
   introThresholdDiscount: string;
   introNote: string;
+  staffelUseBaseOfferProducts: boolean;
   staffelEligibleRefs: string[];
   staffelDiscountMode: StaffelDiscountMode;
   staffelDiscountValue: string;
@@ -197,6 +198,7 @@ export type QuoteFormState = {
   mixStructure: string;
   mixEligibleRefs: string[];
   mixProducts?: string;
+  kortingUseBaseOfferProducts: boolean;
   discountMode: string;
   discountValue: string;
   kortingEligibleRefs: string[];

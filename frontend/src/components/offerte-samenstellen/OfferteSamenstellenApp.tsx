@@ -15,7 +15,9 @@ import {
   createInitialBasisData,
   createInitialQuoteDraft,
   createInitialQuoteFormState,
+  getProductRef,
   inferUnitFromPack,
+  resolveScenarioProductRefs,
 } from "@/components/offerte-samenstellen/quoteUtils";
 import {
   buildQuoteDownloadFilename,
@@ -86,6 +88,14 @@ type BuilderBlock = {
   // Minimal payload for v1 calculations. Kept explicit to avoid hidden magic.
   payload?: Record<string, unknown>;
 };
+
+function isPricingActionBlock(block: BuilderBlock) {
+  return block.type === "Staffel" || block.type === "Korting" || block.type === "Mix";
+}
+
+function usesBaseOfferProducts(block: BuilderBlock | undefined) {
+  return Boolean(block?.payload?.useBaseOfferProducts ?? true);
+}
 
 type Scenario = {
   id: ScenarioId;
@@ -402,7 +412,7 @@ export function OfferteSamenstellenApp({
   const [step, setStep] = useState<StepKey>("basis");
   const [activeScenario, setActiveScenario] = useState<ScenarioId>("A");
   const [unitMode, setUnitMode] = useState<UnitMode>("producten");
-  const [vatMode, setVatMode] = useState<VatMode>("incl");
+  const [vatMode, setVatMode] = useState<VatMode>("excl");
   const [draftMeta, setDraftMeta] = useState<QuoteDraft["meta"]>(() => createInitialQuoteDraft(year).meta);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
@@ -444,6 +454,10 @@ export function OfferteSamenstellenApp({
   const [form, setForm] = useState<QuoteFormState>(() => createInitialQuoteFormState());
   const scenario = scenarios[activeScenario];
   const hasIntro = Boolean(scenario.intro && scenario.intro.start && scenario.intro.end);
+  const baseOfferRefs = useMemo(
+    () => resolveScenarioProductRefs(scenario.products, productIndex.options),
+    [scenario.products, productIndex.options]
+  );
 
   function openNewOption(type: OptionType) {
     const availability = evaluateOptionAvailability({
@@ -519,6 +533,16 @@ export function OfferteSamenstellenApp({
     }));
   }
 
+  function removeProductRow(productId: string) {
+    setScenarios((prev) => ({
+      ...prev,
+      [activeScenario]: {
+        ...prev[activeScenario],
+        products: prev[activeScenario].products.filter((product) => product.id !== productId),
+      },
+    }));
+  }
+
   function applyOptionToScenario(type: OptionType) {
     const availability = evaluateOptionAvailability({
       scenario,
@@ -537,26 +561,21 @@ export function OfferteSamenstellenApp({
       tones,
       icons,
       productOptions: productIndex.options,
+      baseOfferRefs,
       existingBlockId: editingBlockId,
     });
 
     setScenarios((prev) => {
       const existing = prev[activeScenario];
 
-      // If no explicit product selection was captured for a pricing rule, default it to "all current product lines"
-      // to avoid silent no-ops. This is an explicit v1 behavior (not hidden): the modal will show the selection later.
-      if (type === "Staffel" || type === "Mix") {
+      // If no explicit product selection was captured for a scoped pricing rule, default it to the current proposal lines
+      // to avoid silent no-ops. The forms now make this choice visible via the "gebruik basisofferte" switch.
+      if (type === "Staffel" || type === "Mix" || type === "Korting") {
         const payload = (block.payload ?? {}) as Record<string, unknown>;
         const eligibleRaw = Array.isArray(payload.eligibleRefs) ? (payload.eligibleRefs as unknown[]) : [];
         const eligible = eligibleRaw.map((r) => String(r ?? "")).filter(Boolean);
         if (eligible.length === 0) {
-          const refs = (existing.products ?? [])
-            .map((p) =>
-              p.source?.bier_id && p.source?.product_id
-                ? `beer:${String(p.source.bier_id)}:product:${String(p.source.product_id)}`
-                : String(p.id ?? "")
-            )
-            .filter(Boolean);
+          const refs = (existing.products ?? []).map(getProductRef).filter(Boolean);
           block.payload = { ...payload, eligibleRefs: refs };
         }
       }
@@ -602,22 +621,6 @@ export function OfferteSamenstellenApp({
         },
       };
     });
-  }
-
-  function duplicateScenario() {
-    const base = scenarios[activeScenario];
-    const targetId: ScenarioId = activeScenario === "A" ? "B" : activeScenario === "B" ? "C" : "A";
-    setScenarios((prev) => ({
-      ...prev,
-      [targetId]: {
-        ...base,
-        id: targetId,
-        name: `Scenario ${targetId}`,
-        note: `Duplicaat van scenario ${activeScenario}`,
-      },
-    }));
-    setActiveScenario(targetId);
-    setStep("vergelijk");
   }
 
   function handleSelectOptionForRow(rowId: string, optionId: string) {
@@ -771,8 +774,8 @@ export function OfferteSamenstellenApp({
 
   const steps: { id: StepKey; title: string; desc: string }[] = [
     { id: "basis", title: "Basisgegevens", desc: "Klant, kanaal en naam" },
-    { id: "builder", title: "Offerte maken", desc: "Producten, opties en scenario's" },
-    { id: "vergelijk", title: "Vergelijken", desc: "Scenario's naast elkaar" },
+    { id: "builder", title: "Offerte maken", desc: "Producten, opties en voorstellen" },
+    { id: "vergelijk", title: "Vergelijken", desc: "Voorstellen naast elkaar" },
     { id: "afronden", title: "Afronden", desc: "Export en notities" },
   ];
 
@@ -852,17 +855,6 @@ export function OfferteSamenstellenApp({
                 Incl. btw
               </button>
             </div>
-            <button onClick={duplicateScenario} className="cpq-button cpq-button-secondary">
-              Dupliceer scenario
-            </button>
-            <button
-              className="cpq-button cpq-button-primary"
-              type="button"
-              onClick={() => void saveQuoteDraft()}
-              disabled={isSavingDraft || isLoadingDraft}
-            >
-              {isSavingDraft ? "Opslaan..." : "Opslaan"}
-            </button>
           </div>
         </div>
 
@@ -901,7 +893,7 @@ export function OfferteSamenstellenApp({
                 <QuickCell label="Klant" value={basis.klantNaam || "—"} />
                 <QuickCell label="Kanaal" value={basis.kanaal} />
                 <QuickCell label="Status" value={draftMeta.status === "definitief" ? "Definitief" : "Concept"} />
-                <QuickCell label="Scenario" value={activeScenario} />
+                <QuickCell label="Voorstel" value={activeScenario} />
                 <QuickCell label="Jaar" value={String(year)} />
                 <QuickCell label="Versie" value={String(draftMeta.version)} />
                 <QuickCell label="Bewaard" value={draftMeta.updatedAt ? new Date(draftMeta.updatedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "Nog niet"} />
@@ -911,7 +903,13 @@ export function OfferteSamenstellenApp({
 
           <main className="cpq-main">
             {step === "basis" ? (
-              <BasisStep basis={basis} setBasis={setBasis} onNext={() => setStep("builder")} />
+              <BasisStep
+                basis={basis}
+                setBasis={setBasis}
+                onNext={() => setStep("builder")}
+                onSave={() => void saveQuoteDraft()}
+                isSaving={isSavingDraft || isLoadingDraft}
+              />
             ) : null}
 
             {step === "builder" ? (
@@ -924,6 +922,7 @@ export function OfferteSamenstellenApp({
                 setActiveScenario={setActiveScenario}
                 updateProduct={updateProduct}
                 addProductRow={addProductRow}
+                removeProductRow={removeProductRow}
                 removeBlock={removeBlock}
                 toolbarGroups={toolbarGroups}
                 openOption={openNewOption}
@@ -934,6 +933,8 @@ export function OfferteSamenstellenApp({
                 onSelectRowOption={handleSelectOptionForRow}
                 warnings={productIndex.warnings}
                 incompatibilityHints={incompatibilityHints}
+                onSave={() => void saveQuoteDraft()}
+                isSaving={isSavingDraft || isLoadingDraft}
               />
             ) : null}
 
@@ -945,6 +946,8 @@ export function OfferteSamenstellenApp({
                 setActiveScenario={setActiveScenario}
                 onNext={() => setStep("afronden")}
                 onBack={() => setStep("builder")}
+                onSave={() => void saveQuoteDraft()}
+                isSaving={isSavingDraft || isLoadingDraft}
               />
             ) : null}
 
@@ -955,6 +958,8 @@ export function OfferteSamenstellenApp({
                 metrics={scenarioMetrics[activeScenario].standard}
                 onBack={() => setStep("vergelijk")}
                 onDownload={downloadQuoteStub}
+                onSave={() => void saveQuoteDraft()}
+                isSaving={isSavingDraft || isLoadingDraft}
               />
             ) : null}
           </main>
@@ -962,31 +967,44 @@ export function OfferteSamenstellenApp({
           <aside className="cpq-right">
             <h2 className="cpq-right-kicker">Live inzicht</h2>
             <div className="cpq-panel">
-              <Kpi label="Omzet (ex)" value={euro(rightMetrics.revenueEx)} />
-              <Kpi label="Kostprijs (ex)" value={euro(rightMetrics.costEx)} />
-              <Kpi label="Transportkosten" value={rightMetrics.transportCostEx ? euro(rightMetrics.transportCostEx) : "—"} />
-              <Kpi label="Extra kosten" value={rightMetrics.extraCostEx ? euro(rightMetrics.extraCostEx) : "—"} />
-              <div className="cpq-divider" />
-              <Kpi label="Netto marge" value={`${Math.round(rightMetrics.marginPct)}%`} strong />
-            </div>
-
-            <div className="cpq-panel cpq-panel-dark">
-              <div className="cpq-panel-dark-title">
-                <span>Break-even impact</span>
-                <span className="cpq-pill">Placeholder</span>
+              <div className="cpq-live-summary-head">
+                <div className="cpq-panel-title">Totaal</div>
+                <div className="cpq-panel-subtitle">
+                  {scenario.products.length} product{scenario.products.length === 1 ? "" : "en"}
+                </div>
               </div>
-              <div className="cpq-panel-dark-body">
-                <div className="cpq-kv"><span>Huidig</span><span>—</span></div>
-                <div className="cpq-kv"><span>Na offerte</span><span>—</span></div>
-                <div className="cpq-kv"><span>Impact</span><span className="cpq-accent">—</span></div>
-              </div>
-              <div className="cpq-panel-dark-note">
-                Placeholder tot de juiste data beschikbaar is. Hier kan later break-even omzet of volume komen.
+              <div className="cpq-live-summary-grid">
+                <LiveSummaryMetric label="Omzet" value={euro(rightMetrics.revenueEx)} />
+                <LiveSummaryMetric
+                  label="Kostprijs"
+                  value={euro(
+                    Math.max(
+                      0,
+                      rightMetrics.costEx - rightMetrics.extraCostEx - rightMetrics.transportCostEx
+                    )
+                  )}
+                />
+                <LiveSummaryMetric
+                  label="Transport"
+                  value={euro(rightMetrics.transportCostEx)}
+                />
+                <LiveSummaryMetric
+                  label="Extra kosten"
+                  value={euro(rightMetrics.extraCostEx)}
+                />
+                <LiveSummaryMetric
+                  label="Winst"
+                  value={euro(rightMetrics.revenueEx - rightMetrics.costEx)}
+                />
+                <LiveSummaryMetric
+                  label="Marge %"
+                  value={`${Math.round(rightMetrics.marginPct)}%`}
+                />
               </div>
             </div>
 
             <div className="cpq-panel">
-              <h3 className="cpq-panel-title">Actieve scenario-notitie</h3>
+              <h3 className="cpq-panel-title">Actieve voorstel-notitie</h3>
               <p className="cpq-panel-text">{scenario.note || "Geen notitie toegevoegd."}</p>
             </div>
           </aside>
@@ -1001,6 +1019,7 @@ export function OfferteSamenstellenApp({
             form={form}
             setForm={setForm}
             productOptions={productIndex.options}
+            baseOfferRefs={baseOfferRefs}
             onClose={closeOptionDialog}
             onSave={() => applyOptionToScenario(selectedOption)}
           />
@@ -1014,10 +1033,14 @@ function BasisStep({
   basis,
   setBasis,
   onNext,
+  onSave,
+  isSaving,
 }: {
   basis: BasisData;
   setBasis: React.Dispatch<React.SetStateAction<BasisData>>;
   onNext: () => void;
+  onSave: () => void;
+  isSaving: boolean;
 }) {
   return (
     <section className="cpq-card">
@@ -1062,7 +1085,10 @@ function BasisStep({
         </label>
       </div>
 
-      <div className="cpq-actions">
+      <div className="cpq-actions cpq-actions-split">
+        <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
+          {isSaving ? "Opslaan..." : "Opslaan"}
+        </button>
         <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
           Verder naar offerte maken
         </button>
@@ -1080,6 +1106,7 @@ function BuilderStep({
   setActiveScenario,
   updateProduct,
   addProductRow,
+  removeProductRow,
   removeBlock,
   toolbarGroups,
   openOption,
@@ -1090,6 +1117,8 @@ function BuilderStep({
   onSelectRowOption,
   warnings,
   incompatibilityHints,
+  onSave,
+  isSaving,
 }: {
   unitMode: UnitMode;
   vatMode: VatMode;
@@ -1099,6 +1128,7 @@ function BuilderStep({
   setActiveScenario: (id: ScenarioId) => void;
   updateProduct: (productId: string, patch: Partial<QuoteProduct>) => void;
   addProductRow: () => void;
+  removeProductRow: (productId: string) => void;
   removeBlock: (blockId: string) => void;
   toolbarGroups: ToolbarGroup[];
   openOption: (type: OptionType) => void;
@@ -1109,12 +1139,16 @@ function BuilderStep({
   onSelectRowOption: (rowId: string, optionId: string) => void;
   warnings: string[];
   incompatibilityHints: string[];
+  onSave: () => void;
+  isSaving: boolean;
 }) {
   const introBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "intro");
   const standardBlocks = scenario.blocks.filter(
     (block) => (block.appliesTo ?? "standard") === "standard"
   );
   const globalBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "global");
+  const standardPricingBlock = standardBlocks.find((block) => isPricingActionBlock(block));
+  const basisOfferteActive = !standardPricingBlock || usesBaseOfferProducts(standardPricingBlock);
 
   return (
     <div className="cpq-stack">
@@ -1125,7 +1159,7 @@ function BuilderStep({
             Start simpel met producten en breid uit met blokken via de toolbar.
           </p>
         </div>
-        <div className="cpq-toggle-strip" role="group" aria-label="Scenario">
+        <div className="cpq-toggle-strip" role="group" aria-label="Voorstel">
           {(["A", "B", "C"] as ScenarioId[]).map((id) => (
             <button
               key={id}
@@ -1133,7 +1167,7 @@ function BuilderStep({
               onClick={() => setActiveScenario(id)}
               className={`cpq-toggle${activeScenario === id ? " active" : ""}`}
             >
-              Scenario {id}
+              Voorstel {id}
             </button>
           ))}
         </div>
@@ -1185,101 +1219,130 @@ function BuilderStep({
         </div>
       </div>
 
-      <section className="cpq-card">
-        <div className="cpq-card-header cpq-card-header-row">
-          <div>
-            <h3 className="cpq-card-title">Basisofferte</h3>
-            <p className="cpq-card-subtitle">
-              Basisprijs komt uit verkoopstrategie (sell-in, ex). BTW-toggle is alleen
-              weergave.
-            </p>
+      {basisOfferteActive ? (
+        <section className="cpq-card">
+          <div className="cpq-card-header cpq-card-header-row">
+            <div>
+              <h3 className="cpq-card-title">Basisofferte</h3>
+              <p className="cpq-card-subtitle">
+                Basisprijs komt uit verkoopstrategie (sell-in, ex). BTW-toggle is alleen
+                weergave.
+              </p>
+            </div>
+            <button onClick={addProductRow} className="cpq-button cpq-button-secondary" type="button">
+              + Product toevoegen
+            </button>
           </div>
-          <button onClick={addProductRow} className="cpq-button cpq-button-secondary" type="button">
-            + Product toevoegen
-          </button>
-        </div>
 
-        <div className="cpq-table-wrap">
-          <table className="cpq-table">
-            <thead>
-              <tr>
-                <th>Bier</th>
-                <th>Verpakking</th>
-                <th>Aantal</th>
-                <th>Weergave</th>
-                <th>Stukprijs</th>
-                <th>Totaal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scenario.products.map((product) => {
-                const display =
-                  unitMode === "liters"
-                    ? `${(product.qty * product.litersPerUnit).toFixed(1)} L`
-                    : `${product.qty} ${product.unit}`;
-                const vatFactor =
-                  vatMode === "incl" ? 1 + Math.max(0, clampNumber(product.vatRatePct, 0)) / 100 : 1;
-                const unitPrice = product.standardPriceEx * vatFactor;
-                const totalPrice = product.qty * product.standardPriceEx * vatFactor;
-                const qtyInputValue =
-                  unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
-
-                return (
-                  <tr key={product.id}>
-                    <td>
-                      <select
-                        className="cpq-select"
-                        value={
-                          product.source?.bier_id && product.source?.product_id
-                            ? `beer:${product.source.bier_id}:product:${product.source.product_id}`
-                            : ""
-                        }
-                        onChange={(e) => onSelectRowOption(product.id, e.target.value)}
-                      >
-                        <option value="">Kies product…</option>
-                        {productOptions.map((opt) => (
-                          <option key={opt.optionId} value={opt.optionId}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="cpq-muted">{product.pack || "—"}</td>
-                    <td>
-                      <input
-                        type="number"
-                        min={0}
-                        value={Number.isFinite(qtyInputValue) ? qtyInputValue : 0}
-                        onChange={(e) => {
-                          const raw = Math.max(0, clampNumber(e.target.value, 0));
-                          if (unitMode === "liters") {
-                            const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
-                            const nextQty = litersPerUnit > 0 ? raw / litersPerUnit : 0;
-                            updateProduct(product.id, { qty: nextQty });
-                            return;
-                          }
-                          updateProduct(product.id, { qty: raw });
-                        }}
-                        className="cpq-input cpq-input-small"
-                      />
-                    </td>
-                    <td className="cpq-muted">{display}</td>
-                    <td>{euro(unitPrice)}</td>
-                    <td className="cpq-strong">{euro(totalPrice)}</td>
-                  </tr>
-                );
-              })}
-              {scenario.products.length === 0 ? (
+          <div className="cpq-table-wrap">
+            <table className="cpq-table">
+              <thead>
                 <tr>
-                  <td colSpan={6} className="cpq-empty">
-                    Nog geen producten toegevoegd.
-                  </td>
+                  <th>Bier</th>
+                  <th>Verpakking</th>
+                  <th>Aantal</th>
+                  <th>Weergave</th>
+                  <th>Stukprijs</th>
+                  <th>Totaal</th>
+                  <th className="cpq-table-action-cell" aria-label="Acties" />
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {scenario.products.map((product) => {
+                  const display =
+                    unitMode === "liters"
+                      ? `${(product.qty * product.litersPerUnit).toFixed(1)} L`
+                      : `${product.qty} ${product.unit}`;
+                  const vatFactor =
+                    vatMode === "incl" ? 1 + Math.max(0, clampNumber(product.vatRatePct, 0)) / 100 : 1;
+                  const unitPrice = product.standardPriceEx * vatFactor;
+                  const totalPrice = product.qty * product.standardPriceEx * vatFactor;
+                  const qtyInputValue =
+                    unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
+
+                  return (
+                    <tr key={product.id}>
+                      <td>
+                        <select
+                          className="cpq-select"
+                          value={
+                            product.source?.bier_id && product.source?.product_id
+                              ? `beer:${product.source.bier_id}:product:${product.source.product_id}`
+                              : ""
+                          }
+                          onChange={(e) => onSelectRowOption(product.id, e.target.value)}
+                        >
+                          <option value="">Kies product…</option>
+                          {productOptions.map((opt) => (
+                            <option key={opt.optionId} value={opt.optionId}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="cpq-muted">{product.pack || "—"}</td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={Number.isFinite(qtyInputValue) ? qtyInputValue : 0}
+                          onChange={(e) => {
+                            const raw = Math.max(0, clampNumber(e.target.value, 0));
+                            if (unitMode === "liters") {
+                              const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
+                              const nextQty = litersPerUnit > 0 ? raw / litersPerUnit : 0;
+                              updateProduct(product.id, { qty: nextQty });
+                              return;
+                            }
+                            updateProduct(product.id, { qty: raw });
+                          }}
+                          className="cpq-input cpq-input-small"
+                        />
+                      </td>
+                      <td className="cpq-muted">{display}</td>
+                      <td>{euro(unitPrice)}</td>
+                      <td className="cpq-strong">{euro(totalPrice)}</td>
+                      <td className="cpq-table-action-cell">
+                        <button
+                          type="button"
+                          className="cpq-icon-action"
+                          onClick={() => removeProductRow(product.id)}
+                          aria-label={`Verwijder ${product.name || "productregel"}`}
+                          title="Verwijderen"
+                        >
+                          <IconTrash />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {scenario.products.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="cpq-empty">
+                      Nog geen producten toegevoegd.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <section className="cpq-card">
+          <div className="cpq-card-header">
+            <div>
+              <h3 className="cpq-card-title">Basisofferte</h3>
+              <p className="cpq-card-subtitle">
+                Dit voorstel gebruikt de productscope uit {standardPricingBlock?.type?.toLowerCase() ?? "de pricingactie"} in plaats van de basisofferte.
+              </p>
+            </div>
+          </div>
+          <div className="cpq-alert">
+            De producten in de basisofferte zijn in dit voorstel niet leidend voor de actieve pricingactie.
+            Pas de productscope aan in de {standardPricingBlock?.type?.toLowerCase() ?? "pricingactie"}-kaart.
+          </div>
+        </section>
+      )}
 
       <div className="cpq-stack">
         {hasIntro ? (
@@ -1355,7 +1418,10 @@ function BuilderStep({
         ) : null}
       </div>
 
-      <div className="cpq-actions">
+      <div className="cpq-actions cpq-actions-split">
+        <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
+          {isSaving ? "Opslaan..." : "Opslaan"}
+        </button>
         <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
           Verder naar vergelijken
         </button>
@@ -1406,6 +1472,8 @@ function CompareStep({
   setActiveScenario,
   onNext,
   onBack,
+  onSave,
+  isSaving,
 }: {
   scenarios: Record<ScenarioId, Scenario>;
   metrics: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }>;
@@ -1413,13 +1481,15 @@ function CompareStep({
   setActiveScenario: (id: ScenarioId) => void;
   onNext: () => void;
   onBack: () => void;
+  onSave: () => void;
+  isSaving: boolean;
 }) {
   return (
     <section className="cpq-card">
       <div className="cpq-card-header">
         <div>
           <h2 className="cpq-card-title">Vergelijken</h2>
-          <p className="cpq-card-subtitle">Vergelijk scenario's zonder verborgen aannames: we tonen standaard en (optioneel) introductie apart.</p>
+          <p className="cpq-card-subtitle">Vergelijk voorstellen zonder verborgen aannames: we tonen standaard en (optioneel) introductie apart.</p>
         </div>
       </div>
 
@@ -1463,9 +1533,14 @@ function CompareStep({
         <button onClick={onBack} className="cpq-button cpq-button-secondary" type="button">
           Terug
         </button>
-        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
-          Verder naar afronden
-        </button>
+        <div className="cpq-actions-inline">
+          <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
+            {isSaving ? "Opslaan..." : "Opslaan"}
+          </button>
+          <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
+            Verder naar afronden
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -1477,12 +1552,16 @@ function FinalizeStep({
   metrics,
   onBack,
   onDownload,
+  onSave,
+  isSaving,
 }: {
   basis: BasisData;
   scenario: Scenario;
   metrics: ScenarioMetrics;
   onBack: () => void;
   onDownload: () => void;
+  onSave: () => void;
+  isSaving: boolean;
 }) {
   return (
     <section className="cpq-card">
@@ -1498,7 +1577,7 @@ function FinalizeStep({
           <h3 className="cpq-panel-title">Samenvatting</h3>
           <Metric label="Klant" value={basis.klantNaam || "—"} />
           <Metric label="Kanaal" value={basis.kanaal} />
-          <Metric label="Scenario" value={scenario.name} />
+          <Metric label="Voorstel" value={scenario.name} />
           <Metric label="Omzet (ex)" value={euro(metrics.revenueEx)} />
           <Metric label="Marge" value={`${Math.round(metrics.marginPct)}%`} />
         </div>
@@ -1512,9 +1591,14 @@ function FinalizeStep({
         <button onClick={onBack} className="cpq-button cpq-button-secondary" type="button">
           Terug
         </button>
-        <button onClick={onDownload} className="cpq-button cpq-button-primary" type="button">
-          Concept downloaden (JSON stub)
-        </button>
+        <div className="cpq-actions-inline">
+          <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
+            {isSaving ? "Opslaan..." : "Opslaan"}
+          </button>
+          <button onClick={onDownload} className="cpq-button cpq-button-primary" type="button">
+            Concept downloaden (JSON stub)
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -1548,11 +1632,11 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Kpi({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function LiveSummaryMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="cpq-kpi">
-      <span className="cpq-muted">{label}</span>
-      <span className={strong ? "cpq-kpi-strong" : "cpq-kpi-value"}>{value}</span>
+    <div className="cpq-live-summary-metric">
+      <div className="cpq-live-summary-metric-label">{label}</div>
+      <div className="cpq-live-summary-metric-value">{value}</div>
     </div>
   );
 }
@@ -1613,6 +1697,21 @@ function IconTag() {
     <BaseIcon title="Korting">
       <path d="M4.8 12.0l7.2 7.2c.4.4 1 .4 1.4 0l5.8-5.8c.4-.4.4-1 0-1.4L12 4.8H7.3c-.5 0-1 .2-1.3.6L4.3 7.1c-.3.3-.5.8-.5 1.3V12z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       <circle cx="8.3" cy="8.3" r="1.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </BaseIcon>
+  );
+}
+
+function IconTrash() {
+  return (
+    <BaseIcon title="Verwijderen">
+      <path
+        d="M8 7h8m-7 0V5.8c0-.44.36-.8.8-.8h4.4c.44 0 .8.36.8.8V7m-8.4 0-.6 10.2c-.03.46.34.84.8.84h8.8c.46 0 .83-.38.8-.84L16.4 7M10 10.2v4.8M14 10.2v4.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </BaseIcon>
   );
 }

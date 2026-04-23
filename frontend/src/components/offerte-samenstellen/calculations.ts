@@ -139,6 +139,15 @@ export function calculateScenarioMetrics(
   const discountPct = discountBlock ? clampNumber(discountBlock.payload?.discountPct, 0) : 0;
   const hasStaffel = Boolean(staffelBlock);
   const hasMix = Boolean(mixBlock);
+  const discountEligibleRefs = Array.isArray(discountBlock?.payload?.eligibleRefs)
+    ? (discountBlock?.payload?.eligibleRefs as unknown[]).map(String)
+    : [];
+  const discountScope = String(discountBlock?.payload?.discountMode ?? "Totaal");
+  const discountTargets = new Set(
+    discountScope === "Regel" && discountEligibleRefs.length > 0
+      ? discountEligibleRefs
+      : lines.map((row) => row.ref)
+  );
 
   if (discountPct > 0 && (hasStaffel || hasMix)) {
     notes.push(
@@ -146,6 +155,7 @@ export function calculateScenarioMetrics(
     );
   } else if (discountPct > 0) {
     for (const row of lines) {
+      if (!discountTargets.has(row.ref)) continue;
       const current = unitPriceByRef.get(row.ref) ?? row.unitPriceEx;
       unitPriceByRef.set(row.ref, applyDiscountPct(current, discountPct));
     }

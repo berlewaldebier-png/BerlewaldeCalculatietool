@@ -16,6 +16,7 @@ type BuildBlockParams = {
   tones: Record<OptionType, string>;
   icons: Record<OptionType, ReactNode>;
   productOptions?: ProductOption[];
+  baseOfferRefs?: string[];
   existingBlockId?: string | null;
 };
 
@@ -47,6 +48,7 @@ export function buildBlockFromForm({
   tones,
   icons,
   productOptions,
+  baseOfferRefs = [],
   existingBlockId,
 }: BuildBlockParams): BuilderBlock {
   const blockId = existingBlockId ?? `${type.toLowerCase()}-${Date.now()}`;
@@ -99,9 +101,11 @@ export function buildBlockFromForm({
     }
 
     case "Staffel": {
-      const eligibleRefs = Array.isArray(form.staffelEligibleRefs)
-        ? form.staffelEligibleRefs.map(String)
-        : [];
+      const eligibleRefs = form.staffelUseBaseOfferProducts
+        ? baseOfferRefs.map(String)
+        : Array.isArray(form.staffelEligibleRefs)
+          ? form.staffelEligibleRefs.map(String)
+          : [];
       const productLabels = resolveProductLabels(productOptions, eligibleRefs);
 
       return {
@@ -131,6 +135,7 @@ export function buildBlockFromForm({
         tone: tones[type],
         appliesTo: "standard",
         payload: {
+          useBaseOfferProducts: form.staffelUseBaseOfferProducts,
           eligibleRefs,
           productLabels,
           discountMode: form.staffelDiscountMode,
@@ -180,24 +185,37 @@ export function buildBlockFromForm({
         },
       };
 
-    case "Korting":
+    case "Korting": {
+      const eligibleRefs = form.kortingUseBaseOfferProducts
+        ? baseOfferRefs.map(String)
+        : Array.isArray(form.kortingEligibleRefs)
+          ? form.kortingEligibleRefs.map(String)
+          : [];
+
       return {
         id: blockId,
         type,
         icon: icons[type],
         title: "Korting",
         subtitle: `${normalizeText(form.discountMode) || "Totaal"} korting`,
-        lines: [`${normalizeText(form.discountValue) || "0"}% korting op verkoopprijs`],
+        lines: [
+          `${normalizeText(form.discountValue) || "0"}% korting op verkoopprijs`,
+          `Producten: ${
+            eligibleRefs.length > 0
+              ? resolveProductLabels(productOptions, eligibleRefs).join(", ")
+              : "Alle producten in dit voorstel"
+          }`,
+        ],
         tone: tones[type],
         appliesTo: activePeriod as QuoteBlockContext,
         payload: {
+          useBaseOfferProducts: form.kortingUseBaseOfferProducts,
           discountMode: normalizeText(form.discountMode || "Totaal"),
           discountPct: clampNumber(form.discountValue, 0),
-          eligibleRefs: Array.isArray(form.kortingEligibleRefs)
-            ? form.kortingEligibleRefs.map(String)
-            : [],
+          eligibleRefs,
         },
       };
+    }
 
     case "Transport": {
       const distance = clampNumber(form.transportDistanceKm, 0);

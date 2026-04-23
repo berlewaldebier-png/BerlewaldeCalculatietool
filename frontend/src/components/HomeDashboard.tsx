@@ -149,11 +149,13 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                 key={item.label}
                 href={item.href as Route}
                 className={`dashboard-sidebar-link${item.active ? " is-active" : ""}`}
+                aria-label={item.label}
+                title={item.label}
               >
                 <span className="dashboard-sidebar-icon">
                   <MenuIcon />
                 </span>
-                <span>{item.label}</span>
+                <span className="dashboard-sidebar-label">{item.label}</span>
               </Link>
             ))}
           </nav>

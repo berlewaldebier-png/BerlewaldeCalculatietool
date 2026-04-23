@@ -87,11 +87,11 @@ export function PageShell({ title, subtitle, activePath, navigation, children }:
             </div>
 
             <nav className="dashboard-sidebar-nav" aria-label="Paginanavigatie">
-              <Link href="/" className="dashboard-sidebar-link is-active">
+              <Link href="/" className="dashboard-sidebar-link is-active" aria-label="Overzicht" title="Overzicht">
                 <span className="dashboard-sidebar-icon">
                   <OverviewIcon />
                 </span>
-                <span>Overzicht</span>
+                <span className="dashboard-sidebar-label">Overzicht</span>
               </Link>
             </nav>
 

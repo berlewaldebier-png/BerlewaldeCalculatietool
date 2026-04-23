@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useMemo, useState } from "react";
 
 import {
+  BooleanField,
   EmptyHint,
   ErrorField,
   Idea,
@@ -27,6 +28,7 @@ type Props = {
   form: QuoteFormState;
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
+  baseOfferRefs: string[];
 };
 
 function updateRows(
@@ -112,17 +114,37 @@ function updateSelectedProducts(
   };
 }
 
-export function getStaffelFormError(form: QuoteFormState, products: ProductOption[] = []) {
-  if (form.staffelEligibleRefs.length === 0) {
+export function getStaffelFormError(
+  form: QuoteFormState,
+  products: ProductOption[] = [],
+  baseOfferRefs: string[] = []
+) {
+  return getStaffelFormErrorForRefs(
+    form,
+    products,
+    form.staffelUseBaseOfferProducts ? baseOfferRefs : form.staffelEligibleRefs
+  );
+}
+
+export function getStaffelFormErrorForRefs(
+  form: QuoteFormState,
+  products: ProductOption[] = [],
+  refs: string[] = []
+) {
+  if (form.staffelUseBaseOfferProducts && refs.length === 0) {
+    return "Basisofferte bevat nog geen producten om een staffel op toe te passen.";
+  }
+
+  if (!form.staffelUseBaseOfferProducts && refs.length === 0) {
     return "Selecteer minstens een product voor de staffel.";
   }
 
-  const compatibility = getStaffelCompatibilityInfo(products, form.staffelEligibleRefs);
+  const compatibility = getStaffelCompatibilityInfo(products, refs);
   if (compatibility.hasMixedCompatibility) {
     return "De gekozen producten vallen niet binnen dezelfde staffelcategorie.";
   }
 
-  if (form.staffelDiscountMode === "free" && form.staffelEligibleRefs.length > 1) {
+  if (form.staffelDiscountMode === "free" && refs.length > 1) {
     return "Vrij invullen is voorlopig alleen beschikbaar voor een product tegelijk.";
   }
 
@@ -158,12 +180,13 @@ function StaffelModeButton({
   );
 }
 
-export function StaffelForm({ form, setForm, products }: Props) {
+export function StaffelForm({ form, setForm, products, baseOfferRefs }: Props) {
   const [showHelp, setShowHelp] = useState(false);
+  const effectiveRefs = form.staffelUseBaseOfferProducts ? baseOfferRefs : form.staffelEligibleRefs;
 
   const selectedProducts = useMemo(
-    () => resolveSelectedProducts(products, form.staffelEligibleRefs),
-    [products, form.staffelEligibleRefs]
+    () => resolveSelectedProducts(products, effectiveRefs),
+    [products, effectiveRefs]
   );
   const validation = useMemo(
     () =>
@@ -172,7 +195,7 @@ export function StaffelForm({ form, setForm, products }: Props) {
       }),
     [form.staffelDiscountMode, form.staffelRows]
   );
-  const error = getStaffelFormError(form, products);
+  const error = getStaffelFormErrorForRefs(form, products, effectiveRefs);
   const showMasterPriceColumn = form.staffelDiscountMode === "free";
 
   return (
@@ -195,15 +218,29 @@ export function StaffelForm({ form, setForm, products }: Props) {
 
         <div className="cpq-staffel-section cpq-staffel-picker">
           <div className="cpq-label">Producten voor deze staffel</div>
-          <ProductPickerTable
-            products={products}
-            selectedRefs={form.staffelEligibleRefs}
-            strictCompatibility
-            emptyHint="Voeg eerst een bierstijl en verpakking toe om de staffel te starten."
-            onChange={(nextRefs) =>
-              setForm((prev) => updateSelectedProducts(prev, nextRefs, products))
+          <BooleanField
+            label={`Gebruik basisofferte-producten${baseOfferRefs.length > 0 ? ` (${baseOfferRefs.length})` : ""}`}
+            checked={form.staffelUseBaseOfferProducts}
+            onChange={(checked) =>
+              setForm((prev) => ({
+                ...prev,
+                staffelUseBaseOfferProducts: checked,
+              }))
             }
           />
+          {form.staffelUseBaseOfferProducts ? (
+            <Idea text="De staffel gebruikt de producten uit de basisofferte. Pas daar de productscope aan als je andere producten wilt meenemen." />
+          ) : (
+            <ProductPickerTable
+              products={products}
+              selectedRefs={form.staffelEligibleRefs}
+              strictCompatibility
+              emptyHint="Voeg eerst een bierstijl en verpakking toe om de staffel te starten."
+              onChange={(nextRefs) =>
+                setForm((prev) => updateSelectedProducts(prev, nextRefs, products))
+              }
+            />
+          )}
         </div>
 
         <div className="cpq-staffel-section">
