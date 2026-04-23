@@ -103,6 +103,16 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         kortingEligibleRefs: asStringArray(payload.eligibleRefs),
       };
 
+    case "Groothandel":
+      return {
+        ...initial,
+        wholesaleUseBaseOfferProducts: Boolean(
+          payload.useBaseOfferProducts ?? initial.wholesaleUseBaseOfferProducts
+        ),
+        wholesaleMarginPct: String(payload.marginPct ?? initial.wholesaleMarginPct),
+        wholesaleEligibleRefs: asStringArray(payload.eligibleRefs),
+      };
+
     case "Transport":
       return {
         ...initial,

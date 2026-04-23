@@ -217,6 +217,37 @@ export function buildBlockFromForm({
       };
     }
 
+    case "Groothandel": {
+      const eligibleRefs = form.wholesaleUseBaseOfferProducts
+        ? baseOfferRefs.map(String)
+        : Array.isArray(form.wholesaleEligibleRefs)
+          ? form.wholesaleEligibleRefs.map(String)
+          : [];
+      const productLabels = resolveProductLabels(productOptions, eligibleRefs);
+      const marginPct = clampNumber(form.wholesaleMarginPct, 0);
+
+      return {
+        id: blockId,
+        type,
+        icon: icons[type],
+        title: "Groothandel",
+        subtitle: `${normalizeText(form.wholesaleMarginPct) || "0"}% kanaalmarge`,
+        lines: [
+          `Gewenste groothandelsmarge: ${normalizeText(form.wholesaleMarginPct) || "0"}%`,
+          `Producten: ${productLabels.length > 0 ? productLabels.join(", ") : "Alle producten in dit voorstel"}`,
+          "Verkoopprijs aan groothandel wordt teruggerekend vanaf de huidige horeca-sell-in prijs.",
+        ],
+        tone: tones[type],
+        appliesTo: activePeriod as QuoteBlockContext,
+        payload: {
+          useBaseOfferProducts: form.wholesaleUseBaseOfferProducts,
+          marginPct,
+          eligibleRefs,
+          productLabels,
+        },
+      };
+    }
+
     case "Transport": {
       const distance = clampNumber(form.transportDistanceKm, 0);
       const rate = clampNumber(form.transportRateEx, 0);

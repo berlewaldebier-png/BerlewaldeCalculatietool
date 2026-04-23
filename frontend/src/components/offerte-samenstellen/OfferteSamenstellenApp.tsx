@@ -38,12 +38,19 @@ import {
   type BreakEvenResult,
 } from "@/components/break-even/breakEvenUtils";
 import type {
+  BasisData,
+  BuilderBlock,
+  OptionType,
   ProductOption,
   QuoteBreakEvenSnapshot,
+  QuoteChannel,
   QuoteDraft,
   QuoteDraftSnapshot,
   QuoteFormState,
+  QuoteProduct,
+  QuoteScenario,
   ScenarioMetrics,
+  ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
 
 type GenericRecord = Record<string, unknown>;
@@ -53,78 +60,20 @@ type UnitMode = "producten" | "liters";
 type VatMode = "incl" | "excl";
 type ScenarioId = "A" | "B" | "C";
 
-type QuoteChannel = "Horeca" | "Retail" | "Events";
-
-type QuoteProduct = {
-  id: string;
-  name: string;
-  pack: string;
-  qty: number;
-  litersPerUnit: number;
-  unit: "fust" | "doos" | "fles";
-  standardPriceEx: number;
-  costPriceEx: number;
-  vatRatePct: number;
-  source?: {
-    bier_id?: string;
-    product_id?: string;
-    kostprijsversie_id?: string;
-  };
-};
-
-type OptionType =
-  | "Intro"
-  | "Staffel"
-  | "Mix"
-  | "Korting"
-  | "Transport"
-  | "Retour"
-  | "Proeverij"
-  | "Tapverhuur";
-
-type ToolbarGroup = { title: string; items: Array<{ icon: React.ReactNode; label: OptionType }> };
-
-type BuilderBlock = {
-  id: string;
-  type: OptionType;
-  title: string;
-  subtitle: string;
-  lines: string[];
-  tone: string;
-  icon: React.ReactNode;
-  impact?: string;
-  appliesTo?: "intro" | "standard" | "global";
-  // Minimal payload for v1 calculations. Kept explicit to avoid hidden magic.
-  payload?: Record<string, unknown>;
-};
-
 function isPricingActionBlock(block: BuilderBlock) {
-  return block.type === "Staffel" || block.type === "Korting" || block.type === "Mix";
+  return (
+    block.type === "Staffel" ||
+    block.type === "Korting" ||
+    block.type === "Mix" ||
+    block.type === "Groothandel"
+  );
 }
 
 function usesBaseOfferProducts(block: BuilderBlock | undefined) {
   return Boolean(block?.payload?.useBaseOfferProducts ?? true);
 }
 
-type Scenario = {
-  id: ScenarioId;
-  name: string;
-  // Products are the base quote lines for this scenario.
-  products: QuoteProduct[];
-  // Blocks represent pricing rules/services for this scenario.
-  blocks: BuilderBlock[];
-  note?: string;
-  intro?: { start: string; end: string } | null;
-};
-
-type BasisData = {
-  klantNaam: string;
-  contactpersoon: string;
-  kanaal: QuoteChannel;
-  offerteNaam: string;
-  geldigTot: string;
-  opmerking: string;
-};
+type Scenario = QuoteScenario;
 
 type Props = {
   year: number;
@@ -149,6 +98,7 @@ const tones: Record<OptionType, string> = {
   Staffel: "cpq-tone-staffel",
   Mix: "cpq-tone-mix",
   Korting: "cpq-tone-korting",
+  Groothandel: "cpq-tone-korting",
   Transport: "cpq-tone-transport",
   Retour: "cpq-tone-retour",
   Proeverij: "cpq-tone-proeverij",
@@ -160,6 +110,7 @@ const icons: Record<OptionType, React.ReactNode> = {
   Staffel: <IconChart />,
   Mix: <IconShuffle />,
   Korting: <IconTag />,
+  Groothandel: <IconStorefront />,
   Transport: <IconTruck />,
   Retour: <IconReturn />,
   Proeverij: <IconBeer />,
@@ -174,6 +125,7 @@ const toolbarGroups: ToolbarGroup[] = [
       { icon: icons.Staffel, label: "Staffel" },
       { icon: icons.Mix, label: "Mix" },
       { icon: icons.Korting, label: "Korting" },
+      { icon: icons.Groothandel, label: "Groothandel" },
     ],
   },
   {
@@ -694,6 +646,7 @@ export function OfferteSamenstellenApp({
       "Staffel",
       "Mix",
       "Korting",
+      "Groothandel",
       "Transport",
       "Retour",
       "Proeverij",
@@ -1701,6 +1654,21 @@ function IconTag() {
     <BaseIcon title="Korting">
       <path d="M4.8 12.0l7.2 7.2c.4.4 1 .4 1.4 0l5.8-5.8c.4-.4.4-1 0-1.4L12 4.8H7.3c-.5 0-1 .2-1.3.6L4.3 7.1c-.3.3-.5.8-.5 1.3V12z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       <circle cx="8.3" cy="8.3" r="1.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </BaseIcon>
+  );
+}
+
+function IconStorefront() {
+  return (
+    <BaseIcon title="Groothandel">
+      <path
+        d="M5.2 10.2h13.6v8.3H5.2zm1-4.5h11.6l1 3.3H5.2zm3.1 8.1v4.7m5.4-4.7v4.7"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </BaseIcon>
   );
 }

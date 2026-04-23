@@ -35,6 +35,7 @@ export type OptionType =
   | "Staffel"
   | "Mix"
   | "Korting"
+  | "Groothandel"
   | "Transport"
   | "Retour"
   | "Proeverij"
@@ -218,6 +219,9 @@ export type QuoteFormState = {
   discountMode: string;
   discountValue: string;
   kortingEligibleRefs: string[];
+  wholesaleUseBaseOfferProducts: boolean;
+  wholesaleEligibleRefs: string[];
+  wholesaleMarginPct: string;
   transportDistanceKm: string;
   transportRateEx: string;
   transportDeliveries: string;

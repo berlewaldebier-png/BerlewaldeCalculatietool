@@ -17,7 +17,7 @@ type EvaluateOptionParams = {
   editingBlockId?: string | null;
 };
 
-const PRICING_RULE_TYPES: OptionType[] = ["Staffel", "Mix", "Korting"];
+const PRICING_RULE_TYPES: OptionType[] = ["Staffel", "Mix", "Korting", "Groothandel"];
 
 function isPricingRule(type: OptionType) {
   return PRICING_RULE_TYPES.includes(type);

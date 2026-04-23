@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import type { OptionAvailability } from "@/components/offerte-samenstellen/conflictRules";
+import { GroothandelForm, getGroothandelFormError } from "@/components/offerte-samenstellen/forms/GroothandelForm";
 import { IntroForm, getIntroFormError } from "@/components/offerte-samenstellen/forms/IntroForm";
 import { KortingForm, getKortingFormError } from "@/components/offerte-samenstellen/forms/KortingForm";
 import { MixDealForm } from "@/components/offerte-samenstellen/forms/MixDealForm";
@@ -55,9 +56,16 @@ export function ToolbarOptionDialog({
     selectedOption === "Staffel" ? getStaffelFormError(form, productOptions, baseOfferRefs) : "";
   const kortingError =
     selectedOption === "Korting" ? getKortingFormError(form, baseOfferRefs) : "";
+  const groothandelError =
+    selectedOption === "Groothandel" ? getGroothandelFormError(form, baseOfferRefs) : "";
   const saveBlockedReason =
-    introError || staffelError || kortingError || selectedOptionAvailability.reasons[0] || "";
-  const canSave = selectedOptionAvailability.allowed && !introError && !staffelError && !kortingError;
+    introError || staffelError || kortingError || groothandelError || selectedOptionAvailability.reasons[0] || "";
+  const canSave =
+    selectedOptionAvailability.allowed &&
+    !introError &&
+    !staffelError &&
+    !kortingError &&
+    !groothandelError;
   const contextLabel = getContextLabel(selectedOption, hasIntro);
 
   return (
@@ -108,6 +116,14 @@ export function ToolbarOptionDialog({
           ) : null}
           {selectedOption === "Korting" ? (
             <KortingForm
+              form={form}
+              setForm={setForm}
+              products={productOptions}
+              baseOfferRefs={baseOfferRefs}
+            />
+          ) : null}
+          {selectedOption === "Groothandel" ? (
+            <GroothandelForm
               form={form}
               setForm={setForm}
               products={productOptions}

@@ -27,6 +27,7 @@ export function calculateScenarioMetrics(
 
   const staffelBlock = periodBlocks.find((block) => block.type === "Staffel");
   const discountBlock = periodBlocks.find((block) => block.type === "Korting");
+  const wholesaleBlock = periodBlocks.find((block) => block.type === "Groothandel");
   const mixBlock = periodBlocks.find((block) => block.type === "Mix");
   const returnBlock = periodBlocks.find((block) => block.type === "Retour");
   const introBlock = periodBlocks.find((block) => block.type === "Intro");
@@ -165,6 +166,27 @@ export function calculateScenarioMetrics(
       if (!discountTargets.has(row.ref)) continue;
       const current = unitPriceByRef.get(row.ref) ?? row.unitPriceEx;
       unitPriceByRef.set(row.ref, applyDiscountPct(current, discountPct));
+    }
+  }
+
+  const wholesaleMarginPct = wholesaleBlock ? clampNumber(wholesaleBlock.payload?.marginPct, 0) : 0;
+  const wholesaleEligibleRefs = Array.isArray(wholesaleBlock?.payload?.eligibleRefs)
+    ? (wholesaleBlock?.payload?.eligibleRefs as unknown[]).map(String)
+    : [];
+  const wholesaleTargets = new Set(
+    wholesaleEligibleRefs.length > 0 ? wholesaleEligibleRefs : lines.map((row) => row.ref)
+  );
+
+  if (wholesaleMarginPct > 0 && (hasStaffel || hasMix || discountPct > 0)) {
+    notes.push(
+      "Groothandel-pricing is genegeerd: deze actie is niet combineerbaar met andere pricingacties in dezelfde periode."
+    );
+  } else if (wholesaleMarginPct > 0) {
+    const factor = 1 + wholesaleMarginPct / 100;
+    for (const row of lines) {
+      if (!wholesaleTargets.has(row.ref)) continue;
+      const current = unitPriceByRef.get(row.ref) ?? row.unitPriceEx;
+      unitPriceByRef.set(row.ref, factor > 0 ? current / factor : current);
     }
   }
 
