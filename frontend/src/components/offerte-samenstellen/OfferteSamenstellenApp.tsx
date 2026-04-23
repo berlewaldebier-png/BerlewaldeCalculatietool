@@ -276,8 +276,8 @@ export function OfferteSamenstellenApp({
     () => buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult),
     [activeBreakEvenConfig, breakEvenResult]
   );
-  const effectiveBreakEvenSnapshot =
-    draftMeta.status === "definitief" ? savedBreakEvenSnapshot ?? currentBreakEvenSnapshot : currentBreakEvenSnapshot;
+  const hasFrozenBreakEvenSnapshot = Boolean(savedBreakEvenSnapshot?.configId);
+  const effectiveBreakEvenSnapshot = savedBreakEvenSnapshot ?? currentBreakEvenSnapshot;
 
   const [scenarios, setScenarios] = useState<Record<ScenarioId, Scenario>>(
     () => createInitialQuoteDraft(year).scenarios
@@ -478,10 +478,7 @@ export function OfferteSamenstellenApp({
   }
 
   function buildCurrentDraftSnapshot(nextMeta: QuoteDraft["meta"]) {
-    const snapshotBreakEven =
-      nextMeta.status === "definitief"
-        ? savedBreakEvenSnapshot ?? currentBreakEvenSnapshot
-        : currentBreakEvenSnapshot;
+    const snapshotBreakEven = savedBreakEvenSnapshot ?? currentBreakEvenSnapshot;
     return buildQuoteDraftSnapshot({
       meta: nextMeta,
       year: currentYear,
@@ -892,7 +889,9 @@ export function OfferteSamenstellenApp({
                 <p className="cpq-panel-text cpq-break-even-note">
                   {draftMeta.status === "definitief"
                     ? `Definitieve offerte rekent met snapshot ${effectiveBreakEvenSnapshot.configName}.`
-                    : `Actieve break-even: ${effectiveBreakEvenSnapshot.configName}. Conceptoffertes gebruiken de actieve versie; bij opslaan wordt een snapshot meegeschreven.`}
+                    : hasFrozenBreakEvenSnapshot
+                      ? `Conceptofferte rekent met opgeslagen snapshot ${effectiveBreakEvenSnapshot.configName}. Nieuwe offertes gebruiken de actuele actieve break-even.`
+                      : `Actieve break-even: ${effectiveBreakEvenSnapshot.configName}. Bij de eerste save wordt deze snapshot vastgezet voor deze offerte.`}
                 </p>
               ) : (
                 <p className="cpq-panel-text cpq-break-even-note">
