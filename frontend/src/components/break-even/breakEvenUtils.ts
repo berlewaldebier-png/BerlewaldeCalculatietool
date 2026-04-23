@@ -4,6 +4,12 @@ type GenericRecord = Record<string, unknown>;
 
 export type BreakEvenMixMode = "product" | "packaging";
 export type BreakEvenConfigKind = "basis" | "scenario";
+export type BreakEvenScenarioType =
+  | "pricing"
+  | "costs"
+  | "volume"
+  | "combined"
+  | "custom";
 export type BreakEvenScenarioAdjustmentType =
   | "price_pct"
   | "fixed_cost_eur"
@@ -24,6 +30,7 @@ export type BreakEvenConfig = {
   jaar: number;
   naam: string;
   kind: BreakEvenConfigKind;
+  scenario_type: BreakEvenScenarioType | null;
   parent_config_id: string | null;
   is_active_for_quotes: boolean;
   mix_mode: BreakEvenMixMode;
@@ -114,6 +121,7 @@ export function createBreakEvenConfig(
     jaar: year,
     naam: kind === "scenario" ? `Scenario ${year}` : `Break-even basis ${year}`,
     kind,
+    scenario_type: kind === "scenario" ? "custom" : null,
     parent_config_id: null,
     is_active_for_quotes: false,
     mix_mode: "product",
@@ -133,6 +141,7 @@ export function normalizeBreakEvenConfig(row: unknown, fallbackYear: number): Br
   const id = String(source.id ?? "").trim() || `be-${jaar}-${Math.random().toString(16).slice(2)}`;
   const mixMode = source.mix_mode === "packaging" ? "packaging" : "product";
   const kind = source.kind === "scenario" ? "scenario" : "basis";
+  const scenarioType = normalizeScenarioType(source.scenario_type);
   const parentConfigId = String(source.parent_config_id ?? "").trim() || null;
 
   return {
@@ -140,6 +149,7 @@ export function normalizeBreakEvenConfig(row: unknown, fallbackYear: number): Br
     jaar,
     naam: String(source.naam ?? `Break-even ${jaar}`),
     kind,
+    scenario_type: kind === "scenario" ? scenarioType ?? "custom" : null,
     parent_config_id: kind === "scenario" ? parentConfigId : null,
     is_active_for_quotes: Boolean(source.is_active_for_quotes),
     mix_mode: mixMode,
@@ -164,6 +174,7 @@ export function createScenarioFromBase(base: BreakEvenConfig) {
     id: `be-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
     naam: `${base.naam} scenario`,
     kind: "scenario" as const,
+    scenario_type: "custom" as const,
     parent_config_id: base.id,
     is_active_for_quotes: false,
     adjustments: [],
@@ -455,6 +466,20 @@ function normalizeAdjustmentType(value: unknown): BreakEvenScenarioAdjustmentTyp
     type === "fixed_cost_pct" ||
     type === "variable_cost_pct" ||
     type === "volume_mix_pct"
+  ) {
+    return type;
+  }
+  return null;
+}
+
+function normalizeScenarioType(value: unknown): BreakEvenScenarioType | null {
+  const type = String(value ?? "").trim();
+  if (
+    type === "pricing" ||
+    type === "costs" ||
+    type === "volume" ||
+    type === "combined" ||
+    type === "custom"
   ) {
     return type;
   }

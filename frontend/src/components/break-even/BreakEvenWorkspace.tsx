@@ -16,6 +16,7 @@ import {
   type BreakEvenScenarioAdjustment,
   type BreakEvenScenarioAdjustmentType,
   type BreakEvenConfig,
+  type BreakEvenScenarioType,
 } from "@/components/break-even/breakEvenUtils";
 
 type GenericRecord = Record<string, unknown>;
@@ -350,7 +351,7 @@ export function BreakEvenWorkspace({
                   >
                     <span>{scenario.naam}</span>
                     <small>
-                      scenario
+                      {formatScenarioTypeLabel(scenario.scenario_type)}
                       {scenario.is_active_for_quotes ? " - actief voor offertes" : ""}
                     </small>
                   </button>
@@ -426,6 +427,26 @@ export function BreakEvenWorkspace({
                       }
                     />
                   </label>
+                  {activeConfig.kind === "scenario" ? (
+                    <label className="cpq-field">
+                      <span className="cpq-label">Scenariofocus</span>
+                      <select
+                        className="cpq-select"
+                        value={activeConfig.scenario_type ?? "custom"}
+                        onChange={(event) =>
+                          updateConfig({
+                            scenario_type: event.target.value as BreakEvenScenarioType,
+                          })
+                        }
+                      >
+                        <option value="pricing">Prijs</option>
+                        <option value="costs">Kosten</option>
+                        <option value="volume">Volume</option>
+                        <option value="combined">Combinatie</option>
+                        <option value="custom">Vrij</option>
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
                 {activeConfig.kind === "scenario" && activeBaseConfig ? (
                   <div className="cpq-alert">
@@ -460,6 +481,9 @@ export function BreakEvenWorkspace({
                       <div className="module-card-text" style={{ marginBottom: 12 }}>
                         Combineer prijs-, kosten- en volume-aanpassingen. De effectieve mix hieronder
                         wordt automatisch afgeleid uit de basis plus deze wijzigingen.
+                      </div>
+                      <div className="cpq-alert" style={{ marginBottom: 12 }}>
+                        Focus: <strong>{formatScenarioTypeLabel(activeConfig.scenario_type)}</strong>
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                         <button
@@ -528,9 +552,31 @@ export function BreakEvenWorkspace({
                     </div>
 
                     <div className="cpq-panel">
-                      <div className="cpq-panel-title">Samenvatting scenario</div>
+                      <div className="cpq-panel-title">Scenario-overzicht</div>
                       <div className="cpq-panel-subtitle" style={{ marginBottom: 12 }}>
-                        Toegepaste koerswijzigingen in dit scenario.
+                        Basisreferentie en toegepaste koerswijzigingen.
+                      </div>
+                      <div className="cpq-stack" style={{ marginBottom: 12 }}>
+                        <div className="cpq-block tone-neutral">
+                          <div className="cpq-block-row">
+                            <div className="cpq-block-body">
+                              <div className="cpq-block-title">Gebaseerd op</div>
+                              <div className="cpq-block-subtitle">
+                                {activeBaseConfig?.naam ?? "Geen basis gekoppeld"}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="cpq-block tone-neutral">
+                          <div className="cpq-block-row">
+                            <div className="cpq-block-body">
+                              <div className="cpq-block-title">Type</div>
+                              <div className="cpq-block-subtitle">
+                                {formatScenarioTypeLabel(activeConfig.scenario_type)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       <ScenarioSummary
                         adjustments={activeConfig.adjustments}
@@ -864,4 +910,12 @@ function formatAdjustmentValue(adjustment: BreakEvenScenarioAdjustment) {
     return `${adjustment.value >= 0 ? "+" : ""}${formatMoney(adjustment.value)}`;
   }
   return `${adjustment.value >= 0 ? "+" : ""}${formatNumber(adjustment.value, 1)}%`;
+}
+
+function formatScenarioTypeLabel(type: BreakEvenScenarioType | null) {
+  if (type === "pricing") return "Scenario prijs";
+  if (type === "costs") return "Scenario kosten";
+  if (type === "volume") return "Scenario volume";
+  if (type === "combined") return "Scenario combinatie";
+  return "Scenario vrij";
 }
