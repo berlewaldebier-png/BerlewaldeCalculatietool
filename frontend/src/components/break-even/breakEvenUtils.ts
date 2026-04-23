@@ -1,8 +1,4 @@
-import {
-  buildChannelDefaultOpslagMap,
-  buildSellInLookup,
-  resolveSellInPriceEx,
-} from "@/components/offerte-samenstellen/sellInResolver";
+import { buildProductFacts } from "@/lib/productFacts";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -130,100 +126,32 @@ export function buildBreakEvenProductLines(params: {
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
 }) {
-  const beerNameById = new Map<string, string>();
-  params.bieren.forEach((row) => {
-    const id = text((row as any).id);
-    if (!id) return;
-    beerNameById.set(id, text((row as any).biernaam || (row as any).naam || id));
+  const factsIndex = buildProductFacts({
+    ...params,
+    channelCode: "horeca",
   });
 
-  const masterByProductId = new Map<string, { pack: string; litersPerUnit: number }>();
-  [...params.basisproducten, ...params.samengesteldeProducten].forEach((row) => {
-    const id = text((row as any).id);
-    if (!id) return;
-    masterByProductId.set(id, {
-      pack: text((row as any).omschrijving || (row as any).verpakking || id),
-      litersPerUnit: toNumber((row as any).inhoud_per_eenheid_liter, 0),
-    });
-  });
-
-  const versionById = new Map<string, GenericRecord>();
-  params.kostprijsversies.forEach((row) => {
-    const id = text((row as any).id);
-    if (id) versionById.set(id, row);
-  });
-
-  const sellInLookup = buildSellInLookup(params.verkoopprijzen, params.year);
-  const channelDefaultOpslag = buildChannelDefaultOpslagMap(params.channels);
-
-  const lines: BreakEvenProductLine[] = [];
-  const seen = new Set<string>();
-
-  params.kostprijsproductactiveringen
-    .filter((row) => toNumber((row as any).jaar, 0) === params.year)
-    .forEach((activation) => {
-      const bierId = text((activation as any).bier_id);
-      const productId = text((activation as any).product_id);
-      const kostprijsversieId = text((activation as any).kostprijsversie_id);
-      if (!bierId || !productId || !kostprijsversieId) return;
-
-      const ref = `beer:${bierId}:product:${productId}`;
-      if (seen.has(ref)) return;
-      seen.add(ref);
-
-      const version = versionById.get(kostprijsversieId);
-      const snapshotProducts = ((version as any)?.resultaat_snapshot?.producten ?? {}) as Record<string, unknown>;
-      const productRows = [
-        ...(Array.isArray(snapshotProducts.basisproducten) ? snapshotProducts.basisproducten : []),
-        ...(Array.isArray(snapshotProducts.samengestelde_producten) ? snapshotProducts.samengestelde_producten : []),
-      ] as GenericRecord[];
-      const snapshotRow = productRows.find((row) => text((row as any).product_id) === productId) ?? {};
-      const master = masterByProductId.get(productId);
-      const packLabel = master?.pack || text((snapshotRow as any).verpakking || productId);
-      const litersPerUnit =
-        master?.litersPerUnit ||
-        toNumber((snapshotRow as any).liters_per_product ?? (snapshotRow as any).inhoud_per_eenheid_liter, 0);
-      const costPriceEx = toNumber((snapshotRow as any).kostprijs, 0);
-      const fixedCostAllocationEx = toNumber(
-        (snapshotRow as any).vaste_kosten ?? (snapshotRow as any).vaste_directe_kosten,
-        0
-      );
-      const variableCostEx = Math.max(0, costPriceEx - fixedCostAllocationEx);
-      const sellInEx = resolveSellInPriceEx({
-        bierId,
-        productId,
-        costPriceEx,
-        channelCode: "horeca",
-        lookup: sellInLookup,
-        channelDefaultOpslag,
-      }).sellInEx;
-      const warnings: string[] = [];
-      if (litersPerUnit <= 0) warnings.push("Literinhoud ontbreekt.");
-      if (costPriceEx <= 0) warnings.push("Kostprijs ontbreekt.");
-      if (fixedCostAllocationEx <= 0) warnings.push("Vaste kostentoerekening ontbreekt.");
-      if (sellInEx <= 0) warnings.push("Sell-in prijs ontbreekt.");
-
-      lines.push({
-        ref,
-        bierId,
-        productId,
-        label: `${beerNameById.get(bierId) || bierId} - ${packLabel}`,
-        packLabel,
-        packType: inferPackType(packLabel),
-        litersPerUnit,
-        sellInEx,
-        costPriceEx,
-        fixedCostAllocationEx,
-        variableCostEx,
-        sellInPerLiter: litersPerUnit > 0 ? sellInEx / litersPerUnit : 0,
-        variableCostPerLiter: litersPerUnit > 0 ? variableCostEx / litersPerUnit : 0,
-        contributionPerLiter:
-          litersPerUnit > 0 ? (sellInEx - variableCostEx) / litersPerUnit : 0,
-        warnings,
-      });
-    });
-
-  return lines.sort((a, b) => a.label.localeCompare(b.label));
+  return factsIndex.facts.map((fact) => ({
+    ref: fact.ref,
+    bierId: fact.bierId,
+    productId: fact.productId,
+    label: fact.label.replace(" · ", " - "),
+    packLabel: fact.packLabel,
+    packType: fact.packType,
+    litersPerUnit: fact.litersPerUnit,
+    sellInEx: fact.sellInEx,
+    costPriceEx: fact.costPriceEx,
+    fixedCostAllocationEx: fact.fixedCostAllocationEx,
+    variableCostEx: fact.variableCostEx,
+    sellInPerLiter: fact.litersPerUnit > 0 ? fact.sellInEx / fact.litersPerUnit : 0,
+    variableCostPerLiter:
+      fact.litersPerUnit > 0 ? fact.variableCostEx / fact.litersPerUnit : 0,
+    contributionPerLiter:
+      fact.litersPerUnit > 0
+        ? (fact.sellInEx - fact.variableCostEx) / fact.litersPerUnit
+        : 0,
+    warnings: [...fact.warnings],
+  }));
 }
 
 export function calculateBreakEvenResult(
@@ -386,13 +314,6 @@ export function calculateBreakEvenPackSummaries(
   return Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export function inferPackType(packLabel: string) {
-  const lower = packLabel.toLowerCase();
-  if (lower.includes("fust")) return "fust";
-  if (lower.includes("doos")) return "doos";
-  return "fles";
-}
-
 export function formatMoney(value: number) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(
     Number.isFinite(value) ? value : 0
@@ -418,10 +339,6 @@ function normalizeNumberMap(value: unknown) {
       .map(([key, raw]) => [key, toNumber(raw, 0)] as const)
       .filter(([key]) => key.trim())
   );
-}
-
-function text(value: unknown) {
-  return String(value ?? "").trim();
 }
 
 function round(value: number) {
