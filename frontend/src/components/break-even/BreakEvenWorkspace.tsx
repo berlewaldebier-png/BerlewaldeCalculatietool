@@ -223,6 +223,47 @@ export function BreakEvenWorkspace({
     );
   }
 
+  function promoteScenarioToBase() {
+    if (!activeConfig || activeConfig.kind !== "scenario") return;
+    const confirmed = window.confirm(
+      [
+        `Promoveer "${activeConfig.naam}" naar nieuwe break-even basis?`,
+        "",
+        "Gevolgen:",
+        "- deze versie wordt een basisvariant",
+        "- deze versie wordt actief voor nieuwe offertes in dit jaar",
+        "- bestaande offertes houden hun eigen snapshot",
+      ].join("\n")
+    );
+    if (!confirmed) return;
+
+    setConfigs((current) =>
+      current.map((config) => {
+        if (config.id === activeConfig.id) {
+          return {
+            ...config,
+            kind: "basis" as const,
+            parent_config_id: null,
+            naam: normalizePromotedBaseName(config.naam, config.jaar),
+            is_active_for_quotes: true,
+            updated_at: new Date().toISOString(),
+          };
+        }
+
+        if (config.jaar === activeConfig.jaar && config.id !== activeConfig.id) {
+          return {
+            ...config,
+            is_active_for_quotes: false,
+            updated_at: new Date().toISOString(),
+          };
+        }
+
+        return config;
+      })
+    );
+    setStatus(`"${activeConfig.naam}" is gepromoveerd naar break-even basis.`);
+  }
+
   async function saveConfigs() {
     setIsSaving(true);
     setStatus("");
@@ -390,6 +431,17 @@ export function BreakEvenWorkspace({
                   <div className="cpq-alert">
                     Scenario gebaseerd op <strong>{activeBaseConfig.naam}</strong>. Als deze koers de nieuwe werkelijkheid wordt,
                     kun je dit scenario activeren voor offertes.
+                  </div>
+                ) : null}
+                {activeConfig.kind === "scenario" ? (
+                  <div className="cpq-actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
+                    <button
+                      className="cpq-button cpq-button-primary"
+                      type="button"
+                      onClick={promoteScenarioToBase}
+                    >
+                      Promoveer naar basis
+                    </button>
                   </div>
                 ) : null}
               </section>
@@ -665,6 +717,12 @@ function formatDelta(value: number, suffix = "") {
   if (!Number.isFinite(value)) return "-";
   if (suffix) return `${prefix}${formatNumber(value, 0)}${suffix}`;
   return `${prefix}${formatMoney(value)}`;
+}
+
+function normalizePromotedBaseName(name: string, year: number) {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) return `Break-even basis ${year}`;
+  return trimmed.replace(/\s+scenario$/i, "").trim() || `Break-even basis ${year}`;
 }
 
 function ScenarioAdjustmentEditor({
