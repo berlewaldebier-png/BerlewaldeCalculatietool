@@ -42,6 +42,7 @@ type AdjustmentModalState = {
   adjustmentId: string | null;
   draftType: BreakEvenScenarioAdjustmentType;
   value: number;
+  valueInput: string;
   targetKey: string;
   targetLabel: string;
 };
@@ -128,6 +129,10 @@ export function BreakEvenWorkspace({
         ? calculateStandaloneBreakEvenProducts(activeConfig, productLines, vasteKosten)
         : [],
     [activeConfig, productLines, vasteKosten]
+  );
+  const standaloneResultByRef = useMemo(
+    () => new Map(standaloneResults.map((entry) => [entry.ref, entry])),
+    [standaloneResults]
   );
   const baseResult = useMemo(() => {
     if (!activeBaseConfig) return null;
@@ -225,6 +230,7 @@ export function BreakEvenWorkspace({
       adjustmentId: adjustment?.id ?? null,
       draftType: resolvedType,
       value: adjustment?.value ?? 0,
+      valueInput: adjustment ? String(adjustment.value).replace(".", ",") : "",
       targetKey: adjustment?.target_key ?? "",
       targetLabel: adjustment?.target_label ?? "",
     });
@@ -248,7 +254,7 @@ export function BreakEvenWorkspace({
         adjustmentModal.adjustmentId ??
         createBreakEvenScenarioAdjustment(adjustmentModal.draftType).id,
       type: adjustmentModal.draftType,
-      value: adjustmentModal.value,
+      value: parseSignedNumberInput(adjustmentModal.valueInput) ?? 0,
       target_key: adjustmentModal.targetKey,
       target_label: adjustmentModal.targetLabel,
     };
@@ -282,6 +288,23 @@ export function BreakEvenWorkspace({
     const scenario = createScenarioFromBase(base);
     setConfigs((current) => [scenario, ...current]);
     setActiveConfigId(scenario.id);
+  }
+
+  function removeScenarioConfig(configId: string) {
+    const scenario = configs.find((config) => config.id === configId && config.kind === "scenario");
+    if (!scenario) return;
+    const confirmed = window.confirm(`Verwijder "${scenario.naam}"?`);
+    if (!confirmed) return;
+
+    const fallbackId =
+      configs.find((config) => config.id === scenario.parent_config_id)?.id ??
+      configs.find((config) => config.kind === "basis")?.id ??
+      "";
+
+    setConfigs((current) => current.filter((config) => config.id !== configId));
+    if (activeConfigId === configId) {
+      setActiveConfigId(fallbackId);
+    }
   }
 
   function removeScenarioAdjustment(adjustmentId: string) {
@@ -387,9 +410,11 @@ export function BreakEvenWorkspace({
           </div>
         </div>
         <div className="break-even-actions">
-          <button className="cpq-button cpq-button-secondary" type="button" onClick={addBaseConfig}>
-            Nieuwe basis
-          </button>
+          {configs.length === 0 ? (
+            <button className="cpq-button cpq-button-secondary" type="button" onClick={addBaseConfig}>
+              Nieuwe basis
+            </button>
+          ) : null}
           <button
             className="cpq-button cpq-button-secondary"
             type="button"
@@ -448,20 +473,30 @@ export function BreakEvenWorkspace({
                 </div>
                 <div className="break-even-scenario-list">
                   {scenarios.map((scenario, index) => (
-                    <button
-                      key={scenario.id}
-                      type="button"
-                      className={`break-even-config-button break-even-config-button-child${scenario.id === activeConfigId ? " active" : ""}`}
-                      onClick={() => setActiveConfigId(scenario.id)}
-                    >
-                      <span>{`Scenario ${String.fromCharCode(65 + index)}`}</span>
-                      <small>
-                        {formatScenarioTypeLabel(
-                          deriveScenarioTypeFromAdjustments(scenario.adjustments)
-                        )}
-                        {scenario.is_active_for_quotes ? " - actief voor offertes" : ""}
-                      </small>
-                    </button>
+                    <div key={scenario.id} className="break-even-config-base-row">
+                      <button
+                        type="button"
+                        className={`break-even-config-button break-even-config-button-child${scenario.id === activeConfigId ? " active" : ""}`}
+                        onClick={() => setActiveConfigId(scenario.id)}
+                      >
+                        <span>{`Scenario ${String.fromCharCode(65 + index)}`}</span>
+                        <small>
+                          {formatScenarioTypeLabel(
+                            deriveScenarioTypeFromAdjustments(scenario.adjustments)
+                          )}
+                          {scenario.is_active_for_quotes ? " - actief voor offertes" : ""}
+                        </small>
+                      </button>
+                      <button
+                        type="button"
+                        className="cpq-icon-action break-even-config-add"
+                        aria-label={`Verwijder ${scenario.naam}`}
+                        title="Scenario verwijderen"
+                        onClick={() => removeScenarioConfig(scenario.id)}
+                      >
+                        x
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -723,45 +758,8 @@ export function BreakEvenWorkspace({
               </section>
 
               <section className="module-card">
-                <div className="module-card-title">Solo break-even per product</div>
-                <div className="module-card-text" style={{ marginBottom: 12 }}>
-                  Theoretische analyse: wat gebeurt er als je alle vaste kosten volledig op één product laat rusten?
-                </div>
-                <div className="break-even-solo-grid">
-                  {standaloneResults.map((entry) => (
-                    <div key={entry.ref} className="break-even-solo-card">
-                      <div className="break-even-solo-title">{entry.label}</div>
-                      <div className="break-even-solo-metrics">
-                        <MetricCard
-                          label="BE liters"
-                          value={`${formatNumber(entry.breakEvenLiters, 0)} L`}
-                        />
-                        <MetricCard
-                          label="BE omzet"
-                          value={formatMoney(entry.breakEvenRevenue)}
-                        />
-                        <MetricCard
-                          label="Verkoopprijs / L"
-                          value={formatMoney(entry.sellInPerLiter)}
-                        />
-                        <MetricCard
-                          label="Variabel / L"
-                          value={formatMoney(entry.variableCostPerLiter)}
-                        />
-                        <MetricCard
-                          label="Contributie / L"
-                          value={formatMoney(entry.contributionPerLiter)}
-                        />
-                      </div>
-                      {entry.warnings.length > 0 ? (
-                        <div className="cpq-alert cpq-alert-warn break-even-solo-warnings">
-                          {entry.warnings.slice(0, 2).map((warning) => (
-                            <div key={warning}>{warning}</div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
+                <div className="module-card-text">
+                  Solo break-even liters en omzet staan hieronder direct in de mix-tabel per product.
                 </div>
               </section>
 
@@ -784,6 +782,8 @@ export function BreakEvenWorkspace({
                         <th>Sell-in / L</th>
                         <th>Variabel / L</th>
                         <th>Contributie / L</th>
+                        {activeConfig.mix_mode === "product" ? <th>Solo BE liters</th> : null}
+                        {activeConfig.mix_mode === "product" ? <th>Solo BE omzet</th> : null}
                         <th>Gewogen bijdrage / L</th>
                       </tr>
                     </thead>
@@ -818,6 +818,7 @@ export function BreakEvenWorkspace({
                           line?.contributionPerLiter ??
                           packSummary?.contributionPerLiter ??
                           0;
+                        const standalone = line ? standaloneResultByRef.get(line.ref) : null;
 
                         return (
                           <tr key={key}>
@@ -859,6 +860,12 @@ export function BreakEvenWorkspace({
                             <td>{formatMoneyOrMissing(sellInPerLiter)}</td>
                             <td>{formatMoneyOrMissing(variableCostPerLiter)}</td>
                             <td>{formatMoneyOrMissing(contributionPerLiter)}</td>
+                            {activeConfig.mix_mode === "product" ? (
+                              <td>{formatStandaloneLiters(standalone?.breakEvenLiters ?? 0)}</td>
+                            ) : null}
+                            {activeConfig.mix_mode === "product" ? (
+                              <td>{formatMoneyOrMissing(standalone?.breakEvenRevenue ?? 0)}</td>
+                            ) : null}
                             <td>{formatMoney(resultLine?.weightedContributionPerLiter ?? 0)}</td>
                           </tr>
                         );
@@ -904,6 +911,10 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 
 function formatMoneyOrMissing(value: number) {
   return value > 0 ? formatMoney(value) : "Niet bekend";
+}
+
+function formatStandaloneLiters(value: number) {
+  return value > 0 ? `${formatNumber(value, 0)} L` : "Niet bekend";
 }
 
 function formatDelta(value: number, suffix = "") {
@@ -1081,14 +1092,18 @@ function BreakEvenAdjustmentModal({
             </span>
             <input
               className="cpq-input"
-              type="number"
-              value={modal.value}
-              onChange={(event) =>
+              type="text"
+              inputMode="decimal"
+              value={modal.valueInput}
+              onChange={(event) => {
+                const nextInput = event.target.value;
+                const parsedValue = parseSignedNumberInput(nextInput);
                 onChange({
                   ...modal,
-                  value: Number(event.target.value || 0),
-                })
-              }
+                  valueInput: nextInput,
+                  value: parsedValue ?? modal.value,
+                });
+              }}
             />
           </label>
 
@@ -1135,4 +1150,13 @@ function formatScenarioTypeLabel(type: BreakEvenScenarioType | null) {
   if (type === "volume") return "Scenario volume";
   if (type === "combined") return "Scenario combinatie";
   return "Scenario vrij";
+}
+
+function parseSignedNumberInput(value: string) {
+  const normalized = String(value ?? "").trim().replace(",", ".");
+  if (!normalized || normalized === "-" || normalized === "+" || normalized === "." || normalized === "-.") {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
