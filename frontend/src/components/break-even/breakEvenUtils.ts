@@ -4,6 +4,20 @@ type GenericRecord = Record<string, unknown>;
 
 export type BreakEvenMixMode = "product" | "packaging";
 export type BreakEvenConfigKind = "basis" | "scenario";
+export type BreakEvenScenarioAdjustmentType =
+  | "price_pct"
+  | "fixed_cost_eur"
+  | "fixed_cost_pct"
+  | "variable_cost_pct"
+  | "volume_mix_pct";
+
+export type BreakEvenScenarioAdjustment = {
+  id: string;
+  type: BreakEvenScenarioAdjustmentType;
+  value: number;
+  target_key: string;
+  target_label: string;
+};
 
 export type BreakEvenConfig = {
   id: string;
@@ -17,6 +31,7 @@ export type BreakEvenConfig = {
   packaging_mix: Record<string, number>;
   price_overrides: Record<string, number>;
   fixed_cost_adjustment: number;
+  adjustments: BreakEvenScenarioAdjustment[];
   created_at?: string;
   updated_at?: string;
 };
@@ -77,6 +92,18 @@ export type BreakEvenResult = {
   warnings: string[];
 };
 
+export function createBreakEvenScenarioAdjustment(
+  type: BreakEvenScenarioAdjustmentType = "price_pct"
+): BreakEvenScenarioAdjustment {
+  return {
+    id: `adj-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+    type,
+    value: 0,
+    target_key: "",
+    target_label: "",
+  };
+}
+
 export function createBreakEvenConfig(
   year: number,
   kind: BreakEvenConfigKind = "basis"
@@ -94,6 +121,7 @@ export function createBreakEvenConfig(
     packaging_mix: {},
     price_overrides: {},
     fixed_cost_adjustment: 0,
+    adjustments: [],
     created_at: now,
     updated_at: now,
   };
@@ -119,6 +147,7 @@ export function normalizeBreakEvenConfig(row: unknown, fallbackYear: number): Br
     packaging_mix: normalizeNumberMap(source.packaging_mix),
     price_overrides: normalizeNumberMap(source.price_overrides),
     fixed_cost_adjustment: toNumber(source.fixed_cost_adjustment, 0),
+    adjustments: normalizeAdjustments(source.adjustments),
     created_at: typeof source.created_at === "string" ? source.created_at : undefined,
     updated_at: typeof source.updated_at === "string" ? source.updated_at : undefined,
   };
@@ -137,6 +166,7 @@ export function createScenarioFromBase(base: BreakEvenConfig) {
     kind: "scenario" as const,
     parent_config_id: base.id,
     is_active_for_quotes: false,
+    adjustments: [],
     created_at: now,
     updated_at: now,
   };
@@ -186,8 +216,17 @@ export function calculateBreakEvenResult(
   vasteKosten: Record<string, unknown>
 ): BreakEvenResult {
   const fixedCostsTotal = calculateFixedCostsTotal(vasteKosten, config.jaar);
-  const adjustedFixedCostsTotal = Math.max(0, fixedCostsTotal + config.fixed_cost_adjustment);
-  const mixEntries = config.mix_mode === "packaging" ? config.packaging_mix : config.product_mix;
+  const scenarioAdjustments = Array.isArray(config.adjustments) ? config.adjustments : [];
+  const priceMultiplier = multiplyAdjustmentFactors(scenarioAdjustments, "price_pct");
+  const variableCostMultiplier = multiplyAdjustmentFactors(
+    scenarioAdjustments,
+    "variable_cost_pct"
+  );
+  const adjustedFixedCostsTotal = applyFixedCostAdjustments(
+    Math.max(0, fixedCostsTotal + config.fixed_cost_adjustment),
+    scenarioAdjustments
+  );
+  const mixEntries = buildEffectiveMixEntries(config, lines, scenarioAdjustments);
   const warnings: string[] = [];
   const mixLines: BreakEvenMixLine[] = [];
   let mixTotalPct = 0;
@@ -203,7 +242,11 @@ export function calculateBreakEvenResult(
   }
 
   if (config.mix_mode === "packaging") {
-    const packSummaries = calculateBreakEvenPackSummaries(lines, config.price_overrides);
+    const packSummaries = calculateBreakEvenPackSummaries(lines, {
+      priceOverrides: config.price_overrides,
+      priceMultiplier,
+      variableCostMultiplier,
+    });
     const byPack = new Map(packSummaries.map((summary) => [summary.key, summary]));
     Object.entries(mixEntries).forEach(([packType, pct]) => {
       const mixPct = Math.max(0, toNumber(pct, 0));
@@ -230,13 +273,17 @@ export function calculateBreakEvenResult(
         return;
       }
       if (mixPct <= 0) return;
-      const sellIn = config.price_overrides[ref] || line.sellInEx;
+      const sellIn = (config.price_overrides[ref] || line.sellInEx) * priceMultiplier;
       const sellInPerLiter = line.litersPerUnit > 0 ? sellIn / line.litersPerUnit : 0;
-      const contribution = sellInPerLiter - line.variableCostPerLiter;
+      const variableCostPerLiter =
+        line.litersPerUnit > 0
+          ? (line.variableCostEx * variableCostMultiplier) / line.litersPerUnit
+          : 0;
+      const contribution = sellInPerLiter - variableCostPerLiter;
       const weight = mixPct / 100;
       mixTotalPct += mixPct;
       weightedSellInPerLiter += weight * sellInPerLiter;
-      weightedVariableCostPerLiter += weight * line.variableCostPerLiter;
+      weightedVariableCostPerLiter += weight * variableCostPerLiter;
       weightedContributionPerLiter += weight * contribution;
       line.warnings.forEach((warning) => warnings.push(`${line.label}: ${warning}`));
       mixLines.push(
@@ -246,7 +293,7 @@ export function calculateBreakEvenResult(
           mixPct,
           {
             sellInPerLiter,
-            variableCostPerLiter: line.variableCostPerLiter,
+            variableCostPerLiter,
             contributionPerLiter: contribution,
           },
           line.warnings
@@ -294,8 +341,22 @@ export function calculateFixedCostsTotal(vasteKosten: Record<string, unknown>, y
 
 export function calculateBreakEvenPackSummaries(
   lines: BreakEvenProductLine[],
-  priceOverrides: Record<string, number>
+  options:
+    | Record<string, number>
+    | {
+        priceOverrides?: Record<string, number>;
+        priceMultiplier?: number;
+        variableCostMultiplier?: number;
+      }
 ) {
+  const resolvedOptions =
+    isNumberMap(options)
+      ? { priceOverrides: options, priceMultiplier: 1, variableCostMultiplier: 1 }
+      : {
+          priceOverrides: options.priceOverrides ?? {},
+          priceMultiplier: options.priceMultiplier ?? 1,
+          variableCostMultiplier: options.variableCostMultiplier ?? 1,
+        };
   const groups = new Map<
     string,
     {
@@ -326,8 +387,10 @@ export function calculateBreakEvenPackSummaries(
     };
     current.productCount += 1;
     current.liters += line.litersPerUnit;
-    current.sellIn += priceOverrides[line.ref] || line.sellInEx;
-    current.variable += line.variableCostEx;
+    current.sellIn +=
+      (resolvedOptions.priceOverrides[line.ref] || line.sellInEx) *
+      resolvedOptions.priceMultiplier;
+    current.variable += line.variableCostEx * resolvedOptions.variableCostMultiplier;
     groups.set(line.packType, current);
   });
 
@@ -365,6 +428,103 @@ function normalizeNumberMap(value: unknown) {
       .map(([key, raw]) => [key, toNumber(raw, 0)] as const)
       .filter(([key]) => key.trim())
   );
+}
+
+function normalizeAdjustments(value: unknown): BreakEvenScenarioAdjustment[] {
+  const out: BreakEvenScenarioAdjustment[] = [];
+  (Array.isArray(value) ? value : []).forEach((row) => {
+    const source = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+    const type = normalizeAdjustmentType(source.type);
+    if (!type) return;
+    out.push({
+      id: String(source.id ?? "").trim() || `adj-${Math.random().toString(16).slice(2, 8)}`,
+      type,
+      value: toNumber(source.value, 0),
+      target_key: String(source.target_key ?? "").trim(),
+      target_label: String(source.target_label ?? "").trim(),
+    });
+  });
+  return out;
+}
+
+function normalizeAdjustmentType(value: unknown): BreakEvenScenarioAdjustmentType | null {
+  const type = String(value ?? "").trim();
+  if (
+    type === "price_pct" ||
+    type === "fixed_cost_eur" ||
+    type === "fixed_cost_pct" ||
+    type === "variable_cost_pct" ||
+    type === "volume_mix_pct"
+  ) {
+    return type;
+  }
+  return null;
+}
+
+function multiplyAdjustmentFactors(
+  adjustments: BreakEvenScenarioAdjustment[],
+  type: BreakEvenScenarioAdjustmentType
+) {
+  return adjustments
+    .filter((adjustment) => adjustment.type === type)
+    .reduce((factor, adjustment) => factor * (1 + adjustment.value / 100), 1);
+}
+
+function applyFixedCostAdjustments(
+  baseValue: number,
+  adjustments: BreakEvenScenarioAdjustment[]
+) {
+  let current = baseValue;
+  adjustments.forEach((adjustment) => {
+    if (adjustment.type === "fixed_cost_eur") {
+      current += adjustment.value;
+    }
+    if (adjustment.type === "fixed_cost_pct") {
+      current *= 1 + adjustment.value / 100;
+    }
+  });
+  return Math.max(0, current);
+}
+
+function buildEffectiveMixEntries(
+  config: BreakEvenConfig,
+  lines: BreakEvenProductLine[],
+  adjustments: BreakEvenScenarioAdjustment[]
+) {
+  const sourceEntries =
+    config.mix_mode === "packaging" ? { ...config.packaging_mix } : { ...config.product_mix };
+  const byRef = new Map(lines.map((line) => [line.ref, line]));
+
+  adjustments
+    .filter((adjustment) => adjustment.type === "volume_mix_pct")
+    .forEach((adjustment) => {
+      const targetKey = String(adjustment.target_key ?? "").trim();
+      if (!targetKey) return;
+
+      if (config.mix_mode === "packaging") {
+        const current = toNumber(sourceEntries[targetKey], 0);
+        sourceEntries[targetKey] = current * (1 + adjustment.value / 100);
+        return;
+      }
+
+      const current = toNumber(sourceEntries[targetKey], 0);
+      if (current > 0 || byRef.has(targetKey)) {
+        sourceEntries[targetKey] = current * (1 + adjustment.value / 100);
+      }
+    });
+
+  const total = Object.values(sourceEntries).reduce((sum, value) => sum + toNumber(value, 0), 0);
+  if (total <= 0) return sourceEntries;
+
+  return Object.fromEntries(
+    Object.entries(sourceEntries).map(([key, value]) => [key, (toNumber(value, 0) / total) * 100])
+  );
+}
+
+function isNumberMap(
+  value: Record<string, number> | { priceOverrides?: Record<string, number> }
+): value is Record<string, number> {
+  return !("priceOverrides" in value);
 }
 
 function round(value: number) {

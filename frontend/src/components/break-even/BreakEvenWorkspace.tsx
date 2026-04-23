@@ -8,10 +8,13 @@ import {
   calculateBreakEvenPackSummaries,
   calculateBreakEvenResult,
   createBreakEvenConfig,
+  createBreakEvenScenarioAdjustment,
   createScenarioFromBase,
   formatMoney,
   formatNumber,
   normalizeConfigList,
+  type BreakEvenScenarioAdjustment,
+  type BreakEvenScenarioAdjustmentType,
   type BreakEvenConfig,
 } from "@/components/break-even/breakEvenUtils";
 
@@ -179,6 +182,34 @@ export function BreakEvenWorkspace({
     const scenario = createScenarioFromBase(base.kind === "basis" ? base : activeBaseConfig ?? base);
     setConfigs((current) => [scenario, ...current]);
     setActiveConfigId(scenario.id);
+  }
+
+  function addScenarioAdjustment(type: BreakEvenScenarioAdjustmentType = "price_pct") {
+    if (!activeConfig || activeConfig.kind !== "scenario") return;
+    updateConfig({
+      adjustments: [...activeConfig.adjustments, createBreakEvenScenarioAdjustment(type)],
+    });
+  }
+
+  function updateScenarioAdjustment(
+    adjustmentId: string,
+    patch: Partial<BreakEvenScenarioAdjustment>
+  ) {
+    if (!activeConfig || activeConfig.kind !== "scenario") return;
+    updateConfig({
+      adjustments: activeConfig.adjustments.map((adjustment) =>
+        adjustment.id === adjustmentId ? { ...adjustment, ...patch } : adjustment
+      ),
+    });
+  }
+
+  function removeScenarioAdjustment(adjustmentId: string) {
+    if (!activeConfig || activeConfig.kind !== "scenario") return;
+    updateConfig({
+      adjustments: activeConfig.adjustments.filter(
+        (adjustment) => adjustment.id !== adjustmentId
+      ),
+    });
   }
 
   function useForQuotes() {
@@ -363,6 +394,101 @@ export function BreakEvenWorkspace({
                 ) : null}
               </section>
 
+              {activeConfig.kind === "scenario" ? (
+                <section className="module-card">
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: 16,
+                      gridTemplateColumns: "minmax(0, 1.35fr) minmax(260px, 0.65fr)",
+                    }}
+                  >
+                    <div>
+                      <div className="module-card-title">Scenario-aanpassingen</div>
+                      <div className="module-card-text" style={{ marginBottom: 12 }}>
+                        Combineer prijs-, kosten- en volume-aanpassingen. De effectieve mix hieronder
+                        wordt automatisch afgeleid uit de basis plus deze wijzigingen.
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                        <button
+                          className="cpq-button cpq-button-secondary"
+                          type="button"
+                          onClick={() => addScenarioAdjustment("price_pct")}
+                        >
+                          + Prijs %
+                        </button>
+                        <button
+                          className="cpq-button cpq-button-secondary"
+                          type="button"
+                          onClick={() => addScenarioAdjustment("fixed_cost_eur")}
+                        >
+                          + Vaste kosten EUR
+                        </button>
+                        <button
+                          className="cpq-button cpq-button-secondary"
+                          type="button"
+                          onClick={() => addScenarioAdjustment("fixed_cost_pct")}
+                        >
+                          + Vaste kosten %
+                        </button>
+                        <button
+                          className="cpq-button cpq-button-secondary"
+                          type="button"
+                          onClick={() => addScenarioAdjustment("variable_cost_pct")}
+                        >
+                          + Variabele kosten %
+                        </button>
+                        <button
+                          className="cpq-button cpq-button-secondary"
+                          type="button"
+                          onClick={() => addScenarioAdjustment("volume_mix_pct")}
+                        >
+                          + Volume
+                        </button>
+                      </div>
+                      <div className="cpq-stack">
+                        {activeConfig.adjustments.length === 0 ? (
+                          <div className="cpq-empty">
+                            Nog geen scenario-aanpassingen toegevoegd.
+                          </div>
+                        ) : (
+                          activeConfig.adjustments.map((adjustment) => (
+                            <ScenarioAdjustmentEditor
+                              key={adjustment.id}
+                              adjustment={adjustment}
+                              mixMode={activeConfig.mix_mode}
+                              productOptions={productLines.map((line) => ({
+                                key: line.ref,
+                                label: line.label,
+                              }))}
+                              packagingOptions={packTypes.map((pack) => ({
+                                key: pack.key,
+                                label: pack.label,
+                              }))}
+                              onChange={(patch) =>
+                                updateScenarioAdjustment(adjustment.id, patch)
+                              }
+                              onRemove={() => removeScenarioAdjustment(adjustment.id)}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="cpq-panel">
+                      <div className="cpq-panel-title">Samenvatting scenario</div>
+                      <div className="cpq-panel-subtitle" style={{ marginBottom: 12 }}>
+                        Toegepaste koerswijzigingen in dit scenario.
+                      </div>
+                      <ScenarioSummary
+                        adjustments={activeConfig.adjustments}
+                        mixMode={activeConfig.mix_mode}
+                      />
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+
               <section className="module-card">
                 <div className="module-card-title">Resultaat</div>
                 <div className="break-even-metric-grid">
@@ -469,25 +595,37 @@ export function BreakEvenWorkspace({
                           <tr key={key}>
                             <td>{displayLabel}</td>
                             <td>
-                              <input
-                                className="dataset-input"
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={mixValue}
-                                onChange={(event) => updateMix(key, event.target.value)}
-                              />
-                            </td>
-                            {activeConfig.mix_mode === "product" ? (
-                              <td>
+                              {activeConfig.kind === "basis" ? (
                                 <input
                                   className="dataset-input"
                                   type="number"
                                   min={0}
-                                  placeholder={line ? formatNumber(line.sellInEx, 2) : ""}
-                                  value={activeConfig.price_overrides[key] ?? ""}
-                                  onChange={(event) => updatePriceOverride(key, event.target.value)}
+                                  max={100}
+                                  value={mixValue}
+                                  onChange={(event) => updateMix(key, event.target.value)}
                                 />
+                              ) : (
+                                <span>{formatNumber(resultLine?.mixPct ?? mixValue, 1)}%</span>
+                              )}
+                            </td>
+                            {activeConfig.mix_mode === "product" ? (
+                              <td>
+                                {activeConfig.kind === "basis" ? (
+                                  <input
+                                    className="dataset-input"
+                                    type="number"
+                                    min={0}
+                                    placeholder={line ? formatNumber(line.sellInEx, 2) : ""}
+                                    value={activeConfig.price_overrides[key] ?? ""}
+                                    onChange={(event) => updatePriceOverride(key, event.target.value)}
+                                  />
+                                ) : (
+                                  <span>
+                                    {activeConfig.price_overrides[key]
+                                      ? formatMoney(activeConfig.price_overrides[key])
+                                      : "Basisprijs"}
+                                  </span>
+                                )}
                               </td>
                             ) : null}
                             <td>{formatMoneyOrMissing(sellInPerLiter)}</td>
@@ -527,4 +665,145 @@ function formatDelta(value: number, suffix = "") {
   if (!Number.isFinite(value)) return "-";
   if (suffix) return `${prefix}${formatNumber(value, 0)}${suffix}`;
   return `${prefix}${formatMoney(value)}`;
+}
+
+function ScenarioAdjustmentEditor({
+  adjustment,
+  mixMode,
+  productOptions,
+  packagingOptions,
+  onChange,
+  onRemove,
+}: {
+  adjustment: BreakEvenScenarioAdjustment;
+  mixMode: "product" | "packaging";
+  productOptions: Array<{ key: string; label: string }>;
+  packagingOptions: Array<{ key: string; label: string }>;
+  onChange: (patch: Partial<BreakEvenScenarioAdjustment>) => void;
+  onRemove: () => void;
+}) {
+  const targetOptions = mixMode === "packaging" ? packagingOptions : productOptions;
+
+  return (
+    <div className="cpq-card" style={{ padding: 12 }}>
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1.1fr 0.9fr auto" }}>
+        <label className="cpq-field">
+          <span className="cpq-label">Type</span>
+          <select
+            className="cpq-select"
+            value={adjustment.type}
+            onChange={(event) =>
+              onChange({
+                type: event.target.value as BreakEvenScenarioAdjustmentType,
+                target_key: "",
+                target_label: "",
+              })
+            }
+          >
+            <option value="price_pct">Verkoopprijs %</option>
+            <option value="fixed_cost_eur">Vaste kosten EUR</option>
+            <option value="fixed_cost_pct">Vaste kosten %</option>
+            <option value="variable_cost_pct">Variabele kosten %</option>
+            <option value="volume_mix_pct">
+              {mixMode === "packaging" ? "Volume verpakking %" : "Volume product %"}
+            </option>
+          </select>
+        </label>
+        <label className="cpq-field">
+          <span className="cpq-label">Waarde</span>
+          <input
+            className="cpq-input"
+            type="number"
+            value={adjustment.value}
+            onChange={(event) =>
+              onChange({ value: Number(event.target.value || 0) })
+            }
+          />
+        </label>
+        <button
+          type="button"
+          className="cpq-icon-action"
+          onClick={onRemove}
+          aria-label="Verwijder aanpassing"
+          title="Verwijderen"
+          style={{ alignSelf: "end" }}
+        >
+          ×
+        </button>
+      </div>
+
+      {adjustment.type === "volume_mix_pct" ? (
+        <label className="cpq-field">
+          <span className="cpq-label">
+            {mixMode === "packaging" ? "Verpakking" : "Product"}
+          </span>
+          <select
+            className="cpq-select"
+            value={adjustment.target_key ?? ""}
+            onChange={(event) => {
+              const option = targetOptions.find((item) => item.key === event.target.value);
+              onChange({
+                target_key: event.target.value,
+                target_label: option?.label ?? "",
+              });
+            }}
+          >
+            <option value="">Selecteer...</option>
+            {targetOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
+function ScenarioSummary({
+  adjustments,
+  mixMode,
+}: {
+  adjustments: BreakEvenScenarioAdjustment[];
+  mixMode: "product" | "packaging";
+}) {
+  if (adjustments.length === 0) {
+    return <div className="cpq-empty">Nog geen wijzigingen toegepast.</div>;
+  }
+
+  return (
+    <div className="cpq-stack">
+      {adjustments.map((adjustment) => (
+        <div key={adjustment.id} className="cpq-block tone-neutral">
+          <div className="cpq-block-row">
+            <div className="cpq-block-body">
+              <div className="cpq-block-title">{formatAdjustmentTitle(adjustment, mixMode)}</div>
+              <div className="cpq-block-subtitle">{formatAdjustmentValue(adjustment)}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatAdjustmentTitle(
+  adjustment: BreakEvenScenarioAdjustment,
+  mixMode: "product" | "packaging"
+) {
+  if (adjustment.type === "price_pct") return "Verkoopprijs";
+  if (adjustment.type === "fixed_cost_eur") return "Vaste kosten (EUR)";
+  if (adjustment.type === "fixed_cost_pct") return "Vaste kosten (%)";
+  if (adjustment.type === "variable_cost_pct") return "Variabele kosten (%)";
+  return `${mixMode === "packaging" ? "Volume verpakking" : "Volume product"}${
+    adjustment.target_label ? `: ${adjustment.target_label}` : ""
+  }`;
+}
+
+function formatAdjustmentValue(adjustment: BreakEvenScenarioAdjustment) {
+  if (adjustment.type === "fixed_cost_eur") {
+    return `${adjustment.value >= 0 ? "+" : ""}${formatMoney(adjustment.value)}`;
+  }
+  return `${adjustment.value >= 0 ? "+" : ""}${formatNumber(adjustment.value, 1)}%`;
 }
