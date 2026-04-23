@@ -250,6 +250,9 @@ export function OfferteSamenstellenApp({
   const [unitMode, setUnitMode] = useState<UnitMode>("producten");
   const [vatMode, setVatMode] = useState<VatMode>("excl");
   const [draftMeta, setDraftMeta] = useState<QuoteDraft["meta"]>(() => createInitialQuoteDraft(year).meta);
+  const [savedBreakEvenSnapshot, setSavedBreakEvenSnapshot] = useState<QuoteBreakEvenSnapshot | null>(
+    () => createInitialQuoteDraft(year).breakEven
+  );
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -321,6 +324,8 @@ export function OfferteSamenstellenApp({
     () => buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult),
     [activeBreakEvenConfig, breakEvenResult]
   );
+  const effectiveBreakEvenSnapshot =
+    draftMeta.status === "definitief" ? savedBreakEvenSnapshot ?? currentBreakEvenSnapshot : currentBreakEvenSnapshot;
 
   const [scenarios, setScenarios] = useState<Record<ScenarioId, Scenario>>(
     () => createInitialQuoteDraft(year).scenarios
@@ -363,19 +368,19 @@ export function OfferteSamenstellenApp({
   const scenarioMetrics = useMemo(() => {
     const ids: ScenarioId[] = ["A", "B", "C"];
     const result: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }> = {
-      A: { standard: calculateScenarioMetricsForScenario(scenarios.A, "standard", currentBreakEvenSnapshot), intro: null },
-      B: { standard: calculateScenarioMetricsForScenario(scenarios.B, "standard", currentBreakEvenSnapshot), intro: null },
-      C: { standard: calculateScenarioMetricsForScenario(scenarios.C, "standard", currentBreakEvenSnapshot), intro: null },
+      A: { standard: calculateScenarioMetricsForScenario(scenarios.A, "standard", effectiveBreakEvenSnapshot), intro: null },
+      B: { standard: calculateScenarioMetricsForScenario(scenarios.B, "standard", effectiveBreakEvenSnapshot), intro: null },
+      C: { standard: calculateScenarioMetricsForScenario(scenarios.C, "standard", effectiveBreakEvenSnapshot), intro: null },
     };
     for (const id of ids) {
       const sc = scenarios[id];
       result[id] = {
-        standard: calculateScenarioMetricsForScenario(sc, "standard", currentBreakEvenSnapshot),
-        intro: sc.intro ? calculateScenarioMetricsForScenario(sc, "intro", currentBreakEvenSnapshot) : null,
+        standard: calculateScenarioMetricsForScenario(sc, "standard", effectiveBreakEvenSnapshot),
+        intro: sc.intro ? calculateScenarioMetricsForScenario(sc, "intro", effectiveBreakEvenSnapshot) : null,
       };
     }
     return result;
-  }, [currentBreakEvenSnapshot, scenarios]);
+  }, [effectiveBreakEvenSnapshot, scenarios]);
 
   function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
     setScenarios((prev) => ({
@@ -521,12 +526,16 @@ export function OfferteSamenstellenApp({
   }
 
   function buildCurrentDraftSnapshot(nextMeta: QuoteDraft["meta"]) {
+    const snapshotBreakEven =
+      nextMeta.status === "definitief"
+        ? savedBreakEvenSnapshot ?? currentBreakEvenSnapshot
+        : currentBreakEvenSnapshot;
     return buildQuoteDraftSnapshot({
       meta: nextMeta,
       year: currentYear,
       basis,
       scenarios,
-      breakEven: currentBreakEvenSnapshot,
+      breakEven: snapshotBreakEven,
       ui: {
         step,
         activeScenario,
@@ -568,6 +577,7 @@ export function OfferteSamenstellenApp({
   function hydrateDraftSnapshot(snapshot: QuoteDraftSnapshot) {
     setCurrentYear(Number(snapshot.year || year) || year);
     setDraftMeta(snapshot.meta);
+    setSavedBreakEvenSnapshot(snapshot.breakEven ?? null);
     setBasis(snapshot.basis);
     setScenarios(restoreScenarioPresentation(snapshot));
     setStep(snapshot.ui.step);
@@ -610,10 +620,22 @@ export function OfferteSamenstellenApp({
   }, [initialDraftId, year]);
 
   async function saveQuoteDraft() {
+    await persistQuoteDraft(draftMeta);
+  }
+
+  async function finalizeQuoteDraft() {
+    const nextMeta: QuoteDraft["meta"] = {
+      ...draftMeta,
+      status: "definitief",
+    };
+    await persistQuoteDraft(nextMeta);
+  }
+
+  async function persistQuoteDraft(nextMeta: QuoteDraft["meta"]) {
     setIsSavingDraft(true);
     setDraftError(null);
     try {
-      const payload = buildQuotePersistencePayload(buildCurrentDraftSnapshot(draftMeta));
+      const payload = buildQuotePersistencePayload(buildCurrentDraftSnapshot(nextMeta));
       const response = draftMeta.draftId
         ? await updateQuoteDraft(draftMeta.draftId, payload)
         : await createQuoteDraft(payload);
@@ -621,6 +643,7 @@ export function OfferteSamenstellenApp({
       if (!snapshot) {
         throw new Error("Opslaan gaf geen geldige draft snapshot terug.");
       }
+      setSavedBreakEvenSnapshot(snapshot.breakEven ?? null);
       hydrateDraftSnapshot(snapshot);
       if (response.record.id) {
         router.replace(`/offerte-samenstellen?draft=${encodeURIComponent(response.record.id)}`);
@@ -839,9 +862,11 @@ export function OfferteSamenstellenApp({
                 basis={basis}
                 scenario={scenario}
                 metrics={scenarioMetrics[activeScenario].standard}
+                draftStatus={draftMeta.status}
                 onBack={() => setStep("vergelijk")}
                 onDownload={downloadQuoteStub}
                 onSave={() => void saveQuoteDraft()}
+                onFinalize={() => void finalizeQuoteDraft()}
                 isSaving={isSavingDraft || isLoadingDraft}
               />
             ) : null}
@@ -909,10 +934,11 @@ export function OfferteSamenstellenApp({
                   }
                 />
               </div>
-              {activeBreakEvenConfig && breakEvenResult ? (
+              {effectiveBreakEvenSnapshot ? (
                 <p className="cpq-panel-text cpq-break-even-note">
-                  Actieve break-even: {activeBreakEvenConfig.naam}. Conceptoffertes gebruiken
-                  de actieve versie; bij opslaan wordt een snapshot meegeschreven.
+                  {draftMeta.status === "definitief"
+                    ? `Definitieve offerte rekent met snapshot ${effectiveBreakEvenSnapshot.configName}.`
+                    : `Actieve break-even: ${effectiveBreakEvenSnapshot.configName}. Conceptoffertes gebruiken de actieve versie; bij opslaan wordt een snapshot meegeschreven.`}
                 </p>
               ) : (
                 <p className="cpq-panel-text cpq-break-even-note">
@@ -1497,17 +1523,21 @@ function FinalizeStep({
   basis,
   scenario,
   metrics,
+  draftStatus,
   onBack,
   onDownload,
   onSave,
+  onFinalize,
   isSaving,
 }: {
   basis: BasisData;
   scenario: Scenario;
   metrics: ScenarioMetrics;
+  draftStatus: QuoteDraft["meta"]["status"];
   onBack: () => void;
   onDownload: () => void;
   onSave: () => void;
+  onFinalize: () => void;
   isSaving: boolean;
 }) {
   return (
@@ -1547,6 +1577,9 @@ function FinalizeStep({
         <div className="cpq-final-card">
           <h3 className="cpq-panel-title">Opmerking</h3>
           <div className="cpq-panel-text">{basis.opmerking || "Geen opmerking."}</div>
+          <div className="cpq-panel-text">
+            Status: {draftStatus === "definitief" ? "Definitief" : "Concept"}
+          </div>
         </div>
       </div>
 
@@ -1557,6 +1590,14 @@ function FinalizeStep({
         <div className="cpq-actions-inline">
           <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
             {isSaving ? "Opslaan..." : "Opslaan"}
+          </button>
+          <button
+            onClick={onFinalize}
+            className="cpq-button cpq-button-secondary"
+            type="button"
+            disabled={isSaving || draftStatus === "definitief"}
+          >
+            {draftStatus === "definitief" ? "Al definitief" : "Definitief opslaan"}
           </button>
           <button onClick={onDownload} className="cpq-button cpq-button-primary" type="button">
             Concept downloaden (JSON stub)
