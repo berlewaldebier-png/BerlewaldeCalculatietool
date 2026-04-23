@@ -99,6 +99,17 @@ export type BreakEvenResult = {
   warnings: string[];
 };
 
+export type BreakEvenStandaloneProductResult = {
+  ref: string;
+  label: string;
+  breakEvenLiters: number;
+  breakEvenRevenue: number;
+  sellInPerLiter: number;
+  variableCostPerLiter: number;
+  contributionPerLiter: number;
+  warnings: string[];
+};
+
 export function createBreakEvenScenarioAdjustment(
   type: BreakEvenScenarioAdjustmentType = "price_pct"
 ): BreakEvenScenarioAdjustment {
@@ -365,6 +376,56 @@ export function calculateBreakEvenResult(
     mixLines,
     warnings,
   };
+}
+
+export function calculateStandaloneBreakEvenProducts(
+  config: BreakEvenConfig,
+  lines: BreakEvenProductLine[],
+  vasteKosten: Record<string, unknown>
+) {
+  const fixedCostsTotal = calculateFixedCostsTotal(vasteKosten, config.jaar);
+  const scenarioAdjustments = Array.isArray(config.adjustments) ? config.adjustments : [];
+  const priceMultiplier = multiplyAdjustmentFactors(scenarioAdjustments, "price_pct");
+  const variableCostMultiplier = multiplyAdjustmentFactors(
+    scenarioAdjustments,
+    "variable_cost_pct"
+  );
+  const adjustedFixedCostsTotal = applyFixedCostAdjustments(
+    Math.max(0, fixedCostsTotal + config.fixed_cost_adjustment),
+    scenarioAdjustments
+  );
+
+  return lines
+    .map((line) => {
+      const sellInEx = (config.price_overrides[line.ref] || line.sellInEx) * priceMultiplier;
+      const sellInPerLiter = line.litersPerUnit > 0 ? sellInEx / line.litersPerUnit : 0;
+      const variableCostPerLiter =
+        line.litersPerUnit > 0
+          ? (line.variableCostEx * variableCostMultiplier) / line.litersPerUnit
+          : 0;
+      const contributionPerLiter = sellInPerLiter - variableCostPerLiter;
+      const warnings = [...line.warnings];
+
+      if (contributionPerLiter <= 0) {
+        warnings.push("Contributie per liter is 0 of lager.");
+      }
+
+      const breakEvenLiters =
+        contributionPerLiter > 0 ? adjustedFixedCostsTotal / contributionPerLiter : 0;
+      const breakEvenRevenue = breakEvenLiters * sellInPerLiter;
+
+      return {
+        ref: line.ref,
+        label: line.label,
+        breakEvenLiters,
+        breakEvenRevenue,
+        sellInPerLiter,
+        variableCostPerLiter,
+        contributionPerLiter,
+        warnings,
+      } satisfies BreakEvenStandaloneProductResult;
+    })
+    .sort((a, b) => a.breakEvenRevenue - b.breakEvenRevenue);
 }
 
 export function calculateFixedCostsTotal(vasteKosten: Record<string, unknown>, year: number) {

@@ -1084,6 +1084,18 @@ a {
   top: 1rem;
 }
 
+.break-even-config-group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.break-even-config-base-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: start;
+}
+
 .break-even-config-button {
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -1111,6 +1123,20 @@ a {
   line-height: 1.35;
 }
 
+.break-even-config-button-child {
+  margin-left: 0.9rem;
+  background: linear-gradient(180deg, #fbfcff 0%, #f6f8ff 100%);
+}
+
+.break-even-config-add {
+  margin-top: 0.15rem;
+}
+
+.break-even-scenario-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
 .break-even-main {
   display: grid;
   gap: 1rem;
@@ -1126,6 +1152,36 @@ a {
 
 .break-even-warnings {
   margin-top: 0.85rem;
+}
+
+.break-even-solo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.break-even-solo-card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.break-even-solo-title {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.break-even-solo-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.break-even-solo-warnings {
+  margin-top: 0;
 }
 
 .proposal-hub-hero {

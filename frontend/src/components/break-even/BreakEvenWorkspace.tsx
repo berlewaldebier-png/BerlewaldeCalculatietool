@@ -7,6 +7,7 @@ import {
   buildBreakEvenProductLines,
   calculateBreakEvenPackSummaries,
   calculateBreakEvenResult,
+  calculateStandaloneBreakEvenProducts,
   createBreakEvenConfig,
   createBreakEvenScenarioAdjustment,
   createScenarioFromBase,
@@ -121,6 +122,13 @@ export function BreakEvenWorkspace({
   const result = activeConfig
     ? calculateBreakEvenResult(activeConfig, productLines, vasteKosten)
     : null;
+  const standaloneResults = useMemo(
+    () =>
+      activeConfig
+        ? calculateStandaloneBreakEvenProducts(activeConfig, productLines, vasteKosten)
+        : [],
+    [activeConfig, productLines, vasteKosten]
+  );
   const baseResult = useMemo(() => {
     if (!activeBaseConfig) return null;
     return calculateBreakEvenResult(activeBaseConfig, productLines, vasteKosten);
@@ -270,6 +278,12 @@ export function BreakEvenWorkspace({
     setActiveConfigId(scenario.id);
   }
 
+  function addScenarioForBase(base: BreakEvenConfig) {
+    const scenario = createScenarioFromBase(base);
+    setConfigs((current) => [scenario, ...current]);
+    setActiveConfigId(scenario.id);
+  }
+
   function removeScenarioAdjustment(adjustmentId: string) {
     if (!activeConfig || activeConfig.kind !== "scenario") return;
     updateConfig({
@@ -410,33 +424,46 @@ export function BreakEvenWorkspace({
             <div className="module-card-title">Jaarbasis en scenario&apos;s</div>
             {groupedConfigs.map(({ base, scenarios }) => (
               <div key={base.id} className="break-even-config-group">
-                <button
-                  type="button"
-                  className={`break-even-config-button${base.id === activeConfigId ? " active" : ""}`}
-                  onClick={() => setActiveConfigId(base.id)}
-                >
-                  <span>{base.naam}</span>
-                  <small>
-                    {base.jaar}
-                    {base.is_active_for_quotes ? " - actief voor offertes" : " - basis"}
-                  </small>
-                </button>
-                {scenarios.map((scenario) => (
+                <div className="break-even-config-base-row">
                   <button
-                    key={scenario.id}
                     type="button"
-                    className={`break-even-config-button break-even-config-button-child${scenario.id === activeConfigId ? " active" : ""}`}
-                    onClick={() => setActiveConfigId(scenario.id)}
+                    className={`break-even-config-button${base.id === activeConfigId ? " active" : ""}`}
+                    onClick={() => setActiveConfigId(base.id)}
                   >
-                    <span>{scenario.naam}</span>
+                    <span>{base.naam}</span>
                     <small>
-                      {formatScenarioTypeLabel(
-                        deriveScenarioTypeFromAdjustments(scenario.adjustments)
-                      )}
-                      {scenario.is_active_for_quotes ? " - actief voor offertes" : ""}
+                      {base.jaar}
+                      {base.is_active_for_quotes ? " - actief voor offertes" : " - basis"}
                     </small>
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    className="cpq-icon-action break-even-config-add"
+                    aria-label={`Voeg scenario toe aan ${base.naam}`}
+                    title="Scenario toevoegen"
+                    onClick={() => addScenarioForBase(base)}
+                  >
+                    +
+                  </button>
+                </div>
+                <div className="break-even-scenario-list">
+                  {scenarios.map((scenario, index) => (
+                    <button
+                      key={scenario.id}
+                      type="button"
+                      className={`break-even-config-button break-even-config-button-child${scenario.id === activeConfigId ? " active" : ""}`}
+                      onClick={() => setActiveConfigId(scenario.id)}
+                    >
+                      <span>{`Scenario ${String.fromCharCode(65 + index)}`}</span>
+                      <small>
+                        {formatScenarioTypeLabel(
+                          deriveScenarioTypeFromAdjustments(scenario.adjustments)
+                        )}
+                        {scenario.is_active_for_quotes ? " - actief voor offertes" : ""}
+                      </small>
+                    </button>
+                  ))}
+                </div>
               </div>
             ))}
           </aside>
@@ -693,6 +720,49 @@ export function BreakEvenWorkspace({
                     ) : null}
                   </div>
                 ) : null}
+              </section>
+
+              <section className="module-card">
+                <div className="module-card-title">Solo break-even per product</div>
+                <div className="module-card-text" style={{ marginBottom: 12 }}>
+                  Theoretische analyse: wat gebeurt er als je alle vaste kosten volledig op één product laat rusten?
+                </div>
+                <div className="break-even-solo-grid">
+                  {standaloneResults.map((entry) => (
+                    <div key={entry.ref} className="break-even-solo-card">
+                      <div className="break-even-solo-title">{entry.label}</div>
+                      <div className="break-even-solo-metrics">
+                        <MetricCard
+                          label="BE liters"
+                          value={`${formatNumber(entry.breakEvenLiters, 0)} L`}
+                        />
+                        <MetricCard
+                          label="BE omzet"
+                          value={formatMoney(entry.breakEvenRevenue)}
+                        />
+                        <MetricCard
+                          label="Verkoopprijs / L"
+                          value={formatMoney(entry.sellInPerLiter)}
+                        />
+                        <MetricCard
+                          label="Variabel / L"
+                          value={formatMoney(entry.variableCostPerLiter)}
+                        />
+                        <MetricCard
+                          label="Contributie / L"
+                          value={formatMoney(entry.contributionPerLiter)}
+                        />
+                      </div>
+                      {entry.warnings.length > 0 ? (
+                        <div className="cpq-alert cpq-alert-warn break-even-solo-warnings">
+                          {entry.warnings.slice(0, 2).map((warning) => (
+                            <div key={warning}>{warning}</div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
               </section>
 
               <section className="module-card">
