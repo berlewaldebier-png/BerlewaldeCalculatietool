@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import hmac
 import json
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any
 from uuid import uuid4
+
+import jwt
 
 from app.domain import postgres_storage
 
@@ -41,53 +42,49 @@ def _auth_secret() -> str:
 
 
 def _b64url_encode(raw: bytes) -> str:
+    """Kept for backwards compatibility with legacy code if needed."""
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
 def _b64url_decode(text: str) -> bytes:
+    """Kept for backwards compatibility with legacy code if needed."""
     padding = "=" * (-len(text) % 4)
     return base64.urlsafe_b64decode((text + padding).encode("ascii"))
 
 
 def issue_session_token(*, username: str, display_name: str, role: str, expires_in_seconds: int = 60 * 60 * 12) -> str:
-    now = int(datetime.utcnow().timestamp())
+    """Issue a properly signed JWT session token using PyJWT."""
     payload = {
-        "v": 1,
         "username": username,
         "display_name": display_name,
         "role": role,
-        "iat": now,
-        "exp": now + int(expires_in_seconds),
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=int(expires_in_seconds)),
     }
-    payload_bytes = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    body = _b64url_encode(payload_bytes)
-    sig = hmac.new(_auth_secret().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
-    return f"{body}.{_b64url_encode(sig)}"
+    return jwt.encode(payload, _auth_secret(), algorithm="HS256")
 
 
 def verify_session_token(token: str) -> dict[str, Any] | None:
-    raw = str(token or "").strip()
-    if "." not in raw:
-        return None
-    body, sig_text = raw.split(".", 1)
+    """Verify and decode JWT session token."""
     try:
-        expected = hmac.new(_auth_secret().encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
-        provided = _b64url_decode(sig_text)
-        if not hmac.compare_digest(expected, provided):
+        raw = str(token or "").strip()
+        if not raw:
             return None
-        payload = json.loads(_b64url_decode(body).decode("utf-8"))
-        if not isinstance(payload, dict):
-            return None
-        exp = int(payload.get("exp", 0) or 0)
-        now = int(datetime.utcnow().timestamp())
-        if exp <= 0 or now >= exp:
-            return None
+        
+        payload = jwt.decode(raw, _auth_secret(), algorithms=["HS256"])
+        
         username = str(payload.get("username", "") or "").strip()
         display_name = str(payload.get("display_name", "") or "").strip()
         role = str(payload.get("role", "") or "").strip()
+        
         if not username or not display_name or not role:
             return None
+        
         return {"username": username, "display_name": display_name, "role": role}
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
     except Exception:
         return None
 
