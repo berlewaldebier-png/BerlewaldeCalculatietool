@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.data import router as data_router
@@ -12,8 +14,11 @@ from app.api.routes.integrations import router as integrations_router
 from app.api.routes.meta import router as meta_router
 from app.api.routes.quotes import router as quotes_router
 from app.domain import postgres_storage, db_pool
+from app.logging_config import setup_logging, get_logger
 
-logger = logging.getLogger(__name__)
+# Initialize logging
+setup_logging()
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="CalculatieTool API",
@@ -79,6 +84,30 @@ async def postgres_request_connection(request, call_next):
             return response
 
     return await call_next(request)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler for unhandled errors."""
+    request_id = str(uuid.uuid4())
+    logger.exception(
+        "Unhandled exception",
+        exc_info=exc,
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+        },
+    )
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "request_id": request_id,
+            "detail": "An unexpected error occurred. Please contact support with the request ID.",
+        },
+    )
 
 
 @app.get("/health")
