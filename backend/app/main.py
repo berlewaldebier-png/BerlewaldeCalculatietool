@@ -15,6 +15,7 @@ from app.api.routes.meta import router as meta_router
 from app.api.routes.quotes import router as quotes_router
 from app.domain import postgres_storage, db_pool
 from app.logging_config import setup_logging, get_logger
+from app.rate_limits import limiter
 
 # Initialize logging
 setup_logging()
@@ -25,6 +26,9 @@ app = FastAPI(
     version="0.1.0",
     summary="Nieuwe backend voor de CalculatieTool met behoud van bestaande Python-logica.",
 )
+
+# Add rate limiting
+app.state.limiter = limiter
 
 app.add_middleware(
     CORSMiddleware,
