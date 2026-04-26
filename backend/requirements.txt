@@ -1,4 +1,9 @@
 fastapi
 uvicorn[standard]
 pydantic
+pydantic-settings
 psycopg[binary]
+psycopg-pool
+PyJWT
+python-dotenv
+alembic
