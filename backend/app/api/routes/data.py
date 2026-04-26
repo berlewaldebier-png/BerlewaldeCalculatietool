@@ -1,145 +1,62 @@
+"""Data management API routes.
+
+Provides CRUD operations for datasets with special handlers for complex operations
+like cost version activation.
+"""
+
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
+from app.api.utils import create_dataset_crud_router
 from app.domain import dataset_store, postgres_storage
-from app.domain.auth_dependencies import require_admin, require_user
+from app.domain.auth_dependencies import require_admin
 from app.schemas.storage import StorageStatus
 
+logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/data", tags=["data"], dependencies=[Depends(require_user)])
+# Standard datasets exposed via generic CRUD
+_STANDARD_DATASETS = [
+    "productie",
+    "vaste-kosten",
+    "tarieven-heffingen",
+    "verpakkingsonderdelen",
+    "basisproducten",
+    "samengestelde-producten",
+    "bieren",
+    "berekeningen",
+    "kostprijsversies",
+    "verkoopprijzen",
+    "variabele-kosten",
+]
 
-
-@router.get("/productie")
-def get_productie() -> dict:
-    return dataset_store.load_dataset("productie")
-
-
-@router.put("/productie")
-def put_productie(data: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("productie", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/vaste-kosten")
-def get_vaste_kosten() -> dict:
-    return dataset_store.load_dataset("vaste-kosten")
-
-
-@router.put("/vaste-kosten")
-def put_vaste_kosten(data: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("vaste-kosten", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+# Create generic CRUD router for standard datasets
+router = create_dataset_crud_router(_STANDARD_DATASETS, protected=True)
 
 
-@router.get("/tarieven-heffingen")
-def get_tarieven_heffingen() -> list[dict]:
-    return dataset_store.load_dataset("tarieven-heffingen")
-
-
-@router.put("/tarieven-heffingen")
-def put_tarieven_heffingen(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("tarieven-heffingen", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/verpakkingsonderdelen")
-def get_verpakkingsonderdelen() -> list[dict]:
-    return dataset_store.load_dataset("verpakkingsonderdelen")
-
-
-@router.put("/verpakkingsonderdelen")
-def put_verpakkingsonderdelen(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("verpakkingsonderdelen", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/basisproducten")
-def get_basisproducten() -> list[dict]:
-    return dataset_store.load_dataset("basisproducten")
-
-
-@router.put("/basisproducten")
-def put_basisproducten(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("basisproducten", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/samengestelde-producten")
-def get_samengestelde_producten() -> list[dict]:
-    return dataset_store.load_dataset("samengestelde-producten")
-
-
-@router.put("/samengestelde-producten")
-def put_samengestelde_producten(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("samengestelde-producten", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/bieren")
-def get_bieren() -> list[dict]:
-    return dataset_store.load_dataset("bieren")
-
-
-@router.put("/bieren")
-def put_bieren(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("bieren", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/berekeningen")
-def get_berekeningen() -> list[dict]:
-    return dataset_store.load_dataset("berekeningen")
-
-
-@router.put("/berekeningen")
-def put_berekeningen(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("berekeningen", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/kostprijsversies")
-def get_kostprijsversies() -> list[dict]:
-    return dataset_store.load_dataset("kostprijsversies")
-
-
-@router.put("/kostprijsversies")
-def put_kostprijsversies(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("kostprijsversies", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
+# Special handlers for complex operations
 @router.post("/kostprijsversies/{version_id}/activate")
 def post_activate_kostprijsversie(
     version_id: str,
     data: dict[str, Any] = Body(default_factory=dict),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
-    run_id = str(data.get("run_id", "") or "")
-    activated = dataset_store.activate_cost_version(version_id, context={"run_id": run_id})
-    if activated is None:
-        raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden of niet definitief")
-    return {"activated": True, "record": activated}
+    """Activate a cost version."""
+    try:
+        run_id = str(data.get("run_id", "") or "")
+        activated = dataset_store.activate_cost_version(version_id, context={"run_id": run_id})
+        if activated is None:
+            raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden of niet definitief")
+        logger.info(f"Activated cost version: {version_id}")
+        return {"activated": True, "record": activated}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(f"Error activating cost version {version_id}")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.post("/kostprijsversies/{version_id}/activate-products")
@@ -148,77 +65,62 @@ def post_activate_kostprijsversie_products(
     data: dict[str, Any] = Body(...),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
-    product_ids = data.get("product_ids", [])
-    run_id = str(data.get("run_id", "") or "")
-    if not isinstance(product_ids, list):
-        raise HTTPException(status_code=400, detail="product_ids moet een lijst zijn")
-    activated = dataset_store.activate_cost_version_products(
-        version_id,
-        [str(product_id or "") for product_id in product_ids if str(product_id or "").strip()],
-        context={"run_id": run_id},
-    )
-    if activated is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Kostprijsversie of productkoppeling niet gevonden of niet definitief",
+    """Activate specific products for a cost version."""
+    try:
+        product_ids = data.get("product_ids", [])
+        run_id = str(data.get("run_id", "") or "")
+        
+        if not isinstance(product_ids, list):
+            raise HTTPException(status_code=400, detail="product_ids moet een lijst zijn")
+        
+        activated = dataset_store.activate_cost_version_products(
+            version_id,
+            [str(product_id or "") for product_id in product_ids if str(product_id or "").strip()],
+            context={"run_id": run_id},
         )
-    return {"activated": True, "record": activated}
-
-
-@router.get("/verkoopprijzen")
-def get_verkoopprijzen() -> list[dict]:
-    return dataset_store.load_dataset("verkoopprijzen")
-
-
-@router.put("/verkoopprijzen")
-def put_verkoopprijzen(data: list[dict[str, Any]], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("verkoopprijzen", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/variabele-kosten")
-def get_variabele_kosten() -> dict:
-    return dataset_store.load_dataset("variabele-kosten")
-
-
-@router.put("/variabele-kosten")
-def put_variabele_kosten(data: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, bool]:
-    try:
-        return {"saved": dataset_store.save_dataset("variabele-kosten", data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.put("/dataset/{name}")
-def put_dataset(name: str, data: Any = Body(...), _: dict = Depends(require_admin)) -> dict[str, bool]:
-    if name not in dataset_store.get_dataset_names():
-        raise HTTPException(status_code=404, detail="Unknown dataset")
-    try:
-        return {"saved": dataset_store.save_dataset(name, data)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.get("/dataset/{name}")
-def get_dataset(name: str) -> Any:
-    if name not in dataset_store.get_dataset_names():
-        raise HTTPException(status_code=404, detail="Unknown dataset")
-    return dataset_store.load_dataset(name)
+        
+        if activated is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Kostprijsversie of productkoppeling niet gevonden of niet definitief",
+            )
+        
+        logger.info(f"Activated {len(product_ids)} products for cost version: {version_id}")
+        return {"activated": True, "record": activated}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(f"Error activating products for cost version {version_id}")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.get("/storage-status", response_model=StorageStatus)
 def get_storage_status() -> StorageStatus:
-    return StorageStatus(**postgres_storage.storage_status())
+    """Get current storage provider and status."""
+    try:
+        status = postgres_storage.storage_status()
+        logger.debug("Retrieved storage status")
+        return StorageStatus(**status)
+    except Exception as exc:
+        logger.exception("Error retrieving storage status")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.post("/bootstrap-postgres")
 def post_bootstrap_postgres(_: dict = Depends(require_admin)) -> dict[str, Any]:
-    if not postgres_storage.database_url():
-        raise HTTPException(status_code=400, detail="PostgreSQL-configuratie ontbreekt")
-    results = dataset_store.bootstrap_postgres_from_json(overwrite=True)
-    return {
-        "provider": dataset_store.get_storage_provider(),
-        "bootstrapped": results,
-    }
+    """Bootstrap PostgreSQL database from JSON files."""
+    try:
+        if not postgres_storage.database_url():
+            raise HTTPException(status_code=400, detail="PostgreSQL-configuratie ontbreekt")
+        
+        results = dataset_store.bootstrap_postgres_from_json(overwrite=True)
+        logger.info("PostgreSQL bootstrap completed")
+        return {
+            "provider": dataset_store.get_storage_provider(),
+            "bootstrapped": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error bootstrapping PostgreSQL")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
