@@ -13,6 +13,7 @@ from app.api.routes.data import router as data_router
 from app.api.routes.integrations import router as integrations_router
 from app.api.routes.meta import router as meta_router
 from app.api.routes.quotes import router as quotes_router
+from app.config_validation import validate_config, log_startup_info
 from app.domain import postgres_storage, db_pool
 from app.logging_config import setup_logging, get_logger
 from app.rate_limits import limiter
@@ -50,17 +51,24 @@ def startup_event():
     """Initialize database connection pool and validate configuration."""
     logger.info("Initializing application...")
     
-    # Validate critical configuration
-    if postgres_storage.uses_postgres():
-        db_url = postgres_storage.database_url()
-        if not db_url:
-            raise RuntimeError("PostgreSQL configured but connection URL missing")
+    try:
+        # Validate critical configuration first
+        validate_config()
         
-        logger.info("Initializing PostgreSQL connection pool...")
-        db_pool.initialize_pool(db_url, min_size=5, max_size=20)
-        logger.info("Connection pool initialized successfully")
-    
-    logger.info("Application startup complete")
+        # Log startup information
+        log_startup_info()
+        
+        # Initialize connection pool if using PostgreSQL
+        if postgres_storage.uses_postgres():
+            db_url = postgres_storage.database_url()
+            logger.info("Initializing PostgreSQL connection pool...")
+            db_pool.initialize_pool(db_url, min_size=5, max_size=20)
+            logger.info("Connection pool initialized successfully")
+        
+        logger.info("Application startup complete")
+    except Exception as e:
+        logger.error(f"Startup failed: {e}")
+        raise
 
 
 @app.on_event("shutdown")
