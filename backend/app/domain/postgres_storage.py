@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Any, Iterator
 
 from app import config  # noqa: F401
+from app.domain import db_pool
 
 
 _request_connection: ContextVar[Any | None] = ContextVar("calculatietool_request_connection", default=None)
@@ -98,12 +99,26 @@ def _require_psycopg():
 
 @contextmanager
 def connect() -> Iterator[Any]:
+    """Get a database connection from the pool.
+    
+    Priority:
+    1. Use request-bound connection if available (from middleware)
+    2. Use connection from pool if available
+    3. Fail if pool not initialized
+    """
     existing = _request_connection.get()
     if existing is not None:
         # The request middleware owns lifecycle; do not close here.
         yield existing
         return
 
+    # Use connection pool if initialized
+    if db_pool.is_pool_initialized():
+        with db_pool.get_connection() as conn:
+            yield conn
+        return
+    
+    # Fallback for initialization or testing
     psycopg = _require_psycopg()
     db_url = database_url()
     if not db_url:
