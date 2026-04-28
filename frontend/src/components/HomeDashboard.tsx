@@ -33,6 +33,7 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
     "/nieuwe-kostprijsberekening",
     "/prijsvoorstellen",
     "/break-even",
+    "/omzet-en-marge",
     "/productie",
     "/vaste-kosten",
     "/tarieven-heffingen",
@@ -61,6 +62,9 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
   }
   if (!byHref.has("/break-even")) {
     byHref.set("/break-even", { label: "Break-even analyseren", href: "/break-even" });
+  }
+  if (!byHref.has("/omzet-en-marge")) {
+    byHref.set("/omzet-en-marge", { label: "Omzet & marge", href: "/omzet-en-marge" });
   }
 
   const result: DashboardNavItem[] = [];
