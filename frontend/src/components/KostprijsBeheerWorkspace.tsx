@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { BerekeningenWizard } from "@/components/BerekeningenWizard";
+import {
+  BerekeningenWizard,
+  type BerekeningenWizardPersistResult
+} from "@/components/BerekeningenWizard";
+import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatPercent0to2 } from "@/lib/formatters";
 
 type GenericRecord = Record<string, unknown>;
@@ -37,7 +41,10 @@ export function KostprijsBeheerWorkspace({
   initialMode,
   initialFocus
 }: KostprijsBeheerWorkspaceProps) {
-  const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(berekeningen);
+  const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(
+    Array.isArray(berekeningen) ? berekeningen : []
+  );
+  const [currentBieren, setCurrentBieren] = useState<GenericRecord[]>(Array.isArray(bieren) ? bieren : []);
   const normalizedInitialMode =
     initialMode === "wizard-new" || initialMode === "wizard-edit"
       ? (initialMode as WorkspaceMode)
@@ -211,9 +218,45 @@ export function KostprijsBeheerWorkspace({
   const [existingFilterMode, setExistingFilterMode] = useState<ExistingFilterMode>("concept");
   const [existingSearch, setExistingSearch] = useState("");
 
+  useEffect(() => {
+    setCurrentBerekeningen(Array.isArray(berekeningen) ? berekeningen : []);
+  }, [berekeningen]);
+
+  useEffect(() => {
+    setCurrentBieren(Array.isArray(bieren) ? bieren : []);
+  }, [bieren]);
+
+  async function refreshBieren() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/data/bieren`, { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const nextBieren = (await response.json()) as GenericRecord[];
+      setCurrentBieren(Array.isArray(nextBieren) ? nextBieren : []);
+    } catch {
+      // Keep the current UI responsive; a later bootstrap refresh will still recover.
+    }
+  }
+
+  function handleRowsChange(rows: GenericRecord[]) {
+    setCurrentBerekeningen(Array.isArray(rows) ? rows : []);
+    void refreshBieren();
+  }
+
+  function handlePersisted(result: BerekeningenWizardPersistResult) {
+    if (result.year > 0) {
+      setSelectedYear(result.year);
+    }
+    if (result.id) {
+      setSelectedId(result.id);
+    }
+    setExistingFilterMode(result.status === "definitief" ? "definitief" : "concept");
+  }
+
   const bierenById = useMemo(() => {
     const map = new Map<string, string>();
-    (Array.isArray(bieren) ? bieren : []).forEach((row) => {
+    (Array.isArray(currentBieren) ? currentBieren : []).forEach((row) => {
       const id = String((row as any)?.id ?? "");
       const naam = String((row as any)?.naam ?? (row as any)?.biernaam ?? "");
       if (id && naam) {
@@ -221,7 +264,7 @@ export function KostprijsBeheerWorkspace({
       }
     });
     return map;
-  }, [bieren]);
+  }, [currentBieren]);
 
   const basisById = useMemo(() => {
     const map = new Map<string, string>();
@@ -249,7 +292,7 @@ export function KostprijsBeheerWorkspace({
 
   const berekeningenById = useMemo(() => {
     const map = new Map<string, GenericRecord>();
-    currentBerekeningen.forEach((row) => {
+    (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((row) => {
       const id = String((row as any)?.id ?? "");
       if (id) {
         map.set(id, row);
@@ -274,7 +317,7 @@ export function KostprijsBeheerWorkspace({
         const basis = ((row as any)?.basisgegevens ?? {}) as any;
         const bierId = String((row as any)?.bier_id ?? "");
         const bierNaam = String(
-          basis?.biernaam ?? (row as any)?.bier_snapshot?.biernaam ?? bierenById.get(bierId) ?? ""
+          bierenById.get(bierId) ?? basis?.biernaam ?? (row as any)?.bier_snapshot?.biernaam ?? ""
         );
         const jaar = Number((row as any)?.jaar ?? basis?.jaar ?? 0) || 0;
         const status = String((row as any)?.status ?? "");
@@ -555,8 +598,10 @@ export function KostprijsBeheerWorkspace({
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
+        kostprijsproductactiveringen={kostprijsproductactiveringen}
         startWithNew
-        onRowsChange={setCurrentBerekeningen}
+        onRowsChange={handleRowsChange}
+        onPersisted={handlePersisted}
         onFinish={() => setMode("landing")}
         onBackToLanding={() => setMode("landing")}
       />
@@ -573,8 +618,10 @@ export function KostprijsBeheerWorkspace({
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
+        kostprijsproductactiveringen={kostprijsproductactiveringen}
         initialSelectedId={selectedId}
-        onRowsChange={setCurrentBerekeningen}
+        onRowsChange={handleRowsChange}
+        onPersisted={handlePersisted}
         onFinish={() => setMode("landing")}
         onBackToLanding={() => setMode("landing")}
       />
