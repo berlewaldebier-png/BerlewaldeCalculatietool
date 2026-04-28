@@ -272,6 +272,13 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                     Beheer de adviesopslag per kanaal (sell-out) voor een gekozen jaar.
                   </div>
                 </Link>
+
+                <Link href="/omzet-en-marge" className="dashboard-quick-card">
+                  <div className="dashboard-quick-card-title">Omzet &amp; marge</div>
+                  <div className="dashboard-quick-card-text">
+                    Analyseer omzet, kostprijs en brutomarge per klant op basis van Douano orders.
+                  </div>
+                </Link>
               </div>
             </article>
 

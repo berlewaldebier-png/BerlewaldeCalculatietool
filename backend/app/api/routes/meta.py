@@ -104,10 +104,10 @@ def get_navigation() -> list[NavigationItem]:
             section="Verkoop",
         ),
         NavigationItem(
-            key="omzetgegevens",
-            label="Omzetgegevens",
+            key="omzet-en-marge",
+            label="Omzet & marge",
             description="Omzet, kostprijs en brutomarge per klant (Douano).",
-            href="/omzetgegevens",
+            href="/omzet-en-marge",
             section="Verkoop",
         ),
         NavigationItem(
