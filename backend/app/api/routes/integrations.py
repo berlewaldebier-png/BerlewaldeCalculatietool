@@ -729,17 +729,19 @@ def get_douano_active_cost_combos(
             if bid:
                 bieren_by_id[bid] = naam or bid
 
-    product_by_id: dict[str, str] = {}
-    for source in (basisproducten, samengestelde):
+    product_by_ref: dict[tuple[str, str], str] = {}
+    for source, kind in ((basisproducten, "basis"), (samengestelde, "samengesteld")):
         if not isinstance(source, list):
             continue
         for row in source:
             if not isinstance(row, dict):
                 continue
             pid = str(row.get("id", "") or "")
-            oms = str(row.get("omschrijving", row.get("naam", "")) or "")
+            oms = str(row.get("omschrijving", "") or "").strip()
+            naam = str(row.get("naam", "") or "").strip()
+            label = oms or naam or pid
             if pid:
-                product_by_id[pid] = oms or pid
+                product_by_ref[(kind, pid)] = label
 
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -751,6 +753,10 @@ def get_douano_active_cost_combos(
                 continue
             bier_id = str(row.get("bier_id", "") or "")
             product_id = str(row.get("product_id", "") or "")
+            product_type = str(row.get("product_type", "") or "").strip().lower()
+            if product_type not in {"basis", "samengesteld"}:
+                # fallback: keep it visible and searchable
+                product_type = "onbekend"
             if not bier_id or not product_id:
                 continue
             key = f"{bier_id}::{product_id}"
@@ -758,11 +764,12 @@ def get_douano_active_cost_combos(
                 continue
             seen.add(key)
             bier_naam = bieren_by_id.get(bier_id, bier_id)
-            product_naam = product_by_id.get(product_id, product_id)
+            product_naam = product_by_ref.get((product_type, product_id)) or product_by_ref.get(("basis", product_id)) or product_by_ref.get(("samengesteld", product_id)) or f"[{product_type}] {product_id}"
             items.append(
                 {
                     "bier_id": bier_id,
                     "product_id": product_id,
+                    "product_type": product_type,
                     "label": f"{bier_naam} — {product_naam}",
                     "bier_naam": bier_naam,
                     "product_naam": product_naam,
