@@ -14,6 +14,7 @@ type DouanoProduct = {
 type ActiveCombo = {
   bier_id: string;
   product_id: string;
+  product_type?: string;
   label: string;
 };
 
@@ -74,7 +75,6 @@ function TrashIcon() {
 export function DouanoProductMappingCard() {
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
-  const [year, setYear] = useState<number>(new Date().getFullYear());
   const [filter, setFilter] = useState<string>("");
   const [products, setProducts] = useState<DouanoProduct[]>([]);
   const [combos, setCombos] = useState<ActiveCombo[]>([]);
@@ -98,13 +98,22 @@ export function DouanoProductMappingCard() {
     });
   }, [products, filter]);
 
+  const combosByKey = useMemo(() => {
+    const map = new Map<string, ActiveCombo>();
+    combos.forEach((c) => {
+      const key = `${c.bier_id}::${c.product_id}`;
+      map.set(key, c);
+    });
+    return map;
+  }, [combos]);
+
   async function refreshAll() {
     setStatus("Laden…");
     setTone("");
     try {
       const [p, c, m] = await Promise.all([
         readJson("/api/integrations/douano/products?limit=2000"),
-        readJson(`/api/integrations/douano/active-cost-combos?year=${encodeURIComponent(String(year))}`),
+        readJson("/api/integrations/douano/cost-combos"),
         readJson("/api/integrations/douano/product-mappings?limit=10000")
       ]);
       setProducts(Array.isArray(p?.items) ? p.items : []);
@@ -124,7 +133,7 @@ export function DouanoProductMappingCard() {
   useEffect(() => {
     void refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year]);
+  }, []);
 
   async function save(productId: number) {
     const selected = String(draft[productId] ?? "").trim();
@@ -168,17 +177,6 @@ export function DouanoProductMappingCard() {
     >
       <div className="editor-actions" style={{ marginTop: 8 }}>
         <div className="editor-actions-group">
-          <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontWeight: 700, opacity: 0.85 }}>Jaar</span>
-            <input
-              className="editor-input"
-              style={{ width: 110 }}
-              value={String(year)}
-              onChange={(e) => setYear(Number(e.target.value || new Date().getFullYear()))}
-              inputMode="numeric"
-              aria-label="Jaar"
-            />
-          </label>
           <input
             className="editor-input"
             style={{ width: 320 }}
@@ -219,6 +217,7 @@ export function DouanoProductMappingCard() {
               const mappedKey = mapping ? `${mapping.bier_id}::${mapping.product_id}` : "";
               const value = String(draft[id] ?? mappedKey ?? "");
               const isMapped = Boolean(mapping);
+              const mappedLabel = mappedKey ? combosByKey.get(mappedKey)?.label ?? mappedKey : "";
               return (
                 <tr key={id}>
                   <td>
@@ -238,7 +237,7 @@ export function DouanoProductMappingCard() {
                       value={value}
                       onChange={(e) => setDraft((prev) => ({ ...prev, [id]: e.target.value }))}
                     >
-                      <option value="">{isMapped ? "—" : "Selecteer bier — verpakking"}</option>
+                      <option value="">{isMapped ? mappedLabel || "—" : "Selecteer bier — verpakking"}</option>
                       {combos.map((c) => {
                         const key = `${c.bier_id}::${c.product_id}`;
                         return (
@@ -287,9 +286,8 @@ export function DouanoProductMappingCard() {
       </div>
 
       <div style={{ marginTop: 10, opacity: 0.75 }}>
-        Toont max. 500 producten (filter om te zoeken). Combinaties komen uit actieve kostprijs-activaties voor het gekozen jaar.
+        Toont max. 500 producten (filter om te zoeken). Combinaties komen uit definitieve kostprijssnapshots + activaties (alle jaren).
       </div>
     </SectionCard>
   );
 }
-

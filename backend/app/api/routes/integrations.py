@@ -706,15 +706,21 @@ def delete_douano_product_mapping(douano_product_id: int) -> dict[str, Any]:
     return {"deleted": bool(deleted)}
 
 
-@router.get("/douano/active-cost-combos")
-def get_douano_active_cost_combos(
-    year: int = Query(..., ge=2000, le=2100),
+@router.get("/douano/cost-combos")
+def get_douano_cost_combos(
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op jaar (0 = alle jaren)."),
 ) -> dict[str, Any]:
-    """Return active (bier_id, product_id) combos for a year with human labels.
+    """Return unique (bier_id, product_id) combos with human labels.
 
-    This is used for manual mapping: Douano product -> (bier_id, product_id).
+    This endpoint is used for manual mapping: Douano product -> (bier_id, product_id).
+
+    - Mapping is year-independent, so by default (year=0) we return combos across all years.
+    - The list includes:
+      - active activations (kostprijsproductactiveringen)
+      - definitive cost version snapshots (kostprijsversies.resultaat_snapshot)
     """
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
+    versions = dataset_store.load_dataset("kostprijsversies")
     bieren = dataset_store.load_dataset("bieren")
     basisproducten = dataset_store.load_dataset("basisproducten")
     samengestelde = dataset_store.load_dataset("samengestelde-producten")
@@ -745,36 +751,69 @@ def get_douano_active_cost_combos(
 
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
+
+    def _append_combo(*, bier_id: str, product_id: str, product_type: str) -> None:
+        if not bier_id or not product_id:
+            return
+        key = f"{bier_id}::{product_id}"
+        if key in seen:
+            return
+        seen.add(key)
+        bier_naam = bieren_by_id.get(bier_id, bier_id)
+        normalized_type = str(product_type or "").strip().lower()
+        if normalized_type not in {"basis", "samengesteld"}:
+            normalized_type = "onbekend"
+        product_naam = (
+            product_by_ref.get((normalized_type, product_id))
+            or product_by_ref.get(("basis", product_id))
+            or product_by_ref.get(("samengesteld", product_id))
+            or f"[{normalized_type}] {product_id}"
+        )
+        items.append(
+            {
+                "bier_id": bier_id,
+                "product_id": product_id,
+                "product_type": normalized_type,
+                "label": f"{bier_naam} — {product_naam}",
+                "bier_naam": bier_naam,
+                "product_naam": product_naam,
+            }
+        )
+
     if isinstance(activations, list):
         for row in activations:
             if not isinstance(row, dict):
                 continue
-            if int(row.get("jaar", 0) or 0) != int(year):
+            activation_year = int(row.get("jaar", 0) or 0)
+            if int(year) and activation_year != int(year):
                 continue
-            bier_id = str(row.get("bier_id", "") or "")
-            product_id = str(row.get("product_id", "") or "")
-            product_type = str(row.get("product_type", "") or "").strip().lower()
-            if product_type not in {"basis", "samengesteld"}:
-                # fallback: keep it visible and searchable
-                product_type = "onbekend"
-            if not bier_id or not product_id:
-                continue
-            key = f"{bier_id}::{product_id}"
-            if key in seen:
-                continue
-            seen.add(key)
-            bier_naam = bieren_by_id.get(bier_id, bier_id)
-            product_naam = product_by_ref.get((product_type, product_id)) or product_by_ref.get(("basis", product_id)) or product_by_ref.get(("samengesteld", product_id)) or f"[{product_type}] {product_id}"
-            items.append(
-                {
-                    "bier_id": bier_id,
-                    "product_id": product_id,
-                    "product_type": product_type,
-                    "label": f"{bier_naam} — {product_naam}",
-                    "bier_naam": bier_naam,
-                    "product_naam": product_naam,
-                }
+            _append_combo(
+                bier_id=str(row.get("bier_id", "") or ""),
+                product_id=str(row.get("product_id", "") or ""),
+                product_type=str(row.get("product_type", "") or ""),
             )
+
+    if isinstance(versions, list):
+        for version in versions:
+            if not isinstance(version, dict):
+                continue
+            if str(version.get("status", "") or "").strip().lower() != "definitief":
+                continue
+            version_year = int(version.get("jaar", (version.get("basisgegevens", {}) or {}).get("jaar", 0)) or 0)
+            if int(year) and version_year != int(year):
+                continue
+            bier_id = str(version.get("bier_id", "") or "")
+            producten = ((version.get("resultaat_snapshot", {}) or {}).get("producten", {}) or {})
+            if not isinstance(producten, dict):
+                continue
+            for row in producten.get("basisproducten", []) if isinstance(producten.get("basisproducten", []), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                _append_combo(bier_id=bier_id, product_id=str(row.get("product_id", "") or ""), product_type="basis")
+            for row in producten.get("samengestelde_producten", []) if isinstance(producten.get("samengestelde_producten", []), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                _append_combo(bier_id=bier_id, product_id=str(row.get("product_id", "") or ""), product_type="samengesteld")
 
     items.sort(key=lambda item: str(item.get("label", "") or "").lower())
     return {"items": items}
