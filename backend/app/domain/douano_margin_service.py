@@ -158,7 +158,7 @@ def _resolve_cost_per_unit(
     return None, version_id, ""
 
 
-def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dict[str, Any]]:
+def get_company_margin_summary(*, since: str = "", year: int = 0, limit: int = 500) -> list[dict[str, Any]]:
     """Compute company margin summary live by joining:
     douano_sales_order_lines -> douano_product_mapping -> (activations + definitive snapshots).
     """
@@ -167,10 +167,20 @@ def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dic
     postgres_storage.ensure_schema()
 
     since_text = (since or "").strip()
+    year_start, year_end = _year_bounds(year)
     lim = max(1, min(int(limit or 500), 5000))
 
-    where = "WHERE l.order_date >= %s::date" if since_text else ""
-    params: tuple[Any, ...] = (since_text, lim) if since_text else (lim,)
+    where_parts: list[str] = []
+    params_list: list[Any] = []
+    if since_text:
+        where_parts.append("l.order_date >= %s::date")
+        params_list.append(since_text)
+    if year_start:
+        where_parts.append("l.order_date >= %s::date AND l.order_date < %s::date")
+        params_list.extend([year_start, year_end])
+    where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+    params_list.append(lim)
+    params: tuple[Any, ...] = tuple(params_list)
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -220,24 +230,24 @@ def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dic
     cost_by_company: dict[int, dict[str, Any]] = {}
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
+            clauses: list[str] = []
+            params2: list[Any] = []
             if since_text:
-                cur.execute(
-                    """
-                    SELECT l.company_id, l.order_date, l.douano_product_id, l.quantity, l.net_revenue_ex, m.bier_id, m.product_id
-                    FROM douano_sales_order_lines l
-                    JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
-                    WHERE l.order_date >= %s::date
-                    """,
-                    (since_text,),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT l.company_id, l.order_date, l.douano_product_id, l.quantity, l.net_revenue_ex, m.bier_id, m.product_id
-                    FROM douano_sales_order_lines l
-                    JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
-                    """
-                )
+                clauses.append("l.order_date >= %s::date")
+                params2.append(since_text)
+            if year_start:
+                clauses.append("l.order_date >= %s::date AND l.order_date < %s::date")
+                params2.extend([year_start, year_end])
+            where2 = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            cur.execute(
+                f"""
+                SELECT l.company_id, l.order_date, l.douano_product_id, l.quantity, l.net_revenue_ex, m.bier_id, m.product_id
+                FROM douano_sales_order_lines l
+                JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                {where2}
+                """,
+                tuple(params2),
+            )
             mapped_rows = cur.fetchall() or []
 
     for company_id, order_date_raw, douano_product_id, quantity, net_revenue, bier_id, product_id in mapped_rows:
@@ -287,6 +297,15 @@ def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dic
             }
         )
     return out
+
+
+def _year_bounds(year: int) -> tuple[str, str]:
+    y = int(year or 0)
+    if y <= 0:
+        return "", ""
+    start = f"{y:04d}-01-01"
+    end = f"{y + 1:04d}-01-01"
+    return start, end
 
 
 def list_company_unmapped_products(*, company_id: int, since: str = "", limit: int = 50) -> list[dict[str, Any]]:
@@ -348,6 +367,7 @@ def list_company_lines(
     *,
     company_id: int,
     since: str = "",
+    year: int = 0,
     only_unmapped: bool = False,
     only_missing_cost: bool = False,
     limit: int = 500,
@@ -362,12 +382,16 @@ def list_company_lines(
 
     lim = max(1, min(int(limit or 500), 5000))
     since_text = (since or "").strip()
+    year_start, year_end = _year_bounds(year)
 
     clauses: list[str] = ["l.company_id = %s"]
     params: list[Any] = [cid]
     if since_text:
         clauses.append("l.order_date >= %s::date")
         params.append(since_text)
+    if year_start:
+        clauses.append("l.order_date >= %s::date AND l.order_date < %s::date")
+        params.extend([year_start, year_end])
 
     if only_unmapped:
         clauses.append("ig.douano_product_id IS NULL AND m.douano_product_id IS NULL")
@@ -495,6 +519,7 @@ def list_company_orders(
     *,
     company_id: int,
     since: str = "",
+    year: int = 0,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     """List sales orders for a company with totals + counts.
@@ -509,8 +534,17 @@ def list_company_orders(
         return []
     lim = max(1, min(int(limit or 200), 2000))
     since_text = (since or "").strip()
-    where_since = "AND l.order_date >= %s::date" if since_text else ""
-    params: tuple[Any, ...] = (cid, since_text, lim) if since_text else (cid, lim)
+    year_start, year_end = _year_bounds(year)
+    where = ""
+    params_list: list[Any] = [cid]
+    if since_text:
+        where += " AND l.order_date >= %s::date"
+        params_list.append(since_text)
+    if year_start:
+        where += " AND l.order_date >= %s::date AND l.order_date < %s::date"
+        params_list.extend([year_start, year_end])
+    params_list.append(lim)
+    params: tuple[Any, ...] = tuple(params_list)
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
@@ -533,7 +567,7 @@ def list_company_orders(
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 WHERE o.company_id = %s
-                {where_since}
+                {where}
                 GROUP BY o.sales_order_id, o.order_date, o.transaction_number, o.status
                 ORDER BY o.order_date DESC, o.sales_order_id DESC
                 LIMIT %s

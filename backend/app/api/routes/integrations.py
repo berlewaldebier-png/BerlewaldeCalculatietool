@@ -687,15 +687,17 @@ def get_douano_revenue_summary(
 @router.get("/douano/margin-summary")
 def get_douano_margin_summary(
     since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op order jaar (0 = alles)."),
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
-    return {"items": douano_margin_service.get_company_margin_summary(since=since, limit=int(limit))}
+    return {"items": douano_margin_service.get_company_margin_summary(since=since, year=int(year or 0), limit=int(limit))}
 
 
 @router.get("/douano/company-lines")
 def get_douano_company_lines(
     company_id: int = Query(..., ge=1),
     since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op order jaar (0 = alles)."),
     only_unmapped: bool = Query(False),
     only_missing_cost: bool = Query(False),
     limit: int = Query(500, ge=1, le=5000),
@@ -704,6 +706,7 @@ def get_douano_company_lines(
         "items": douano_margin_service.list_company_lines(
             company_id=int(company_id),
             since=since,
+            year=int(year or 0),
             only_unmapped=bool(only_unmapped),
             only_missing_cost=bool(only_missing_cost),
             limit=int(limit),
@@ -715,12 +718,14 @@ def get_douano_company_lines(
 def get_douano_company_orders(
     company_id: int = Query(..., ge=1),
     since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op order jaar (0 = alles)."),
     limit: int = Query(200, ge=1, le=2000),
 ) -> dict[str, Any]:
     return {
         "items": douano_margin_service.list_company_orders(
             company_id=int(company_id),
             since=since,
+            year=int(year or 0),
             limit=int(limit),
         )
     }

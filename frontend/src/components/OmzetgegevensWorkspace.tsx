@@ -34,8 +34,9 @@ function euro(value: number) {
   return formatMoneyEUR(value);
 }
 
-export function OmzetgegevensWorkspace() {
+export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears?: number[] }) {
   const [since, setSince] = useState<string>("");
+  const [year, setYear] = useState<number>(0);
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [rows, setRows] = useState<Row[]>([]);
@@ -44,7 +45,10 @@ export function OmzetgegevensWorkspace() {
     setStatus("Laden…");
     setTone("");
     try {
-      const qs = since.trim() ? `?since=${encodeURIComponent(since.trim())}` : "";
+      const params = new URLSearchParams();
+      if (since.trim()) params.set("since", since.trim());
+      if (year > 0) params.set("year", String(year));
+      const qs = params.toString() ? `?${params.toString()}` : "";
       const payload = await readJson(`/api/integrations/douano/margin-summary${qs}`);
       setRows(Array.isArray(payload?.items) ? payload.items : []);
       setStatus("Gereed");
@@ -80,6 +84,20 @@ export function OmzetgegevensWorkspace() {
     <section>
       <div className="editor-actions" style={{ marginTop: 8 }}>
         <div className="editor-actions-group">
+          <select
+            className="editor-input"
+            style={{ width: 180 }}
+            value={String(year)}
+            onChange={(e) => setYear(Number(e.target.value || 0) || 0)}
+            aria-label="Jaarfilter"
+          >
+            <option value="0">Alle jaren</option>
+            {availableYears.slice().reverse().map((y) => (
+              <option key={y} value={String(y)}>
+                {y}
+              </option>
+            ))}
+          </select>
           <input
             className="editor-input"
             style={{ width: 180 }}
