@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from datetime import UTC, datetime, timedelta
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -13,6 +14,11 @@ from fastapi.responses import RedirectResponse
 
 from app.domain.auth_dependencies import require_user
 from app.domain import douano_oauth_storage
+from app.domain import douano_sync_storage
+from app.domain import douano_product_mapping_storage
+from app.domain import douano_product_ignore_storage
+from app.domain import dataset_store
+from app.domain import douano_margin_service
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
@@ -135,6 +141,63 @@ def _douano_api_base_url(tokens: dict[str, Any]) -> str:
     return str(tokens.get("base_url", "") or "").strip().rstrip("/") or _douano_base_url()
 
 
+def _parse_iso_ts(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        # Stored as ISO string via douano_oauth_storage.get_tokens()
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _refresh_douano_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
+    refresh_token = str(tokens.get("refresh_token", "") or "")
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Douano refresh_token ontbreekt; opnieuw koppelen.")
+
+    token_url = _douano_token_url()
+    form = {
+        "grant_type": "refresh_token",
+        "client_id": _douano_client_id(),
+        "client_secret": _douano_client_secret(),
+        "refresh_token": refresh_token,
+    }
+    status, _, raw = _douano_request(tokens={"access_token": ""}, method="POST", url=token_url, form=form)
+    if status >= 400:
+        snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+        if len(snippet) > 500:
+            snippet = snippet[:500] + "…"
+        raise HTTPException(status_code=400, detail=f"Douano token refresh mislukt ({status}): {snippet}")
+
+    parsed = _parse_json_payload(raw)
+    access_token = str(parsed.get("access_token", "") or "")
+    new_refresh_token = str(parsed.get("refresh_token", "") or refresh_token)
+    token_type = str(parsed.get("token_type", "") or "")
+    scope = str(parsed.get("scope", "") or "")
+    try:
+        expires_in = int(parsed.get("expires_in", 0) or 0)
+    except (TypeError, ValueError):
+        expires_in = 0
+
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Douano token refresh response mist access_token; opnieuw koppelen.")
+
+    douano_oauth_storage.upsert_tokens(
+        provider="douano",
+        base_url=_douano_base_url(),
+        access_token=access_token,
+        refresh_token=new_refresh_token,
+        token_type=token_type,
+        scope=scope,
+        expires_in_seconds=expires_in,
+        raw_payload=parsed if isinstance(parsed, dict) else {},
+    )
+    refreshed = douano_oauth_storage.get_tokens("douano") or {}
+    return refreshed if refreshed else tokens
+
+
 def _douano_request(
     *,
     tokens: dict[str, Any],
@@ -147,8 +210,10 @@ def _douano_request(
     headers = {
         "Accept": "application/json",
         "User-Agent": "calculatietool/0.1 (+http://localhost)",
-        "Authorization": f"Bearer {tokens.get('access_token','')}",
     }
+    access = str(tokens.get("access_token", "") or "").strip()
+    if access:
+        headers["Authorization"] = f"Bearer {access}"
     if form is not None:
         body = urllib.parse.urlencode(form).encode("utf-8")
         headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -166,6 +231,69 @@ def _douano_request(
         return int(getattr(exc, "code", 0) or 0), (dict(hdrs.items()) if hdrs else {}), raw
     except Exception as exc:
         return 0, {}, str(exc)
+
+
+def _parse_json_payload(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Douano response is geen JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=502, detail="Douano response ongeldig (verwacht object).")
+    return parsed
+
+
+def _extract_result_list(payload: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return 0, []
+    current_page = int(result.get("current_page", 0) or 0)
+    data = result.get("data", [])
+    if not isinstance(data, list):
+        return current_page, []
+    cleaned: list[dict[str, Any]] = [row for row in data if isinstance(row, dict)]
+    return current_page, cleaned
+
+
+def _fetch_paged_resource(
+    *,
+    tokens: dict[str, Any],
+    path: str,
+    query: dict[str, str] | None = None,
+    max_pages: int = 10,
+) -> list[dict[str, Any]]:
+    # Refresh tokens proactively when expired/near-expired.
+    expires_at = _parse_iso_ts(tokens.get("expires_at"))
+    if expires_at is not None:
+        now = datetime.now(UTC)
+        if expires_at <= now + timedelta(seconds=60):
+            tokens = _refresh_douano_tokens(tokens)
+
+    base = _douano_api_base_url(tokens)
+    q = dict(query or {})
+    items: list[dict[str, Any]] = []
+    for page in range(1, max(1, int(max_pages)) + 1):
+        q_with_page = {**q, "page": str(page)}
+        url = f"{base}{path}?{urllib.parse.urlencode(q_with_page)}" if q_with_page else f"{base}{path}"
+        status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
+        if status == 401:
+            # Try a single refresh+retry; if rights are missing this still stays 401/403.
+            tokens = _refresh_douano_tokens(tokens)
+            status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
+        if status >= 400:
+            snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+            if len(snippet) > 300:
+                snippet = snippet[:300] + "…"
+            raise HTTPException(
+                status_code=502,
+                detail=f"Douano fetch faalde ({status}) voor {path}: {snippet}",
+            )
+        payload = _parse_json_payload(raw)
+        _, page_items = _extract_result_list(payload)
+        if not page_items:
+            break
+        items.extend(page_items)
+    return items
 
 
 def _set_state_cookie(response: Response, state: str) -> None:
@@ -432,4 +560,380 @@ def get_douano_status() -> dict[str, Any]:
         "created_at": tokens.get("created_at", ""),
         "updated_at": tokens.get("updated_at", ""),
     }
+
+
+@router.get("/douano/sync-status")
+def get_douano_sync_status() -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_sync_state()}
+
+
+@router.post("/douano/sync/companies")
+def post_douano_sync_companies(
+    max_pages: int = Query(10, ge=1, le=200),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    try:
+        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/companies", max_pages=max_pages)
+        for row in items:
+            douano_sync_storage.upsert_raw_object(
+                resource="companies",
+                external_id=int(row.get("id", 0) or 0),
+                entity_version=int(row.get("entity_version", 0) or 0),
+                payload=row,
+            )
+        normalized = douano_sync_storage.upsert_companies(items)
+        stats = {"fetched": len(items), "upserted": normalized}
+        douano_sync_storage.set_sync_state(resource="companies", success=True, since_date=None, stats=stats, error="")
+        return {"resource": "companies", **stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={}, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Companies sync faalde: {exc}") from exc
+
+
+@router.post("/douano/sync/products")
+def post_douano_sync_products(
+    max_pages: int = Query(10, ge=1, le=200),
+    is_sellable: bool = Query(True, description="Wanneer true: filter_by_is_sellable=true"),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    query: dict[str, str] = {}
+    if is_sellable:
+        query["filter_by_is_sellable"] = "true"
+    try:
+        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/products", query=query, max_pages=max_pages)
+        for row in items:
+            douano_sync_storage.upsert_raw_object(
+                resource="products",
+                external_id=int(row.get("id", 0) or 0),
+                entity_version=int(row.get("entity_version", 0) or 0),
+                payload=row,
+            )
+        normalized = douano_sync_storage.upsert_products(items)
+        stats = {"fetched": len(items), "upserted": normalized}
+        douano_sync_storage.set_sync_state(resource="products", success=True, since_date=None, stats=stats, error="")
+        return {"resource": "products", **stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={}, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Products sync faalde: {exc}") from exc
+
+
+@router.post("/douano/sync/sales-orders")
+def post_douano_sync_sales_orders(
+    max_pages: int = Query(10, ge=1, le=500),
+    since_date: str = Query("", description="Optioneel: filter orders client-side op date >= since_date (YYYY-MM-DD)."),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    try:
+        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-orders", max_pages=max_pages)
+        filtered: list[dict[str, Any]] = []
+        since = since_date.strip()
+        for row in items:
+            if not since:
+                filtered.append(row)
+                continue
+            date_text = str(row.get("date", "") or "").strip()
+            if date_text and date_text >= since:
+                filtered.append(row)
+
+        for row in filtered:
+            douano_sync_storage.upsert_raw_object(
+                resource="sales_orders",
+                external_id=int(row.get("id", 0) or 0),
+                entity_version=int(row.get("entity_version", 0) or 0),
+                payload=row,
+            )
+        stats = douano_sync_storage.upsert_sales_orders(filtered)
+        out_stats = {"fetched": len(filtered), **stats}
+        douano_sync_storage.set_sync_state(resource="sales_orders", success=True, since_date=since or None, stats=out_stats, error="")
+        return {"resource": "sales_orders", **out_stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Sales-orders sync faalde: {exc}") from exc
+
+
+@router.get("/douano/companies")
+def get_douano_companies(
+    only_customers: bool = Query(False),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_companies(only_customers=only_customers, limit=int(limit))}
+
+
+@router.get("/douano/products")
+def get_douano_products(
+    q: str = Query("", description="Zoek op name/sku/gtin (case-insensitive)"),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_products(q=q, limit=int(limit))}
+
+
+@router.get("/douano/revenue-summary")
+def get_douano_revenue_summary(
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    limit: int = Query(500, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_company_revenue_summary(since=since, limit=int(limit))}
+
+
+@router.get("/douano/margin-summary")
+def get_douano_margin_summary(
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op order jaar (0 = alles)."),
+    limit: int = Query(500, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {"items": douano_margin_service.get_company_margin_summary(since=since, year=int(year or 0), limit=int(limit))}
+
+
+@router.get("/douano/company-lines")
+def get_douano_company_lines(
+    company_id: int = Query(..., ge=1),
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op order jaar (0 = alles)."),
+    only_unmapped: bool = Query(False),
+    only_missing_cost: bool = Query(False),
+    limit: int = Query(500, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_company_lines(
+            company_id=int(company_id),
+            since=since,
+            year=int(year or 0),
+            only_unmapped=bool(only_unmapped),
+            only_missing_cost=bool(only_missing_cost),
+            limit=int(limit),
+        )
+    }
+
+
+@router.get("/douano/company-orders")
+def get_douano_company_orders(
+    company_id: int = Query(..., ge=1),
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op order jaar (0 = alles)."),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_company_orders(
+            company_id=int(company_id),
+            since=since,
+            year=int(year or 0),
+            limit=int(limit),
+        )
+    }
+
+
+@router.get("/douano/order-lines")
+def get_douano_order_lines(
+    sales_order_id: int = Query(..., ge=1),
+    only_unmapped: bool = Query(False),
+    only_missing_cost: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_order_lines(
+            sales_order_id=int(sales_order_id),
+            only_unmapped=bool(only_unmapped),
+            only_missing_cost=bool(only_missing_cost),
+            limit=int(limit),
+        )
+    }
+
+
+@router.get("/douano/company-unmapped-products")
+def get_douano_company_unmapped_products(
+    company_id: int = Query(..., ge=1),
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    limit: int = Query(100, ge=1, le=1000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_company_unmapped_products(
+            company_id=int(company_id),
+            since=since,
+            limit=int(limit),
+        )
+    }
+
+
+@router.post("/douano/backfill-line-snapshots")
+def post_douano_backfill_line_snapshots(
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    company_id: int = Query(0, ge=0, description="Optioneel: alleen deze company_id backfillen"),
+    limit: int = Query(5000, ge=1, le=50000),
+) -> dict[str, Any]:
+    return {
+        "result": douano_margin_service.backfill_line_snapshots(
+            since=since,
+            company_id=int(company_id or 0),
+            limit=int(limit),
+        )
+    }
+
+
+@router.get("/douano/product-mappings")
+def get_douano_product_mappings(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
+    return {"items": douano_product_mapping_storage.list_mappings(limit=int(limit))}
+
+
+@router.put("/douano/product-mappings/{douano_product_id}")
+def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        record = douano_product_mapping_storage.upsert_mapping(
+            douano_product_id=int(douano_product_id or 0),
+            bier_id=str(payload.get("bier_id", "") or ""),
+            product_id=str(payload.get("product_id", "") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": record}
+
+
+@router.delete("/douano/product-mappings/{douano_product_id}")
+def delete_douano_product_mapping(douano_product_id: int) -> dict[str, Any]:
+    deleted = douano_product_mapping_storage.delete_mapping(douano_product_id=int(douano_product_id or 0))
+    return {"deleted": bool(deleted)}
+
+
+@router.get("/douano/product-ignored")
+def get_douano_product_ignored(limit: int = Query(10000, ge=1, le=50000)) -> dict[str, Any]:
+    return {"items": douano_product_ignore_storage.list_ignored(limit=int(limit))}
+
+
+@router.put("/douano/product-ignored/{douano_product_id}")
+def put_douano_product_ignored(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        record = douano_product_ignore_storage.upsert_ignore(
+            douano_product_id=int(douano_product_id or 0),
+            reason=str(payload.get("reason", "") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": record}
+
+
+@router.delete("/douano/product-ignored/{douano_product_id}")
+def delete_douano_product_ignored(douano_product_id: int) -> dict[str, Any]:
+    deleted = douano_product_ignore_storage.delete_ignore(douano_product_id=int(douano_product_id or 0))
+    return {"deleted": bool(deleted)}
+
+
+@router.get("/douano/cost-combos")
+def get_douano_cost_combos(
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op jaar (0 = alle jaren)."),
+) -> dict[str, Any]:
+    """Return unique (bier_id, product_id) combos with human labels.
+
+    This endpoint is used for manual mapping: Douano product -> (bier_id, product_id).
+
+    - Mapping is year-independent, so by default (year=0) we return combos across all years.
+    - The list includes:
+      - active activations (kostprijsproductactiveringen)
+      - definitive cost version snapshots (kostprijsversies.resultaat_snapshot)
+    """
+    activations = dataset_store.load_dataset("kostprijsproductactiveringen")
+    versions = dataset_store.load_dataset("kostprijsversies")
+    bieren = dataset_store.load_dataset("bieren")
+    basisproducten = dataset_store.load_dataset("basisproducten")
+    samengestelde = dataset_store.load_dataset("samengestelde-producten")
+
+    bieren_by_id: dict[str, str] = {}
+    if isinstance(bieren, list):
+        for row in bieren:
+            if not isinstance(row, dict):
+                continue
+            bid = str(row.get("id", "") or "")
+            naam = str(row.get("naam", row.get("biernaam", "")) or "")
+            if bid:
+                bieren_by_id[bid] = naam or bid
+
+    product_by_ref: dict[tuple[str, str], str] = {}
+    for source, kind in ((basisproducten, "basis"), (samengestelde, "samengesteld")):
+        if not isinstance(source, list):
+            continue
+        for row in source:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("id", "") or "")
+            oms = str(row.get("omschrijving", "") or "").strip()
+            naam = str(row.get("naam", "") or "").strip()
+            label = oms or naam or pid
+            if pid:
+                product_by_ref[(kind, pid)] = label
+
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _append_combo(*, bier_id: str, product_id: str, product_type: str) -> None:
+        if not bier_id or not product_id:
+            return
+        key = f"{bier_id}::{product_id}"
+        if key in seen:
+            return
+        seen.add(key)
+        bier_naam = bieren_by_id.get(bier_id, bier_id)
+        normalized_type = str(product_type or "").strip().lower()
+        if normalized_type not in {"basis", "samengesteld"}:
+            normalized_type = "onbekend"
+        product_naam = (
+            product_by_ref.get((normalized_type, product_id))
+            or product_by_ref.get(("basis", product_id))
+            or product_by_ref.get(("samengesteld", product_id))
+            or f"[{normalized_type}] {product_id}"
+        )
+        items.append(
+            {
+                "bier_id": bier_id,
+                "product_id": product_id,
+                "product_type": normalized_type,
+                "label": f"{bier_naam} — {product_naam}",
+                "bier_naam": bier_naam,
+                "product_naam": product_naam,
+            }
+        )
+
+    if isinstance(activations, list):
+        for row in activations:
+            if not isinstance(row, dict):
+                continue
+            activation_year = int(row.get("jaar", 0) or 0)
+            if int(year) and activation_year != int(year):
+                continue
+            _append_combo(
+                bier_id=str(row.get("bier_id", "") or ""),
+                product_id=str(row.get("product_id", "") or ""),
+                product_type=str(row.get("product_type", "") or ""),
+            )
+
+    if isinstance(versions, list):
+        for version in versions:
+            if not isinstance(version, dict):
+                continue
+            if str(version.get("status", "") or "").strip().lower() != "definitief":
+                continue
+            version_year = int(version.get("jaar", (version.get("basisgegevens", {}) or {}).get("jaar", 0)) or 0)
+            if int(year) and version_year != int(year):
+                continue
+            bier_id = str(version.get("bier_id", "") or "")
+            producten = ((version.get("resultaat_snapshot", {}) or {}).get("producten", {}) or {})
+            if not isinstance(producten, dict):
+                continue
+            for row in producten.get("basisproducten", []) if isinstance(producten.get("basisproducten", []), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                _append_combo(bier_id=bier_id, product_id=str(row.get("product_id", "") or ""), product_type="basis")
+            for row in producten.get("samengestelde_producten", []) if isinstance(producten.get("samengestelde_producten", []), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                _append_combo(bier_id=bier_id, product_id=str(row.get("product_id", "") or ""), product_type="samengesteld")
+
+    items.sort(key=lambda item: str(item.get("label", "") or "").lower())
+    return {"items": items}
 

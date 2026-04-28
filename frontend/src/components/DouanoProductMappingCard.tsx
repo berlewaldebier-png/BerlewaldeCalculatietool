@@ -1,0 +1,389 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { SectionCard } from "@/components/SectionCard";
+
+type DouanoProduct = {
+  product_id: number;
+  name: string;
+  sku: string;
+  gtin: string;
+};
+
+type ActiveCombo = {
+  bier_id: string;
+  product_id: string;
+  product_type?: string;
+  label: string;
+};
+
+type Mapping = {
+  douano_product_id: number;
+  bier_id: string;
+  product_id: string;
+  updated_at: string;
+};
+
+async function readJson(path: string) {
+  const response = await fetch(path, { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) {
+    const detail = typeof payload?.detail === "string" ? payload.detail : response.statusText;
+    throw new Error(`${response.status} ${detail}`);
+  }
+  return payload;
+}
+
+async function writeJson(path: string, method: "PUT" | "DELETE", body?: any) {
+  const response = await fetch(path, {
+    method,
+    cache: "no-store",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    const detail = typeof payload?.detail === "string" ? payload.detail : response.statusText;
+    throw new Error(`${response.status} ${detail}`);
+  }
+  return payload;
+}
+
+function SaveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M19 21H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h11l5 5v9a2 2 0 0 1-2 2Z" />
+      <path d="M17 21v-8H7v8" />
+      <path d="M7 3v4h8" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 7h16" />
+      <path d="M9 4h6" />
+      <path d="M7 7l1 12h8l1-12" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter?: string }) {
+  const [status, setStatus] = useState<string>("");
+  const [tone, setTone] = useState<"" | "success" | "error">("");
+  const [filter, setFilter] = useState<string>(String(initialFilter ?? ""));
+  const [showIgnored, setShowIgnored] = useState<boolean>(false);
+  const [products, setProducts] = useState<DouanoProduct[]>([]);
+  const [combos, setCombos] = useState<ActiveCombo[]>([]);
+  const [mappings, setMappings] = useState<Mapping[]>([]);
+  const [ignored, setIgnored] = useState<Array<{ douano_product_id: number; reason: string }>>([]);
+  const [draft, setDraft] = useState<Record<number, string>>({});
+
+  const mappingsById = useMemo(() => {
+    const map = new Map<number, Mapping>();
+    mappings.forEach((m) => {
+      if (m?.douano_product_id) map.set(Number(m.douano_product_id), m);
+    });
+    return map;
+  }, [mappings]);
+
+  const filteredProducts = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const ignoredSet = new Set(ignored.map((i) => Number(i?.douano_product_id ?? 0)).filter((id) => id > 0));
+    const visible = showIgnored ? products : products.filter((p) => !ignoredSet.has(Number(p.product_id ?? 0)));
+    if (!q) return visible;
+    return visible.filter((p) => {
+      const hay = `${p.name ?? ""} ${p.sku ?? ""} ${p.gtin ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [products, filter, ignored, showIgnored]);
+
+  const combosByKey = useMemo(() => {
+    const map = new Map<string, ActiveCombo>();
+    combos.forEach((c) => {
+      const key = `${c.bier_id}::${c.product_id}`;
+      map.set(key, c);
+    });
+    return map;
+  }, [combos]);
+
+  const ignoredById = useMemo(() => {
+    const map = new Map<number, { douano_product_id: number; reason: string }>();
+    ignored.forEach((row) => {
+      const id = Number((row as any)?.douano_product_id ?? 0);
+      if (id > 0) map.set(id, row);
+    });
+    return map;
+  }, [ignored]);
+
+  async function refreshAll() {
+    setStatus("Laden…");
+    setTone("");
+    try {
+      const [p, c, m, ig] = await Promise.all([
+        readJson("/api/integrations/douano/products?limit=2000"),
+        readJson("/api/integrations/douano/cost-combos"),
+        readJson("/api/integrations/douano/product-mappings?limit=10000"),
+        readJson("/api/integrations/douano/product-ignored?limit=50000")
+      ]);
+      setProducts(Array.isArray(p?.items) ? p.items : []);
+      setCombos(Array.isArray(c?.items) ? c.items : []);
+      setMappings(Array.isArray(m?.items) ? m.items : []);
+      setIgnored(Array.isArray(ig?.items) ? ig.items : []);
+      setStatus("Gereed");
+      setTone("success");
+    } catch (error) {
+      setProducts([]);
+      setCombos([]);
+      setMappings([]);
+      setIgnored([]);
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
+  useEffect(() => {
+    void refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function save(productId: number) {
+    const selected = String(draft[productId] ?? "").trim();
+    const [bier_id, product_id] = selected.split("::");
+    if (!bier_id || !product_id) {
+      setStatus("Selecteer eerst een bier — verpakking combinatie.");
+      setTone("error");
+      return;
+    }
+    setStatus("Opslaan…");
+    setTone("");
+    try {
+      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", { bier_id, product_id });
+      await refreshAll();
+      setStatus("Opgeslagen");
+      setTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
+  async function remove(productId: number) {
+    setStatus("Verwijderen…");
+    setTone("");
+    try {
+      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "DELETE");
+      await refreshAll();
+      setStatus("Verwijderd");
+      setTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
+  async function ignore(productId: number) {
+    setStatus("Negeren…");
+    setTone("");
+    try {
+      await writeJson(`/api/integrations/douano/product-ignored/${productId}`, "PUT", { reason: "" });
+      await refreshAll();
+      setStatus("Genegeerd");
+      setTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
+  async function unignore(productId: number) {
+    setStatus("Tonen…");
+    setTone("");
+    try {
+      await writeJson(`/api/integrations/douano/product-ignored/${productId}`, "DELETE");
+      await refreshAll();
+      setStatus("Weer zichtbaar");
+      setTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Productkoppeling (Douano → Kostprijs)"
+      description="Koppel Douano producten aan een actieve (bier + verpakking) combinatie. Dit is nodig voor kostprijs + marge op omzetregels."
+    >
+      <div className="editor-actions" style={{ marginTop: 8 }}>
+        <div className="editor-actions-group">
+          <input
+            className="editor-input"
+            style={{ width: 320 }}
+            placeholder="Filter Douano producten (naam/sku/gtin)"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+            <input
+              type="checkbox"
+              checked={showIgnored}
+              onChange={(e) => setShowIgnored(e.target.checked)}
+            />
+            Toon genegeerde
+          </label>
+        </div>
+        <div className="editor-actions-group">
+          <button type="button" className="editor-button editor-button-secondary" onClick={() => void refreshAll()}>
+            Ververs
+          </button>
+        </div>
+      </div>
+
+      {status ? (
+        <div className={`editor-status${tone ? ` ${tone}` : ""}`} style={{ marginTop: 12 }}>
+          {status}
+        </div>
+      ) : null}
+
+      <div className="data-table" style={{ marginTop: 12 }}>
+        <table>
+          <thead>
+            <tr>
+              <th style={{ width: 90 }}>ID</th>
+              <th>Douano product</th>
+              <th style={{ width: 160 }}>SKU</th>
+              <th style={{ width: 180 }}>GTIN</th>
+              <th style={{ width: 420 }}>Koppeling</th>
+              <th style={{ width: 110 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {filteredProducts.slice(0, 500).map((p) => {
+              const id = Number(p.product_id || 0);
+              const mapping = mappingsById.get(id);
+              const mappedKey = mapping ? `${mapping.bier_id}::${mapping.product_id}` : "";
+              const value = String(draft[id] ?? mappedKey ?? "");
+              const isMapped = Boolean(mapping);
+              const mappedLabel = mappedKey ? combosByKey.get(mappedKey)?.label ?? mappedKey : "";
+              const isIgnored = ignoredById.has(id);
+              return (
+                <tr key={id}>
+                  <td>
+                    <code>{id}</code>
+                  </td>
+                  <td>{p.name}</td>
+                  <td>
+                    <code>{p.sku}</code>
+                  </td>
+                  <td>
+                    <code>{p.gtin}</code>
+                  </td>
+                  <td>
+                    <select
+                      className="editor-input"
+                      style={{ width: "100%" }}
+                      value={value}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, [id]: e.target.value }))}
+                    >
+                      <option value="">{isMapped ? mappedLabel || "—" : "Selecteer bier — verpakking"}</option>
+                      {combos.map((c) => {
+                        const key = `${c.bier_id}::${c.product_id}`;
+                        return (
+                          <option key={key} value={key}>
+                            {c.label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    {!isMapped ? (
+                      <div style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          className="editor-button editor-button-icon"
+                          aria-label="Opslaan"
+                          title="Opslaan"
+                          onClick={() => void save(id)}
+                          disabled={isIgnored}
+                        >
+                          <SaveIcon />
+                        </button>
+                        {isIgnored ? (
+                          <button
+                            type="button"
+                            className="editor-button editor-button-secondary editor-button-icon"
+                            aria-label="Weer tonen"
+                            title="Weer tonen"
+                            onClick={() => void unignore(id)}
+                          >
+                            <EyeIcon />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="editor-button editor-button-secondary editor-button-icon"
+                            aria-label="Negeren"
+                            title="Negeren"
+                            onClick={() => void ignore(id)}
+                          >
+                            <EyeOffIcon />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="editor-button editor-button-secondary editor-button-icon"
+                        aria-label="Verwijderen"
+                        title="Verwijderen"
+                        onClick={() => void remove(id)}
+                      >
+                        <TrashIcon />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {products.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ opacity: 0.75 }}>
+                  Geen Douano producten geladen. Gebruik “Ververs” (en zorg dat je eerder “Sync products” hebt gedaan).
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginTop: 10, opacity: 0.75 }}>
+        Toont max. 500 producten (filter om te zoeken). Combinaties komen uit definitieve kostprijssnapshots + activaties (alle jaren).
+      </div>
+    </SectionCard>
+  );
+}

@@ -104,6 +104,13 @@ def get_navigation() -> list[NavigationItem]:
             section="Verkoop",
         ),
         NavigationItem(
+            key="omzet-en-marge",
+            label="Omzet & marge",
+            description="Omzet, kostprijs en brutomarge per klant (Douano).",
+            href="/omzet-en-marge",
+            section="Verkoop",
+        ),
+        NavigationItem(
             key="prijsvoorstel",
             label="Prijsvoorstel maken",
             description="Maak prijsvoorstellen op basis van liters of producten.",
@@ -122,6 +129,13 @@ def get_navigation() -> list[NavigationItem]:
             label="Beheer",
             description="Users, handleiding en deployment-informatie.",
             href="/beheer",
+            section="Beheer",
+        ),
+        NavigationItem(
+            key="productkoppeling",
+            label="Productkoppeling",
+            description="Koppel Douano producten aan actieve kostprijscombinaties.",
+            href="/beheer/productkoppeling",
             section="Beheer",
         ),
     ]

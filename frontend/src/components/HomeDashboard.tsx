@@ -33,6 +33,7 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
     "/nieuwe-kostprijsberekening",
     "/prijsvoorstellen",
     "/break-even",
+    "/omzet-en-marge",
     "/productie",
     "/vaste-kosten",
     "/tarieven-heffingen",
@@ -61,6 +62,9 @@ function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
   }
   if (!byHref.has("/break-even")) {
     byHref.set("/break-even", { label: "Break-even analyseren", href: "/break-even" });
+  }
+  if (!byHref.has("/omzet-en-marge")) {
+    byHref.set("/omzet-en-marge", { label: "Omzet & marge", href: "/omzet-en-marge" });
   }
 
   const result: DashboardNavItem[] = [];
@@ -270,6 +274,13 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
                   <div className="dashboard-quick-card-title">Adviesprijzen</div>
                   <div className="dashboard-quick-card-text">
                     Beheer de adviesopslag per kanaal (sell-out) voor een gekozen jaar.
+                  </div>
+                </Link>
+
+                <Link href="/omzet-en-marge" className="dashboard-quick-card">
+                  <div className="dashboard-quick-card-title">Omzet &amp; marge</div>
+                  <div className="dashboard-quick-card-text">
+                    Analyseer omzet, kostprijs en brutomarge per klant op basis van Douano orders.
                   </div>
                 </Link>
               </div>

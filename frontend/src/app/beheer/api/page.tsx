@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { DouanoSyncPanel } from "@/components/DouanoSyncPanel";
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
 import { apiGetServer, getBootstrap } from "@/lib/apiServer";
@@ -105,6 +106,8 @@ export default async function ApiIntegratiesPage() {
           </div>
         </div>
       </SectionCard>
+
+      <DouanoSyncPanel />
 
       <SectionCard title="Gebruikte aanroepen" description="Dit zijn de interne endpoints die we gebruiken voor de Douano OAuth flow.">
         <div className="data-table">
