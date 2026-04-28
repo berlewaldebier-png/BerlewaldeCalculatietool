@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from datetime import UTC, datetime, timedelta
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -136,6 +137,63 @@ def _douano_api_base_url(tokens: dict[str, Any]) -> str:
     return str(tokens.get("base_url", "") or "").strip().rstrip("/") or _douano_base_url()
 
 
+def _parse_iso_ts(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        # Stored as ISO string via douano_oauth_storage.get_tokens()
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _refresh_douano_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
+    refresh_token = str(tokens.get("refresh_token", "") or "")
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Douano refresh_token ontbreekt; opnieuw koppelen.")
+
+    token_url = _douano_token_url()
+    form = {
+        "grant_type": "refresh_token",
+        "client_id": _douano_client_id(),
+        "client_secret": _douano_client_secret(),
+        "refresh_token": refresh_token,
+    }
+    status, _, raw = _douano_request(tokens={"access_token": ""}, method="POST", url=token_url, form=form)
+    if status >= 400:
+        snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+        if len(snippet) > 500:
+            snippet = snippet[:500] + "…"
+        raise HTTPException(status_code=400, detail=f"Douano token refresh mislukt ({status}): {snippet}")
+
+    parsed = _parse_json_payload(raw)
+    access_token = str(parsed.get("access_token", "") or "")
+    new_refresh_token = str(parsed.get("refresh_token", "") or refresh_token)
+    token_type = str(parsed.get("token_type", "") or "")
+    scope = str(parsed.get("scope", "") or "")
+    try:
+        expires_in = int(parsed.get("expires_in", 0) or 0)
+    except (TypeError, ValueError):
+        expires_in = 0
+
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Douano token refresh response mist access_token; opnieuw koppelen.")
+
+    douano_oauth_storage.upsert_tokens(
+        provider="douano",
+        base_url=_douano_base_url(),
+        access_token=access_token,
+        refresh_token=new_refresh_token,
+        token_type=token_type,
+        scope=scope,
+        expires_in_seconds=expires_in,
+        raw_payload=parsed if isinstance(parsed, dict) else {},
+    )
+    refreshed = douano_oauth_storage.get_tokens("douano") or {}
+    return refreshed if refreshed else tokens
+
+
 def _douano_request(
     *,
     tokens: dict[str, Any],
@@ -148,8 +206,10 @@ def _douano_request(
     headers = {
         "Accept": "application/json",
         "User-Agent": "calculatietool/0.1 (+http://localhost)",
-        "Authorization": f"Bearer {tokens.get('access_token','')}",
     }
+    access = str(tokens.get("access_token", "") or "").strip()
+    if access:
+        headers["Authorization"] = f"Bearer {access}"
     if form is not None:
         body = urllib.parse.urlencode(form).encode("utf-8")
         headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -198,6 +258,13 @@ def _fetch_paged_resource(
     query: dict[str, str] | None = None,
     max_pages: int = 10,
 ) -> list[dict[str, Any]]:
+    # Refresh tokens proactively when expired/near-expired.
+    expires_at = _parse_iso_ts(tokens.get("expires_at"))
+    if expires_at is not None:
+        now = datetime.now(UTC)
+        if expires_at <= now + timedelta(seconds=60):
+            tokens = _refresh_douano_tokens(tokens)
+
     base = _douano_api_base_url(tokens)
     q = dict(query or {})
     items: list[dict[str, Any]] = []
@@ -205,8 +272,18 @@ def _fetch_paged_resource(
         q_with_page = {**q, "page": str(page)}
         url = f"{base}{path}?{urllib.parse.urlencode(q_with_page)}" if q_with_page else f"{base}{path}"
         status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
+        if status == 401:
+            # Try a single refresh+retry; if rights are missing this still stays 401/403.
+            tokens = _refresh_douano_tokens(tokens)
+            status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
         if status >= 400:
-            raise HTTPException(status_code=502, detail=f"Douano fetch faalde ({status}) voor {path}.")
+            snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+            if len(snippet) > 300:
+                snippet = snippet[:300] + "…"
+            raise HTTPException(
+                status_code=502,
+                detail=f"Douano fetch faalde ({status}) voor {path}: {snippet}",
+            )
         payload = _parse_json_payload(raw)
         _, page_items = _extract_result_list(payload)
         if not page_items:
