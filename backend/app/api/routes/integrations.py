@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse
 
 from app.domain.auth_dependencies import require_user
 from app.domain import douano_oauth_storage
+from app.domain import douano_sync_storage
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
@@ -166,6 +167,52 @@ def _douano_request(
         return int(getattr(exc, "code", 0) or 0), (dict(hdrs.items()) if hdrs else {}), raw
     except Exception as exc:
         return 0, {}, str(exc)
+
+
+def _parse_json_payload(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw or "")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Douano response is geen JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=502, detail="Douano response ongeldig (verwacht object).")
+    return parsed
+
+
+def _extract_result_list(payload: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return 0, []
+    current_page = int(result.get("current_page", 0) or 0)
+    data = result.get("data", [])
+    if not isinstance(data, list):
+        return current_page, []
+    cleaned: list[dict[str, Any]] = [row for row in data if isinstance(row, dict)]
+    return current_page, cleaned
+
+
+def _fetch_paged_resource(
+    *,
+    tokens: dict[str, Any],
+    path: str,
+    query: dict[str, str] | None = None,
+    max_pages: int = 10,
+) -> list[dict[str, Any]]:
+    base = _douano_api_base_url(tokens)
+    q = dict(query or {})
+    items: list[dict[str, Any]] = []
+    for page in range(1, max(1, int(max_pages)) + 1):
+        q_with_page = {**q, "page": str(page)}
+        url = f"{base}{path}?{urllib.parse.urlencode(q_with_page)}" if q_with_page else f"{base}{path}"
+        status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
+        if status >= 400:
+            raise HTTPException(status_code=502, detail=f"Douano fetch faalde ({status}) voor {path}.")
+        payload = _parse_json_payload(raw)
+        _, page_items = _extract_result_list(payload)
+        if not page_items:
+            break
+        items.extend(page_items)
+    return items
 
 
 def _set_state_cookie(response: Response, state: str) -> None:
@@ -432,4 +479,126 @@ def get_douano_status() -> dict[str, Any]:
         "created_at": tokens.get("created_at", ""),
         "updated_at": tokens.get("updated_at", ""),
     }
+
+
+@router.get("/douano/sync-status")
+def get_douano_sync_status() -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_sync_state()}
+
+
+@router.post("/douano/sync/companies")
+def post_douano_sync_companies(
+    max_pages: int = Query(10, ge=1, le=200),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    try:
+        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/companies", max_pages=max_pages)
+        for row in items:
+            douano_sync_storage.upsert_raw_object(
+                resource="companies",
+                external_id=int(row.get("id", 0) or 0),
+                entity_version=int(row.get("entity_version", 0) or 0),
+                payload=row,
+            )
+        normalized = douano_sync_storage.upsert_companies(items)
+        stats = {"fetched": len(items), "upserted": normalized}
+        douano_sync_storage.set_sync_state(resource="companies", success=True, since_date=None, stats=stats, error="")
+        return {"resource": "companies", **stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={}, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Companies sync faalde: {exc}") from exc
+
+
+@router.post("/douano/sync/products")
+def post_douano_sync_products(
+    max_pages: int = Query(10, ge=1, le=200),
+    is_sellable: bool = Query(True, description="Wanneer true: filter_by_is_sellable=true"),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    query: dict[str, str] = {}
+    if is_sellable:
+        query["filter_by_is_sellable"] = "true"
+    try:
+        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/products", query=query, max_pages=max_pages)
+        for row in items:
+            douano_sync_storage.upsert_raw_object(
+                resource="products",
+                external_id=int(row.get("id", 0) or 0),
+                entity_version=int(row.get("entity_version", 0) or 0),
+                payload=row,
+            )
+        normalized = douano_sync_storage.upsert_products(items)
+        stats = {"fetched": len(items), "upserted": normalized}
+        douano_sync_storage.set_sync_state(resource="products", success=True, since_date=None, stats=stats, error="")
+        return {"resource": "products", **stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={}, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Products sync faalde: {exc}") from exc
+
+
+@router.post("/douano/sync/sales-orders")
+def post_douano_sync_sales_orders(
+    max_pages: int = Query(10, ge=1, le=500),
+    since_date: str = Query("", description="Optioneel: filter orders client-side op date >= since_date (YYYY-MM-DD)."),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    try:
+        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-orders", max_pages=max_pages)
+        filtered: list[dict[str, Any]] = []
+        since = since_date.strip()
+        for row in items:
+            if not since:
+                filtered.append(row)
+                continue
+            date_text = str(row.get("date", "") or "").strip()
+            if date_text and date_text >= since:
+                filtered.append(row)
+
+        for row in filtered:
+            douano_sync_storage.upsert_raw_object(
+                resource="sales_orders",
+                external_id=int(row.get("id", 0) or 0),
+                entity_version=int(row.get("entity_version", 0) or 0),
+                payload=row,
+            )
+        stats = douano_sync_storage.upsert_sales_orders(filtered)
+        out_stats = {"fetched": len(filtered), **stats}
+        douano_sync_storage.set_sync_state(resource="sales_orders", success=True, since_date=since or None, stats=out_stats, error="")
+        return {"resource": "sales_orders", **out_stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Sales-orders sync faalde: {exc}") from exc
+
+
+@router.get("/douano/companies")
+def get_douano_companies(
+    only_customers: bool = Query(False),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_companies(only_customers=only_customers, limit=int(limit))}
+
+
+@router.get("/douano/products")
+def get_douano_products(
+    q: str = Query("", description="Zoek op name/sku/gtin (case-insensitive)"),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_products(q=q, limit=int(limit))}
+
+
+@router.get("/douano/revenue-summary")
+def get_douano_revenue_summary(
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    limit: int = Query(500, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {"items": douano_sync_storage.list_company_revenue_summary(since=since, limit=int(limit))}
 
