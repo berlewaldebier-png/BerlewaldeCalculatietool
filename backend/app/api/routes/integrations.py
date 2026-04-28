@@ -16,6 +16,7 @@ from app.domain.auth_dependencies import require_user
 from app.domain import douano_oauth_storage
 from app.domain import douano_sync_storage
 from app.domain import douano_product_mapping_storage
+from app.domain import douano_product_ignore_storage
 from app.domain import dataset_store
 from app.domain import douano_margin_service
 
@@ -691,6 +692,55 @@ def get_douano_margin_summary(
     return {"items": douano_margin_service.get_company_margin_summary(since=since, limit=int(limit))}
 
 
+@router.get("/douano/company-lines")
+def get_douano_company_lines(
+    company_id: int = Query(..., ge=1),
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    only_unmapped: bool = Query(False),
+    only_missing_cost: bool = Query(False),
+    limit: int = Query(500, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_company_lines(
+            company_id=int(company_id),
+            since=since,
+            only_unmapped=bool(only_unmapped),
+            only_missing_cost=bool(only_missing_cost),
+            limit=int(limit),
+        )
+    }
+
+
+@router.get("/douano/company-unmapped-products")
+def get_douano_company_unmapped_products(
+    company_id: int = Query(..., ge=1),
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    limit: int = Query(100, ge=1, le=1000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_company_unmapped_products(
+            company_id=int(company_id),
+            since=since,
+            limit=int(limit),
+        )
+    }
+
+
+@router.post("/douano/backfill-line-snapshots")
+def post_douano_backfill_line_snapshots(
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    company_id: int = Query(0, ge=0, description="Optioneel: alleen deze company_id backfillen"),
+    limit: int = Query(5000, ge=1, le=50000),
+) -> dict[str, Any]:
+    return {
+        "result": douano_margin_service.backfill_line_snapshots(
+            since=since,
+            company_id=int(company_id or 0),
+            limit=int(limit),
+        )
+    }
+
+
 @router.get("/douano/product-mappings")
 def get_douano_product_mappings(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
     return {"items": douano_product_mapping_storage.list_mappings(limit=int(limit))}
@@ -712,6 +762,29 @@ def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) 
 @router.delete("/douano/product-mappings/{douano_product_id}")
 def delete_douano_product_mapping(douano_product_id: int) -> dict[str, Any]:
     deleted = douano_product_mapping_storage.delete_mapping(douano_product_id=int(douano_product_id or 0))
+    return {"deleted": bool(deleted)}
+
+
+@router.get("/douano/product-ignored")
+def get_douano_product_ignored(limit: int = Query(10000, ge=1, le=50000)) -> dict[str, Any]:
+    return {"items": douano_product_ignore_storage.list_ignored(limit=int(limit))}
+
+
+@router.put("/douano/product-ignored/{douano_product_id}")
+def put_douano_product_ignored(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        record = douano_product_ignore_storage.upsert_ignore(
+            douano_product_id=int(douano_product_id or 0),
+            reason=str(payload.get("reason", "") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": record}
+
+
+@router.delete("/douano/product-ignored/{douano_product_id}")
+def delete_douano_product_ignored(douano_product_id: int) -> dict[str, Any]:
+    deleted = douano_product_ignore_storage.delete_ignore(douano_product_id=int(douano_product_id or 0))
     return {"deleted": bool(deleted)}
 
 

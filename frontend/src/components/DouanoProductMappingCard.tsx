@@ -72,13 +72,34 @@ function TrashIcon() {
   );
 }
 
-export function DouanoProductMappingCard() {
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter?: string }) {
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
-  const [filter, setFilter] = useState<string>("");
+  const [filter, setFilter] = useState<string>(String(initialFilter ?? ""));
+  const [showIgnored, setShowIgnored] = useState<boolean>(false);
   const [products, setProducts] = useState<DouanoProduct[]>([]);
   const [combos, setCombos] = useState<ActiveCombo[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
+  const [ignored, setIgnored] = useState<Array<{ douano_product_id: number; reason: string }>>([]);
   const [draft, setDraft] = useState<Record<number, string>>({});
 
   const mappingsById = useMemo(() => {
@@ -91,12 +112,14 @@ export function DouanoProductMappingCard() {
 
   const filteredProducts = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter((p) => {
+    const ignoredSet = new Set(ignored.map((i) => Number(i?.douano_product_id ?? 0)).filter((id) => id > 0));
+    const visible = showIgnored ? products : products.filter((p) => !ignoredSet.has(Number(p.product_id ?? 0)));
+    if (!q) return visible;
+    return visible.filter((p) => {
       const hay = `${p.name ?? ""} ${p.sku ?? ""} ${p.gtin ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [products, filter]);
+  }, [products, filter, ignored, showIgnored]);
 
   const combosByKey = useMemo(() => {
     const map = new Map<string, ActiveCombo>();
@@ -107,24 +130,36 @@ export function DouanoProductMappingCard() {
     return map;
   }, [combos]);
 
+  const ignoredById = useMemo(() => {
+    const map = new Map<number, { douano_product_id: number; reason: string }>();
+    ignored.forEach((row) => {
+      const id = Number((row as any)?.douano_product_id ?? 0);
+      if (id > 0) map.set(id, row);
+    });
+    return map;
+  }, [ignored]);
+
   async function refreshAll() {
     setStatus("Laden…");
     setTone("");
     try {
-      const [p, c, m] = await Promise.all([
+      const [p, c, m, ig] = await Promise.all([
         readJson("/api/integrations/douano/products?limit=2000"),
         readJson("/api/integrations/douano/cost-combos"),
-        readJson("/api/integrations/douano/product-mappings?limit=10000")
+        readJson("/api/integrations/douano/product-mappings?limit=10000"),
+        readJson("/api/integrations/douano/product-ignored?limit=50000")
       ]);
       setProducts(Array.isArray(p?.items) ? p.items : []);
       setCombos(Array.isArray(c?.items) ? c.items : []);
       setMappings(Array.isArray(m?.items) ? m.items : []);
+      setIgnored(Array.isArray(ig?.items) ? ig.items : []);
       setStatus("Gereed");
       setTone("success");
     } catch (error) {
       setProducts([]);
       setCombos([]);
       setMappings([]);
+      setIgnored([]);
       setStatus(error instanceof Error ? error.message : String(error));
       setTone("error");
     }
@@ -170,6 +205,34 @@ export function DouanoProductMappingCard() {
     }
   }
 
+  async function ignore(productId: number) {
+    setStatus("Negeren…");
+    setTone("");
+    try {
+      await writeJson(`/api/integrations/douano/product-ignored/${productId}`, "PUT", { reason: "" });
+      await refreshAll();
+      setStatus("Genegeerd");
+      setTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
+  async function unignore(productId: number) {
+    setStatus("Tonen…");
+    setTone("");
+    try {
+      await writeJson(`/api/integrations/douano/product-ignored/${productId}`, "DELETE");
+      await refreshAll();
+      setStatus("Weer zichtbaar");
+      setTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
   return (
     <SectionCard
       title="Productkoppeling (Douano → Kostprijs)"
@@ -184,6 +247,14 @@ export function DouanoProductMappingCard() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+            <input
+              type="checkbox"
+              checked={showIgnored}
+              onChange={(e) => setShowIgnored(e.target.checked)}
+            />
+            Toon genegeerde
+          </label>
         </div>
         <div className="editor-actions-group">
           <button type="button" className="editor-button editor-button-secondary" onClick={() => void refreshAll()}>
@@ -218,6 +289,7 @@ export function DouanoProductMappingCard() {
               const value = String(draft[id] ?? mappedKey ?? "");
               const isMapped = Boolean(mapping);
               const mappedLabel = mappedKey ? combosByKey.get(mappedKey)?.label ?? mappedKey : "";
+              const isIgnored = ignoredById.has(id);
               return (
                 <tr key={id}>
                   <td>
@@ -250,15 +322,39 @@ export function DouanoProductMappingCard() {
                   </td>
                   <td style={{ textAlign: "right" }}>
                     {!isMapped ? (
-                      <button
-                        type="button"
-                        className="editor-button editor-button-icon"
-                        aria-label="Opslaan"
-                        title="Opslaan"
-                        onClick={() => void save(id)}
-                      >
-                        <SaveIcon />
-                      </button>
+                      <div style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          className="editor-button editor-button-icon"
+                          aria-label="Opslaan"
+                          title="Opslaan"
+                          onClick={() => void save(id)}
+                          disabled={isIgnored}
+                        >
+                          <SaveIcon />
+                        </button>
+                        {isIgnored ? (
+                          <button
+                            type="button"
+                            className="editor-button editor-button-secondary editor-button-icon"
+                            aria-label="Weer tonen"
+                            title="Weer tonen"
+                            onClick={() => void unignore(id)}
+                          >
+                            <EyeIcon />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="editor-button editor-button-secondary editor-button-icon"
+                            aria-label="Negeren"
+                            title="Negeren"
+                            onClick={() => void ignore(id)}
+                          >
+                            <EyeOffIcon />
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <button
                         type="button"

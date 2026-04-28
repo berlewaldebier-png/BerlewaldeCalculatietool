@@ -15,6 +15,7 @@ type Row = {
   brutomarge_ex: number;
   lines: number;
   unmapped_lines: number;
+  ignored_lines?: number;
   missing_cost_lines: number;
 };
 
@@ -117,13 +118,22 @@ export function OmzetgegevensWorkspace() {
               <th style={{ width: 150 }}>Brutomarge</th>
               <th style={{ width: 100 }}>Regels</th>
               <th style={{ width: 120 }}>Unmapped</th>
+              <th style={{ width: 110 }}>Ignored</th>
               <th style={{ width: 130 }}>Missing cost</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.company_id}>
-                <td>{row.company_name || String(row.company_id)}</td>
+                <td>
+                  <a
+                    href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}`}
+                    style={{ color: "inherit", textDecoration: "none", fontWeight: 700 }}
+                    title="Open details"
+                  >
+                    {row.company_name || String(row.company_id)}
+                  </a>
+                </td>
                 <td>{euro(row.omzet_ex)}</td>
                 <td>{euro(row.korting_ex)}</td>
                 <td>{euro(row.charges_ex)}</td>
@@ -131,13 +141,40 @@ export function OmzetgegevensWorkspace() {
                 <td>{euro(row.kostprijs_ex)}</td>
                 <td>{euro(row.brutomarge_ex)}</td>
                 <td>{row.lines}</td>
-                <td>{row.unmapped_lines}</td>
-                <td>{row.missing_cost_lines}</td>
+                <td>
+                  {row.unmapped_lines > 0 ? (
+                    <a
+                      href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}?only_unmapped=true`}
+                      className="pill"
+                      style={{ textDecoration: "none" }}
+                      title="Bekijk unmapped regels"
+                    >
+                      {row.unmapped_lines}
+                    </a>
+                  ) : (
+                    row.unmapped_lines
+                  )}
+                </td>
+                <td>{Number(row.ignored_lines ?? 0) || 0}</td>
+                <td>
+                  {row.missing_cost_lines > 0 ? (
+                    <a
+                      href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}?only_missing_cost=true`}
+                      className="pill"
+                      style={{ textDecoration: "none" }}
+                      title="Bekijk regels zonder kostprijs"
+                    >
+                      {row.missing_cost_lines}
+                    </a>
+                  ) : (
+                    row.missing_cost_lines
+                  )}
+                </td>
               </tr>
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10} style={{ opacity: 0.75 }}>
+                <td colSpan={11} style={{ opacity: 0.75 }}>
                   Geen data. Draai eerst `Sync sales-orders` en maak productkoppelingen.
                 </td>
               </tr>
@@ -148,4 +185,3 @@ export function OmzetgegevensWorkspace() {
     </section>
   );
 }
-

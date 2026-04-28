@@ -4,7 +4,13 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Iterable
 
-from app.domain import dataset_store, douano_product_mapping_storage, postgres_storage
+from app.domain import (
+    dataset_store,
+    douano_product_ignore_storage,
+    douano_product_mapping_storage,
+    douano_margin_snapshot_storage,
+    postgres_storage,
+)
 
 
 def _parse_date(value: Any) -> date | None:
@@ -157,6 +163,7 @@ def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dic
     douano_sales_order_lines -> douano_product_mapping -> (activations + definitive snapshots).
     """
     douano_product_mapping_storage.ensure_schema()
+    douano_product_ignore_storage.ensure_schema()
     postgres_storage.ensure_schema()
 
     since_text = (since or "").strip()
@@ -178,10 +185,12 @@ def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dic
                     COALESCE(SUM(l.charges_total_ex), 0) AS charges_ex,
                     COALESCE(SUM(l.net_revenue_ex), 0) AS netto_omzet_ex,
                     COALESCE(SUM(l.quantity), 0) AS total_quantity,
-                    COALESCE(SUM(CASE WHEN m.douano_product_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
                 FROM douano_sales_order_lines l
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 {where}
                 GROUP BY l.company_id, c.name, c.public_name
                 ORDER BY netto_omzet_ex DESC
@@ -255,7 +264,7 @@ def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dic
         bucket["cost_total_ex"] = float(bucket.get("cost_total_ex", 0.0) or 0.0) + _num(quantity) * float(cost_unit)
 
     out: list[dict[str, Any]] = []
-    for company_id, name, public_name, lines, omzet, korting, charges, netto, total_quantity, unmapped_lines in rows:
+    for company_id, name, public_name, lines, omzet, korting, charges, netto, total_quantity, ignored_lines, unmapped_lines in rows:
         cid = int(company_id or 0)
         cost_bucket = cost_by_company.get(cid, {"cost_total_ex": 0.0, "mapped_lines": 0, "missing_cost_lines": 0})
         cost_total = float(cost_bucket.get("cost_total_ex", 0.0) or 0.0)
@@ -272,9 +281,270 @@ def get_company_margin_summary(*, since: str = "", limit: int = 500) -> list[dic
                 "kostprijs_ex": cost_total,
                 "brutomarge_ex": margin,
                 "unmapped_lines": int(unmapped_lines or 0),
+                "ignored_lines": int(ignored_lines or 0),
                 "mapped_lines": int(cost_bucket.get("mapped_lines", 0) or 0),
                 "missing_cost_lines": int(cost_bucket.get("missing_cost_lines", 0) or 0),
             }
         )
     return out
 
+
+def list_company_unmapped_products(*, company_id: int, since: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    """Return unmapped products (excluding ignored) for a company, ranked by net revenue."""
+    douano_product_mapping_storage.ensure_schema()
+    douano_product_ignore_storage.ensure_schema()
+    postgres_storage.ensure_schema()
+    cid = int(company_id or 0)
+    if cid <= 0:
+        return []
+    lim = max(1, min(int(limit or 50), 1000))
+    since_text = (since or "").strip()
+    where_since = "AND l.order_date >= %s::date" if since_text else ""
+    params: tuple[Any, ...] = (cid, since_text, lim) if since_text else (cid, lim)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    l.douano_product_id,
+                    p.name,
+                    p.sku,
+                    p.gtin,
+                    COUNT(*)::int AS lines,
+                    COALESCE(SUM(l.quantity), 0) AS quantity,
+                    COALESCE(SUM(l.net_revenue_ex), 0) AS net_revenue_ex
+                FROM douano_sales_order_lines l
+                LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                WHERE l.company_id = %s
+                  AND ig.douano_product_id IS NULL
+                  AND m.douano_product_id IS NULL
+                  {where_since}
+                GROUP BY l.douano_product_id, p.name, p.sku, p.gtin
+                ORDER BY net_revenue_ex DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            rows = cur.fetchall() or []
+    out: list[dict[str, Any]] = []
+    for douano_product_id, name, sku, gtin, lines, quantity, net_revenue_ex in rows:
+        out.append(
+            {
+                "douano_product_id": int(douano_product_id or 0),
+                "name": str(name or ""),
+                "sku": str(sku or ""),
+                "gtin": str(gtin or ""),
+                "lines": int(lines or 0),
+                "quantity": float(quantity or 0),
+                "net_revenue_ex": float(net_revenue_ex or 0),
+            }
+        )
+    return out
+
+
+def list_company_lines(
+    *,
+    company_id: int,
+    since: str = "",
+    only_unmapped: bool = False,
+    only_missing_cost: bool = False,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    """List order lines for a company with mapping + cost resolution."""
+    douano_product_mapping_storage.ensure_schema()
+    douano_product_ignore_storage.ensure_schema()
+    postgres_storage.ensure_schema()
+    cid = int(company_id or 0)
+    if cid <= 0:
+        return []
+
+    lim = max(1, min(int(limit or 500), 5000))
+    since_text = (since or "").strip()
+
+    clauses: list[str] = ["l.company_id = %s"]
+    params: list[Any] = [cid]
+    if since_text:
+        clauses.append("l.order_date >= %s::date")
+        params.append(since_text)
+
+    if only_unmapped:
+        clauses.append("ig.douano_product_id IS NULL AND m.douano_product_id IS NULL")
+    if only_missing_cost:
+        # We'll apply after resolving cost, but we can prefilter to mapped lines to reduce work.
+        clauses.append("m.douano_product_id IS NOT NULL")
+
+    where = " AND ".join(clauses)
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    l.line_id,
+                    l.sales_order_id,
+                    l.order_date,
+                    l.douano_product_id,
+                    p.name,
+                    p.sku,
+                    l.quantity,
+                    l.unit_price_ex,
+                    l.discount_ex,
+                    l.charges_total_ex,
+                    l.net_revenue_ex,
+                    m.bier_id,
+                    m.product_id,
+                    ig.douano_product_id IS NOT NULL AS ignored
+                FROM douano_sales_order_lines l
+                LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                WHERE {where}
+                ORDER BY l.order_date DESC, l.line_id DESC
+                LIMIT %s
+                """,
+                (*params, lim),
+            )
+            rows = cur.fetchall() or []
+
+    activations = dataset_store.load_dataset("kostprijsproductactiveringen")
+    versions = dataset_store.load_dataset("kostprijsversies")
+    activation_index = _build_activation_index(activations if isinstance(activations, list) else [])
+    versions_by_id: dict[str, dict[str, Any]] = {
+        str(v.get("id", "") or ""): v for v in (versions if isinstance(versions, list) else []) if isinstance(v, dict)
+    }
+    used_version_ids = [
+        str(row.get("kostprijsversie_id", "") or "")
+        for row in (activations if isinstance(activations, list) else [])
+        if isinstance(row, dict)
+    ]
+    snapshot_cost_index = _build_snapshot_cost_index(versions_by_id, used_version_ids)
+
+    out: list[dict[str, Any]] = []
+    for (
+        line_id,
+        sales_order_id,
+        order_date_raw,
+        douano_product_id,
+        product_name,
+        sku,
+        quantity,
+        unit_price_ex,
+        discount_ex,
+        charges_total_ex,
+        net_revenue_ex,
+        bier_id,
+        product_id,
+        ignored,
+    ) in rows:
+        order_date = _parse_date(order_date_raw)
+        bier_id_text = str(bier_id or "")
+        product_id_text = str(product_id or "")
+        cost_unit: float | None = None
+        cost_total = 0.0
+        margin = 0.0
+        missing_cost = False
+        kostprijsversie_id = ""
+        if bier_id_text and product_id_text and order_date is not None:
+            cost_unit, kostprijsversie_id, _ = _resolve_cost_per_unit(
+                bier_id=bier_id_text,
+                product_id=product_id_text,
+                as_of=order_date,
+                activations_index=activation_index,
+                versions_by_id=versions_by_id,
+                snapshot_cost_index=snapshot_cost_index,
+            )
+            if cost_unit is None:
+                missing_cost = True
+            else:
+                cost_total = _num(quantity) * float(cost_unit)
+                margin = float(net_revenue_ex or 0.0) - cost_total
+
+        if only_missing_cost and not missing_cost:
+            continue
+
+        out.append(
+            {
+                "line_id": int(line_id or 0),
+                "sales_order_id": int(sales_order_id or 0),
+                "order_date": str(order_date_raw or ""),
+                "douano_product_id": int(douano_product_id or 0),
+                "douano_product_name": str(product_name or ""),
+                "douano_sku": str(sku or ""),
+                "quantity": float(quantity or 0),
+                "unit_price_ex": float(unit_price_ex or 0),
+                "discount_ex": float(discount_ex or 0),
+                "charges_ex": float(charges_total_ex or 0),
+                "net_revenue_ex": float(net_revenue_ex or 0),
+                "bier_id": bier_id_text,
+                "product_id": product_id_text,
+                "ignored": bool(ignored),
+                "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
+                "cost_total_ex": float(cost_total),
+                "margin_ex": float(margin),
+                "missing_cost": bool(missing_cost),
+                "mapped": bool(bier_id_text and product_id_text),
+                "kostprijsversie_id": kostprijsversie_id,
+            }
+        )
+    return out
+
+
+def backfill_line_snapshots(
+    *,
+    since: str = "",
+    company_id: int = 0,
+    limit: int = 5000,
+) -> dict[str, Any]:
+    """Compute and store cost snapshots for mapped lines.
+
+    This is optional; the UI primarily uses live joins. Use for performance or auditing.
+    """
+    douano_margin_snapshot_storage.ensure_schema()
+    clauses: list[str] = []
+    params: list[Any] = []
+    since_text = (since or "").strip()
+    if company_id:
+        clauses.append("company_id = %s")
+        params.append(int(company_id))
+    if since_text:
+        clauses.append("order_date >= %s::date")
+        params.append(since_text)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    lim = max(1, min(int(limit or 5000), 50000))
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT DISTINCT company_id
+                FROM douano_sales_order_lines
+                {where}
+                LIMIT %s
+                """,
+                (*params, lim),
+            )
+            rows = cur.fetchall() or []
+
+    computed = 0
+    missing = 0
+    companies = sorted({int(cid[0] or 0) for cid in rows if int(cid[0] or 0) > 0})
+    for cid in companies:
+        lines = list_company_lines(company_id=cid, since=since_text, limit=lim)
+        for line in lines:
+            if not line.get("mapped") or line.get("ignored"):
+                continue
+            computed += 1
+            if line.get("missing_cost"):
+                missing += 1
+            douano_margin_snapshot_storage.upsert_snapshot(
+                line_id=int(line.get("line_id", 0) or 0),
+                bier_id=str(line.get("bier_id", "") or ""),
+                product_id=str(line.get("product_id", "") or ""),
+                kostprijsversie_id=str(line.get("kostprijsversie_id", "") or ""),
+                cost_price_ex=line.get("cost_price_ex", None),
+                cost_total_ex=float(line.get("cost_total_ex", 0) or 0),
+                margin_ex=float(line.get("margin_ex", 0) or 0),
+            )
+
+    return {"computed": computed, "missing_cost": missing, "companies": len(companies)}
