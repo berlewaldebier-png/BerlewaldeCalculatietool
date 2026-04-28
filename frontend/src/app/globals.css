@@ -1867,6 +1867,50 @@ a {
   margin-bottom: 1rem;
 }
 
+.wizard-main-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.wizard-content-grid {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.wizard-inline-sidebar {
+  min-width: 0;
+}
+
+.wizard-inline-sidebar-card {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: #fbfbf8;
+  padding: 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.wizard-main-meta {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.wizard-main-kicker {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wizard-main-context {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
 .wizard-main-header-actions {
   display: flex;
   align-items: center;
@@ -2058,6 +2102,10 @@ a {
 
 .wizard-stats-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.wizard-inkoop-stats-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .stat-value.small {

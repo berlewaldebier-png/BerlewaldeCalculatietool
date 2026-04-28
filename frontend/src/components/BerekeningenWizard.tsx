@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 
-import { usePageShellWizardSidebar } from "@/components/PageShell";
+import { usePageShellHeader } from "@/components/PageShell";
 import { API_BASE_URL } from "@/lib/api";
 import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
 import {
@@ -22,6 +22,12 @@ type StepDefinition = {
 
 type BerekeningProcessType = "Eigen productie" | "Inkoop";
 
+export type BerekeningenWizardPersistResult = {
+  id: string;
+  year: number;
+  status: string;
+};
+
 type BerekeningenWizardProps = {
   initialRows: GenericRecord[];
   basisproducten: GenericRecord[];
@@ -30,10 +36,12 @@ type BerekeningenWizardProps = {
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
   packagingComponentPrices: GenericRecord[];
+  kostprijsproductactiveringen: GenericRecord[];
   initialSelectedId?: string;
   startWithNew?: boolean;
   onBackToLanding?: () => void;
   onRowsChange?: (rows: GenericRecord[]) => void;
+  onPersisted?: (result: BerekeningenWizardPersistResult) => void;
   onFinish?: () => void;
 };
 
@@ -124,6 +132,7 @@ function syncPrimaryInkoopFactuur(row: GenericRecord) {
 function normalizeBerekening(raw: GenericRecord): GenericRecord {
   const row = cloneRecord(raw);
   row.id = String(row.id ?? createId());
+  row.bier_id = String(row.bier_id ?? "");
   row.status = String(row.status ?? "concept");
   row.jaar = Number(row.jaar ?? (row.basisgegevens as GenericRecord | undefined)?.jaar ?? new Date().getFullYear());
   row.versie_nummer = Number(row.versie_nummer ?? 0);
@@ -368,6 +377,26 @@ function getProductUnitLabel(
   return options.find((option) => option.id === unitId)?.label ?? "";
 }
 
+function isFustOption(option: ProductUnitOption | undefined | null) {
+  if (!option) return false;
+  const source = option.source ?? {};
+  const haystack = [
+    option.label,
+    (source as any)?.omschrijving,
+    (source as any)?.verpakking,
+    (source as any)?.verpakkingstype,
+    (source as any)?.pack_type
+  ]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+  return haystack.includes("fust");
+}
+
+function getFactuurRegelAfvulkostenFust(regel: GenericRecord) {
+  return Number(regel.afvulkosten_fust ?? 0);
+}
+
 function getProductUnitOptions(
   year: number,
   basisproducten: GenericRecord[],
@@ -526,7 +555,7 @@ function calculateInkoopPrijsPerEenheid(
   if (aantal <= 0) {
     return 0;
   }
-  return (Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel) / aantal;
+  return (Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel + getFactuurRegelAfvulkostenFust(regel)) / aantal;
 }
 
 function calculateInkoopPrijsPerLiter(
@@ -547,7 +576,9 @@ function calculateInkoopPrijsPerLiter(
   if (liters <= 0) {
     return 0;
   }
-  return (Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel) / liters;
+  return (
+    Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel + getFactuurRegelAfvulkostenFust(regel)
+  ) / liters;
 }
 
 function getSelectedInkoopProductRows(
@@ -633,7 +664,10 @@ function getSelectedInkoopProducts(
 
     const aantal = Number(regel.aantal ?? 0);
     const prijsPerEenheid =
-      aantal > 0 ? (Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel) / aantal : 0;
+      aantal > 0
+        ? (Number(regel.subfactuurbedrag ?? 0) + extraKostenPerRegel + getFactuurRegelAfvulkostenFust(regel)) /
+          aantal
+        : 0;
     const bestaand = grouped.get(eenheidId) ?? {
       product,
       hoogstePrijsPerEenheid: 0
@@ -729,7 +763,11 @@ function calculateVariabeleKostenPerLiter(
       0
     );
     const totaleKosten = enrichedRegels.reduce(
-      (sum, item) => sum + Number(item.regel.subfactuurbedrag ?? 0) + item.extraKostenPerRegel,
+      (sum, item) =>
+        sum +
+        Number(item.regel.subfactuurbedrag ?? 0) +
+        item.extraKostenPerRegel +
+        getFactuurRegelAfvulkostenFust(item.regel),
       0
     );
 
@@ -764,10 +802,12 @@ export function BerekeningenWizard({
   vasteKosten,
   tarievenHeffingen,
   packagingComponentPrices,
+  kostprijsproductactiveringen,
   initialSelectedId,
   startWithNew = false,
   onBackToLanding,
   onRowsChange,
+  onPersisted,
   onFinish
 }: BerekeningenWizardProps) {
   const productieJaren = useMemo(
@@ -813,6 +853,9 @@ export function BerekeningenWizard({
   const [statusTone, setStatusTone] = useState<"success" | "error" | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDeleteDialog | null>(null);
+  const [persistedIds, setPersistedIds] = useState<string[]>(
+    startWithNew ? [] : initialRows.map((row) => String((row as GenericRecord)?.id ?? "")).filter(Boolean)
+  );
 
   const effectiveSelectedId = useMemo(() => {
     if (rows.some((row) => String(row.id) === String(selectedId))) {
@@ -829,23 +872,32 @@ export function BerekeningenWizard({
 
   const current =
     rows.find((row) => String(row.id) === effectiveSelectedId) ?? rows[0] ?? createEmptyBerekening();
-  const isEditingExisting = !startWithNew;
+  const isEditingExisting = !startWithNew || persistedIds.includes(effectiveSelectedId);
   const processType = getBerekeningProcessType(current);
   const steps = buildWizardSteps(current);
   const currentIndex = Math.min(activeStepIndex, steps.length - 1);
   const currentStep = steps[currentIndex] ?? steps[0];
-
-  const wizardSidebar = useMemo(
+  const isCurrentDefinitive = String(current.status ?? "").trim().toLowerCase() === "definitief";
+  const isCurrentReferencedByActivation = useMemo(
+    () =>
+      (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).some(
+        (row) => String((row as any)?.kostprijsversie_id ?? "") === String(current.id ?? "")
+      ),
+    [current.id, kostprijsproductactiveringen]
+  );
+  const canDeleteCurrent = isEditingExisting && !isCurrentDefinitive && !isCurrentReferencedByActivation;
+  const pageHeader = useMemo(
     () => ({
-      title: "Wizard",
-      steps,
-      activeIndex: currentIndex,
-      onStepSelect: setActiveStepIndex
+      title: String((current.basisgegevens as GenericRecord)?.biernaam ?? "").trim() || "Nieuwe kostprijsberekening",
+      subtitle:
+        processType === "Inkoop"
+          ? "Werk de inkoopkostprijs stap voor stap uit, inclusief producten, facturen en samenvatting."
+          : "Werk de kostprijs stap voor stap uit vanuit recept, ingredienten en verpakkingen."
     }),
-    [currentIndex, steps]
+    [current.basisgegevens, processType]
   );
 
-  usePageShellWizardSidebar(wizardSidebar);
+  usePageShellHeader(pageHeader);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -993,6 +1045,12 @@ export function BerekeningenWizard({
     setStatusTone(null);
     setIsSaving(true);
     try {
+      const validationError = validateCurrentBeforePersist();
+      if (validationError) {
+        setStatus(validationError);
+        setStatusTone("error");
+        return false;
+      }
       const sourceRows = rowsRef.current;
       const payload = sourceRows.map((row) => {
         const next = cloneRecord(row);
@@ -1016,7 +1074,15 @@ export function BerekeningenWizard({
         : payload;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
+      setPersistedIds((currentIds) =>
+        currentIds.includes(String(current.id ?? "")) ? currentIds : [...currentIds, String(current.id ?? "")]
+      );
       onRowsChange?.(refreshedRows);
+      onPersisted?.({
+        id: String(current.id ?? ""),
+        year: Number(((current.basisgegevens as GenericRecord)?.jaar ?? current.jaar ?? 0) || 0),
+        status: String(current.status ?? "concept")
+      });
       setStatus("Kostprijsversies opgeslagen.");
       setStatusTone("success");
       return true;
@@ -1034,6 +1100,12 @@ export function BerekeningenWizard({
     setStatusTone(null);
     setIsSaving(true);
     try {
+      const validationError = validateCurrentBeforePersist();
+      if (validationError) {
+        setStatus(validationError);
+        setStatusTone("error");
+        return false;
+      }
       const basis = (current.basisgegevens as GenericRecord) ?? {};
       const biernaam = String(basis.biernaam ?? "").trim();
       const alcoholpercentage = parseOptionalNumber(basis.alcoholpercentage);
@@ -1071,7 +1143,15 @@ export function BerekeningenWizard({
         : payload;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
+      setPersistedIds((currentIds) =>
+        currentIds.includes(String(current.id ?? "")) ? currentIds : [...currentIds, String(current.id ?? "")]
+      );
       onRowsChange?.(refreshedRows);
+      onPersisted?.({
+        id: String(current.id ?? ""),
+        year: Number(((current.basisgegevens as GenericRecord)?.jaar ?? current.jaar ?? 0) || 0),
+        status: "definitief"
+      });
       setStatus("Kostprijsversie definitief gemaakt.");
       setStatusTone("success");
       return true;
@@ -1082,6 +1162,27 @@ export function BerekeningenWizard({
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function validateCurrentBeforePersist() {
+    const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+    if (soort !== "Inkoop") {
+      return "";
+    }
+    const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
+    const factuurregels = Array.isArray(inkoop.factuurregels) ? (inkoop.factuurregels as GenericRecord[]) : [];
+    const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0) || 0);
+    const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten, current);
+    for (const regel of factuurregels) {
+      const option = unitOptions.find((item) => item.id === String(regel.eenheid ?? ""));
+      if (!isFustOption(option)) {
+        continue;
+      }
+      if (String(regel.afvulkosten_fust ?? "").trim() === "") {
+        return "Afvulkosten fusten zijn verplicht voor geselecteerde fustregels.";
+      }
+    }
+    return "";
   }
 
   async function handleDeleteCurrent() {
@@ -1277,12 +1378,8 @@ export function BerekeningenWizard({
           <span>Status</span>
           <input
             className="dataset-input"
-            value={String(current.status ?? "")}
-            onChange={(event) =>
-              updateCurrent((draft) => {
-                draft.status = event.target.value;
-              })
-            }
+            value={String(current.status ?? "concept")}
+            readOnly
           />
         </label>
       </div>
@@ -1745,42 +1842,79 @@ export function BerekeningenWizard({
     const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));
     const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten, current);
     const extraKostenPerRegel = calculateInkoopExtraKostenPerRegel(inkoop, factuurregels.length);
+    const unitOptionsById = new Map(unitOptions.map((option) => [option.id, option]));
+    const totaalFactuurbedrag = factuurregels.reduce((sum, regel) => sum + Number(regel.subfactuurbedrag ?? 0), 0);
+    const totaalAfvulkostenFust = factuurregels.reduce((sum, regel) => sum + getFactuurRegelAfvulkostenFust(regel), 0);
+    const totaalExtraKosten = Number(inkoop.verzendkosten ?? 0) + Number(inkoop.overige_kosten ?? 0);
+    const totaalBronkosten = totaalFactuurbedrag + totaalExtraKosten + totaalAfvulkostenFust;
+    const totaalLiters = factuurregels.reduce(
+      (sum, regel) => sum + Number(getFactuurRegelLiters(regel, jaar, basisproducten, samengesteldeProducten, current) ?? 0),
+      0
+    );
+    const gemiddeldePrijsPerLiter = totaalLiters > 0 ? totaalBronkosten / totaalLiters : 0;
     return (
       <div className="wizard-stack">
         <div className="wizard-form-grid">
           {[
             ["Factuurnummer", "factuurnummer"],
-            ["Factuurdatum", "factuurdatum"],
+            ["Factuurdatum", "factuurdatum"]
+          ].map(([label, key]) => (
+            <label key={key} className="nested-field">
+              <span>{label}</span>
+              <input
+                className="dataset-input"
+                type="text"
+                value={String(inkoop[key] ?? "")}
+                onChange={(event) =>
+                  updateCurrent((draft) => {
+                    ((draft.invoer as GenericRecord).inkoop as GenericRecord)[key] = event.target.value;
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <div className="stats-grid wizard-stats-grid wizard-inkoop-stats-grid">
+          <div className="stat-card">
+            <div className="stat-label">Factuurbedragen</div>
+            <div className="stat-value small">{formatCurrencyDisplay(totaalFactuurbedrag)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Extra kosten</div>
+            <div className="stat-value small">{formatCurrencyDisplay(totaalExtraKosten + totaalAfvulkostenFust)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Totaal factuur</div>
+            <div className="stat-value small">{formatCurrencyDisplay(totaalBronkosten)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Totaal liters</div>
+            <div className="stat-value small">{totaalLiters > 0 ? formatDecimalValue(totaalLiters, 2) : "-"}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Gem. prijs per liter</div>
+            <div className="stat-value small">{totaalLiters > 0 ? formatCurrencyDisplay(gemiddeldePrijsPerLiter) : "-"}</div>
+          </div>
+        </div>
+        <div className="wizard-form-grid">
+          {[
             ["Verzendkosten", "verzendkosten"],
             ["Overige kosten", "overige_kosten"]
           ].map(([label, key]) => (
             <label key={key} className="nested-field">
               <span>{label}</span>
-              {key === "verzendkosten" || key === "overige_kosten" ? (
-                <CurrencyInput
-                  className="dataset-input"
-                  type="number"
-                  step="any"
-                  value={String(inkoop[key] ?? "")}
-                  onChange={(event) =>
-                    updateCurrent((draft) => {
-                      ((draft.invoer as GenericRecord).inkoop as GenericRecord)[key] =
-                        event.target.value === "" ? null : Number(event.target.value);
-                    })
-                  }
-                />
-              ) : (
-                <input
-                  className="dataset-input"
-                  type="text"
-                  value={String(inkoop[key] ?? "")}
-                  onChange={(event) =>
-                    updateCurrent((draft) => {
-                      ((draft.invoer as GenericRecord).inkoop as GenericRecord)[key] = event.target.value;
-                    })
-                  }
-                />
-              )}
+              <CurrencyInput
+                className="dataset-input"
+                type="number"
+                step="any"
+                value={String(inkoop[key] ?? "")}
+                onChange={(event) =>
+                  updateCurrent((draft) => {
+                    ((draft.invoer as GenericRecord).inkoop as GenericRecord)[key] =
+                      event.target.value === "" ? null : Number(event.target.value);
+                  })
+                }
+              />
             </label>
           ))}
         </div>
@@ -1791,6 +1925,7 @@ export function BerekeningenWizard({
                 <th>Aantal</th>
                 <th>Eenheid</th>
                 <th>Factuurbedrag</th>
+                <th>Afvulkosten fust</th>
                 <th>Liters</th>
                 <th>Extra kosten</th>
                 <th>Prijs per eenheid</th>
@@ -1868,6 +2003,30 @@ export function BerekeningenWizard({
                         })
                       }
                     />
+                  </td>
+                  <td>
+                    {(() => {
+                      const option = unitOptionsById.get(String(regel.eenheid ?? ""));
+                      const isFust = isFustOption(option);
+                      return (
+                        <CurrencyInput
+                          className={`dataset-input${!isFust ? " dataset-input-readonly" : ""}`}
+                          type="number"
+                          step="0.01"
+                          value={isFust ? String(regel.afvulkosten_fust ?? "") : ""}
+                          readOnly={!isFust}
+                          onChange={(event) =>
+                            updateCurrent((draft) => {
+                              const regels =
+                                ((((draft.invoer as GenericRecord).inkoop as GenericRecord)
+                                  .factuurregels as GenericRecord[]) ?? []);
+                              regels[index].afvulkosten_fust =
+                                event.target.value === "" ? null : Number(event.target.value);
+                            })
+                          }
+                        />
+                      );
+                    })()}
                   </td>
                   <td>
                     <input
@@ -1961,7 +2120,8 @@ export function BerekeningenWizard({
                   aantal: 0,
                   eenheid: "",
                   liters: 0,
-                  subfactuurbedrag: 0
+                  subfactuurbedrag: 0,
+                  afvulkosten_fust: null
                 });
               })
             }
@@ -2060,23 +2220,7 @@ export function BerekeningenWizard({
   }
 
   function renderSummaryStep() {
-    const storedSnapshotCandidate =
-      typeof (current as any).resultaat_snapshot === "object" && (current as any).resultaat_snapshot !== null
-        ? ((current as any).resultaat_snapshot as ResultaatSnapshot)
-        : null;
-
-    const storedBasis = Array.isArray(storedSnapshotCandidate?.producten?.basisproducten)
-      ? storedSnapshotCandidate?.producten?.basisproducten
-      : [];
-    const storedSamengesteld = Array.isArray(storedSnapshotCandidate?.producten?.samengestelde_producten)
-      ? storedSnapshotCandidate?.producten?.samengestelde_producten
-      : [];
-
-    // For definitive records we prefer the persisted snapshot as the single source of truth.
-    // The wizard can still recompute a preview after edits, but opening an existing dossier
-    // should show what was actually saved (e.g. year-activation or finalized calculations).
-    const snapshot =
-      storedBasis.length > 0 || storedSamengesteld.length > 0 ? storedSnapshotCandidate! : buildResultaatSnapshot(current);
+    const snapshot = buildResultaatSnapshot(current);
     const basisproductenRows = snapshot.producten.basisproducten;
     const samengesteldeRows = snapshot.producten.samengestelde_producten;
     const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0));
@@ -2166,17 +2310,13 @@ export function BerekeningenWizard({
   }
 
   return (
-    <section className="content-card wizard-main-card">
+    <section className="wizard-main-card">
         <div className="wizard-main-header">
-          <div>
-            <h2 className="wizard-main-title">
+          <div className="wizard-main-meta">
+            <span className="wizard-main-kicker">Kostprijswizard</span>
+            <span className="wizard-main-context">
               {String((current.basisgegevens as GenericRecord).biernaam ?? "Nieuwe berekening")}
-            </h2>
-            <div className="page-text">
-              {processType === "Inkoop"
-                ? "Werk de inkoopkostprijs stap voor stap uit, inclusief producten, facturen en samenvatting."
-                : "Werk de kostprijs stap voor stap uit vanuit recept, ingredienten en verpakkingen."}
-            </div>
+            </span>
           </div>
           <div className="wizard-main-header-actions">
             {onBackToLanding ? (
@@ -2193,8 +2333,14 @@ export function BerekeningenWizard({
                 type="button"
                 className="icon-button-table"
                 aria-label="Kostprijs verwijderen"
-                title="Verwijderen"
-                disabled={isSaving}
+                title={
+                  !canDeleteCurrent
+                    ? isCurrentDefinitive
+                      ? "Definitieve kostprijsversies kun je niet verwijderen."
+                      : "Deze kostprijsversie wordt nog gebruikt en kun je daarom niet verwijderen."
+                    : "Verwijderen"
+                }
+                disabled={isSaving || !canDeleteCurrent}
                 onClick={() =>
                   requestDelete(
                     "Kostprijs verwijderen",
@@ -2229,57 +2375,86 @@ export function BerekeningenWizard({
           </div>
         </div>
 
-        <div className="wizard-shell wizard-shell-single">
-          <div className="wizard-step-card wizard-step-stage-card">
-            <div className="wizard-step-header">
-              <div>
-                <div className="wizard-step-title">
-                  Stap {currentIndex + 1}: {currentStep.label}
-                </div>
-                <div className="wizard-step-description">{currentStep.description}</div>
+        <div className="wizard-content-grid">
+          <aside className="wizard-inline-sidebar">
+            <div className="wizard-inline-sidebar-card">
+              <div className="page-shell-wizard-title">Wizard</div>
+              <div className="page-shell-wizard-list">
+                {steps.map((step, index) => (
+                  <button
+                    key={step.id}
+                    type="button"
+                    className={`page-shell-wizard-link${currentIndex === index ? " active" : ""}${
+                      index < currentIndex ? " completed" : ""
+                    }`}
+                    onClick={() => setActiveStepIndex(index)}
+                  >
+                    <span className="page-shell-wizard-rail">
+                      <span className="page-shell-wizard-dot">{index < currentIndex ? "\u2713" : ""}</span>
+                      {index < steps.length - 1 ? <span className="page-shell-wizard-line" /> : null}
+                    </span>
+                    <span className="page-shell-wizard-copy">
+                      <span className="page-shell-wizard-label">{step.label}</span>
+                      <span className="page-shell-wizard-text">{step.description}</span>
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
+          </aside>
 
-            <div className="wizard-step-body">{renderStepContent()}</div>
+          <div className="wizard-shell wizard-shell-single">
+            <div className="wizard-step-card wizard-step-stage-card">
+              <div className="wizard-step-header">
+                <div>
+                  <div className="wizard-step-title">
+                    Stap {currentIndex + 1}: {currentStep.label}
+                  </div>
+                  <div className="wizard-step-description">{currentStep.description}</div>
+                </div>
+              </div>
 
-            <div className="editor-actions wizard-footer-actions">
-              <div className="editor-actions-group">
-                {currentIndex > 0 ? (
+              <div className="wizard-step-body">{renderStepContent()}</div>
+
+              <div className="editor-actions wizard-footer-actions">
+                <div className="editor-actions-group">
+                  {currentIndex > 0 ? (
+                    <button
+                      type="button"
+                      className="editor-button editor-button-secondary"
+                      onClick={() => setActiveStepIndex(Math.max(0, currentIndex - 1))}
+                    >
+                      Vorige
+                    </button>
+                  ) : null}
+                </div>
+                <div className="editor-actions-group">
                   <button
                     type="button"
                     className="editor-button editor-button-secondary"
-                    onClick={() => setActiveStepIndex(Math.max(0, currentIndex - 1))}
+                    onClick={handleSave}
                   >
-                    Vorige
+                    Opslaan
                   </button>
-                ) : null}
-              </div>
-              <div className="editor-actions-group">
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={handleSave}
-                >
-                  Opslaan
-                </button>
-                <button
-                  type="button"
-                  className="editor-button"
-                  onClick={async () => {
-                    if (currentStep.id === "summary") {
-                      const saved = await handleFinalize();
-                      if (saved) {
-                        onFinish?.();
+                  <button
+                    type="button"
+                    className="editor-button"
+                    onClick={async () => {
+                      if (currentStep.id === "summary") {
+                        const saved = await handleFinalize();
+                        if (saved) {
+                          onFinish?.();
+                        }
+                        return;
                       }
-                      return;
-                    }
 
-                    setActiveStepIndex(Math.min(steps.length - 1, currentIndex + 1));
-                  }}
-                  disabled={isSaving}
-                >
-                  {isSaving ? "Opslaan..." : currentStep.id === "summary" ? "Afronden" : "Volgende"}
-                </button>
+                      setActiveStepIndex(Math.min(steps.length - 1, currentIndex + 1));
+                    }}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? "Opslaan..." : currentStep.id === "summary" ? "Afronden" : "Volgende"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

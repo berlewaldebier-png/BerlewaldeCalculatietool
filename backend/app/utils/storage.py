@@ -452,6 +452,10 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
             subfactuurbedrag = float(row.get("subfactuurbedrag", 0.0) or 0.0)
         except (TypeError, ValueError):
             subfactuurbedrag = 0.0
+        try:
+            afvulkosten_fust = float(row.get("afvulkosten_fust", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            afvulkosten_fust = 0.0
 
         normalized_rows.append(
             {
@@ -460,6 +464,7 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
                 "eenheid": str(row.get("eenheid", "") or ""),
                 "liters": liters,
                 "subfactuurbedrag": subfactuurbedrag,
+                "afvulkosten_fust": afvulkosten_fust,
             }
         )
 
@@ -5895,6 +5900,7 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
         for bier in bieren
         if isinstance(bier, dict) and str(bier.get("biernaam", "") or "").strip()
     }
+    bieren_changed = False
 
     for record in cleaned_data:
         try:
@@ -5908,28 +5914,64 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
         if not isinstance(basisgegevens, dict):
             basisgegevens = {}
         biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
-        if bier_id and bier_id in bieren_by_id:
-            continue
-        if biernaam and biernaam.lower() in bieren_by_name:
-            record["bier_id"] = str(bieren_by_name[biernaam.lower()].get("id", "") or "")
-            continue
+        stijl = str(basisgegevens.get("stijl", "") or "").strip()
+        alcoholpercentage = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
+        belastingsoort = str(
+            basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT
+        )
+        tarief_accijns = str(
+            basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS
+        )
+        btw_tarief = str(basisgegevens.get("btw_tarief", DEFAULT_BTW_TARIEF) or DEFAULT_BTW_TARIEF)
+
+        existing_bier = bieren_by_id.get(bier_id) if bier_id else None
+        if existing_bier is None and biernaam and biernaam.lower() in bieren_by_name:
+            existing_bier = bieren_by_name[biernaam.lower()]
+            record["bier_id"] = str(existing_bier.get("id", "") or "")
+
         if not biernaam:
             # Fail hard: a definitive record must be attributable to a beer.
             raise ValueError("Definitieve kostprijsversie mist biernaam (basisgegevens.biernaam).")
-        # Create the beer explicitly from the definitive basisgegevens snapshot.
-        new_bier = add_bier(
-            biernaam=biernaam,
-            stijl=str(basisgegevens.get("stijl", "") or "").strip(),
-            alcoholpercentage=float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0),
-            belastingsoort=str(basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT),
-            tarief_accijns=str(basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS),
-            btw_tarief=str(basisgegevens.get("btw_tarief", DEFAULT_BTW_TARIEF) or DEFAULT_BTW_TARIEF),
+        if existing_bier is None:
+            # Create the beer explicitly from the definitive basisgegevens snapshot.
+            new_bier = add_bier(
+                biernaam=biernaam,
+                stijl=stijl,
+                alcoholpercentage=alcoholpercentage,
+                belastingsoort=belastingsoort,
+                tarief_accijns=tarief_accijns,
+                btw_tarief=btw_tarief,
+            )
+            if not isinstance(new_bier, dict) or not str(new_bier.get("id", "") or "").strip():
+                raise ValueError("Kon bierstamdata niet aanmaken voor definitieve kostprijsversie.")
+            record["bier_id"] = str(new_bier.get("id", "") or "")
+            bieren_by_id[str(new_bier.get("id", "") or "")] = new_bier
+            bieren_by_name[biernaam.lower()] = new_bier
+            continue
+
+        updated_bier = normalize_bier_record(
+            {
+                **existing_bier,
+                "biernaam": biernaam,
+                "stijl": stijl,
+                "alcoholpercentage": alcoholpercentage,
+                "belastingsoort": belastingsoort,
+                "tarief_accijns": tarief_accijns,
+                "btw_tarief": btw_tarief,
+                "updated_at": _now_iso(),
+            }
         )
-        if not isinstance(new_bier, dict) or not str(new_bier.get("id", "") or "").strip():
-            raise ValueError("Kon bierstamdata niet aanmaken voor definitieve kostprijsversie.")
-        record["bier_id"] = str(new_bier.get("id", "") or "")
-        bieren_by_id[str(new_bier.get("id", "") or "")] = new_bier
-        bieren_by_name[biernaam.lower()] = new_bier
+        if updated_bier != existing_bier:
+            for index, bier in enumerate(bieren):
+                if str(bier.get("id", "") or "") == str(updated_bier.get("id", "") or ""):
+                    bieren[index] = updated_bier
+                    break
+            bieren_by_id[str(updated_bier.get("id", "") or "")] = updated_bier
+            bieren_by_name[biernaam.lower()] = updated_bier
+            bieren_changed = True
+
+    if bieren_changed and not save_bieren(bieren):
+        raise ValueError("Kon bierstamdata niet bijwerken vanuit definitieve kostprijsversie.")
 
     # Prevent implicit destructive deletes: hard delete is only allowed for concept records
     # that are not referenced anywhere. Definitive/active versions must be deactivated instead.
