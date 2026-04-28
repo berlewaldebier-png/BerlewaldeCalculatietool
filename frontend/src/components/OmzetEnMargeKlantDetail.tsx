@@ -14,8 +14,11 @@ type OrderRow = {
   korting_ex: number;
   charges_ex: number;
   netto_omzet_ex: number;
+  kostprijs_ex: number;
+  brutomarge_ex: number;
   ignored_lines: number;
   unmapped_lines: number;
+  missing_cost_lines?: number;
 };
 
 type LineRow = {
@@ -114,10 +117,12 @@ export function OmzetEnMargeKlantDetail({
       (acc, row) => {
         acc.netto += Number(row.netto_omzet_ex ?? 0) || 0;
         acc.omzet += Number(row.omzet_ex ?? 0) || 0;
+        acc.kostprijs += Number(row.kostprijs_ex ?? 0) || 0;
+        acc.marge += Number(row.brutomarge_ex ?? 0) || 0;
         acc.unmapped += Number(row.unmapped_lines ?? 0) || 0;
         return acc;
       },
-      { omzet: 0, netto: 0, unmapped: 0 }
+      { omzet: 0, netto: 0, kostprijs: 0, marge: 0, unmapped: 0 }
     );
   }, [orders]);
 
@@ -170,6 +175,8 @@ export function OmzetEnMargeKlantDetail({
         <div className="editor-actions-group">
           <span className="pill">Omzet {euro(totals.omzet)}</span>
           <span className="pill">Netto {euro(totals.netto)}</span>
+          <span className="pill">Kostprijs {euro(totals.kostprijs)}</span>
+          <span className="pill">Marge {euro(totals.marge)}</span>
           <span className="pill">Unmapped {totals.unmapped}</span>
         </div>
       </div>
@@ -190,6 +197,8 @@ export function OmzetEnMargeKlantDetail({
                 <th style={{ width: 140 }}>Order</th>
                 <th style={{ width: 160 }}>Omzet</th>
                 <th style={{ width: 160 }}>Netto</th>
+                <th style={{ width: 160 }}>Kostprijs</th>
+                <th style={{ width: 160 }}>Marge</th>
                 <th style={{ width: 120 }}>Regels</th>
                 <th style={{ width: 120 }}>Unmapped</th>
                 <th style={{ width: 120 }}>Ignored</th>
@@ -206,6 +215,8 @@ export function OmzetEnMargeKlantDetail({
                       <td><strong>{row.transaction_number || String(row.sales_order_id)}</strong></td>
                       <td>{euro(row.omzet_ex)}</td>
                       <td>{euro(row.netto_omzet_ex)}</td>
+                      <td>{euro(row.kostprijs_ex)}</td>
+                      <td>{euro(row.brutomarge_ex)}</td>
                       <td>{row.lines}</td>
                       <td>{row.unmapped_lines}</td>
                       <td>{row.ignored_lines}</td>

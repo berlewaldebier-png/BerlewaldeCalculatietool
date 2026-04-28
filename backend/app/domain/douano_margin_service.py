@@ -542,6 +542,68 @@ def list_company_orders(
             )
             rows = cur.fetchall() or []
 
+    # Load datasets once for cost resolution.
+    activations = dataset_store.load_dataset("kostprijsproductactiveringen")
+    versions = dataset_store.load_dataset("kostprijsversies")
+    activation_index = _build_activation_index(activations if isinstance(activations, list) else [])
+    versions_by_id: dict[str, dict[str, Any]] = {
+        str(v.get("id", "") or ""): v for v in (versions if isinstance(versions, list) else []) if isinstance(v, dict)
+    }
+    used_version_ids = [
+        str(row.get("kostprijsversie_id", "") or "")
+        for row in (activations if isinstance(activations, list) else [])
+        if isinstance(row, dict)
+    ]
+    snapshot_cost_index = _build_snapshot_cost_index(versions_by_id, used_version_ids)
+
+    # Compute cost totals per order by scanning mapped lines for just these orders.
+    order_ids = [int(r[0] or 0) for r in rows if int(r[0] or 0) > 0]
+    cost_by_order: dict[int, dict[str, Any]] = {}
+    if order_ids:
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.sales_order_id,
+                        l.order_date,
+                        l.quantity,
+                        l.net_revenue_ex,
+                        m.bier_id,
+                        m.product_id
+                    FROM douano_sales_order_lines l
+                    JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    WHERE ig.douano_product_id IS NULL
+                      AND l.sales_order_id = ANY(%s)
+                    """,
+                    (order_ids,),
+                )
+                mapped_rows = cur.fetchall() or []
+
+        for sales_order_id, order_date_raw, quantity, net_revenue_ex, bier_id, product_id in mapped_rows:
+            order_id = int(sales_order_id or 0)
+            order_date = _parse_date(order_date_raw)
+            if order_id <= 0 or order_date is None:
+                continue
+            cost_unit, _, _ = _resolve_cost_per_unit(
+                bier_id=str(bier_id or ""),
+                product_id=str(product_id or ""),
+                as_of=order_date,
+                activations_index=activation_index,
+                versions_by_id=versions_by_id,
+                snapshot_cost_index=snapshot_cost_index,
+            )
+            bucket = cost_by_order.setdefault(
+                order_id,
+                {"cost_total_ex": 0.0, "mapped_lines": 0, "missing_cost_lines": 0},
+            )
+            bucket["mapped_lines"] = int(bucket.get("mapped_lines", 0) or 0) + 1
+            if cost_unit is None:
+                bucket["missing_cost_lines"] = int(bucket.get("missing_cost_lines", 0) or 0) + 1
+                continue
+            bucket["cost_total_ex"] = float(bucket.get("cost_total_ex", 0.0) or 0.0) + _num(quantity) * float(cost_unit)
+
     out: list[dict[str, Any]] = []
     for (
         sales_order_id,
@@ -556,9 +618,13 @@ def list_company_orders(
         ignored_lines,
         unmapped_lines,
     ) in rows:
+        oid = int(sales_order_id or 0)
+        cost_bucket = cost_by_order.get(oid, {"cost_total_ex": 0.0, "mapped_lines": 0, "missing_cost_lines": 0})
+        cost_total = float(cost_bucket.get("cost_total_ex", 0.0) or 0.0)
+        margin = float(netto_omzet_ex or 0.0) - cost_total
         out.append(
             {
-                "sales_order_id": int(sales_order_id or 0),
+                "sales_order_id": oid,
                 "order_date": str(order_date or ""),
                 "transaction_number": str(transaction_number or ""),
                 "status": str(status or ""),
@@ -567,8 +633,11 @@ def list_company_orders(
                 "korting_ex": float(korting_ex or 0),
                 "charges_ex": float(charges_ex or 0),
                 "netto_omzet_ex": float(netto_omzet_ex or 0),
+                "kostprijs_ex": cost_total,
+                "brutomarge_ex": margin,
                 "ignored_lines": int(ignored_lines or 0),
                 "unmapped_lines": int(unmapped_lines or 0),
+                "missing_cost_lines": int(cost_bucket.get("missing_cost_lines", 0) or 0),
             }
         )
     return out
