@@ -1,18 +1,21 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { formatMoneyEUR } from "@/lib/formatters";
 
-type UnmappedProduct = {
-  douano_product_id: number;
-  name: string;
-  sku: string;
-  gtin: string;
+type OrderRow = {
+  sales_order_id: number;
+  order_date: string;
+  transaction_number: string;
+  status: string;
   lines: number;
-  quantity: number;
-  net_revenue_ex: number;
+  omzet_ex: number;
+  korting_ex: number;
+  charges_ex: number;
+  netto_omzet_ex: number;
+  ignored_lines: number;
+  unmapped_lines: number;
 };
 
 type LineRow = {
@@ -52,6 +55,14 @@ function euro(value: number) {
   return formatMoneyEUR(value);
 }
 
+function formatDateNl(value: string) {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  const dt = new Date(`${text}T00:00:00`);
+  if (Number.isNaN(dt.getTime())) return text;
+  return dt.toLocaleDateString("nl-NL");
+}
+
 export function OmzetEnMargeKlantDetail({
   companyId,
   initialOnlyUnmapped = false,
@@ -66,8 +77,9 @@ export function OmzetEnMargeKlantDetail({
   const [onlyMissingCost, setOnlyMissingCost] = useState(Boolean(initialOnlyMissingCost));
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
-  const [lines, setLines] = useState<LineRow[]>([]);
-  const [unmappedProducts, setUnmappedProducts] = useState<UnmappedProduct[]>([]);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
+  const [orderLines, setOrderLines] = useState<Record<number, LineRow[]>>({});
 
   async function load() {
     setStatus("Laden…");
@@ -76,24 +88,17 @@ export function OmzetEnMargeKlantDetail({
       const qs = new URLSearchParams();
       qs.set("company_id", String(companyId));
       if (since.trim()) qs.set("since", since.trim());
-      if (onlyUnmapped) qs.set("only_unmapped", "true");
-      if (onlyMissingCost) qs.set("only_missing_cost", "true");
-      qs.set("limit", "1000");
-      const [linePayload, unmappedPayload] = await Promise.all([
-        readJson(`/api/integrations/douano/company-lines?${qs.toString()}`),
-        readJson(
-          `/api/integrations/douano/company-unmapped-products?company_id=${encodeURIComponent(
-            String(companyId)
-          )}${since.trim() ? `&since=${encodeURIComponent(since.trim())}` : ""}`
-        )
-      ]);
-      setLines(Array.isArray(linePayload?.items) ? linePayload.items : []);
-      setUnmappedProducts(Array.isArray(unmappedPayload?.items) ? unmappedPayload.items : []);
+      qs.set("limit", "500");
+      const orderPayload = await readJson(`/api/integrations/douano/company-orders?${qs.toString()}`);
+      setOrders(Array.isArray(orderPayload?.items) ? orderPayload.items : []);
+      setOrderLines({});
+      setExpandedOrderId(null);
       setStatus("Gereed");
       setTone("success");
     } catch (error) {
-      setLines([]);
-      setUnmappedProducts([]);
+      setOrders([]);
+      setOrderLines({});
+      setExpandedOrderId(null);
       setStatus(error instanceof Error ? error.message : String(error));
       setTone("error");
     }
@@ -105,16 +110,35 @@ export function OmzetEnMargeKlantDetail({
   }, []);
 
   const totals = useMemo(() => {
-    return lines.reduce(
+    return orders.reduce(
       (acc, row) => {
-        acc.netto += Number(row.net_revenue_ex ?? 0) || 0;
-        acc.kost += Number(row.cost_total_ex ?? 0) || 0;
-        acc.marge += Number(row.margin_ex ?? 0) || 0;
+        acc.netto += Number(row.netto_omzet_ex ?? 0) || 0;
+        acc.omzet += Number(row.omzet_ex ?? 0) || 0;
+        acc.unmapped += Number(row.unmapped_lines ?? 0) || 0;
         return acc;
       },
-      { netto: 0, kost: 0, marge: 0 }
+      { omzet: 0, netto: 0, unmapped: 0 }
     );
-  }, [lines]);
+  }, [orders]);
+
+  async function toggleOrder(orderId: number) {
+    const next = expandedOrderId === orderId ? null : orderId;
+    setExpandedOrderId(next);
+    if (!next) return;
+    if (orderLines[next]) return;
+    try {
+      const qs = new URLSearchParams();
+      qs.set("sales_order_id", String(next));
+      if (onlyUnmapped) qs.set("only_unmapped", "true");
+      if (onlyMissingCost) qs.set("only_missing_cost", "true");
+      qs.set("limit", "5000");
+      const payload = await readJson(`/api/integrations/douano/order-lines?${qs.toString()}`);
+      setOrderLines((prev) => ({ ...prev, [next]: Array.isArray(payload?.items) ? payload.items : [] }));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
 
   return (
     <section>
@@ -144,9 +168,9 @@ export function OmzetEnMargeKlantDetail({
           </button>
         </div>
         <div className="editor-actions-group">
+          <span className="pill">Omzet {euro(totals.omzet)}</span>
           <span className="pill">Netto {euro(totals.netto)}</span>
-          <span className="pill">Kostprijs {euro(totals.kost)}</span>
-          <span className="pill">Marge {euro(totals.marge)}</span>
+          <span className="pill">Unmapped {totals.unmapped}</span>
         </div>
       </div>
 
@@ -156,92 +180,130 @@ export function OmzetEnMargeKlantDetail({
         </div>
       ) : null}
 
-      {unmappedProducts.length > 0 ? (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Top unmapped producten</div>
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Douano product</th>
-                  <th style={{ width: 120 }}>Regels</th>
-                  <th style={{ width: 160 }}>Netto omzet</th>
-                  <th style={{ width: 160 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {unmappedProducts.slice(0, 20).map((p) => (
-                  <tr key={p.douano_product_id}>
-                    <td>
-                      <strong>{p.name || String(p.douano_product_id)}</strong>
-                      <div className="muted" style={{ fontSize: "0.85rem" }}>
-                        <code>{p.sku}</code> <code>{p.gtin}</code>
-                      </div>
-                    </td>
-                    <td>{p.lines}</td>
-                    <td>{euro(p.net_revenue_ex)}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <Link
-                        href={`/beheer/productkoppeling?q=${encodeURIComponent(p.name || String(p.douano_product_id))}`}
-                        className="editor-button editor-button-secondary"
-                      >
-                        Koppel
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
-
       <div style={{ marginTop: 12 }}>
-        <div style={{ fontWeight: 800, marginBottom: 6 }}>Orderregels</div>
+        <div style={{ fontWeight: 800, marginBottom: 6 }}>Orders</div>
         <div className="data-table">
           <table>
             <thead>
               <tr>
-                <th style={{ width: 110 }}>Datum</th>
-                <th>Douano product</th>
-                <th style={{ width: 90 }}>Qty</th>
-                <th style={{ width: 140 }}>Netto</th>
-                <th style={{ width: 140 }}>Kostprijs</th>
-                <th style={{ width: 140 }}>Marge</th>
-                <th style={{ width: 140 }}>Status</th>
+                <th style={{ width: 120 }}>Datum</th>
+                <th style={{ width: 140 }}>Order</th>
+                <th style={{ width: 160 }}>Omzet</th>
+                <th style={{ width: 160 }}>Netto</th>
+                <th style={{ width: 120 }}>Regels</th>
+                <th style={{ width: 120 }}>Unmapped</th>
+                <th style={{ width: 120 }}>Ignored</th>
+                <th style={{ width: 120 }} />
               </tr>
             </thead>
             <tbody>
-              {lines.slice(0, 1000).map((row) => {
-                const status = row.ignored ? "ignored" : !row.mapped ? "unmapped" : row.missing_cost ? "missing cost" : "ok";
+              {orders.slice(0, 500).map((row) => {
+                const isExpanded = expandedOrderId === row.sales_order_id;
                 return (
-                  <tr key={row.line_id}>
-                    <td><code>{row.order_date}</code></td>
-                    <td>
-                      <div style={{ fontWeight: 700 }}>{row.douano_product_name || String(row.douano_product_id)}</div>
-                      <div className="muted" style={{ fontSize: "0.85rem" }}>
-                        <code>{row.douano_sku}</code>{" "}
-                        {row.mapped ? (
-                          <code>
-                            {row.bier_id}::{row.product_id}
-                          </code>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>{row.quantity}</td>
-                    <td>{euro(row.net_revenue_ex)}</td>
-                    <td>{row.cost_price_ex === null ? "-" : euro(row.cost_total_ex)}</td>
-                    <td>{row.cost_price_ex === null ? "-" : euro(row.margin_ex)}</td>
-                    <td>
-                      <span className="pill">{status}</span>
-                    </td>
-                  </tr>
+                  <Fragment key={row.sales_order_id}>
+                    <tr key={row.sales_order_id}>
+                      <td><code>{formatDateNl(row.order_date)}</code></td>
+                      <td><strong>{row.transaction_number || String(row.sales_order_id)}</strong></td>
+                      <td>{euro(row.omzet_ex)}</td>
+                      <td>{euro(row.netto_omzet_ex)}</td>
+                      <td>{row.lines}</td>
+                      <td>{row.unmapped_lines}</td>
+                      <td>{row.ignored_lines}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <button
+                          type="button"
+                          className="editor-button editor-button-secondary"
+                          onClick={() => void toggleOrder(row.sales_order_id)}
+                        >
+                          {isExpanded ? "Sluiten" : "Open"}
+                        </button>
+                      </td>
+                    </tr>
+                    {isExpanded ? (
+                      <tr key={`${row.sales_order_id}-lines`}>
+                        <td colSpan={8}>
+                          <div style={{ padding: "10px 0" }}>
+                            <div style={{ fontWeight: 800, marginBottom: 6 }}>Orderregels</div>
+                            <div className="data-table">
+                              <table>
+                                <thead>
+                                  <tr>
+                                    <th>Product</th>
+                                    <th style={{ width: 90 }}>Qty</th>
+                                    <th style={{ width: 140 }}>Netto</th>
+                                    <th style={{ width: 140 }}>Kostprijs</th>
+                                    <th style={{ width: 140 }}>Marge</th>
+                                    <th style={{ width: 140 }}>Status</th>
+                                    <th style={{ width: 160 }} />
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(orderLines[row.sales_order_id] ?? []).map((line) => {
+                                    const lineStatus = line.ignored
+                                      ? "ignored"
+                                      : !line.mapped
+                                        ? "unmapped"
+                                        : line.missing_cost
+                                          ? "missing cost"
+                                          : "ok";
+                                    return (
+                                      <tr key={line.line_id}>
+                                        <td>
+                                          <div style={{ fontWeight: 700 }}>
+                                            {line.douano_product_name || String(line.douano_product_id)}
+                                          </div>
+                                          <div className="muted" style={{ fontSize: "0.85rem" }}>
+                                            <code>{line.douano_sku}</code>{" "}
+                                            {line.mapped ? (
+                                              <code>
+                                                {line.bier_id}::{line.product_id}
+                                              </code>
+                                            ) : null}
+                                          </div>
+                                        </td>
+                                        <td>{line.quantity}</td>
+                                        <td>{euro(line.net_revenue_ex)}</td>
+                                        <td>{line.cost_price_ex === null ? "-" : euro(line.cost_total_ex)}</td>
+                                        <td>{line.cost_price_ex === null ? "-" : euro(line.margin_ex)}</td>
+                                        <td>
+                                          <span className="pill">{lineStatus}</span>
+                                        </td>
+                                        <td style={{ textAlign: "right" }}>
+                                          {!line.mapped && !line.ignored ? (
+                                            <a
+                                              className="editor-button editor-button-secondary"
+                                              href={`/beheer/productkoppeling?q=${encodeURIComponent(
+                                                line.douano_product_name || String(line.douano_product_id)
+                                              )}`}
+                                            >
+                                              Koppel
+                                            </a>
+                                          ) : null}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {(orderLines[row.sales_order_id] ?? []).length === 0 ? (
+                                    <tr>
+                                      <td colSpan={7} style={{ opacity: 0.75 }}>
+                                        Geen regels of nog aan het laden.
+                                      </td>
+                                    </tr>
+                                  ) : null}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
-              {lines.length === 0 ? (
+              {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ opacity: 0.75 }}>
-                    Geen regels gevonden.
+                  <td colSpan={8} style={{ opacity: 0.75 }}>
+                    Geen orders gevonden.
                   </td>
                 </tr>
               ) : null}

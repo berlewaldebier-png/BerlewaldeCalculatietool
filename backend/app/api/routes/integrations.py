@@ -711,6 +711,38 @@ def get_douano_company_lines(
     }
 
 
+@router.get("/douano/company-orders")
+def get_douano_company_orders(
+    company_id: int = Query(..., ge=1),
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_company_orders(
+            company_id=int(company_id),
+            since=since,
+            limit=int(limit),
+        )
+    }
+
+
+@router.get("/douano/order-lines")
+def get_douano_order_lines(
+    sales_order_id: int = Query(..., ge=1),
+    only_unmapped: bool = Query(False),
+    only_missing_cost: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_order_lines(
+            sales_order_id=int(sales_order_id),
+            only_unmapped=bool(only_unmapped),
+            only_missing_cost=bool(only_missing_cost),
+            limit=int(limit),
+        )
+    }
+
+
 @router.get("/douano/company-unmapped-products")
 def get_douano_company_unmapped_products(
     company_id: int = Query(..., ge=1),
