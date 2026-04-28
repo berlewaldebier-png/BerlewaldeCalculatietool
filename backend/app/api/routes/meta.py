@@ -124,6 +124,13 @@ def get_navigation() -> list[NavigationItem]:
             href="/beheer",
             section="Beheer",
         ),
+        NavigationItem(
+            key="productkoppeling",
+            label="Productkoppeling",
+            description="Koppel Douano producten aan actieve kostprijscombinaties.",
+            href="/beheer/productkoppeling",
+            section="Beheer",
+        ),
     ]
 
 

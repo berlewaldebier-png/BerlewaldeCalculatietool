@@ -43,6 +43,11 @@ export default async function BeheerPage() {
           <div className="home-card-title">API integraties</div>
           <div className="home-card-text">Koppelingen met externe systemen (Douano), status en datamapping.</div>
         </Link>
+        <Link href="/beheer/productkoppeling" className="home-card">
+          <div className="home-card-section">Beheer</div>
+          <div className="home-card-title">Productkoppeling</div>
+          <div className="home-card-text">Koppel Douano producten aan actieve kostprijscombinaties (bier + verpakking).</div>
+        </Link>
         {showDevTools ? (
           <Link href="/beheer/devtools" className="home-card">
             <div className="home-card-section">Beheer</div>
