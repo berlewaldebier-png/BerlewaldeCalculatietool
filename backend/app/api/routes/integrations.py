@@ -17,6 +17,7 @@ from app.domain import douano_oauth_storage
 from app.domain import douano_sync_storage
 from app.domain import douano_product_mapping_storage
 from app.domain import dataset_store
+from app.domain import douano_margin_service
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
@@ -680,6 +681,14 @@ def get_douano_revenue_summary(
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
     return {"items": douano_sync_storage.list_company_revenue_summary(since=since, limit=int(limit))}
+
+
+@router.get("/douano/margin-summary")
+def get_douano_margin_summary(
+    since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
+    limit: int = Query(500, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {"items": douano_margin_service.get_company_margin_summary(since=since, limit=int(limit))}
 
 
 @router.get("/douano/product-mappings")

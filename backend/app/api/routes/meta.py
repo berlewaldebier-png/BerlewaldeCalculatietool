@@ -104,6 +104,13 @@ def get_navigation() -> list[NavigationItem]:
             section="Verkoop",
         ),
         NavigationItem(
+            key="omzetgegevens",
+            label="Omzetgegevens",
+            description="Omzet, kostprijs en brutomarge per klant (Douano).",
+            href="/omzetgegevens",
+            section="Verkoop",
+        ),
+        NavigationItem(
             key="prijsvoorstel",
             label="Prijsvoorstel maken",
             description="Maak prijsvoorstellen op basis van liters of producten.",
