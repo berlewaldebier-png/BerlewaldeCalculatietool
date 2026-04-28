@@ -15,6 +15,8 @@ from fastapi.responses import RedirectResponse
 from app.domain.auth_dependencies import require_user
 from app.domain import douano_oauth_storage
 from app.domain import douano_sync_storage
+from app.domain import douano_product_mapping_storage
+from app.domain import dataset_store
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
@@ -678,4 +680,95 @@ def get_douano_revenue_summary(
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
     return {"items": douano_sync_storage.list_company_revenue_summary(since=since, limit=int(limit))}
+
+
+@router.get("/douano/product-mappings")
+def get_douano_product_mappings(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
+    return {"items": douano_product_mapping_storage.list_mappings(limit=int(limit))}
+
+
+@router.put("/douano/product-mappings/{douano_product_id}")
+def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        record = douano_product_mapping_storage.upsert_mapping(
+            douano_product_id=int(douano_product_id or 0),
+            bier_id=str(payload.get("bier_id", "") or ""),
+            product_id=str(payload.get("product_id", "") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": record}
+
+
+@router.delete("/douano/product-mappings/{douano_product_id}")
+def delete_douano_product_mapping(douano_product_id: int) -> dict[str, Any]:
+    deleted = douano_product_mapping_storage.delete_mapping(douano_product_id=int(douano_product_id or 0))
+    return {"deleted": bool(deleted)}
+
+
+@router.get("/douano/active-cost-combos")
+def get_douano_active_cost_combos(
+    year: int = Query(..., ge=2000, le=2100),
+) -> dict[str, Any]:
+    """Return active (bier_id, product_id) combos for a year with human labels.
+
+    This is used for manual mapping: Douano product -> (bier_id, product_id).
+    """
+    activations = dataset_store.load_dataset("kostprijsproductactiveringen")
+    bieren = dataset_store.load_dataset("bieren")
+    basisproducten = dataset_store.load_dataset("basisproducten")
+    samengestelde = dataset_store.load_dataset("samengestelde-producten")
+
+    bieren_by_id: dict[str, str] = {}
+    if isinstance(bieren, list):
+        for row in bieren:
+            if not isinstance(row, dict):
+                continue
+            bid = str(row.get("id", "") or "")
+            naam = str(row.get("naam", row.get("biernaam", "")) or "")
+            if bid:
+                bieren_by_id[bid] = naam or bid
+
+    product_by_id: dict[str, str] = {}
+    for source in (basisproducten, samengestelde):
+        if not isinstance(source, list):
+            continue
+        for row in source:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("id", "") or "")
+            oms = str(row.get("omschrijving", row.get("naam", "")) or "")
+            if pid:
+                product_by_id[pid] = oms or pid
+
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if isinstance(activations, list):
+        for row in activations:
+            if not isinstance(row, dict):
+                continue
+            if int(row.get("jaar", 0) or 0) != int(year):
+                continue
+            bier_id = str(row.get("bier_id", "") or "")
+            product_id = str(row.get("product_id", "") or "")
+            if not bier_id or not product_id:
+                continue
+            key = f"{bier_id}::{product_id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            bier_naam = bieren_by_id.get(bier_id, bier_id)
+            product_naam = product_by_id.get(product_id, product_id)
+            items.append(
+                {
+                    "bier_id": bier_id,
+                    "product_id": product_id,
+                    "label": f"{bier_naam} — {product_naam}",
+                    "bier_naam": bier_naam,
+                    "product_naam": product_naam,
+                }
+            )
+
+    items.sort(key=lambda item: str(item.get("label", "") or "").lower())
+    return {"items": items}
 
