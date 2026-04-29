@@ -413,6 +413,7 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                 orders += 1
 
                 ordered_items = order.get("ordered_items", [])
+
                 def _upsert_line(*, item: dict[str, Any], sign: float = 1.0, is_misc: bool = False) -> None:
                     nonlocal lines
                     line_id = int(item.get("id", 0) or 0)
@@ -424,9 +425,16 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                         product_obj = item.get("product")
                         douano_product_id = int(product_obj.get("id", 0) or 0) if isinstance(product_obj, dict) else 0
 
-                    quantity = sign * _num(item.get("quantity", 0))
+                    # Douano returns can already have negative quantities (e.g. -2).
+                    # We normalize here to avoid double-negation:
+                    # - ordered/misc: +abs(qty)
+                    # - returned: -abs(qty) (callers pass sign=-1)
+                    raw_qty = _num(item.get("quantity", 0))
+                    qty_sign = -1.0 if float(sign or 1.0) < 0 else 1.0
+                    quantity = qty_sign * abs(raw_qty)
                     unit_price_ex = _num(item.get("price", 0))
-                    discount_ex = sign * _num(item.get("discount", 0))
+                    # Keep discount aligned with the line sign so returns reverse the discounted amount.
+                    discount_ex = qty_sign * abs(_num(item.get("discount", 0)))
 
                     excise_per_unit = 0.0
                     refund_per_unit = 0.0
