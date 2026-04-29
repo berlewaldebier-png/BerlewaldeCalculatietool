@@ -413,19 +413,20 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                 orders += 1
 
                 ordered_items = order.get("ordered_items", [])
-                if not isinstance(ordered_items, list):
-                    continue
-                for item in ordered_items:
-                    if not isinstance(item, dict):
-                        continue
+                def _upsert_line(*, item: dict[str, Any], sign: float = 1.0, is_misc: bool = False) -> None:
+                    nonlocal lines
                     line_id = int(item.get("id", 0) or 0)
                     if line_id <= 0:
-                        continue
-                    product_obj = item.get("product")
-                    douano_product_id = int(product_obj.get("id", 0) or 0) if isinstance(product_obj, dict) else 0
-                    quantity = _num(item.get("quantity", 0))
+                        return
+
+                    douano_product_id = 0
+                    if not is_misc:
+                        product_obj = item.get("product")
+                        douano_product_id = int(product_obj.get("id", 0) or 0) if isinstance(product_obj, dict) else 0
+
+                    quantity = sign * _num(item.get("quantity", 0))
                     unit_price_ex = _num(item.get("price", 0))
-                    discount_ex = _num(item.get("discount", 0))
+                    discount_ex = sign * _num(item.get("discount", 0))
 
                     excise_per_unit = 0.0
                     refund_per_unit = 0.0
@@ -487,7 +488,7 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                             sales_order_id,
                             company_id,
                             order_date,
-                            douano_product_id,
+                            int(douano_product_id or 0),
                             quantity,
                             unit_price_ex,
                             discount_ex,
@@ -500,6 +501,23 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                         ),
                     )
                     lines += 1
+
+                if isinstance(ordered_items, list):
+                    for item in ordered_items:
+                        if isinstance(item, dict):
+                            _upsert_line(item=item, sign=1.0, is_misc=False)
+
+                returned_items = order.get("returned_items", [])
+                if isinstance(returned_items, list):
+                    for item in returned_items:
+                        if isinstance(item, dict):
+                            _upsert_line(item=item, sign=-1.0, is_misc=False)
+
+                misc_items = order.get("miscellaneous_items", [])
+                if isinstance(misc_items, list):
+                    for item in misc_items:
+                        if isinstance(item, dict):
+                            _upsert_line(item=item, sign=1.0, is_misc=True)
         if not postgres_storage.in_transaction():
             conn.commit()
     return {"orders": orders, "lines": lines}

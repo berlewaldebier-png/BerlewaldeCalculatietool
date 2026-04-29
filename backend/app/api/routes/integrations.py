@@ -625,7 +625,7 @@ def post_douano_sync_products(
 
 @router.post("/douano/sync/sales-orders")
 def post_douano_sync_sales_orders(
-    max_pages: int = Query(10, ge=1, le=500),
+    max_pages: int = Query(200, ge=1, le=500),
     since_date: str = Query("", description="Optioneel: filter orders client-side op date >= since_date (YYYY-MM-DD)."),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
