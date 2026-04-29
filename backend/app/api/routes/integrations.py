@@ -261,7 +261,7 @@ def _fetch_paged_resource(
     path: str,
     query: dict[str, str] | None = None,
     max_pages: int = 10,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     # Refresh tokens proactively when expired/near-expired.
     expires_at = _parse_iso_ts(tokens.get("expires_at"))
     if expires_at is not None:
@@ -272,7 +272,10 @@ def _fetch_paged_resource(
     base = _douano_api_base_url(tokens)
     q = dict(query or {})
     items: list[dict[str, Any]] = []
+    pages_fetched = 0
+    stop_reason = "max_pages"
     for page in range(1, max(1, int(max_pages)) + 1):
+        pages_fetched = page
         q_with_page = {**q, "page": str(page)}
         url = f"{base}{path}?{urllib.parse.urlencode(q_with_page)}" if q_with_page else f"{base}{path}"
         status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
@@ -291,9 +294,18 @@ def _fetch_paged_resource(
         payload = _parse_json_payload(raw)
         _, page_items = _extract_result_list(payload)
         if not page_items:
+            stop_reason = "empty_page"
             break
         items.extend(page_items)
-    return items
+    meta = {
+        "path": path,
+        "query": q,
+        "max_pages_requested": int(max_pages),
+        "last_page_fetched": int(pages_fetched),
+        "stop_reason": str(stop_reason),
+        "max_pages_reached": bool(stop_reason == "max_pages" and pages_fetched >= int(max_pages)),
+    }
+    return items, meta
 
 
 def _set_state_cookie(response: Response, state: str) -> None:
@@ -573,7 +585,7 @@ def post_douano_sync_companies(
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
-        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/companies", max_pages=max_pages)
+        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/companies", max_pages=max_pages)
         for row in items:
             douano_sync_storage.upsert_raw_object(
                 resource="companies",
@@ -582,11 +594,11 @@ def post_douano_sync_companies(
                 payload=row,
             )
         normalized = douano_sync_storage.upsert_companies(items)
-        stats = {"fetched": len(items), "upserted": normalized}
+        stats = {"fetched": len(items), "upserted": normalized, "fetch": fetch_meta}
         douano_sync_storage.set_sync_state(resource="companies", success=True, since_date=None, stats=stats, error="")
         return {"resource": "companies", **stats}
     except HTTPException as exc:
-        douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={}, error=str(exc.detail))
+        douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={"fetch": {"path": "/api/public/v1/core/companies"}}, error=str(exc.detail))
         raise
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={}, error=str(exc))
@@ -603,7 +615,7 @@ def post_douano_sync_products(
     if is_sellable:
         query["filter_by_is_sellable"] = "true"
     try:
-        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/products", query=query, max_pages=max_pages)
+        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/products", query=query, max_pages=max_pages)
         for row in items:
             douano_sync_storage.upsert_raw_object(
                 resource="products",
@@ -612,11 +624,11 @@ def post_douano_sync_products(
                 payload=row,
             )
         normalized = douano_sync_storage.upsert_products(items)
-        stats = {"fetched": len(items), "upserted": normalized}
+        stats = {"fetched": len(items), "upserted": normalized, "fetch": fetch_meta}
         douano_sync_storage.set_sync_state(resource="products", success=True, since_date=None, stats=stats, error="")
         return {"resource": "products", **stats}
     except HTTPException as exc:
-        douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={}, error=str(exc.detail))
+        douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={"fetch": {"path": "/api/public/v1/core/products", "query": query}}, error=str(exc.detail))
         raise
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={}, error=str(exc))
@@ -630,7 +642,7 @@ def post_douano_sync_sales_orders(
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
-        items = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-orders", max_pages=max_pages)
+        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-orders", max_pages=max_pages)
         filtered: list[dict[str, Any]] = []
         since = since_date.strip()
         for row in items:
@@ -649,11 +661,41 @@ def post_douano_sync_sales_orders(
                 payload=row,
             )
         stats = douano_sync_storage.upsert_sales_orders(filtered)
-        out_stats = {"fetched": len(filtered), **stats}
+
+        # Completeness-ish stats for quick validation in UI.
+        dates = [str(row.get("date", "") or "").strip() for row in filtered if isinstance(row, dict)]
+        date_values = [d for d in dates if d]
+        min_date = min(date_values) if date_values else ""
+        max_date = max(date_values) if date_values else ""
+        ordered_count = 0
+        returned_count = 0
+        misc_count = 0
+        for row in filtered:
+            if not isinstance(row, dict):
+                continue
+            if isinstance(row.get("ordered_items"), list):
+                ordered_count += len(row.get("ordered_items") or [])
+            if isinstance(row.get("returned_items"), list):
+                returned_count += len(row.get("returned_items") or [])
+            if isinstance(row.get("miscellaneous_items"), list):
+                misc_count += len(row.get("miscellaneous_items") or [])
+
+        out_stats = {
+            "fetched": len(filtered),
+            **stats,
+            "fetch": fetch_meta,
+            "filters": {"since_date": since},
+            "scope": {"ordered_items": True, "returned_items": True, "miscellaneous_items": True},
+            "min_order_date": min_date,
+            "max_order_date": max_date,
+            "ordered_items_count": int(ordered_count),
+            "returned_items_count": int(returned_count),
+            "misc_items_count": int(misc_count),
+        }
         douano_sync_storage.set_sync_state(resource="sales_orders", success=True, since_date=since or None, stats=out_stats, error="")
         return {"resource": "sales_orders", **out_stats}
     except HTTPException as exc:
-        douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc.detail))
+        douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={"fetch": {"path": "/api/public/v1/trade/sales-orders", "max_pages_requested": int(max_pages)}}, error=str(exc.detail))
         raise
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc))
