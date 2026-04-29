@@ -425,13 +425,17 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                         product_obj = item.get("product")
                         douano_product_id = int(product_obj.get("id", 0) or 0) if isinstance(product_obj, dict) else 0
 
-                    # Douano returns can already have negative quantities (e.g. -2).
-                    # We normalize here to avoid double-negation:
-                    # - ordered/misc: +abs(qty)
-                    # - returned: -abs(qty) (callers pass sign=-1)
+                    # Douano can encode line direction via list type and/or sign on quantity:
+                    # - ordered items should always be positive
+                    # - returned items should always be negative (callers pass sign=-1)
+                    # - miscellaneous items may be positive or negative (credits), so keep sign
                     raw_qty = _num(item.get("quantity", 0))
-                    qty_sign = -1.0 if float(sign or 1.0) < 0 else 1.0
-                    quantity = qty_sign * abs(raw_qty)
+                    if is_misc:
+                        quantity = raw_qty
+                        qty_sign = -1.0 if raw_qty < 0 else 1.0
+                    else:
+                        qty_sign = -1.0 if float(sign or 1.0) < 0 else 1.0
+                        quantity = qty_sign * abs(raw_qty)
                     unit_price_ex = _num(item.get("price", 0))
                     # Keep discount aligned with the line sign so returns reverse the discounted amount.
                     discount_ex = qty_sign * abs(_num(item.get("discount", 0)))
