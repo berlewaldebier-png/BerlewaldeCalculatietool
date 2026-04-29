@@ -17,7 +17,7 @@ type DouanoStatus = {
 };
 
 function formatDate(value?: string) {
-  if (!value) return "—";
+  if (!value) return "-";
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return value;
   return dt.toLocaleString("nl-NL");
@@ -41,13 +41,7 @@ export default async function ApiIntegratiesPage() {
     { name: "Callback", method: "GET", path: "/api/integrations/douano/callback", note: "Ontvangt code en wisselt token(s) om." },
     { name: "Status", method: "GET", path: "/api/integrations/douano/status", note: "Toont verbinding en token-metadata (zonder tokens)." },
     { name: "Companies (discover)", method: "GET", path: "/api/integrations/douano/discover-companies", note: "Probeert bekende paden om customers endpoint te vinden." },
-    { name: "HTTP debug", method: "GET", path: "/api/integrations/douano/debug?path=/api", note: "Debug helper om te zien of je een HTML pagina of API JSON raakt." }
-  ];
-
-  const datasets = [
-    { domain: "Klanten", endpoint: "Douano API (nog te bouwen)", matching: "Nog niet", output: "—" },
-    { domain: "Verkoopfacturen", endpoint: "Douano API (nog te bouwen)", matching: "Nog niet", output: "—" },
-    { domain: "Producten", endpoint: "Douano API (nog te bouwen)", matching: "Nog niet", output: "—" }
+    { name: "HTTP debug", method: "GET", path: "/api/integrations/douano/debug?path=/api", note: "Debug helper om te zien of je een HTML pagina of API JSON raakt." },
   ];
 
   return (
@@ -57,10 +51,7 @@ export default async function ApiIntegratiesPage() {
       activePath="/beheer"
       navigation={navigation}
     >
-      <SectionCard
-        title="Douano"
-        description="OAuth2 verbinding en basisinformatie. Tokens worden server-side opgeslagen in PostgreSQL."
-      >
+      <SectionCard title="Douano" description="OAuth2 verbinding en basisinformatie. Tokens worden server-side opgeslagen in PostgreSQL.">
         <div className="record-card-grid">
           <div className="wizard-toggle-card">
             <span>
@@ -71,7 +62,7 @@ export default async function ApiIntegratiesPage() {
           <div className="wizard-toggle-card">
             <span>
               <strong>Base URL</strong>
-              <small>{douano?.base_url || "—"}</small>
+              <small>{douano?.base_url || "-"}</small>
             </span>
           </div>
           <div className="wizard-toggle-card">
@@ -137,34 +128,7 @@ export default async function ApiIntegratiesPage() {
           </table>
         </div>
       </SectionCard>
-
-      <SectionCard
-        title="Data die we ophalen"
-        description='Overzicht van de datasets die we (straks) uit Douano ophalen. "Matching" beschrijft of en hoe we Douano items koppelen aan onze producten/bieren.'
-      >
-        <div className="data-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Domein</th>
-                <th>Bron</th>
-                <th>Matching</th>
-                <th>Output in app</th>
-              </tr>
-            </thead>
-            <tbody>
-              {datasets.map((row) => (
-                <tr key={row.domain}>
-                  <td>{row.domain}</td>
-                  <td>{row.endpoint}</td>
-                  <td>{row.matching}</td>
-                  <td>{row.output}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </SectionCard>
     </PageShell>
   );
 }
+
