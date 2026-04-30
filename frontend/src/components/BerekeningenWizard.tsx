@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 
 import { usePageShellHeader } from "@/components/PageShell";
+import { WizardSteps } from "@/components/WizardSteps";
 import { API_BASE_URL } from "@/lib/api";
 import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
 import {
@@ -2378,28 +2379,16 @@ export function BerekeningenWizard({
         <div className="wizard-content-grid">
           <aside className="wizard-inline-sidebar">
             <div className="wizard-inline-sidebar-card">
-              <div className="page-shell-wizard-title">Wizard</div>
-              <div className="page-shell-wizard-list">
-                {steps.map((step, index) => (
-                  <button
-                    key={step.id}
-                    type="button"
-                    className={`page-shell-wizard-link${currentIndex === index ? " active" : ""}${
-                      index < currentIndex ? " completed" : ""
-                    }`}
-                    onClick={() => setActiveStepIndex(index)}
-                  >
-                    <span className="page-shell-wizard-rail">
-                      <span className="page-shell-wizard-dot">{index < currentIndex ? "\u2713" : ""}</span>
-                      {index < steps.length - 1 ? <span className="page-shell-wizard-line" /> : null}
-                    </span>
-                    <span className="page-shell-wizard-copy">
-                      <span className="page-shell-wizard-label">{step.label}</span>
-                      <span className="page-shell-wizard-text">{step.description}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <WizardSteps
+                title="Wizard"
+                steps={steps.map((step) => ({
+                  id: step.id,
+                  title: step.label,
+                  description: step.description
+                }))}
+                activeIndex={currentIndex}
+                onSelect={(index) => setActiveStepIndex(index)}
+              />
             </div>
           </aside>
 

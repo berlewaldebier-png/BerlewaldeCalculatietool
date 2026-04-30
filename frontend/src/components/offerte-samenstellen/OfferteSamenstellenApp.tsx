@@ -52,6 +52,7 @@ import type {
   ScenarioMetrics,
   ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
+import { WizardSteps } from "@/components/WizardSteps";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -712,29 +713,16 @@ export function OfferteSamenstellenApp({
 
         <div className="cpq-grid">
           <aside className="cpq-left">
-            <div className="cpq-left-title">Stappen</div>
-            <div className="cpq-steps">
-              {steps.map((item, idx) => {
-                const active = item.id === step;
-                const done = steps.findIndex((s) => s.id === step) > idx;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setStep(item.id)}
-                    className={`cpq-step${active ? " active" : ""}${done ? " done" : ""}`}
-                    type="button"
-                  >
-                    <div className="cpq-step-row">
-                      <div className="cpq-step-dot">{done ? "✓" : idx + 1}</div>
-                      <div>
-                        <div className="cpq-step-title">{item.title}</div>
-                        <div className="cpq-step-desc">{item.desc}</div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <WizardSteps
+              title="Stappen"
+              steps={steps.map((item) => ({ id: item.id, title: item.title, description: item.desc }))}
+              activeIndex={steps.findIndex((item) => item.id === step)}
+              onSelect={(index) => {
+                const next = steps[index];
+                if (!next) return;
+                setStep(next.id);
+              }}
+            />
 
             <div className="cpq-quick">
               <div className="cpq-quick-title">Quick view</div>

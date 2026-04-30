@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { NavigationItem } from "@/lib/apiShared";
 import { DevGitBadge } from "@/components/DevGitBadge";
 import { NavigationSidebar } from "@/components/NavigationSidebar";
+import { WizardSteps } from "@/components/WizardSteps";
 
 type PageShellProps = {
   title: string;
@@ -74,36 +75,14 @@ export function PageShell({ title, subtitle, activePath, navigation, children }:
   const wizardContextValue = useMemo(() => setWizardSidebar, []);
   const headerContextValue = useMemo(() => setPageHeader, []);
 
-  const wizardContent = wizardSidebar ? (
-    <>
-      <div className="page-shell-wizard-title">{wizardSidebar.title}</div>
-      <div className="page-shell-wizard-list">
-        {wizardSidebar.steps.map((step, index) => (
-          <button
-            key={step.id}
-            type="button"
-            className={`page-shell-wizard-link${wizardSidebar.activeIndex === index ? " active" : ""}${
-              index < wizardSidebar.activeIndex ? " completed" : ""
-            }`}
-            disabled={Boolean(step.disabled)}
-            onClick={() => {
-              if (step.disabled) return;
-              wizardSidebar.onStepSelect?.(index);
-            }}
-          >
-            <span className="page-shell-wizard-rail">
-              <span className="page-shell-wizard-dot">{index < wizardSidebar.activeIndex ? "\u2713" : ""}</span>
-              {index < wizardSidebar.steps.length - 1 ? <span className="page-shell-wizard-line" /> : null}
-            </span>
-            <span className="page-shell-wizard-copy">
-              <span className="page-shell-wizard-label">{step.label}</span>
-              <span className="page-shell-wizard-text">{step.description}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-    </>
-  ) : null;
+  const wizardSteps = wizardSidebar
+    ? wizardSidebar.steps.map((step) => ({
+        id: step.id,
+        title: step.label,
+        description: step.description,
+        disabled: step.disabled
+      }))
+    : [];
 
   return (
     <WizardSidebarContext.Provider value={wizardContextValue}>
@@ -113,7 +92,16 @@ export function PageShell({ title, subtitle, activePath, navigation, children }:
 
           {wizardSidebar ? (
             <aside className="dashboard-sidebar page-shell-wizard-panel" aria-label="Wizard stappen">
-              <div className="page-shell-wizard-nav">{wizardContent}</div>
+              <WizardSteps
+                title={wizardSidebar.title}
+                steps={wizardSteps}
+                activeIndex={wizardSidebar.activeIndex}
+                onSelect={(index) => {
+                  const next = wizardSidebar.steps[index];
+                  if (!next || next.disabled) return;
+                  wizardSidebar.onStepSelect?.(index);
+                }}
+              />
             </aside>
           ) : null}
 
