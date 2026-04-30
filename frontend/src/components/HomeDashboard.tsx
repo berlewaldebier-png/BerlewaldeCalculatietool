@@ -5,18 +5,13 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { fetchMe, logout, readAuthSession } from "@/lib/auth";
+import { fetchMe, logout } from "@/lib/auth";
 import type { DashboardSummary, NavigationItem } from "@/lib/apiShared";
+import { NavigationSidebar } from "@/components/NavigationSidebar";
 
 type HomeDashboardProps = {
   navigation: NavigationItem[];
   summary: DashboardSummary;
-};
-
-type DashboardNavItem = {
-  label: string;
-  href: string;
-  active?: boolean;
 };
 
 type AlertCard = {
@@ -26,63 +21,6 @@ type AlertCard = {
   href?: string;
   tone?: "default" | "warning";
 };
-
-function buildNavItems(navigation: NavigationItem[]): DashboardNavItem[] {
-  const preferredOrder = [
-    "/",
-    "/nieuwe-kostprijsberekening",
-    "/prijsvoorstellen",
-    "/break-even",
-    "/omzet-en-marge",
-    "/productie",
-    "/vaste-kosten",
-    "/tarieven-heffingen",
-    "/producten-verpakking",
-    "/bieren",
-    "/recept-hercalculatie",
-    "/inkoopfacturen",
-    "/verkoopstrategie",
-    "/adviesprijzen",
-    "/nieuw-jaar-voorbereiden",
-    "/beheer"
-  ];
-
-  const normalized = navigation.map((item) => ({
-    label: item.label,
-    href: item.href
-  }));
-
-  const overviewItem = { label: "Overzicht", href: "/", active: true };
-  const byHref = new Map(normalized.map((item) => [item.href, item]));
-
-  // CPQ entry is owned by the frontend. The backend navigation list may not contain it yet.
-  // We inject it explicitly so it always shows in the dashboard sidebar.
-  if (!byHref.has("/prijsvoorstellen")) {
-    byHref.set("/prijsvoorstellen", { label: "Prijsvoorstel maken", href: "/prijsvoorstellen" });
-  }
-  if (!byHref.has("/break-even")) {
-    byHref.set("/break-even", { label: "Break-even analyseren", href: "/break-even" });
-  }
-  if (!byHref.has("/omzet-en-marge")) {
-    byHref.set("/omzet-en-marge", { label: "Omzet & marge", href: "/omzet-en-marge" });
-  }
-
-  const result: DashboardNavItem[] = [];
-
-  for (const href of preferredOrder) {
-    if (href === "/") {
-      result.push(overviewItem);
-      continue;
-    }
-
-    const found = byHref.get(href);
-    if (found) {
-      result.push({ ...found, active: false });
-    }
-  }
-
-  return result;
-}
 
 function buildAlertCards(summary: DashboardSummary): AlertCard[] {
   const klaar = Number(summary.klaar_om_te_activeren ?? 0) || 0;
@@ -139,35 +77,12 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
     return () => window.removeEventListener("calculatietool-auth-changed", sync);
   }, []);
 
-  const navItems = useMemo(() => buildNavItems(navigation), [navigation]);
   const alertCards = useMemo(() => buildAlertCards(summary), [summary]);
 
   return (
     <main className="dashboard-page">
       <div className="dashboard-shell">
-        <aside className="dashboard-sidebar">
-          <div className="dashboard-brand-block">
-            <span className="dashboard-brand-text">BERLEWALDE</span>
-            <small className="dashboard-brand-subtitle">CalculatieTool</small>
-          </div>
-
-          <nav className="dashboard-sidebar-nav" aria-label="Hoofdnavigatie">
-            {navItems.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href as Route}
-                className={`dashboard-sidebar-link${item.active ? " is-active" : ""}`}
-                aria-label={item.label}
-                title={item.label}
-              >
-                <span className="dashboard-sidebar-icon">
-                  <MenuIcon />
-                </span>
-                <span className="dashboard-sidebar-label">{item.label}</span>
-              </Link>
-            ))}
-          </nav>
-        </aside>
+        <NavigationSidebar navigation={navigation} activePath="/" />
 
         <section className="dashboard-main-content">
           <header className="dashboard-topbar">
@@ -325,17 +240,6 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
         </section>
       </div>
     </main>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <rect x="4" y="4" width="6" height="6" rx="1.2" />
-      <rect x="14" y="4" width="6" height="6" rx="1.2" />
-      <rect x="4" y="14" width="6" height="6" rx="1.2" />
-      <rect x="14" y="14" width="6" height="6" rx="1.2" />
-    </svg>
   );
 }
 
