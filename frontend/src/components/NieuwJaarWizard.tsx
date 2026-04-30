@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { usePageShellHeader, usePageShellWizardSidebar } from "@/components/PageShell";
+import { usePageShellHeader } from "@/components/PageShell";
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
+import { WizardSteps } from "@/components/WizardSteps";
 import { API_BASE_URL } from "@/lib/api";
 import { computeVasteKostenTotals } from "@/lib/kostprijsEngine";
 import {
@@ -2137,7 +2138,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     [sourceYear, targetYear]
   );
 
-  usePageShellWizardSidebar(wizardSidebar);
   usePageShellHeader(pageHeader);
 
   const saveAndCloseButton = (
@@ -2152,47 +2152,73 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   );
 
   return (
-    <section className="module-card">
-      <div className="module-card-header">
-        <div className="module-card-title">Nieuw jaar {targetYear} voorbereiden</div>
-        <div className="module-card-text">
-          Bouw een nieuw productiejaar op basis van een bronjaar. Je kunt tussentijds opslaan als concept; pas bij
-          afronden schrijven we alles in 1 keer definitief weg. Een concept kun je verwijderen; rollback van een definitieve jaarset doe je via Beheer.
-        </div>
-      </div>
-
-      <div className="editor-actions" style={{ marginBottom: 18 }}>
-        <div className="editor-actions-group">
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() => router.push("/")}
-            disabled={isRunning}
-          >
-            Terug
-          </button>
-        </div>
-        <div className="editor-actions-group">
-          {conceptStarted ? (
+    <div className="cpq-root">
+      <div className="cpq-frame">
+        <div className="cpq-topbar">
+          <div>
+            <div className="cpq-kicker">Nieuw jaar wizard</div>
+            <h1 className="cpq-title">Nieuw jaar {targetYear} voorbereiden</h1>
+            <div className="module-card-text" style={{ marginTop: 6, maxWidth: 760 }}>
+              Bouw een nieuw productiejaar op basis van een bronjaar. Je kunt tussentijds opslaan als concept; pas bij
+              afronden schrijven we alles in 1 keer definitief weg. Een concept kun je verwijderen; rollback van een
+              definitieve jaarset doe je via Beheer.
+            </div>
+          </div>
+          <div className="cpq-topbar-actions">
             <button
               type="button"
-              className="editor-button editor-button-secondary editor-button-icon"
-              onClick={() => void deleteConcept()}
+              className="editor-button editor-button-secondary"
+              onClick={() => router.push("/")}
               disabled={isRunning}
-              aria-label="Verwijder concept"
-              title="Verwijder concept"
             >
-              <TrashIcon />
+              Terug
             </button>
-          ) : null}
-          <span className="pill">
-            Bronjaar {sourceYear} -&gt; Doeljaar {targetYear}
-          </span>
+            {conceptStarted ? (
+              <button
+                type="button"
+                className="editor-button editor-button-secondary editor-button-icon"
+                onClick={() => void deleteConcept()}
+                disabled={isRunning}
+                aria-label="Verwijder concept"
+                title="Verwijder concept"
+              >
+                <TrashIcon />
+              </button>
+            ) : null}
+            <span className="pill">
+              Bronjaar {sourceYear} -&gt; Doeljaar {targetYear}
+            </span>
+          </div>
         </div>
-      </div>
 
-      <div className="wizard-shell wizard-shell-single">
-        <div className="wizard-step-card wizard-step-stage-card">
+        <div className="cpq-grid">
+          <aside className="cpq-left">
+            <WizardSteps
+              title={wizardSidebar.title}
+              steps={wizardSidebar.steps.map((step) => ({
+                id: step.id,
+                title: step.label,
+                description: step.description,
+                disabled: step.disabled
+              }))}
+              activeIndex={wizardSidebar.activeIndex}
+              onSelect={(index) => wizardSidebar.onStepSelect?.(index)}
+            />
+
+            <div className="cpq-quick">
+              <div className="cpq-quick-title">Quick view</div>
+              <div className="cpq-quick-grid">
+                <QuickCell label="Bronjaar" value={String(sourceYear)} />
+                <QuickCell label="Doeljaar" value={String(targetYear)} />
+                <QuickCell label="Concept" value={conceptStarted ? "Ja" : "Nee"} />
+                <QuickCell label="Actieve stap" value={`Stap ${activeStep + 1}`} />
+              </div>
+            </div>
+          </aside>
+
+          <main className="cpq-main">
+            <div className="wizard-shell wizard-shell-single" style={{ marginTop: 0 }}>
+              <div className="wizard-step-card wizard-step-stage-card">
           <div className="wizard-step-header">
             <div>
               <div className="wizard-step-title">
@@ -3655,9 +3681,21 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
             </div>
           ) : null}
           </div>
+              </div>
+            </div>
+          </main>
+
+          <aside className="cpq-right">
+            <div className="cpq-right-kicker">Status</div>
+            <div className="placeholder-block" style={{ margin: 0 }}>
+              <strong>{conceptStarted ? "Concept gestart" : "Concept nog niet gestart"}</strong>
+              Gebruik de stappen links om het doeljaar op te bouwen. Verwijder het concept via de prullenbak in de
+              topbar.
+            </div>
+          </aside>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -3670,5 +3708,14 @@ function TrashIcon() {
       <path d="M10 11v5" />
       <path d="M14 11v5" />
     </svg>
+  );
+}
+
+function QuickCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="cpq-quick-label">{label}</div>
+      <div className="cpq-quick-value">{value || "—"}</div>
+    </div>
   );
 }
