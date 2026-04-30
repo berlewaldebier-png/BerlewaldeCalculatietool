@@ -110,15 +110,18 @@ export function DouanoSyncPanel() {
       const fetched = asNumber(item.stats.fetched);
       const upserted = asNumber(item.stats.upserted);
       const orders = asNumber(item.stats.orders);
+      const invoices = asNumber(item.stats.invoices);
       const lines = asNumber(item.stats.lines);
 
       const minOrderDate = safeString(item.stats.min_order_date);
       const maxOrderDate = safeString(item.stats.max_order_date);
+      const minInvoiceDate = safeString(item.stats.min_invoice_date);
+      const maxInvoiceDate = safeString(item.stats.max_invoice_date);
       const sinceDate = item.last_since_date || safeString((item.stats as any)?.filters?.since_date);
 
       const countsText =
-        orders != null || lines != null
-          ? `${orders ?? 0} orders / ${lines ?? 0} regels`
+        invoices != null || orders != null || lines != null
+          ? `${invoices != null ? `${invoices ?? 0} invoices` : `${orders ?? 0} orders`} / ${lines ?? 0} regels`
           : fetched != null || upserted != null
             ? `${fetched ?? 0} fetched / ${upserted ?? 0} upserted`
             : "-";
@@ -134,7 +137,12 @@ export function DouanoSyncPanel() {
           ? `stop=${stopReason}`
           : "-";
 
-      const dateRange = minOrderDate || maxOrderDate ? `${minOrderDate || "?"} -> ${maxOrderDate || "?"}` : "-";
+      const dateRange =
+        minInvoiceDate || maxInvoiceDate
+          ? `${minInvoiceDate || "?"} -> ${maxInvoiceDate || "?"}`
+          : minOrderDate || maxOrderDate
+            ? `${minOrderDate || "?"} -> ${maxOrderDate || "?"}`
+            : "-";
 
       return {
         resource: item.resource,
@@ -149,8 +157,14 @@ export function DouanoSyncPanel() {
     });
   }, [syncItems]);
 
+  const salesInvoicesMissing = useMemo(() => {
+    if (!syncItems) return false;
+    const item = syncItems.find((row) => row.resource === "sales_invoices");
+    return !item || !String(item.last_success_at || "").trim();
+  }, [syncItems]);
+
   return (
-    <SectionCard title="Douano sync (fase 1)" description="Handmatige import van companies/products/sales-orders naar PostgreSQL (raw + normalized).">
+    <SectionCard title="Douano sync (fase 1)" description="Handmatige import van companies/products/sales-orders/sales-invoices naar PostgreSQL (raw + normalized).">
       <div className="editor-actions" style={{ marginTop: 8 }}>
         <div className="editor-actions-group">
           <button type="button" className="editor-button" onClick={() => run("Sync companies", () => requestJson("/api/integrations/douano/sync/companies", "POST"))}>
@@ -165,6 +179,13 @@ export function DouanoSyncPanel() {
             onClick={() => run("Sync sales-orders", () => requestJson("/api/integrations/douano/sync/sales-orders", "POST"))}
           >
             Sync sales-orders
+          </button>
+          <button
+            type="button"
+            className="editor-button"
+            onClick={() => run("Sync sales-invoices", () => requestJson("/api/integrations/douano/sync/sales-invoices", "POST"))}
+          >
+            Sync sales-invoices
           </button>
         </div>
         <div className="editor-actions-group">
@@ -206,6 +227,15 @@ export function DouanoSyncPanel() {
         </div>
       ) : null}
 
+      {salesInvoicesMissing ? (
+        <div className="placeholder-block" style={{ marginTop: 12 }}>
+          <strong>Let op</strong>
+          <div style={{ marginTop: 6, opacity: 0.9 }}>
+            `sales-invoices` is nog niet gesynct. De omzetrapportage gebruikt standaard facturen, dus draai eerst “Sync sales-invoices”.
+          </div>
+        </div>
+      ) : null}
+
       <div className="data-table" style={{ marginTop: 12 }}>
         <table>
           <thead>
@@ -215,7 +245,7 @@ export function DouanoSyncPanel() {
               <th>Since</th>
               <th>Pages</th>
               <th>Counts</th>
-              <th>Order-dates</th>
+              <th>Dates</th>
               <th>Completeness</th>
               <th>Laatste fout</th>
             </tr>
@@ -253,4 +283,3 @@ export function DouanoSyncPanel() {
     </SectionCard>
   );
 }
-

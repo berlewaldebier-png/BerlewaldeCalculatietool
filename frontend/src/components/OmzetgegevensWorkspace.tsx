@@ -19,6 +19,19 @@ type Row = {
   missing_cost_lines: number;
 };
 
+type SortKey =
+  | "company_name"
+  | "omzet_ex"
+  | "korting_ex"
+  | "charges_ex"
+  | "netto_omzet_ex"
+  | "kostprijs_ex"
+  | "brutomarge_ex"
+  | "lines"
+  | "unmapped_lines"
+  | "ignored_lines"
+  | "missing_cost_lines";
+
 async function readJson(path: string) {
   const response = await fetch(path, { cache: "no-store" });
   const payload = await response.json();
@@ -34,9 +47,75 @@ function euro(value: number) {
   return formatMoneyEUR(value);
 }
 
+function normalizeText(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function SortButton({
+  label,
+  active,
+  dir,
+  onClick
+}: {
+  label: string;
+  active: boolean;
+  dir: "asc" | "desc";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Sorteren"
+      style={{
+        appearance: "none",
+        background: "transparent",
+        border: 0,
+        padding: 0,
+        margin: 0,
+        font: "inherit",
+        fontWeight: active ? 800 : 700,
+        color: "inherit",
+        cursor: "pointer",
+        textDecoration: "none",
+        opacity: active ? 1 : 0.9
+      }}
+    >
+      {label}
+      {active ? (dir === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
+}
+
+function buildPageItems(current: number, total: number) {
+  const clamp = (value: number) => Math.min(Math.max(1, value), total);
+  const c = clamp(current);
+  const items: Array<number | "..."> = [];
+  if (total <= 1) return [1];
+  items.push(1);
+
+  const windowStart = Math.max(2, c - 2);
+  const windowEnd = Math.min(total - 1, c + 2);
+  if (windowStart > 2) items.push("...");
+  for (let p = windowStart; p <= windowEnd; p += 1) items.push(p);
+  if (windowEnd < total - 1) items.push("...");
+  items.push(total);
+  return items;
+}
+
 export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears?: number[] }) {
   const [since, setSince] = useState<string>("");
   const [year, setYear] = useState<number>(0);
+  const [basis, setBasis] = useState<"invoice" | "order">("invoice");
+
+  const [query, setQuery] = useState<string>("");
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [page, setPage] = useState<number>(1);
+  const [sortKey, setSortKey] = useState<SortKey>("netto_omzet_ex");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [rows, setRows] = useState<Row[]>([]);
@@ -48,9 +127,12 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
       const params = new URLSearchParams();
       if (since.trim()) params.set("since", since.trim());
       if (year > 0) params.set("year", String(year));
+      params.set("basis", basis);
+      params.set("limit", "5000");
       const qs = params.toString() ? `?${params.toString()}` : "";
       const payload = await readJson(`/api/integrations/douano/margin-summary${qs}`);
       setRows(Array.isArray(payload?.items) ? payload.items : []);
+      setPage(1);
       setStatus("Gereed");
       setTone("success");
     } catch (error) {
@@ -64,6 +146,15 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basis]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, pageSize, sortKey, sortDir, year, since]);
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -79,6 +170,45 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
       { omzet: 0, netto: 0, kostprijs: 0, marge: 0, unmapped: 0, missing_cost: 0 }
     );
   }, [rows]);
+
+  const normalizedQuery = normalizeText(query);
+
+  const filteredSorted = useMemo(() => {
+    const filtered = normalizedQuery
+      ? rows.filter((row) => normalizeText(row.company_name).includes(normalizedQuery))
+      : rows.slice();
+
+    const dir = sortDir === "asc" ? 1 : -1;
+    const key = sortKey;
+    filtered.sort((a, b) => {
+      if (key === "company_name") {
+        return normalizeText(a.company_name).localeCompare(normalizeText(b.company_name)) * dir;
+      }
+      const av = Number((a as any)[key] ?? 0) || 0;
+      const bv = Number((b as any)[key] ?? 0) || 0;
+      if (av === bv) return 0;
+      return (av < bv ? -1 : 1) * dir;
+    });
+    return filtered;
+  }, [normalizedQuery, rows, sortDir, sortKey]);
+
+  const safePageSize = Math.max(1, Math.min(Number(pageSize || 20) || 20, 5000));
+  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / safePageSize));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+
+  const pageRows = useMemo(() => {
+    const start = (currentPage - 1) * safePageSize;
+    return filteredSorted.slice(start, start + safePageSize);
+  }, [currentPage, filteredSorted, safePageSize]);
+
+  function toggleSort(nextKey: SortKey) {
+    if (sortKey === nextKey) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDir(nextKey === "company_name" ? "asc" : "desc");
+  }
 
   return (
     <section>
@@ -98,6 +228,42 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
               </option>
             ))}
           </select>
+
+          <select
+            className="editor-input"
+            style={{ width: 180 }}
+            value={basis}
+            onChange={(e) => setBasis((e.target.value as any) === "order" ? "order" : "invoice")}
+            aria-label="Basis"
+            title="Douano export gebruikt factuurdatum (invoice)"
+          >
+            <option value="invoice">Factuurdatum</option>
+            <option value="order">Orderdatum</option>
+          </select>
+
+          <input
+            className="editor-input"
+            style={{ width: 220 }}
+            placeholder="Zoek klant (naam)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+
+          <select
+            className="editor-input"
+            style={{ width: 140 }}
+            value={String(pageSize)}
+            onChange={(e) => setPageSize(Math.max(1, Math.min(Number(e.target.value || 20) || 20, 5000)))}
+            aria-label="Per pagina"
+            title="Aantal klanten per pagina"
+          >
+            {[20, 50, 100, 200, 500, 1000, 2000, 5000].map((n) => (
+              <option key={n} value={String(n)}>
+                {n} / pagina
+              </option>
+            ))}
+          </select>
+
           <input
             className="editor-input"
             style={{ width: 180 }}
@@ -105,10 +271,12 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
             value={since}
             onChange={(e) => setSince(e.target.value)}
           />
+
           <button type="button" className="editor-button editor-button-secondary" onClick={() => void load()}>
             Ververs
           </button>
         </div>
+
         <div className="editor-actions-group">
           <span className="pill">Omzet {euro(totals.omzet)}</span>
           <span className="pill">Netto {euro(totals.netto)}</span>
@@ -127,25 +295,92 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
         <table>
           <thead>
             <tr>
-              <th>Klant</th>
-              <th style={{ width: 150 }}>Omzet</th>
-              <th style={{ width: 150 }}>Kortingen</th>
-              <th style={{ width: 150 }}>Charges</th>
-              <th style={{ width: 160 }}>Netto omzet</th>
-              <th style={{ width: 150 }}>Kostprijs</th>
-              <th style={{ width: 150 }}>Brutomarge</th>
-              <th style={{ width: 100 }}>Regels</th>
-              <th style={{ width: 120 }}>Unmapped</th>
-              <th style={{ width: 110 }}>Ignored</th>
-              <th style={{ width: 130 }}>Missing cost</th>
+              <th>
+                <SortButton
+                  label="Klant"
+                  active={sortKey === "company_name"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("company_name")}
+                />
+              </th>
+              <th style={{ width: 150 }}>
+                <SortButton label="Omzet" active={sortKey === "omzet_ex"} dir={sortDir} onClick={() => toggleSort("omzet_ex")} />
+              </th>
+              <th style={{ width: 150 }}>
+                <SortButton
+                  label="Kortingen"
+                  active={sortKey === "korting_ex"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("korting_ex")}
+                />
+              </th>
+              <th style={{ width: 150 }}>
+                <SortButton
+                  label="Charges"
+                  active={sortKey === "charges_ex"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("charges_ex")}
+                />
+              </th>
+              <th style={{ width: 160 }}>
+                <SortButton
+                  label="Netto omzet"
+                  active={sortKey === "netto_omzet_ex"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("netto_omzet_ex")}
+                />
+              </th>
+              <th style={{ width: 150 }}>
+                <SortButton
+                  label="Kostprijs"
+                  active={sortKey === "kostprijs_ex"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("kostprijs_ex")}
+                />
+              </th>
+              <th style={{ width: 150 }}>
+                <SortButton
+                  label="Brutomarge"
+                  active={sortKey === "brutomarge_ex"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("brutomarge_ex")}
+                />
+              </th>
+              <th style={{ width: 100 }}>
+                <SortButton label="Regels" active={sortKey === "lines"} dir={sortDir} onClick={() => toggleSort("lines")} />
+              </th>
+              <th style={{ width: 120 }}>
+                <SortButton
+                  label="Unmapped"
+                  active={sortKey === "unmapped_lines"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("unmapped_lines")}
+                />
+              </th>
+              <th style={{ width: 110 }}>
+                <SortButton
+                  label="Ignored"
+                  active={sortKey === "ignored_lines"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("ignored_lines")}
+                />
+              </th>
+              <th style={{ width: 130 }}>
+                <SortButton
+                  label="Missing cost"
+                  active={sortKey === "missing_cost_lines"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("missing_cost_lines")}
+                />
+              </th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {pageRows.map((row) => (
               <tr key={row.company_id}>
                 <td>
                   <a
-                    href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}`}
+                    href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}?basis=${encodeURIComponent(basis)}`}
                     style={{ color: "inherit", textDecoration: "none", fontWeight: 700 }}
                     title="Open details"
                   >
@@ -162,7 +397,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 <td>
                   {row.unmapped_lines > 0 ? (
                     <a
-                      href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}?only_unmapped=true`}
+                      href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}?only_unmapped=true&basis=${encodeURIComponent(basis)}`}
                       className="pill"
                       style={{ textDecoration: "none" }}
                       title="Bekijk unmapped regels"
@@ -177,7 +412,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 <td>
                   {row.missing_cost_lines > 0 ? (
                     <a
-                      href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}?only_missing_cost=true`}
+                      href={`/omzet-en-marge/${encodeURIComponent(String(row.company_id))}?only_missing_cost=true&basis=${encodeURIComponent(basis)}`}
                       className="pill"
                       style={{ textDecoration: "none" }}
                       title="Bekijk regels zonder kostprijs"
@@ -190,15 +425,75 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 </td>
               </tr>
             ))}
-            {rows.length === 0 ? (
+            {pageRows.length === 0 ? (
               <tr>
                 <td colSpan={11} style={{ opacity: 0.75 }}>
-                  Geen data. Draai eerst `Sync sales-orders` en maak productkoppelingen.
+                  Geen resultaten.
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "center",
+          marginTop: 10
+        }}
+      >
+        <div style={{ opacity: 0.85 }}>
+          {filteredSorted.length ? (
+            <span>
+              Showing {(currentPage - 1) * safePageSize + 1} to{" "}
+              {Math.min(currentPage * safePageSize, filteredSorted.length)} of {filteredSorted.length} entries
+            </span>
+          ) : (
+            <span>Showing 0 entries</span>
+          )}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}>
+          {currentPage > 1 ? (
+            <button
+              type="button"
+              className="editor-button editor-button-secondary"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Vorige
+            </button>
+          ) : null}
+
+          {buildPageItems(currentPage, totalPages).map((item, idx) =>
+            item === "..." ? (
+              <span key={`ellipsis-${idx}`} style={{ padding: "6px 8px", opacity: 0.7 }}>
+                …
+              </span>
+            ) : (
+              <button
+                key={`page-${item}`}
+                type="button"
+                className={item === currentPage ? "editor-button" : "editor-button editor-button-secondary"}
+                onClick={() => setPage(item)}
+              >
+                {item}
+              </button>
+            )
+          )}
+
+          {currentPage < totalPages ? (
+            <button
+              type="button"
+              className="editor-button editor-button-secondary"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Volgende
+            </button>
+          ) : null}
+        </div>
       </div>
     </section>
   );

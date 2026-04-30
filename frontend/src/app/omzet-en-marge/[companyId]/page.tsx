@@ -14,13 +14,14 @@ export default async function OmzetEnMargeKlantPage({
   const sp = searchParams ? await searchParams : {};
   const onlyUnmapped = sp.only_unmapped === "true" || sp.onlyUnmapped === "true";
   const onlyMissingCost = sp.only_missing_cost === "true" || sp.onlyMissingCost === "true";
+  const basis = sp.basis === "order" ? "order" : "invoice";
   const bootstrap = await getBootstrap(["auth-status"], true, `/omzet-en-marge/${encodeURIComponent(String(resolved.companyId || ""))}`);
   const navigation = bootstrap.navigation ?? [];
 
   return (
     <PageShell
       title={`Omzet & marge — klant ${companyId || "-"}`}
-      subtitle="Detailregels, unmapped producten en margeberekening op basis van Douano orders."
+      subtitle={`Detailregels, unmapped producten en margeberekening op basis van Douano ${basis === "invoice" ? "facturen" : "orders"}.`}
       activePath="/omzet-en-marge"
       navigation={navigation}
     >
@@ -28,6 +29,7 @@ export default async function OmzetEnMargeKlantPage({
         companyId={companyId}
         initialOnlyUnmapped={Boolean(onlyUnmapped)}
         initialOnlyMissingCost={Boolean(onlyMissingCost)}
+        initialBasis={basis}
       />
     </PageShell>
   );

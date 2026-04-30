@@ -702,6 +702,79 @@ def post_douano_sync_sales_orders(
         raise HTTPException(status_code=500, detail=f"Sales-orders sync faalde: {exc}") from exc
 
 
+@router.post("/douano/sync/sales-invoices")
+def post_douano_sync_sales_invoices(
+    max_pages: int = Query(200, ge=1, le=500),
+    since_date: str = Query("", description="Optioneel: filter invoices client-side op date >= since_date (YYYY-MM-DD)."),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    try:
+        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-invoices", max_pages=max_pages)
+        filtered: list[dict[str, Any]] = []
+        since = since_date.strip()
+        for row in items:
+            if not since:
+                filtered.append(row)
+                continue
+            date_text = str(row.get("date", "") or "").strip()
+            if date_text and date_text >= since:
+                filtered.append(row)
+
+        for row in filtered:
+            douano_sync_storage.upsert_raw_object(
+                resource="sales_invoices",
+                external_id=int(row.get("id", 0) or 0),
+                entity_version=int(row.get("entity_version", 0) or 0),
+                payload=row,
+            )
+        stats = douano_sync_storage.upsert_sales_invoices(filtered)
+
+        dates = [str(row.get("date", "") or "").strip() for row in filtered if isinstance(row, dict)]
+        date_values = [d for d in dates if d]
+        min_date = min(date_values) if date_values else ""
+        max_date = max(date_values) if date_values else ""
+        line_count = 0
+        invoiced_numbers_count = 0
+        for row in filtered:
+            if not isinstance(row, dict):
+                continue
+            if isinstance(row.get("invoice_line_items"), list):
+                line_count += len(row.get("invoice_line_items") or [])
+            if isinstance(row.get("invoiced_transaction_numbers"), list):
+                invoiced_numbers_count += len(row.get("invoiced_transaction_numbers") or [])
+
+        out_stats = {
+            "fetched": len(filtered),
+            **stats,
+            "fetch": fetch_meta,
+            "filters": {"since_date": since},
+            "min_invoice_date": min_date,
+            "max_invoice_date": max_date,
+            "invoice_line_items_count": int(line_count),
+            "invoiced_transaction_numbers_count": int(invoiced_numbers_count),
+        }
+        douano_sync_storage.set_sync_state(
+            resource="sales_invoices",
+            success=True,
+            since_date=since or None,
+            stats=out_stats,
+            error="",
+        )
+        return {"resource": "sales_invoices", **out_stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(
+            resource="sales_invoices",
+            success=False,
+            since_date=since_date.strip() or None,
+            stats={"fetch": {"path": "/api/public/v1/trade/sales-invoices", "max_pages_requested": int(max_pages)}},
+            error=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource="sales_invoices", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Sales-invoices sync faalde: {exc}") from exc
+
+
 @router.get("/douano/companies")
 def get_douano_companies(
     only_customers: bool = Query(False),
@@ -730,9 +803,17 @@ def get_douano_revenue_summary(
 def get_douano_margin_summary(
     since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
     year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op order jaar (0 = alles)."),
+    basis: str = Query("invoice", description="Basis voor rapportage: invoice (factuurdatum) of order (orderdatum)."),
     limit: int = Query(500, ge=1, le=5000),
 ) -> dict[str, Any]:
-    return {"items": douano_margin_service.get_company_margin_summary(since=since, year=int(year or 0), limit=int(limit))}
+    return {
+        "items": douano_margin_service.get_company_margin_summary(
+            since=since,
+            year=int(year or 0),
+            limit=int(limit),
+            basis=basis,
+        )
+    }
 
 
 @router.get("/douano/company-lines")
@@ -773,6 +854,23 @@ def get_douano_company_orders(
     }
 
 
+@router.get("/douano/company-invoices")
+def get_douano_company_invoices(
+    company_id: int = Query(..., ge=1),
+    since: str = Query("", description="Optioneel: filter op invoice_date >= since (YYYY-MM-DD)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op invoice jaar (0 = alles)."),
+    limit: int = Query(200, ge=1, le=2000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_company_invoices(
+            company_id=int(company_id),
+            since=since,
+            year=int(year or 0),
+            limit=int(limit),
+        )
+    }
+
+
 @router.get("/douano/order-lines")
 def get_douano_order_lines(
     sales_order_id: int = Query(..., ge=1),
@@ -783,6 +881,23 @@ def get_douano_order_lines(
     return {
         "items": douano_margin_service.list_order_lines(
             sales_order_id=int(sales_order_id),
+            only_unmapped=bool(only_unmapped),
+            only_missing_cost=bool(only_missing_cost),
+            limit=int(limit),
+        )
+    }
+
+
+@router.get("/douano/invoice-lines")
+def get_douano_invoice_lines(
+    sales_invoice_id: int = Query(..., ge=1),
+    only_unmapped: bool = Query(False),
+    only_missing_cost: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {
+        "items": douano_margin_service.list_invoice_lines(
+            sales_invoice_id=int(sales_invoice_id),
             only_unmapped=bool(only_unmapped),
             only_missing_cost=bool(only_missing_cost),
             limit=int(limit),

@@ -112,10 +112,55 @@ def ensure_schema() -> None:
                     """
                 )
                 cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS douano_sales_invoices (
+                        sales_invoice_id BIGINT PRIMARY KEY,
+                        entity_version INT NOT NULL DEFAULT 0,
+                        invoice_date DATE,
+                        invoice_number TEXT NOT NULL DEFAULT '',
+                        due_date DATE,
+                        transaction_type TEXT NOT NULL DEFAULT '',
+                        is_sent BOOLEAN NOT NULL DEFAULT FALSE,
+                        company_id BIGINT NOT NULL DEFAULT 0,
+                        invoiced_transaction_numbers JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        updated_at TIMESTAMPTZ,
+                        raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS douano_sales_invoice_lines (
+                        line_id BIGINT PRIMARY KEY,
+                        sales_invoice_id BIGINT NOT NULL,
+                        company_id BIGINT NOT NULL DEFAULT 0,
+                        invoice_date DATE,
+                        douano_product_id BIGINT NOT NULL DEFAULT 0,
+                        quantity NUMERIC NOT NULL DEFAULT 0,
+                        unit_price_ex NUMERIC NOT NULL DEFAULT 0,
+                        discount_raw NUMERIC NOT NULL DEFAULT 0,
+                        discount_type TEXT NOT NULL DEFAULT 'absolute',
+                        discount_ex NUMERIC NOT NULL DEFAULT 0,
+                        excise_per_unit NUMERIC NOT NULL DEFAULT 0,
+                        refund_per_unit NUMERIC NOT NULL DEFAULT 0,
+                        gross_revenue_ex NUMERIC NOT NULL DEFAULT 0,
+                        charges_total_ex NUMERIC NOT NULL DEFAULT 0,
+                        net_revenue_ex NUMERIC NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMPTZ
+                    )
+                    """
+                )
+                cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_douano_sales_lines_company_date ON douano_sales_order_lines(company_id, order_date)"
                 )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_douano_sales_lines_product ON douano_sales_order_lines(douano_product_id)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_douano_invoice_lines_company_date ON douano_sales_invoice_lines(company_id, invoice_date)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_douano_invoice_lines_product ON douano_sales_invoice_lines(douano_product_id)"
                 )
             if not postgres_storage.in_transaction():
                 conn.commit()
@@ -533,6 +578,184 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
         if not postgres_storage.in_transaction():
             conn.commit()
     return {"orders": orders, "lines": lines}
+
+
+def upsert_sales_invoices(items: Iterable[dict[str, Any]]) -> dict[str, int]:
+    ensure_schema()
+    invoices = 0
+    lines = 0
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            for invoice in items:
+                if not isinstance(invoice, dict):
+                    continue
+                sales_invoice_id = int(invoice.get("id", 0) or 0)
+                if sales_invoice_id <= 0:
+                    continue
+                company_obj = invoice.get("company")
+                company_id = int(company_obj.get("id", 0) or 0) if isinstance(company_obj, dict) else 0
+                invoice_date = str(invoice.get("date", "") or "").strip() or None
+                updated = _parse_ts(invoice.get("updated_at"))
+                inv_numbers = invoice.get("invoiced_transaction_numbers") or []
+                if not isinstance(inv_numbers, list):
+                    inv_numbers = []
+
+                cur.execute(
+                    """
+                    INSERT INTO douano_sales_invoices(
+                        sales_invoice_id,
+                        entity_version,
+                        invoice_date,
+                        invoice_number,
+                        due_date,
+                        transaction_type,
+                        is_sent,
+                        company_id,
+                        invoiced_transaction_numbers,
+                        updated_at,
+                        raw_payload
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb)
+                    ON CONFLICT (sales_invoice_id)
+                    DO UPDATE SET
+                        entity_version = EXCLUDED.entity_version,
+                        invoice_date = EXCLUDED.invoice_date,
+                        invoice_number = EXCLUDED.invoice_number,
+                        due_date = EXCLUDED.due_date,
+                        transaction_type = EXCLUDED.transaction_type,
+                        is_sent = EXCLUDED.is_sent,
+                        company_id = EXCLUDED.company_id,
+                        invoiced_transaction_numbers = EXCLUDED.invoiced_transaction_numbers,
+                        updated_at = EXCLUDED.updated_at,
+                        raw_payload = EXCLUDED.raw_payload
+                    """,
+                    (
+                        sales_invoice_id,
+                        int(invoice.get("entity_version", 0) or 0),
+                        invoice_date,
+                        str(invoice.get("invoice_number", "") or ""),
+                        str(invoice.get("due_date", "") or "").strip() or None,
+                        str(invoice.get("transaction_type", "") or ""),
+                        bool(invoice.get("is_sent", False)),
+                        company_id,
+                        json.dumps([str(v) for v in inv_numbers if str(v or "").strip()], ensure_ascii=True),
+                        updated,
+                        json.dumps(invoice, ensure_ascii=True),
+                    ),
+                )
+                invoices += 1
+
+                line_items = invoice.get("invoice_line_items") or []
+                if not isinstance(line_items, list):
+                    line_items = []
+
+                for item in line_items:
+                    if not isinstance(item, dict):
+                        continue
+                    line_id = int(item.get("id", 0) or 0)
+                    if line_id <= 0:
+                        continue
+
+                    product_obj = item.get("product")
+                    douano_product_id = int(product_obj.get("id", 0) or 0) if isinstance(product_obj, dict) else 0
+
+                    quantity = _num(item.get("quantity", 0))
+                    unit_price_ex = _num(item.get("price", 0))
+                    discount_raw = _num(item.get("discount", 0))
+                    discount_type = str(item.get("discount_type", "absolute") or "absolute").strip().lower()
+                    if discount_type not in {"absolute", "percentage"}:
+                        discount_type = "absolute"
+
+                    excise_per_unit = 0.0
+                    refund_per_unit = 0.0
+                    extension_values = item.get("extension_values", [])
+                    if isinstance(extension_values, list):
+                        for ext in extension_values:
+                            if not isinstance(ext, dict):
+                                continue
+                            ext_meta = ext.get("extension")
+                            ext_name = ""
+                            if isinstance(ext_meta, dict):
+                                ext_name = str(ext_meta.get("name", "") or "").strip().lower()
+                            if ext_name == "excise":
+                                excise_per_unit += _num(ext.get("value", 0))
+                            elif ext_name == "refund":
+                                refund_per_unit += _num(ext.get("value", 0))
+
+                    gross = quantity * unit_price_ex
+                    charges_total = quantity * (excise_per_unit + refund_per_unit)
+                    if discount_type == "percentage":
+                        discount_ex = gross * discount_raw
+                    else:
+                        sign = -1.0 if gross < 0 else 1.0
+                        discount_ex = sign * abs(discount_raw)
+
+                    net_calc = gross - discount_ex + charges_total
+                    revenue_api = item.get("revenue")
+                    net = _num(revenue_api) if revenue_api is not None else net_calc
+
+                    cur.execute(
+                        """
+                        INSERT INTO douano_sales_invoice_lines(
+                            line_id,
+                            sales_invoice_id,
+                            company_id,
+                            invoice_date,
+                            douano_product_id,
+                            quantity,
+                            unit_price_ex,
+                            discount_raw,
+                            discount_type,
+                            discount_ex,
+                            excise_per_unit,
+                            refund_per_unit,
+                            gross_revenue_ex,
+                            charges_total_ex,
+                            net_revenue_ex,
+                            updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (line_id)
+                        DO UPDATE SET
+                            sales_invoice_id = EXCLUDED.sales_invoice_id,
+                            company_id = EXCLUDED.company_id,
+                            invoice_date = EXCLUDED.invoice_date,
+                            douano_product_id = EXCLUDED.douano_product_id,
+                            quantity = EXCLUDED.quantity,
+                            unit_price_ex = EXCLUDED.unit_price_ex,
+                            discount_raw = EXCLUDED.discount_raw,
+                            discount_type = EXCLUDED.discount_type,
+                            discount_ex = EXCLUDED.discount_ex,
+                            excise_per_unit = EXCLUDED.excise_per_unit,
+                            refund_per_unit = EXCLUDED.refund_per_unit,
+                            gross_revenue_ex = EXCLUDED.gross_revenue_ex,
+                            charges_total_ex = EXCLUDED.charges_total_ex,
+                            net_revenue_ex = EXCLUDED.net_revenue_ex,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            line_id,
+                            sales_invoice_id,
+                            company_id,
+                            invoice_date,
+                            int(douano_product_id or 0),
+                            quantity,
+                            unit_price_ex,
+                            discount_raw,
+                            discount_type,
+                            discount_ex,
+                            excise_per_unit,
+                            refund_per_unit,
+                            gross,
+                            charges_total,
+                            net,
+                            updated,
+                        ),
+                    )
+                    lines += 1
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    return {"invoices": invoices, "lines": lines}
 
 
 def list_companies(*, only_customers: bool = False, limit: int = 200) -> list[dict[str, Any]]:

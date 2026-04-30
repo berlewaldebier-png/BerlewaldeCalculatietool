@@ -18,7 +18,7 @@ export default async function OmzetEnMargePage() {
   return (
     <PageShell
       title="Omzet & marge"
-      subtitle="Omzet, kostprijs en brutomarge per klant op basis van Douano sales-orders."
+      subtitle="Omzet, kostprijs en brutomarge per klant op basis van Douano facturen (default) of orders."
       activePath="/omzet-en-marge"
       navigation={navigation}
     >
