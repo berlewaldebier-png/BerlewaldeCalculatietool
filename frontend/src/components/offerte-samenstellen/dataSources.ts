@@ -33,6 +33,8 @@ type BuildProductOptionsParams = {
   verkoopprijzen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
+  litersPerUnitOverrides?: Map<string, number>;
+  scenarioLabelSuffix?: string;
 };
 
 export function buildQuoteableProductOptions(

@@ -34,6 +34,8 @@ type BuildProductFactsParams = {
   verkoopprijzen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
+  litersPerUnitOverrides?: Map<string, number>;
+  scenarioLabelSuffix?: string;
 };
 
 type ProductMaster = {
@@ -106,12 +108,37 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       if (fixedCostAllocationEx <= 0)
         warningsForFact.push("Vaste kostentoerekening ontbreekt.");
 
+      const overrideLitersPerUnit = params.litersPerUnitOverrides?.get(productId) ?? null;
+      const hasOverride =
+        Number.isFinite(overrideLitersPerUnit as number) &&
+        (overrideLitersPerUnit as number) > 0;
+      const baselineLitersPerUnit = litersPerUnit > 0 ? litersPerUnit : 0.001;
+      const costPerLiter = costPriceEx / baselineLitersPerUnit;
+      const fixedPerLiter = fixedCostAllocationEx / baselineLitersPerUnit;
+      const variablePerLiter = variableCostEx / baselineLitersPerUnit;
+
+      const effectiveLitersPerUnit = hasOverride
+        ? (overrideLitersPerUnit as number)
+        : litersPerUnit;
+      const effectiveCostPriceEx = hasOverride
+        ? costPerLiter * effectiveLitersPerUnit
+        : costPriceEx;
+      const effectiveFixedCostAllocationEx = hasOverride
+        ? fixedPerLiter * effectiveLitersPerUnit
+        : fixedCostAllocationEx;
+      const effectiveVariableCostEx = hasOverride
+        ? variablePerLiter * effectiveLitersPerUnit
+        : variableCostEx;
+      const effectiveLabelSuffix = hasOverride
+        ? params.scenarioLabelSuffix ?? " (scenario)"
+        : "";
+
       let sellInEx = 0;
       if (params.channelCode) {
         sellInEx = resolveSellInPriceEx({
           bierId,
           productId,
-          costPriceEx,
+          costPriceEx: effectiveCostPriceEx,
           channelCode: params.channelCode,
           lookup: sellInLookup,
           channelDefaultOpslag,
@@ -128,11 +155,11 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         bierName,
         packLabel,
         packType: master?.packType || inferPackType(packLabel),
-        label: `${bierName} · ${packLabel}`,
-        litersPerUnit,
-        costPriceEx,
-        fixedCostAllocationEx,
-        variableCostEx,
+        label: `${bierName} · ${packLabel}${effectiveLabelSuffix}`,
+        litersPerUnit: effectiveLitersPerUnit,
+        costPriceEx: effectiveCostPriceEx,
+        fixedCostAllocationEx: effectiveFixedCostAllocationEx,
+        variableCostEx: effectiveVariableCostEx,
         sellInEx,
         vatRatePct,
         warnings: warningsForFact,

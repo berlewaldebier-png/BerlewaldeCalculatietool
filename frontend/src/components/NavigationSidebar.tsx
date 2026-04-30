@@ -19,6 +19,7 @@ function buildNavItems(navigation: NavigationItem[], activePath: string): Dashbo
     "/nieuwe-kostprijsberekening",
     "/prijsvoorstellen",
     "/break-even",
+    "/scenario-analyse",
     "/omzet-en-marge",
     "/productie",
     "/vaste-kosten",
@@ -49,6 +50,9 @@ function buildNavItems(navigation: NavigationItem[], activePath: string): Dashbo
   }
   if (!byHref.has("/omzet-en-marge")) {
     byHref.set("/omzet-en-marge", { label: "Omzet & marge", href: "/omzet-en-marge" });
+  }
+  if (!byHref.has("/scenario-analyse")) {
+    byHref.set("/scenario-analyse", { label: "Scenario analyse", href: "/scenario-analyse" });
   }
 
   const result: DashboardNavItem[] = [];

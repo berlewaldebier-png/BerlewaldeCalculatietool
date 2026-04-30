@@ -53,6 +53,7 @@ import type {
   ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
 import { WizardSteps } from "@/components/WizardSteps";
+import { buildLitersPerUnitOverrideMap, getScenario as getLocalScenario, getScenarioLabel } from "@/lib/scenarios";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -92,6 +93,7 @@ type Props = {
   vasteKosten: Record<string, unknown>;
   initialMode?: string;
   initialDraftId?: string | null;
+  scenarioId?: string | null;
 };
 
 const tones: Record<OptionType, string> = {
@@ -195,6 +197,7 @@ export function OfferteSamenstellenApp({
   vasteKosten,
   initialMode,
   initialDraftId,
+  scenarioId,
 }: Props) {
   const router = useRouter();
   const [currentYear, setCurrentYear] = useState<number>(year);
@@ -212,6 +215,17 @@ export function OfferteSamenstellenApp({
 
   const [basis, setBasis] = useState<BasisData>(() => createInitialBasisData());
 
+  const appliedScenario = useMemo(() => {
+    const id = String(scenarioId ?? "").trim();
+    if (!id) return null;
+    return getLocalScenario(id);
+  }, [scenarioId]);
+  const appliedScenarioLabel = useMemo(() => getScenarioLabel(appliedScenario), [appliedScenario]);
+  const litersPerUnitOverrides = useMemo(
+    () => buildLitersPerUnitOverrideMap(appliedScenario),
+    [appliedScenario]
+  );
+
   const productIndex = useMemo(() => {
     return buildQuoteableProductOptions({
       year: currentYear,
@@ -223,6 +237,8 @@ export function OfferteSamenstellenApp({
       verkoopprijzen,
       basisproducten,
       samengesteldeProducten,
+      litersPerUnitOverrides,
+      scenarioLabelSuffix: appliedScenarioLabel ? ` (${appliedScenarioLabel})` : " (scenario)",
     });
   }, [
     currentYear,
@@ -234,6 +250,8 @@ export function OfferteSamenstellenApp({
     verkoopprijzen,
     basisproducten,
     samengesteldeProducten,
+    litersPerUnitOverrides,
+    appliedScenarioLabel,
   ]);
 
   const breakEvenConfigs = useMemo(
@@ -710,6 +728,11 @@ export function OfferteSamenstellenApp({
 
         {draftError ? <div className="cpq-alert cpq-alert-warn">{draftError}</div> : null}
         {isLoadingDraft ? <div className="cpq-alert">Offerte wordt geladen...</div> : null}
+        {appliedScenarioLabel ? (
+          <div className="cpq-alert">
+            Scenario actief: <strong>{appliedScenarioLabel}</strong>. Kostprijs + sell-in per eenheid zijn aangepast op basis van literinhoud per eenheid.
+          </div>
+        ) : null}
 
         <div className="cpq-grid">
           <aside className="cpq-left">

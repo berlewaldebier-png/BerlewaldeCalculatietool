@@ -55,6 +55,7 @@ export default async function OfferteSamenstellenPage({
 
   const mode = typeof resolvedSearchParams.mode === "string" ? resolvedSearchParams.mode : "";
   const draftId = typeof resolvedSearchParams.draft === "string" ? resolvedSearchParams.draft : null;
+  const scenarioId = typeof resolvedSearchParams.scenario === "string" ? resolvedSearchParams.scenario : null;
 
   return (
     <PageShell
@@ -79,6 +80,7 @@ export default async function OfferteSamenstellenPage({
         vasteKosten={vasteKosten}
         initialMode={mode}
         initialDraftId={draftId}
+        scenarioId={scenarioId}
       />
     </PageShell>
   );
