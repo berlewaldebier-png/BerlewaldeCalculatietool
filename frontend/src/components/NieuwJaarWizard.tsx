@@ -2151,6 +2151,180 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     </button>
   );
 
+  const rightRail = useMemo(() => {
+    const validations: Array<{ tone: "ok" | "warn" | "error"; label: string; detail: string }> = [];
+
+    validations.push({
+      tone: conceptStarted ? "ok" : "warn",
+      label: "Concept",
+      detail: conceptStarted ? "Gestart" : "Nog niet gestart (stap Jaarset)"
+    });
+
+    if (draftStatus && draftStatus !== "idle") {
+      validations.push({ tone: "warn", label: "Opslaan", detail: `Bezig: ${draftStatus}` });
+    }
+
+    if (commitConflict) {
+      validations.push({ tone: "error", label: "Conflict", detail: commitConflict });
+    }
+
+    if (status) {
+      const inferredTone: "ok" | "warn" | "error" = /mislukt|error|fout|conflict/i.test(status)
+        ? "error"
+        : /start eerst|uitgeschakeld|let op/i.test(status)
+          ? "warn"
+          : "ok";
+      validations.push({ tone: inferredTone, label: "Status", detail: status });
+    }
+
+    const changes: Array<{ label: string; before: string; after: string; delta?: string; changed: boolean }> = [];
+
+    if (copyProductie && sourceProductie) {
+      const sourceInkoop = Number((sourceProductie as any)?.hoeveelheid_inkoop_l ?? 0);
+      const sourceProductieLiters = Number((sourceProductie as any)?.hoeveelheid_productie_l ?? 0);
+      const sourceBatch = Number((sourceProductie as any)?.batchgrootte_eigen_productie_l ?? 0);
+      const targetInkoop = Number(draftProductieTarget.hoeveelheid_inkoop_l ?? 0);
+      const targetProductieLiters = Number(draftProductieTarget.hoeveelheid_productie_l ?? 0);
+      const targetBatch = Number(draftProductieTarget.batchgrootte_eigen_productie_l ?? 0);
+
+      changes.push({
+        label: "Inkoop (L)",
+        before: String(sourceInkoop),
+        after: String(targetInkoop),
+        delta: String(targetInkoop - sourceInkoop),
+        changed: sourceInkoop !== targetInkoop
+      });
+      changes.push({
+        label: "Productie (L)",
+        before: String(sourceProductieLiters),
+        after: String(targetProductieLiters),
+        delta: String(targetProductieLiters - sourceProductieLiters),
+        changed: sourceProductieLiters !== targetProductieLiters
+      });
+      changes.push({
+        label: "Batchgrootte (L)",
+        before: String(sourceBatch),
+        after: String(targetBatch),
+        delta: String(targetBatch - sourceBatch),
+        changed: sourceBatch !== targetBatch
+      });
+    }
+
+    if (copyTarieven && sourceTarief) {
+      const sHigh = Number(sourceTarief.tarief_hoog ?? 0);
+      const sLow = Number(sourceTarief.tarief_laag ?? 0);
+      const sVb = Number(sourceTarief.verbruikersbelasting ?? 0);
+      const tHigh = Number(draftTariefTarget.tarief_hoog ?? 0);
+      const tLow = Number(draftTariefTarget.tarief_laag ?? 0);
+      const tVb = Number(draftTariefTarget.verbruikersbelasting ?? 0);
+
+      changes.push({
+        label: "Accijns hoog",
+        before: formatEur(sHigh),
+        after: formatEur(tHigh),
+        changed: sHigh !== tHigh
+      });
+      changes.push({
+        label: "Accijns laag",
+        before: formatEur(sLow),
+        after: formatEur(tLow),
+        changed: sLow !== tLow
+      });
+      changes.push({
+        label: "Verbruikersbelasting",
+        before: formatEur(sVb),
+        after: formatEur(tVb),
+        changed: sVb !== tVb
+      });
+    }
+
+    if (copyVasteKosten) {
+      const sourceTotal = sourceVasteKostenRows.reduce((sum, row) => sum + Number(row.bedrag_per_jaar ?? 0), 0);
+      const targetTotal = (Array.isArray(draftVasteKostenTarget) ? draftVasteKostenTarget : []).reduce(
+        (sum, row) => sum + Number((row as any)?.bedrag_per_jaar ?? 0),
+        0
+      );
+      changes.push({
+        label: "Vaste kosten totaal",
+        before: formatEur(sourceTotal),
+        after: formatEur(targetTotal),
+        delta: formatEur(targetTotal - sourceTotal),
+        changed: Math.abs(targetTotal - sourceTotal) > 0.0001
+      });
+    }
+
+    if (copyVerpakkingsonderdelen) {
+      const sourcePrices = (Array.isArray(currentPackagingPrices) ? currentPackagingPrices : [])
+        .filter((row) => Number((row as any)?.jaar ?? 0) === sourceYear)
+        .reduce<Record<string, number>>((acc, row) => {
+          acc[String((row as any)?.verpakkingsonderdeel_id ?? "")] = Number((row as any)?.prijs_per_stuk ?? 0);
+          return acc;
+        }, {});
+
+      const changedCount = packagingComponents.reduce((count, component) => {
+        const key = String(component.id);
+        const before = Number(sourcePrices[key] ?? 0);
+        const after = Number(draftPackagingPrices[key] ?? before);
+        return count + (Math.abs(after - before) > 0.0001 ? 1 : 0);
+      }, 0);
+
+      changes.push({
+        label: "Verpakkingsprijzen",
+        before: `${packagingComponents.length} onderdelen`,
+        after: `${changedCount} gewijzigd`,
+        changed: changedCount > 0
+      });
+    }
+
+    if (copyVerkoopstrategie) {
+      const draftCount = Array.isArray(draftVerkoopstrategieTarget) ? draftVerkoopstrategieTarget.length : 0;
+      const draftAdviesCount = Array.isArray(draftAdviesprijzenTarget) ? draftAdviesprijzenTarget.length : 0;
+      changes.push({
+        label: "Verkoopstrategie records",
+        before: "-",
+        after: String(draftCount),
+        changed: draftCount > 0
+      });
+      changes.push({
+        label: "Adviesprijzen records",
+        before: "-",
+        after: String(draftAdviesCount),
+        changed: draftAdviesCount > 0
+      });
+    }
+
+    const changedItems = changes.filter((item) => item.changed);
+
+    return {
+      validations,
+      changes: changedItems.length > 0 ? changedItems : [],
+      changedCount: changedItems.length
+    };
+  }, [
+    commitConflict,
+    conceptStarted,
+    copyProductie,
+    copyTarieven,
+    copyVasteKosten,
+    copyVerkoopstrategie,
+    copyVerpakkingsonderdelen,
+    currentPackagingPrices,
+    draftAdviesprijzenTarget,
+    draftPackagingPrices,
+    draftProductieTarget,
+    draftStatus,
+    draftTariefTarget,
+    draftVerkoopstrategieTarget,
+    draftVasteKostenTarget,
+    packagingComponents,
+    sourceProductie,
+    sourceTarief,
+    sourceVasteKostenRows,
+    sourceYear,
+    status,
+    // status tone is inferred from status text
+  ]);
+
   return (
     <div className="cpq-root">
       <div className="cpq-frame">
@@ -3686,11 +3860,71 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           </main>
 
           <aside className="cpq-right">
-            <div className="cpq-right-kicker">Status</div>
-            <div className="placeholder-block" style={{ margin: 0 }}>
-              <strong>{conceptStarted ? "Concept gestart" : "Concept nog niet gestart"}</strong>
-              Gebruik de stappen links om het doeljaar op te bouwen. Verwijder het concept via de prullenbak in de
-              topbar.
+            <div className="cpq-right-kicker">Impact</div>
+            <div className="cpq-stack">
+              <div className="cpq-block">
+                <div className="cpq-right-kicker" style={{ marginBottom: 8 }}>
+                  Validatie
+                </div>
+                <div className="data-table" style={{ background: "transparent", border: 0, padding: 0 }}>
+                  <table>
+                    <tbody>
+                      {rightRail.validations.map((row) => (
+                        <tr key={`${row.label}-${row.detail}`}>
+                          <td style={{ width: 96, fontWeight: 700 }}>{row.label}</td>
+                          <td>
+                            <span
+                              className="pill"
+                              style={
+                                row.tone === "error"
+                                  ? { background: "var(--status-error-bg)", borderColor: "var(--status-error-border)", color: "var(--status-error-text)" }
+                                  : row.tone === "warn"
+                                    ? { background: "var(--status-warning-bg)", borderColor: "var(--status-warning-border)", color: "var(--status-warning-text)" }
+                                    : { background: "var(--status-success-bg)", borderColor: "var(--status-success-border)", color: "var(--status-success-text)" }
+                              }
+                            >
+                              {row.detail}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="cpq-block">
+                <div className="cpq-right-kicker" style={{ marginBottom: 8 }}>
+                  Wijzigingen ({rightRail.changedCount})
+                </div>
+                {rightRail.changes.length === 0 ? (
+                  <div className="placeholder-block" style={{ margin: 0 }}>
+                    <strong>Nog geen wijzigingen gedetecteerd</strong>
+                    Pas waarden aan in de stappen links om een impact overzicht te zien.
+                  </div>
+                ) : (
+                  <div className="data-table" style={{ background: "transparent", border: 0, padding: 0 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Voor</th>
+                          <th>Na</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rightRail.changes.slice(0, 8).map((row) => (
+                          <tr key={row.label}>
+                            <td style={{ fontWeight: 700 }}>{row.label}</td>
+                            <td>{row.before}</td>
+                            <td>{row.after}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           </aside>
         </div>
