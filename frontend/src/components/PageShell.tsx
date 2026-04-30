@@ -74,7 +74,7 @@ export function PageShell({ title, subtitle, activePath, navigation, children }:
   const wizardContextValue = useMemo(() => setWizardSidebar, []);
   const headerContextValue = useMemo(() => setPageHeader, []);
 
-  const wizardFooter = wizardSidebar ? (
+  const wizardContent = wizardSidebar ? (
     <>
       <div className="page-shell-wizard-title">{wizardSidebar.title}</div>
       <div className="page-shell-wizard-list">
@@ -108,8 +108,14 @@ export function PageShell({ title, subtitle, activePath, navigation, children }:
   return (
     <WizardSidebarContext.Provider value={wizardContextValue}>
       <PageHeaderContext.Provider value={headerContextValue}>
-        <div className="page-grid">
-          <NavigationSidebar navigation={navigation} activePath={activePath} variant="pageShell" footer={wizardFooter} />
+        <div className={wizardSidebar ? "page-shell-grid page-shell-grid-wizard" : "page-grid"}>
+          <NavigationSidebar navigation={navigation} activePath={activePath} variant="pageShell" />
+
+          {wizardSidebar ? (
+            <aside className="dashboard-sidebar page-shell-wizard-panel" aria-label="Wizard stappen">
+              <div className="page-shell-wizard-nav">{wizardContent}</div>
+            </aside>
+          ) : null}
 
           <section className="content-card">
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
