@@ -2725,6 +2725,10 @@ a {
   min-height: 860px;
 }
 
+.cpq-grid-wide {
+  grid-template-columns: 220px minmax(0, 1fr) 360px;
+}
+
 .cpq-left,
 .cpq-right {
   background: rgba(250, 251, 255, 0.72);

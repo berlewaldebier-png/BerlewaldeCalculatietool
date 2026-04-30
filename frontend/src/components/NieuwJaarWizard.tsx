@@ -2365,7 +2365,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           </div>
         </div>
 
-        <div className="cpq-grid">
+        <div className="cpq-grid cpq-grid-wide">
           <aside className="cpq-left">
             <WizardSteps
               title={wizardSidebar.title}
