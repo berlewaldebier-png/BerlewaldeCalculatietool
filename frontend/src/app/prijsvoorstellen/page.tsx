@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 import { PageShell } from "@/components/PageShell";
+import { DataTablePro } from "@/components/DataTablePro";
 import type { QuoteDraftRecord } from "@/components/offerte-samenstellen/types";
 import { getBootstrap, apiGetServer } from "@/lib/apiServer";
-
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -12,7 +12,7 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat("nl-NL", {
     day: "2-digit",
     month: "2-digit",
-    year: "numeric",
+    year: "numeric"
   }).format(date);
 }
 
@@ -25,7 +25,7 @@ function formatDateTime(value: string | null) {
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
-    minute: "2-digit",
+    minute: "2-digit"
   }).format(date);
 }
 
@@ -36,7 +36,7 @@ function statusLabel(status: string) {
 export default async function PrijsvoorstellenPage() {
   const [bootstrap, quotesResponse] = await Promise.all([
     getBootstrap([], true, "/prijsvoorstellen"),
-    apiGetServer<{ items: QuoteDraftRecord[] }>("/quotes?limit=100", "/prijsvoorstellen"),
+    apiGetServer<{ items: QuoteDraftRecord[] }>("/quotes?limit=100", "/prijsvoorstellen")
   ]);
 
   const navigation = bootstrap.navigation ?? [];
@@ -54,8 +54,8 @@ export default async function PrijsvoorstellenPage() {
           <div className="proposal-hub-hero-copy">
             <div className="module-card-title">Nieuw prijsvoorstel</div>
             <div className="module-card-text">
-              Start direct een nieuwe offerte in de CPQ builder. Je kiest producten,
-              bouwt scenario&apos;s op en slaat het voorstel daarna op als concept.
+              Start direct een nieuwe offerte in de CPQ builder. Je kiest producten, bouwt scenario&apos;s op en slaat
+              het voorstel daarna op als concept.
             </div>
           </div>
           <div className="proposal-hub-hero-actions">
@@ -82,53 +82,82 @@ export default async function PrijsvoorstellenPage() {
               Zodra je een prijsvoorstel opslaat, verschijnt het hier in het overzicht.
             </div>
           ) : (
-            <div className="data-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Offertenummer</th>
-                    <th>Titel</th>
-                    <th>Klant</th>
-                    <th>Kanaal</th>
-                    <th>Status</th>
-                    <th>Geldig tot</th>
-                    <th>Laatst bewerkt</th>
-                    <th>Actie</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quotes.map((quote) => (
-                    <tr key={quote.id}>
-                      <td>
-                        <div className="stack">
-                          <strong>{quote.quote_number}</strong>
-                          <span className="muted">v{quote.draft_version}</span>
-                        </div>
-                      </td>
-                      <td>{quote.title || "—"}</td>
-                      <td>{quote.customer_name || "—"}</td>
-                      <td>{quote.channel_code || "—"}</td>
-                      <td>
-                        <span className="pill">{statusLabel(quote.status)}</span>
-                      </td>
-                      <td>{formatDate(quote.valid_until)}</td>
-                      <td>{formatDateTime(quote.updated_at)}</td>
-                      <td>
-                        <Link
-                          href={`/offerte-samenstellen?draft=${encodeURIComponent(quote.id)}`}
-                          className="proposal-hub-link"
-                        >
-                          Openen
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTablePro<QuoteDraftRecord>
+              rows={quotes}
+              getRowKey={(row) => row.id}
+              initialSortKey="updated_at"
+              initialSortDir="desc"
+              queryPlaceholder="Zoek offerte (nummer/titel/klant/kanaal)…"
+              queryFilter={(row, q) => {
+                const title = String(row.title || "").toLowerCase();
+                const customer = String(row.customer_name || "").toLowerCase();
+                const channel = String(row.channel_code || "").toLowerCase();
+                const number = String(row.quote_number || "").toLowerCase();
+                return title.includes(q) || customer.includes(q) || channel.includes(q) || number.includes(q);
+              }}
+              columns={[
+                {
+                  key: "quote_number",
+                  header: "Offertenummer",
+                  sortValue: (row) => String(row.quote_number || ""),
+                  render: (row) => (
+                    <div className="stack">
+                      <strong>{row.quote_number}</strong>
+                      <span className="muted">v{row.draft_version}</span>
+                    </div>
+                  )
+                },
+                {
+                  key: "title",
+                  header: "Titel",
+                  sortValue: (row) => String(row.title || ""),
+                  render: (row) => row.title || "—"
+                },
+                {
+                  key: "customer_name",
+                  header: "Klant",
+                  sortValue: (row) => String(row.customer_name || ""),
+                  render: (row) => row.customer_name || "—"
+                },
+                {
+                  key: "channel_code",
+                  header: "Kanaal",
+                  sortValue: (row) => String(row.channel_code || ""),
+                  render: (row) => row.channel_code || "—"
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  sortValue: (row) => statusLabel(row.status),
+                  render: (row) => <span className="pill">{statusLabel(row.status)}</span>
+                },
+                {
+                  key: "valid_until",
+                  header: "Geldig tot",
+                  sortValue: (row) => String(row.valid_until || ""),
+                  render: (row) => formatDate(row.valid_until)
+                },
+                {
+                  key: "updated_at",
+                  header: "Laatst bewerkt",
+                  sortValue: (row) => String(row.updated_at || ""),
+                  render: (row) => formatDateTime(row.updated_at)
+                },
+                {
+                  key: "action",
+                  header: "Actie",
+                  render: (row) => (
+                    <Link href={`/offerte-samenstellen?draft=${encodeURIComponent(row.id)}`} className="proposal-hub-link">
+                      Openen
+                    </Link>
+                  )
+                }
+              ]}
+            />
           )}
         </section>
       </div>
     </PageShell>
   );
 }
+
