@@ -33,7 +33,52 @@ export function listScenarios(): ScenarioRecord[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((row) => row && typeof row === "object") as ScenarioRecord[];
+    const normalized = (parsed as unknown[])
+      .filter((row) => row && typeof row === "object")
+      .map((row) => {
+        const obj = row as Record<string, unknown>;
+        const id = String(obj.id ?? "").trim();
+        if (!id) return null;
+        const createdAt = String(obj.createdAt ?? "").trim();
+        const updatedAt = String(obj.updatedAt ?? "").trim();
+        const name = String(obj.name ?? "").trim() || "Scenario";
+        const year = Number(obj.year ?? 0) || 0;
+        const overrides = Array.isArray(obj.overrides) ? (obj.overrides as unknown[]) : [];
+        const notes = obj.notes != null ? String(obj.notes) : undefined;
+
+        return {
+          id,
+          createdAt: createdAt || updatedAt || new Date(0).toISOString(),
+          updatedAt: updatedAt || createdAt || new Date(0).toISOString(),
+          name,
+          year,
+          overrides: overrides
+            .filter((ov) => ov && typeof ov === "object")
+            .map((ov) => ({
+              productId: String((ov as any).productId ?? "").trim(),
+              litersPerUnit:
+                (ov as any).litersPerUnit == null ? undefined : Number((ov as any).litersPerUnit),
+            }))
+            .filter((ov) => ov.productId),
+          notes,
+        } satisfies ScenarioRecord;
+      })
+      .filter(Boolean) as ScenarioRecord[];
+
+    const byId = new Map<string, ScenarioRecord>();
+    for (const scenario of normalized) {
+      const existing = byId.get(scenario.id);
+      if (!existing) {
+        byId.set(scenario.id, scenario);
+        continue;
+      }
+      // Keep the most recently updated record for a given id.
+      if (scenario.updatedAt.localeCompare(existing.updatedAt) > 0) {
+        byId.set(scenario.id, scenario);
+      }
+    }
+
+    return Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   } catch {
     return [];
   }

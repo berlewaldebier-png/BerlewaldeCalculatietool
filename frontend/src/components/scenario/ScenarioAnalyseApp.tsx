@@ -442,7 +442,7 @@ export function ScenarioAnalyseApp(props: Props) {
                     <select className="dataset-input" value={scenarioId ?? ""} onChange={(e) => setScenarioId(e.target.value || null)}>
                       <option value="">(nieuw / niet opgeslagen)</option>
                       {scenarioList.map((row) => (
-                        <option key={row.id} value={row.id}>
+                        <option key={`${row.id}-${row.updatedAt}`} value={row.id}>
                           {row.name} ({row.year})
                         </option>
                       ))}
@@ -456,7 +456,7 @@ export function ScenarioAnalyseApp(props: Props) {
                       {scenarioList
                         .filter((row) => row.id !== (scenarioId ?? ""))
                         .map((row) => (
-                          <option key={row.id} value={row.id}>
+                          <option key={`${row.id}-${row.updatedAt}`} value={row.id}>
                             {row.name} ({row.year})
                           </option>
                         ))}
@@ -556,4 +556,3 @@ function TrashIcon() {
     </svg>
   );
 }
-
