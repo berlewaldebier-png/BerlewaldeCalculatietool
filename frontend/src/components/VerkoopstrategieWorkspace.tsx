@@ -32,6 +32,8 @@ type Props = {
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   bieren: GenericRecord[];
+  skus?: GenericRecord[];
+  articles?: GenericRecord[];
   berekeningen: GenericRecord[];
   /** Authoritative list of available years comes from productie. */
   productie?: unknown;
@@ -216,6 +218,8 @@ export function VerkoopstrategieWorkspace({
   basisproducten,
   samengesteldeProducten,
   bieren,
+  skus,
+  articles,
   berekeningen,
   productie,
   channels,
@@ -246,6 +250,26 @@ export function VerkoopstrategieWorkspace({
   const verkoopStrategyRows = useMemo(() => {
     return verkoopprijzen.filter((row) => STRATEGY_RECORD_TYPES.has(String(row.record_type ?? "")));
   }, [verkoopprijzen]);
+  const formatArticleById = useMemo(() => {
+    const map = new Map<string, { id: string; label: string }>();
+    (Array.isArray(articles) ? articles : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "").trim();
+      if (!id) return;
+      const kind = String((row as any)?.kind ?? "").trim().toLowerCase();
+      if (kind !== "format") return;
+      const label = String((row as any)?.name ?? (row as any)?.naam ?? id).trim() || id;
+      map.set(id, { id, label });
+    });
+    return map;
+  }, [articles]);
+  const skuById = useMemo(() => {
+    const map = new Map<string, GenericRecord>();
+    (Array.isArray(skus) ? skus : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "").trim();
+      if (id) map.set(id, row);
+    });
+    return map;
+  }, [skus]);
   const productSources = useMemo(() => {
     const seen = new Map<string, { id: string; label: string; type: "basis" | "samengesteld" }>();
     basisproducten.forEach((row) => {
@@ -258,8 +282,22 @@ export function VerkoopstrategieWorkspace({
       const label = String(row.omschrijving ?? "");
       if (id && label) seen.set(`samengesteld:${id}`, { id, label, type: "samengesteld" });
     });
+
+    // SKU-aanpak: na hard reset zijn basis-/samengestelde productlijsten leeg.
+    // Gebruik dan de actieve activaties om de beschikbare formats (verpakking) te tonen.
+    if (seen.size === 0 && formatArticleById.size > 0) {
+      (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).forEach((act) => {
+        const skuId = String((act as any)?.sku_id ?? "").trim();
+        const sku = skuId ? (skuById.get(skuId) ?? null) : null;
+        const formatId = String((sku as any)?.format_article_id ?? "").trim();
+        if (!formatId) return;
+        const format = formatArticleById.get(formatId);
+        if (!format) return;
+        seen.set(`basis:${format.id}`, { id: format.id, label: format.label, type: "basis" });
+      });
+    }
     return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
-  }, [basisproducten, samengesteldeProducten]);
+  }, [basisproducten, samengesteldeProducten, formatArticleById, kostprijsproductactiveringen, skuById]);
   const basisProductParentMap = useMemo(() => {
     const parents = new Map<string, { productId: string; label: string; score: number }[]>();
     samengesteldeProducten.forEach((row) => {

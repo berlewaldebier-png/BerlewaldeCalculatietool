@@ -411,7 +411,7 @@ export function AdviesprijzenWorkspace(props: {
         }))
       ];
 
-      const response = await fetch(`${API_BASE_URL}/data/dataset/adviesprijzen`, {
+      const response = await fetch(`${API_BASE_URL}/data/adviesprijzen`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(next)

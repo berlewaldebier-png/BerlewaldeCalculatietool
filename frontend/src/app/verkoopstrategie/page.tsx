@@ -10,6 +10,8 @@ export default async function VerkoopstrategiePage() {
       "basisproducten",
       "samengestelde-producten",
       "bieren",
+      "skus",
+      "articles",
       "berekeningen",
       "channels",
       "kostprijsproductactiveringen"
@@ -23,6 +25,8 @@ export default async function VerkoopstrategiePage() {
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
   const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
+  const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
   const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
   const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
@@ -41,6 +45,8 @@ export default async function VerkoopstrategiePage() {
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         bieren={bieren}
+        skus={skus}
+        articles={articles}
         berekeningen={berekeningen}
         channels={channels}
         kostprijsproductactiveringen={kostprijsproductactiveringen}

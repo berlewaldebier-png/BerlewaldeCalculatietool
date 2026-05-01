@@ -29,7 +29,11 @@ _STANDARD_DATASETS = [
     "bieren",
     "berekeningen",
     "kostprijsversies",
+    "kostprijsproductactiveringen",
     "verkoopprijzen",
+    "break-even-configuraties",
+    "adviesprijzen",
+    "channels",
     "variabele-kosten",
 ]
 

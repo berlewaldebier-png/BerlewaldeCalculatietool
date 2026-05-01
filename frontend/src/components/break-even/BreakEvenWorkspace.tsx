@@ -393,7 +393,7 @@ export function BreakEvenWorkspace({
     setIsSaving(true);
     setStatus("");
     try {
-      const response = await fetch(`${API_BASE_URL}/data/dataset/break-even-configuraties`, {
+      const response = await fetch(`${API_BASE_URL}/data/break-even-configuraties`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(configs),
