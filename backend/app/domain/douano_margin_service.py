@@ -236,15 +236,15 @@ def get_company_margin_summary(
                 clauses.append("l.order_date >= %s::date AND l.order_date < %s::date")
                 params2.extend([year_start, year_end])
             where2 = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-                cur.execute(
-                    f"""
+            cur.execute(
+                f"""
                 SELECT l.company_id, l.order_date, l.douano_product_id, l.quantity, l.net_revenue_ex, m.sku_id
                 FROM douano_sales_order_lines l
                 JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 {where2}
                 """,
-                    tuple(params2),
-                )
+                tuple(params2),
+            )
             mapped_rows = cur.fetchall() or []
 
     for company_id, order_date_raw, douano_product_id, quantity, net_revenue, sku_id in mapped_rows:
