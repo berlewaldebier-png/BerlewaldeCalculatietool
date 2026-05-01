@@ -32,6 +32,8 @@ type BuildProductFactsParams = {
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
+  skus?: GenericRecord[];
+  articles?: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   litersPerUnitOverrides?: Map<string, number>;
@@ -58,6 +60,26 @@ export function buildProductFacts(params: BuildProductFactsParams) {
     params.samengesteldeProducten
   );
 
+  const skuById = new Map<string, GenericRecord>();
+  (params.skus ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (id) skuById.set(id, row);
+  });
+
+  const formatById = new Map<string, ProductMaster>();
+  (params.articles ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (!id) return;
+    const kind = text((row as any).kind).toLowerCase();
+    if (kind !== "format") return;
+    const packLabel = text((row as any).name || (row as any).naam || id);
+    formatById.set(id, {
+      packLabel,
+      packType: text((row as any).uom || (row as any).eenheid || inferPackType(packLabel)),
+      litersPerUnit: toNumber((row as any).content_liter, 0),
+    });
+  });
+
   const versionById = new Map<string, GenericRecord>();
   params.kostprijsversies.forEach((row) => {
     const id = text((row as any).id);
@@ -72,20 +94,24 @@ export function buildProductFacts(params: BuildProductFactsParams) {
   params.kostprijsproductactiveringen
     .filter((row) => toNumber((row as any).jaar, 0) === params.year)
     .forEach((activation) => {
-      const bierId = text((activation as any).bier_id);
-      const productId = text((activation as any).product_id);
+      const skuId = text((activation as any).sku_id);
+      const skuRow = skuId ? skuById.get(skuId) ?? null : null;
+      const bierId = text((activation as any).bier_id) || text((skuRow as any)?.beer_id);
+      const productId =
+        text((activation as any).product_id) || text((skuRow as any)?.format_article_id);
       const kostprijsversieId = text((activation as any).kostprijsversie_id);
       if (!bierId || !productId || !kostprijsversieId) return;
 
-      const ref = `beer:${bierId}:product:${productId}`;
+      const ref = skuId ? `sku:${skuId}` : `beer:${bierId}:product:${productId}`;
       if (seen.has(ref)) return;
       seen.add(ref);
 
       const version = versionById.get(kostprijsversieId);
-      const snapshotRow = getSnapshotProductRow(version, productId);
-      const master = productMasterById.get(productId);
+      const snapshotRow = getSnapshotProductRow(version, { skuId, productId });
+      const master = formatById.get(productId) ?? productMasterById.get(productId);
       const packLabel =
-        master?.packLabel || text((snapshotRow as any).verpakking || productId);
+        master?.packLabel ||
+        text((snapshotRow as any).verpakking_label || (snapshotRow as any).verpakking || productId);
       const litersPerUnit =
         master?.litersPerUnit ||
         toNumber(
@@ -108,7 +134,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       if (fixedCostAllocationEx <= 0)
         warningsForFact.push("Vaste kostentoerekening ontbreekt.");
 
-      const overrideLitersPerUnit = params.litersPerUnitOverrides?.get(productId) ?? null;
+      const overrideLitersPerUnit = params.litersPerUnitOverrides?.get(skuId || productId) ?? null;
       const hasOverride =
         Number.isFinite(overrideLitersPerUnit as number) &&
         (overrideLitersPerUnit as number) > 0;
@@ -218,7 +244,10 @@ function buildProductMasterById(
   return map;
 }
 
-function getSnapshotProductRow(version: GenericRecord | undefined, productId: string) {
+function getSnapshotProductRow(
+  version: GenericRecord | undefined,
+  ids: { skuId: string; productId: string }
+) {
   const snapshotProducts = ((version as any)?.resultaat_snapshot?.producten ?? {}) as Record<
     string,
     unknown
@@ -230,9 +259,17 @@ function getSnapshotProductRow(version: GenericRecord | undefined, productId: st
       : []),
   ] as GenericRecord[];
 
-  return (
-    productRows.find((row) => text((row as any).product_id) === productId) ?? {}
-  );
+  const skuId = text(ids.skuId);
+  if (skuId) {
+    const bySku = productRows.find((row) => text((row as any).sku_id) === skuId);
+    if (bySku) return bySku;
+  }
+
+  const productId = text(ids.productId);
+  if (productId) {
+    return productRows.find((row) => text((row as any).product_id) === productId) ?? {};
+  }
+  return {};
 }
 
 function readVatRatePct(version: GenericRecord | undefined) {

@@ -32,6 +32,8 @@ type Props = {
   year: number;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
@@ -84,6 +86,8 @@ export function ScenarioAnalyseApp(props: Props) {
       channelCode: "horeca",
       channels: props.channels,
       bieren: props.bieren,
+      skus: props.skus,
+      articles: props.articles,
       kostprijsversies: props.kostprijsversies,
       kostprijsproductactiveringen: props.kostprijsproductactiveringen,
       verkoopprijzen: props.verkoopprijzen,
@@ -94,6 +98,8 @@ export function ScenarioAnalyseApp(props: Props) {
     selectedYear,
     props.channels,
     props.bieren,
+    props.skus,
+    props.articles,
     props.kostprijsversies,
     props.kostprijsproductactiveringen,
     props.verkoopprijzen,

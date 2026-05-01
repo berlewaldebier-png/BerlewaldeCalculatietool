@@ -525,6 +525,10 @@ def post_dev_hard_reset(
 @router.post("/dev/seed-sku-foundation")
 def post_dev_seed_sku_foundation(
     year: int = Query(2025, description="Jaar voor seed (prijzen/jaarsetup)."),
+    with_demo: bool = Query(
+        False,
+        description="Voegt demo kostprijsversie + activaties + verkoopstrategie toe zodat Offerte/Break-even direct werkt.",
+    ),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Seed a minimal foundation dataset for the SKU/Article model.
@@ -615,6 +619,89 @@ def post_dev_seed_sku_foundation(
         dataset_store.save_dataset("bieren", beers)
         dataset_store.save_dataset("productie", productie)
 
+        if with_demo:
+            # Minimal channels so sell-in pricing can resolve without extra setup.
+            channels = [
+                {"id": "horeca", "code": "horeca", "naam": "Horeca", "default_marge_pct": 25},
+                {"id": "retail", "code": "retail", "naam": "Retail", "default_marge_pct": 30},
+            ]
+            dataset_store.save_dataset("channels", channels)
+
+            # Minimal year strategy for sell-in (opslag %) so prices are non-zero.
+            verkoopstrategie = [
+                {
+                    "id": f"verkoopstrategie-{year_value}",
+                    "record_type": "jaarstrategie",
+                    "jaar": year_value,
+                    "sell_in_margins": {"horeca": 25, "retail": 30},
+                }
+            ]
+
+            # Minimal definitive cost version snapshot for the seeded SKUs.
+            kostprijsversie_id = f"kostprijs-blond-{year_value}"
+            basis_btw = "21%"
+            # Build snapshot rows; keep both sku_id and product_id so the UI can still render legacy lists.
+            snapshot_rows = []
+            for sku in skus:
+                fmt_id = str(sku.get("format_article_id", "") or "")
+                fmt_row = next((f for f in formats if str(f.get("id", "")) == fmt_id), None)
+                liters_per_unit = float((fmt_row or {}).get("content_liter", 0.0) or 0.0)
+                pack_label = str((fmt_row or {}).get("name", "") or fmt_id)
+                # Simple demo pricing: base cost per liter + packaging overhead.
+                base_cost_per_liter = 2.0
+                kostprijs = round(base_cost_per_liter * max(liters_per_unit, 0.0), 4)
+                vaste_kosten = round(kostprijs * 0.2, 4) if kostprijs > 0 else 0.0
+                snapshot_rows.append(
+                    {
+                        "sku_id": str(sku.get("id", "") or ""),
+                        "product_type": "sku",
+                        "product_id": fmt_id,
+                        "verpakking": pack_label,
+                        "verpakking_label": pack_label,
+                        "liters_per_product": liters_per_unit,
+                        "kostprijs": kostprijs,
+                        "vaste_kosten": vaste_kosten,
+                    }
+                )
+
+            kostprijsversie = {
+                "id": kostprijsversie_id,
+                "jaar": year_value,
+                "status": "definitief",
+                "bier_id": "beer-blond",
+                "basisgegevens": {
+                    "biernaam": "Berlewalde Blond",
+                    "stijl": "Blond",
+                    "alcoholpercentage": 6.0,
+                    "belastingsoort": "Accijns",
+                    "tarief_accijns": "Hoog",
+                    "btw_tarief": basis_btw,
+                },
+                "resultaat_snapshot": {
+                    "producten": {
+                        "basisproducten": snapshot_rows,
+                        "samengestelde_producten": [],
+                    }
+                },
+            }
+
+            # Replace kostprijsversies entirely (dev-only) to avoid invalid refs after prior seeds.
+            postgres_storage.save_dataset("kostprijsversies", [kostprijsversie], overwrite=True)
+
+            # Activations: 1 per SKU for the selected year.
+            activations = [
+                {
+                    "sku_id": str(sku.get("id", "") or ""),
+                    "jaar": year_value,
+                    "kostprijsversie_id": kostprijsversie_id,
+                }
+                for sku in skus
+            ]
+            dataset_store.save_dataset("kostprijsproductactiveringen", activations)
+
+            # Pricing (verkoopprijzen): year strategy only; product prices derive from cost * opslag%.
+            dataset_store.save_dataset("verkoopprijzen", verkoopstrategie)
+
     dashboard_service.invalidate_dashboard_summary_cache()
     return {
         "ok": True,
@@ -625,6 +712,7 @@ def post_dev_seed_sku_foundation(
             "skus": len(skus),
             "bieren": len(beers),
             "packaging_component_prices": len(packaging_component_prices),
+            "with_demo": bool(with_demo),
         },
     }
 

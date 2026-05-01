@@ -28,6 +28,8 @@ type BreakEvenWorkspaceProps = {
   vasteKosten: Record<string, unknown>;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
@@ -52,6 +54,8 @@ export function BreakEvenWorkspace({
   vasteKosten,
   channels,
   bieren,
+  skus,
+  articles,
   kostprijsversies,
   kostprijsproductactiveringen,
   verkoopprijzen,
@@ -97,6 +101,8 @@ export function BreakEvenWorkspace({
         year: selectedYear,
         channels,
         bieren,
+        skus,
+        articles,
         kostprijsversies,
         kostprijsproductactiveringen,
         verkoopprijzen,
@@ -107,6 +113,8 @@ export function BreakEvenWorkspace({
       selectedYear,
       channels,
       bieren,
+      skus,
+      articles,
       kostprijsversies,
       kostprijsproductactiveringen,
       verkoopprijzen,

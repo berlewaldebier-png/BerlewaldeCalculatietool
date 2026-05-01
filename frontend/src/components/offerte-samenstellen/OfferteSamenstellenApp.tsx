@@ -81,6 +81,8 @@ type Props = {
   year: number;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
@@ -188,6 +190,8 @@ export function OfferteSamenstellenApp({
   year,
   channels,
   bieren,
+  skus,
+  articles,
   kostprijsversies,
   kostprijsproductactiveringen,
   verkoopprijzen,
@@ -232,6 +236,8 @@ export function OfferteSamenstellenApp({
       channel: basis.kanaal,
       channels,
       bieren,
+      skus,
+      articles,
       kostprijsversies,
       kostprijsproductactiveringen,
       verkoopprijzen,
@@ -245,6 +251,8 @@ export function OfferteSamenstellenApp({
     basis.kanaal,
     channels,
     bieren,
+    skus,
+    articles,
     kostprijsversies,
     kostprijsproductactiveringen,
     verkoopprijzen,
@@ -269,6 +277,8 @@ export function OfferteSamenstellenApp({
         year: currentYear,
         channels,
         bieren,
+        skus,
+        articles,
         kostprijsversies,
         kostprijsproductactiveringen,
         verkoopprijzen,
@@ -279,6 +289,8 @@ export function OfferteSamenstellenApp({
       currentYear,
       channels,
       bieren,
+      skus,
+      articles,
       kostprijsversies,
       kostprijsproductactiveringen,
       verkoopprijzen,

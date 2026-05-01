@@ -131,6 +131,9 @@ export function createInitialQuoteFormState(): QuoteFormState {
 }
 
 export function getProductRef(product: QuoteProduct) {
+  if (product.source?.sku_id) {
+    return `sku:${String(product.source.sku_id)}`;
+  }
   if (product.source?.bier_id && product.source?.product_id) {
     return `beer:${String(product.source.bier_id)}:product:${String(product.source.product_id)}`;
   }

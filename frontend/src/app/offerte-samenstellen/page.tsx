@@ -15,6 +15,8 @@ export default async function OfferteSamenstellenPage({
     [
       "productie",
       "bieren",
+      "skus",
+      "articles",
       "kostprijsversies",
       "kostprijsproductactiveringen",
       "verkoopprijzen",
@@ -34,6 +36,8 @@ export default async function OfferteSamenstellenPage({
   const navigation = bootstrap.navigation ?? [];
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
+  const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
   const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
@@ -68,6 +72,8 @@ export default async function OfferteSamenstellenPage({
         year={year}
         channels={channels}
         bieren={bieren}
+        skus={skus}
+        articles={articles}
         kostprijsversies={kostprijsversies}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
         verkoopprijzen={verkoopprijzen}
