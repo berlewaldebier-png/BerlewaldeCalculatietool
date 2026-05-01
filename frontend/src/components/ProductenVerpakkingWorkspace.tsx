@@ -533,7 +533,7 @@ export function ProductenVerpakkingWorkspace({
         }))
         .filter((row) => row.verpakkingsonderdeel_id && row.jaar > 0);
 
-      const response = await fetch(`${API_BASE_URL}/data/dataset/packaging-component-prices`, {
+      const response = await fetch(`${API_BASE_URL}/data/packaging-component-prices`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json"
@@ -688,7 +688,7 @@ export function ProductenVerpakkingWorkspace({
 
       {activeTab === "onderdelen" ? (
         <DatasetTableEditor
-          endpoint="/data/dataset/packaging-components"
+          endpoint="/data/packaging-components"
           initialRows={verpakkingsonderdelenRows.map((row) => {
             const componentId = String(row.id ?? "");
             return {
@@ -729,7 +729,7 @@ export function ProductenVerpakkingWorkspace({
 
       {activeTab === "basis" ? (
         <NestedCollectionEditor
-          endpoint="/data/dataset/base-product-masters"
+          endpoint="/data/base-product-masters"
           initialRows={basisproductenRows}
           addRowTemplate={{
             id: "",
@@ -788,7 +788,7 @@ export function ProductenVerpakkingWorkspace({
 
       {activeTab === "samengesteld" ? (
         <NestedCollectionEditor
-          endpoint="/data/dataset/composite-product-masters"
+          endpoint="/data/composite-product-masters"
           initialRows={samengesteldeProductenRows}
           addRowTemplate={{
             id: "",
@@ -888,7 +888,7 @@ export function ProductenVerpakkingWorkspace({
 
       {activeTab === "glasmaten" ? (
         <DatasetTableEditor
-          endpoint="/data/dataset/glasmaten"
+          endpoint="/data/glasmaten"
           initialRows={glasmatenRows.map((row) => ({
             id: String(row.id ?? ""),
             label: String(row.label ?? ""),

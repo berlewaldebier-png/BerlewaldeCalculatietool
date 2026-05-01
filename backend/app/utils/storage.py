@@ -2200,51 +2200,224 @@ def normalize_basisproduct_record(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_basisproducten(year: int | str | None = None) -> list[dict[str, Any]]:
-    """Laadt alle basisproducten veilig in."""
-    data = _load_postgres_first_list("base-product-masters", BASISPRODUCTEN_FILE)
-    normalized = [
-        normalize_basisproduct_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
-    if year is None:
-        return normalized
+    """Laadt alle basisproducten veilig in.
+
+    Phase G: Basisproducten zijn nu een projectie van `articles(kind=format)` + `bom-lines`.
+    We tonen hier alleen leaf-formats (formats die geen andere formats bevatten).
+    """
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+
     try:
-        year_value = int(year)
+        year_value = int(year) if year is not None else _fallback_producten_year()
     except (TypeError, ValueError):
+        year_value = _fallback_producten_year()
+
+    articles = postgres_storage.load_dataset("articles", [])
+    bom_lines = postgres_storage.load_dataset("bom-lines", [])
+    if not isinstance(articles, list) or not isinstance(bom_lines, list):
         return []
-    filtered = [
-        record
-        for record in normalized
-        if int(record.get("jaar", 0) or 0) == year_value
-    ]
-    # Basisproducten are treated as "masters" (year-independent) but legacy records still
-    # carry a `jaar`. For new years (e.g. 2026) we still want the masters to resolve so
-    # year-based price resolution (packaging component prices) works.
-    return filtered or normalized
+
+    by_id = {str(a.get("id", "") or ""): a for a in articles if isinstance(a, dict) and str(a.get("id", "") or "")}
+    format_ids = {
+        aid
+        for aid, a in by_id.items()
+        if str(a.get("kind", "") or "").strip().lower() == "format"
+    }
+    packaging_ids = {
+        aid
+        for aid, a in by_id.items()
+        if str(a.get("kind", "") or "").strip().lower() == "packaging_component"
+    }
+
+    # Group BOM lines by parent format.
+    lines_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for line in bom_lines:
+        if not isinstance(line, dict):
+            continue
+        parent_id = str(line.get("parent_article_id", "") or "").strip()
+        if not parent_id or parent_id not in format_ids:
+            continue
+        lines_by_parent.setdefault(parent_id, []).append(line)
+
+    # Leaf formats: no component formats.
+    leaf_format_ids: list[str] = []
+    for fmt_id in sorted(format_ids):
+        lines = lines_by_parent.get(fmt_id, [])
+        has_format_component = any(
+            str(l.get("component_article_id", "") or "").strip() in format_ids
+            for l in lines
+        )
+        if not has_format_component:
+            leaf_format_ids.append(fmt_id)
+
+    price_by_component: dict[str, float] = {}
+    try:
+        for row in load_packaging_component_prices():
+            if not isinstance(row, dict):
+                continue
+            if int(row.get("jaar", 0) or 0) != int(year_value):
+                continue
+            cid = str(row.get("verpakkingsonderdeel_id", "") or "").strip()
+            if not cid:
+                continue
+            price_by_component[cid] = float(row.get("prijs_per_stuk", 0.0) or 0.0)
+    except Exception:
+        price_by_component = {}
+
+    out: list[dict[str, Any]] = []
+    for fmt_id in leaf_format_ids:
+        fmt = by_id.get(fmt_id, {}) if isinstance(by_id.get(fmt_id, {}), dict) else {}
+        fmt_name = str(fmt.get("name", fmt.get("naam", fmt_id)) or fmt_id)
+        try:
+            content_liter = float(fmt.get("content_liter", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            content_liter = 0.0
+
+        onderdelen: list[dict[str, Any]] = []
+        totale = 0.0
+        for line in lines_by_parent.get(fmt_id, []):
+            comp_id = str(line.get("component_article_id", "") or "").strip()
+            if not comp_id or comp_id not in packaging_ids:
+                continue
+            try:
+                qty = float(line.get("quantity", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            comp = by_id.get(comp_id, {}) if isinstance(by_id.get(comp_id, {}), dict) else {}
+            comp_name = str(comp.get("name", comp.get("naam", comp_id)) or comp_id)
+            prijs = float(price_by_component.get(comp_id, 0.0) or 0.0)
+            totale_kosten = bereken_basisproduct_regel_kosten(qty, prijs)
+            totale += totale_kosten
+            onderdelen.append(
+                {
+                    "verpakkingsonderdeel_id": comp_id,
+                    "omschrijving": comp_name,
+                    "hoeveelheid": qty,
+                    "prijs_per_stuk": prijs,
+                    "totale_kosten": totale_kosten,
+                }
+            )
+
+        out.append(
+            normalize_basisproduct_record(
+                {
+                    "id": fmt_id,
+                    "jaar": int(year_value),
+                    "omschrijving": fmt_name,
+                    "inhoud_per_eenheid_liter": content_liter,
+                    "onderdelen": onderdelen,
+                    "totale_verpakkingskosten": totale,
+                }
+            )
+        )
+
+    return out
 
 
 def save_basisproducten(data: list[dict[str, Any]]) -> bool:
-    """Slaat alle basisproducten veilig op."""
+    """Slaat alle basisproducten veilig op.
+
+    Phase G: schrijft naar `articles(kind=format)` + `bom-lines` i.p.v. legacy base-product-masters.
+    """
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+
+    current_articles = postgres_storage.load_dataset("articles", [])
+    current_bom = postgres_storage.load_dataset("bom-lines", [])
+    if not isinstance(current_articles, list):
+        current_articles = []
+    if not isinstance(current_bom, list):
+        current_bom = []
+
     valid_component_ids = {
         str(record.get("id", "") or "")
         for record in load_packaging_component_masters()
         if isinstance(record, dict) and str(record.get("id", "") or "")
     }
+
     normalized: list[dict[str, Any]] = []
+    format_ids: set[str] = set()
+    next_format_articles: list[dict[str, Any]] = []
+    next_bom_lines: list[dict[str, Any]] = []
     for record in data:
         if not isinstance(record, dict):
             continue
         cleaned = normalize_basisproduct_record(record)
-        cleaned["onderdelen"] = [
+        format_id = str(cleaned.get("id", "") or "").strip()
+        if not format_id:
+            continue
+        format_ids.add(format_id)
+
+        fmt_name = str(cleaned.get("omschrijving", "") or "").strip() or format_id
+        try:
+            content_liter = float(cleaned.get("inhoud_per_eenheid_liter", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            content_liter = 0.0
+
+        # Persist as format article.
+        next_format_articles.append(
+            {
+                "id": format_id,
+                "code": str(cleaned.get("code", "") or "").strip(),
+                "name": fmt_name,
+                "kind": "format",
+                "uom": str(cleaned.get("uom", "stuk") or "stuk").strip().lower() or "stuk",
+                "content_liter": content_liter,
+                "active": True,
+            }
+        )
+
+        onderdelen = [
             row
             for row in cleaned.get("onderdelen", [])
             if isinstance(row, dict)
             and str(row.get("verpakkingsonderdeel_id", "") or "") in valid_component_ids
         ]
-        cleaned["totale_verpakkingskosten"] = bereken_basisproduct_totaal(cleaned["onderdelen"])
+        for onderdeel in onderdelen:
+            comp_id = str(onderdeel.get("verpakkingsonderdeel_id", "") or "").strip()
+            try:
+                qty = float(onderdeel.get("hoeveelheid", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            if not comp_id or qty <= 0:
+                continue
+            next_bom_lines.append(
+                {
+                    "id": str(uuid4()),
+                    "parent_article_id": format_id,
+                    "component_article_id": comp_id,
+                    "component_sku_id": "",
+                    "quantity": qty,
+                    "uom": "stuk",
+                    "scrap_pct": 0,
+                    "line_kind": "packaging_component",
+                    "packaging_component_id": comp_id,
+                }
+            )
+
+        cleaned["onderdelen"] = onderdelen
+        cleaned["totale_verpakkingskosten"] = bereken_basisproduct_totaal(onderdelen)
         normalized.append(cleaned)
-    return _save_postgres_dataset("base-product-masters", normalized)
+
+    # Merge into existing datasets (replace by id / parent).
+    kept_articles = [
+        row
+        for row in current_articles
+        if not (isinstance(row, dict) and str(row.get("id", "") or "").strip() in format_ids and str(row.get("kind", "") or "").strip().lower() == "format")
+    ]
+    kept_bom = [
+        row
+        for row in current_bom
+        if not (isinstance(row, dict) and str(row.get("parent_article_id", "") or "").strip() in format_ids)
+    ]
+
+    return bool(
+        postgres_storage.save_dataset("articles", [*kept_articles, *next_format_articles], overwrite=True)
+        and postgres_storage.save_dataset("bom-lines", [*kept_bom, *next_bom_lines], overwrite=True)
+    )
 
 
 def bereken_basisproduct_totaal(onderdelen: list[dict[str, Any]]) -> float:
@@ -2466,52 +2639,215 @@ def normalize_samengesteld_product_record(record: dict[str, Any]) -> dict[str, A
 
 
 def load_samengestelde_producten(year: int | str | None = None) -> list[dict[str, Any]]:
-    """Laadt alle samengestelde producten veilig in."""
-    data = _load_postgres_first_list("composite-product-masters", SAMENGESTELDE_PRODUCTEN_FILE)
-    normalized = [
-        normalize_samengesteld_product_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
-    if year is None:
-        return normalized
+    """Laadt alle samengestelde producten veilig in.
+
+    Phase G: Samengestelde producten zijn nu een projectie van `articles(kind=format)` + `bom-lines`.
+    We tonen hier formats die minstens één format-component bevatten.
+    """
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+
     try:
-        year_value = int(year)
+        year_value = int(year) if year is not None else _fallback_producten_year()
     except (TypeError, ValueError):
+        year_value = _fallback_producten_year()
+
+    articles = postgres_storage.load_dataset("articles", [])
+    bom_lines = postgres_storage.load_dataset("bom-lines", [])
+    if not isinstance(articles, list) or not isinstance(bom_lines, list):
         return []
-    filtered = [
-        record
-        for record in normalized
-        if int(record.get("jaar", 0) or 0) == year_value
-    ]
-    # Samengestelde producten are also treated as masters (year-independent).
-    return filtered or normalized
+
+    by_id = {str(a.get("id", "") or ""): a for a in articles if isinstance(a, dict) and str(a.get("id", "") or "")}
+    format_ids = {
+        aid
+        for aid, a in by_id.items()
+        if str(a.get("kind", "") or "").strip().lower() == "format"
+    }
+    packaging_ids = {
+        aid
+        for aid, a in by_id.items()
+        if str(a.get("kind", "") or "").strip().lower() == "packaging_component"
+    }
+
+    lines_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for line in bom_lines:
+        if not isinstance(line, dict):
+            continue
+        parent_id = str(line.get("parent_article_id", "") or "").strip()
+        if not parent_id or parent_id not in format_ids:
+            continue
+        lines_by_parent.setdefault(parent_id, []).append(line)
+
+    composite_format_ids: list[str] = []
+    for fmt_id in sorted(format_ids):
+        lines = lines_by_parent.get(fmt_id, [])
+        has_format_component = any(
+            str(l.get("component_article_id", "") or "").strip() in format_ids
+            for l in lines
+        )
+        if has_format_component:
+            composite_format_ids.append(fmt_id)
+
+    out: list[dict[str, Any]] = []
+    for fmt_id in composite_format_ids:
+        fmt = by_id.get(fmt_id, {}) if isinstance(by_id.get(fmt_id, {}), dict) else {}
+        fmt_name = str(fmt.get("name", fmt.get("naam", fmt_id)) or fmt_id)
+        basis_rows: list[dict[str, Any]] = []
+        for line in lines_by_parent.get(fmt_id, []):
+            comp_id = str(line.get("component_article_id", "") or "").strip()
+            if not comp_id:
+                continue
+            try:
+                qty = float(line.get("quantity", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            if qty <= 0:
+                continue
+            if comp_id in format_ids:
+                comp = by_id.get(comp_id, {}) if isinstance(by_id.get(comp_id, {}), dict) else {}
+                comp_name = str(comp.get("name", comp.get("naam", comp_id)) or comp_id)
+                try:
+                    comp_liter = float(comp.get("content_liter", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    comp_liter = 0.0
+                basis_rows.append(
+                    {
+                        "basisproduct_id": comp_id,
+                        "omschrijving": comp_name,
+                        "aantal": qty,
+                        "inhoud_per_eenheid_liter": comp_liter,
+                        "totale_inhoud_liter": qty * comp_liter,
+                    }
+                )
+            elif comp_id in packaging_ids:
+                # Legacy composite editor expects packaging refs as "verpakkingsonderdeel:<id>"
+                comp = by_id.get(comp_id, {}) if isinstance(by_id.get(comp_id, {}), dict) else {}
+                comp_name = str(comp.get("name", comp.get("naam", comp_id)) or comp_id)
+                basis_rows.append(
+                    {
+                        "basisproduct_id": f"{SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX}{comp_id}",
+                        "omschrijving": comp_name,
+                        "aantal": qty,
+                        "inhoud_per_eenheid_liter": 0.0,
+                        "totale_inhoud_liter": 0.0,
+                    }
+                )
+
+        out.append(
+            normalize_samengesteld_product_record(
+                {
+                    "id": fmt_id,
+                    "jaar": int(year_value),
+                    "omschrijving": fmt_name,
+                    "basisproducten": basis_rows,
+                }
+            )
+        )
+
+    return out
 
 
 def save_samengestelde_producten(data: list[dict[str, Any]]) -> bool:
-    """Slaat alle samengestelde producten veilig op."""
-    valid_basisproduct_ids = {
-        str(record.get("id", "") or "")
-        for record in load_basisproducten()
-        if isinstance(record, dict) and str(record.get("id", "") or "")
-    }
+    """Slaat alle samengestelde producten veilig op.
+
+    Phase G: schrijft compositie naar `articles(kind=format)` + `bom-lines` (component formats + components).
+    """
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+
+    current_articles = postgres_storage.load_dataset("articles", [])
+    current_bom = postgres_storage.load_dataset("bom-lines", [])
+    if not isinstance(current_articles, list):
+        current_articles = []
+    if not isinstance(current_bom, list):
+        current_bom = []
+
     normalized: list[dict[str, Any]] = []
+    format_ids: set[str] = set()
+    next_format_articles: list[dict[str, Any]] = []
+    next_bom_lines: list[dict[str, Any]] = []
+
     for record in data:
         if not isinstance(record, dict):
             continue
         cleaned = normalize_samengesteld_product_record(record)
-        cleaned["basisproducten"] = [
-            row
-            for row in cleaned.get("basisproducten", [])
-            if isinstance(row, dict)
-            and str(row.get("basisproduct_id", "") or "") in valid_basisproduct_ids
-        ]
-        cleaned["totale_inhoud_liter"] = bereken_samengesteld_product_totaal_inhoud(cleaned["basisproducten"])
-        cleaned["totale_verpakkingskosten"] = bereken_samengesteld_product_totaal_verpakkingskosten(
-            cleaned["basisproducten"]
+        format_id = str(cleaned.get("id", "") or "").strip()
+        if not format_id:
+            continue
+        format_ids.add(format_id)
+        fmt_name = str(cleaned.get("omschrijving", "") or "").strip() or format_id
+
+        # Derived fields.
+        try:
+            content_liter = float(cleaned.get("totale_inhoud_liter", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            content_liter = 0.0
+
+        next_format_articles.append(
+            {
+                "id": format_id,
+                "code": str(cleaned.get("code", "") or "").strip(),
+                "name": fmt_name,
+                "kind": "format",
+                "uom": str(cleaned.get("uom", "stuk") or "stuk").strip().lower() or "stuk",
+                "content_liter": content_liter,
+                "active": True,
+            }
         )
+
+        basis_rows = cleaned.get("basisproducten", [])
+        if not isinstance(basis_rows, list):
+            basis_rows = []
+        for row in basis_rows:
+            if not isinstance(row, dict):
+                continue
+            basis_id = str(row.get("basisproduct_id", "") or "").strip()
+            try:
+                qty = float(row.get("aantal", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            if qty <= 0 or not basis_id:
+                continue
+            comp_article_id = ""
+            if basis_id.startswith(SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX):
+                comp_article_id = basis_id.removeprefix(SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX)
+                line_kind = "packaging_component"
+            else:
+                comp_article_id = basis_id
+                line_kind = "format"
+
+            next_bom_lines.append(
+                {
+                    "id": str(uuid4()),
+                    "parent_article_id": format_id,
+                    "component_article_id": comp_article_id,
+                    "component_sku_id": "",
+                    "quantity": qty,
+                    "uom": "stuk",
+                    "scrap_pct": 0,
+                    "line_kind": line_kind,
+                }
+            )
+
         normalized.append(cleaned)
-    return _save_postgres_dataset("composite-product-masters", normalized)
+
+    kept_articles = [
+        row
+        for row in current_articles
+        if not (isinstance(row, dict) and str(row.get("id", "") or "").strip() in format_ids and str(row.get("kind", "") or "").strip().lower() == "format")
+    ]
+    kept_bom = [
+        row
+        for row in current_bom
+        if not (isinstance(row, dict) and str(row.get("parent_article_id", "") or "").strip() in format_ids)
+    ]
+
+    return bool(
+        postgres_storage.save_dataset("articles", [*kept_articles, *next_format_articles], overwrite=True)
+        and postgres_storage.save_dataset("bom-lines", [*kept_bom, *next_bom_lines], overwrite=True)
+    )
 
 
 def bereken_samengesteld_product_totaal_inhoud(
