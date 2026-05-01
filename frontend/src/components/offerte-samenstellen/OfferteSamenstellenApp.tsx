@@ -734,7 +734,7 @@ export function OfferteSamenstellenApp({
           </div>
         ) : null}
 
-        <div className="cpq-grid">
+        <div className="cpq-grid cpq-grid-two">
           <aside className="cpq-left">
             <WizardSteps
               title="Stappen"
@@ -830,90 +830,6 @@ export function OfferteSamenstellenApp({
               />
             ) : null}
           </main>
-
-          <aside className="cpq-right">
-            <h2 className="cpq-right-kicker">Live inzicht</h2>
-            <div className="cpq-panel">
-              <div className="cpq-live-summary-head">
-                <div className="cpq-panel-title">Totaal</div>
-                <div className="cpq-panel-subtitle">
-                  {scenario.products.length} product{scenario.products.length === 1 ? "" : "en"}
-                </div>
-              </div>
-              <div className="cpq-live-summary-grid">
-                <LiveSummaryMetric label="Omzet" value={euro(rightMetrics.revenueEx)} />
-                <LiveSummaryMetric
-                  label="Kostprijs"
-                  value={euro(
-                    Math.max(
-                      0,
-                      rightMetrics.costEx - rightMetrics.extraCostEx - rightMetrics.transportCostEx
-                    )
-                  )}
-                />
-                <LiveSummaryMetric
-                  label="Transport"
-                  value={euro(rightMetrics.transportCostEx)}
-                />
-                <LiveSummaryMetric
-                  label="Extra kosten"
-                  value={euro(rightMetrics.extraCostEx)}
-                />
-                <LiveSummaryMetric
-                  label="Winst"
-                  value={euro(rightMetrics.revenueEx - rightMetrics.costEx)}
-                />
-                <LiveSummaryMetric
-                  label="Marge %"
-                  value={`${Math.round(rightMetrics.marginPct)}%`}
-                />
-              </div>
-            </div>
-
-            <div className="cpq-panel">
-              <div className="cpq-live-summary-head">
-                <div className="cpq-panel-title">Live break-even</div>
-                <div className="cpq-panel-subtitle">Impact van dit voorstel</div>
-              </div>
-              <div className="cpq-live-summary-grid">
-                <LiveSummaryMetric
-                  label="Break-even omzet"
-                  value={rightMetrics.breakEvenCurrent === null ? "Niet ingesteld" : euro(rightMetrics.breakEvenCurrent)}
-                />
-                <LiveSummaryMetric
-                  label="Boven / onder BE"
-                  value={rightMetrics.breakEvenProjected === null ? "-" : euro(rightMetrics.breakEvenProjected)}
-                />
-                <LiveSummaryMetric
-                  label="BE-dekking"
-                  value={
-                    rightMetrics.breakEvenCoveragePct === null
-                      ? "Niet beschikbaar"
-                      : `${Math.round(rightMetrics.breakEvenCoveragePct)}%`
-                  }
-                />
-              </div>
-              {effectiveBreakEvenSnapshot ? (
-                <p className="cpq-panel-text cpq-break-even-note">
-                  {draftMeta.status === "definitief"
-                    ? `Definitieve offerte rekent met snapshot ${effectiveBreakEvenSnapshot.configName}.`
-                    : hasFrozenBreakEvenSnapshot
-                      ? `Conceptofferte rekent met opgeslagen snapshot ${effectiveBreakEvenSnapshot.configName}. Nieuwe offertes gebruiken de actuele actieve break-even.`
-                      : `Actieve break-even: ${effectiveBreakEvenSnapshot.configName}. Bij de eerste save wordt deze snapshot vastgezet voor deze offerte.`}
-                </p>
-              ) : (
-                <p className="cpq-panel-text cpq-break-even-note">
-                  Geen actieve break-even configuratie voor {currentYear}. De offerte blijft werken,
-                  maar toont nog geen break-even referentie.
-                </p>
-              )}
-            </div>
-
-            <div className="cpq-panel">
-              <h3 className="cpq-panel-title">Actieve voorstel-notitie</h3>
-              <p className="cpq-panel-text">{scenario.note || "Geen notitie toegevoegd."}</p>
-            </div>
-          </aside>
         </div>
 
         {selectedOption ? (

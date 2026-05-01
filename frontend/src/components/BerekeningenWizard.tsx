@@ -50,6 +50,9 @@ type PendingDeleteDialog = {
   title: string;
   body: string;
   onConfirm: () => void;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  hideCancel?: boolean;
 };
 
 type ProductUnitOption = {
@@ -81,6 +84,19 @@ function createId() {
 
 function cloneRecord<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function unwrapDatasetListPayload(value: unknown): GenericRecord[] | null {
+  if (Array.isArray(value)) {
+    return value as GenericRecord[];
+  }
+  if (value && typeof value === "object") {
+    const data = (value as any).data;
+    if (Array.isArray(data)) {
+      return data as GenericRecord[];
+    }
+  }
+  return null;
 }
 
 function parseOptionalNumber(value: unknown): number | null {
@@ -904,8 +920,13 @@ export function BerekeningenWizard({
     rowsRef.current = rows;
   }, [rows]);
 
-  function requestDelete(title: string, body: string, onConfirm: () => void) {
-    setPendingDelete({ title, body, onConfirm });
+  function requestDelete(
+    title: string,
+    body: string,
+    onConfirm: () => void,
+    options?: Pick<PendingDeleteDialog, "confirmLabel" | "cancelLabel" | "hideCancel">
+  ) {
+    setPendingDelete({ title, body, onConfirm, ...options });
   }
 
   function buildResultaatSnapshot(row: GenericRecord): ResultaatSnapshot {
@@ -1071,7 +1092,7 @@ export function BerekeningenWizard({
         cache: "no-store"
       });
       const refreshedRows = refreshedResponse.ok
-        ? ((await refreshedResponse.json()) as GenericRecord[])
+        ? unwrapDatasetListPayload(await refreshedResponse.json()) ?? payload
         : payload;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
@@ -1140,7 +1161,7 @@ export function BerekeningenWizard({
         cache: "no-store"
       });
       const refreshedRows = refreshedResponse.ok
-        ? ((await refreshedResponse.json()) as GenericRecord[])
+        ? unwrapDatasetListPayload(await refreshedResponse.json()) ?? payload
         : payload;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
@@ -1235,7 +1256,7 @@ export function BerekeningenWizard({
       }
       const refreshedResponse = await fetch(KOSTPRIJSVERSIES_API, { cache: "no-store" });
       const refreshedRows = refreshedResponse.ok
-        ? ((await refreshedResponse.json()) as GenericRecord[])
+        ? unwrapDatasetListPayload(await refreshedResponse.json()) ?? rowsRef.current
         : rowsRef.current;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
@@ -2337,6 +2358,7 @@ export function BerekeningenWizard({
                 type="button"
                 className="icon-button-table"
                 aria-label="Kostprijs verwijderen"
+                aria-disabled={!canDeleteCurrent || isSaving}
                 title={
                   !canDeleteCurrent
                     ? isCurrentDefinitive
@@ -2344,18 +2366,30 @@ export function BerekeningenWizard({
                       : "Deze kostprijsversie wordt nog gebruikt en kun je daarom niet verwijderen."
                     : "Verwijderen"
                 }
-                disabled={isSaving || !canDeleteCurrent}
-                onClick={() =>
+                disabled={isSaving}
+                onClick={() => {
+                  if (!canDeleteCurrent) {
+                    requestDelete(
+                      "Kostprijs verwijderen niet mogelijk",
+                      isCurrentDefinitive
+                        ? "Definitieve kostprijsversies kun je niet verwijderen. Activeer een andere versie of maak een nieuwe conceptversie."
+                        : "Deze kostprijsversie wordt nog gebruikt (bijv. door product-activaties) en kun je daarom niet verwijderen.",
+                      () => {},
+                      { confirmLabel: "Ok", hideCancel: true }
+                    );
+                    return;
+                  }
+
                   requestDelete(
                     "Kostprijs verwijderen",
                     `Weet je zeker dat je de kostprijs voor ${String(
                       (current.basisgegevens as GenericRecord)?.biernaam ?? "dit bier"
-                    )} wilt verwijderen?`,
+                    )} wilt verwijderen? Dit kan alleen bij conceptversies.`,
                     () => {
                       void handleDeleteCurrent();
                     }
-                  )
-                }
+                  );
+                }}
               >
                 <TrashIcon />
               </button>
@@ -2483,9 +2517,15 @@ export function BerekeningenWizard({
               </div>
               <div className="confirm-modal-text">{pendingDelete.body}</div>
               <div className="confirm-modal-actions">
-                <button type="button" className="editor-button editor-button-secondary" onClick={() => setPendingDelete(null)}>
-                  Annuleren
-                </button>
+                {!pendingDelete.hideCancel ? (
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => setPendingDelete(null)}
+                  >
+                    {pendingDelete.cancelLabel ?? "Annuleren"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="editor-button"
@@ -2494,7 +2534,7 @@ export function BerekeningenWizard({
                     setPendingDelete(null);
                   }}
                 >
-                  Verwijderen
+                  {pendingDelete.confirmLabel ?? "Verwijderen"}
                 </button>
               </div>
             </div>

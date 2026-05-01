@@ -487,8 +487,8 @@ export function ScenarioAnalyseApp(props: Props) {
                   <div className="data-table" style={{ background: "transparent", border: 0, padding: 0 }}>
                     <table>
                       <tbody>
-                        {savedScenario.overrides.map((ov) => (
-                          <tr key={ov.productId}>
+                        {savedScenario.overrides.map((ov, index) => (
+                          <tr key={`${ov.productId}-${index}`}>
                             <td style={{ fontWeight: 700 }}>Product</td>
                             <td>{ov.productId}</td>
                           </tr>

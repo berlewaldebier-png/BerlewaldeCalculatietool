@@ -2365,7 +2365,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           </div>
         </div>
 
-        <div className="cpq-grid cpq-grid-wide">
+        <div className="cpq-grid cpq-grid-two">
           <aside className="cpq-left">
             <WizardSteps
               title={wizardSidebar.title}
@@ -3858,75 +3858,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               </div>
             </div>
           </main>
-
-          <aside className="cpq-right">
-            <div className="cpq-right-kicker">Impact</div>
-            <div className="cpq-stack">
-              <div className="cpq-block">
-                <div className="cpq-right-kicker" style={{ marginBottom: 8 }}>
-                  Validatie
-                </div>
-                <div className="data-table" style={{ background: "transparent", border: 0, padding: 0 }}>
-                  <table>
-                    <tbody>
-                      {rightRail.validations.map((row) => (
-                        <tr key={`${row.label}-${row.detail}`}>
-                          <td style={{ width: 96, fontWeight: 700 }}>{row.label}</td>
-                          <td>
-                            <span
-                              className="pill"
-                              style={
-                                row.tone === "error"
-                                  ? { background: "var(--status-error-bg)", borderColor: "var(--status-error-border)", color: "var(--status-error-text)" }
-                                  : row.tone === "warn"
-                                    ? { background: "var(--status-warning-bg)", borderColor: "var(--status-warning-border)", color: "var(--status-warning-text)" }
-                                    : { background: "var(--status-success-bg)", borderColor: "var(--status-success-border)", color: "var(--status-success-text)" }
-                              }
-                            >
-                              {row.detail}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="cpq-block">
-                <div className="cpq-right-kicker" style={{ marginBottom: 8 }}>
-                  Wijzigingen ({rightRail.changedCount})
-                </div>
-                {rightRail.changes.length === 0 ? (
-                  <div className="placeholder-block" style={{ margin: 0 }}>
-                    <strong>Nog geen wijzigingen gedetecteerd</strong>
-                    Pas waarden aan in de stappen links om een impact overzicht te zien.
-                  </div>
-                ) : (
-                  <div className="data-table" style={{ background: "transparent", border: 0, padding: 0 }}>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Item</th>
-                          <th>Voor</th>
-                          <th>Na</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rightRail.changes.slice(0, 8).map((row) => (
-                          <tr key={row.label}>
-                            <td style={{ fontWeight: 700 }}>{row.label}</td>
-                            <td>{row.before}</td>
-                            <td>{row.after}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </aside>
         </div>
       </div>
     </div>

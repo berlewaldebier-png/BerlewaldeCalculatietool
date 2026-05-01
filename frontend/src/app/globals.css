@@ -1623,6 +1623,18 @@ a {
   transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 
+.icon-button-table[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.icon-button-table[aria-disabled="true"]:hover {
+  transform: none;
+  border-color: var(--border);
+  background: #ffffff;
+  color: #6d768d;
+}
+
 .icon-button-table:hover {
   transform: translateY(-1px);
   border-color: #e1b7b7;
@@ -2723,6 +2735,10 @@ a {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr) 300px;
   min-height: 860px;
+}
+
+.cpq-grid-two {
+  grid-template-columns: 220px minmax(0, 1fr);
 }
 
 .cpq-grid-wide {
