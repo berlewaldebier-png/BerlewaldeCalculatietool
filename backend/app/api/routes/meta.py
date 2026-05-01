@@ -517,6 +517,113 @@ def post_dev_hard_reset(
     }
 
 
+@router.post("/dev/seed-sku-foundation")
+def post_dev_seed_sku_foundation(
+    year: int = Query(2025, description="Jaar voor seed (prijzen/jaarsetup)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Seed a minimal foundation dataset for the SKU/Article model.
+
+    Dev-only helper; safe to run on an empty DB after /dev/hard-reset.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Seed is alleen toegestaan in local/dev.")
+
+    year_value = int(year)
+    if year_value <= 0:
+        raise HTTPException(status_code=400, detail="Ongeldig jaar.")
+
+    # Minimal packaging components as articles (inventory-ready building blocks).
+    packaging_components = [
+        {"id": "pkg-bottle-33cl", "code": "BOTTLE33", "name": "Fles 33cl", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+        {"id": "pkg-cap", "code": "CAP", "name": "Dop", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+        {"id": "pkg-label", "code": "LABEL", "name": "Label", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+        {"id": "pkg-box-24", "code": "BOX24", "name": "Doos 24", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+    ]
+
+    # Formats (sellable/purchasable forms). These are the "ArticleFormat" layer.
+    formats = [
+        {"id": "fmt-bottle-33cl", "code": "FMT33", "name": "Fles 33cl", "kind": "format", "uom": "stuk", "content_liter": 0.33, "active": True},
+        {"id": "fmt-box-24x33cl", "code": "FMT24X33", "name": "Doos 24×33cl", "kind": "format", "uom": "doos", "content_liter": 24 * 0.33, "active": True},
+        {"id": "fmt-keg-20l", "code": "FMTKEG20", "name": "Fust 20L", "kind": "format", "uom": "fust", "content_liter": 20.0, "active": True},
+    ]
+
+    # BOM for formats (composition of packaging components and nested formats).
+    bom_lines = [
+        # Doos 24×33cl consists of 24 bottles + 24 caps + 24 labels + 1 box.
+        {"id": "bom-24x33-bottle", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "fmt-bottle-33cl", "quantity": 24, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-24x33-cap", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "pkg-cap", "quantity": 24, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-24x33-label", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "pkg-label", "quantity": 24, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-24x33-box", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "pkg-box-24", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+        # Fles 33cl packaging structure (cap+label+bottle). In reality bottle is the container too; we keep it explicit.
+        {"id": "bom-33cl-bottle", "parent_article_id": "fmt-bottle-33cl", "component_article_id": "pkg-bottle-33cl", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-33cl-cap", "parent_article_id": "fmt-bottle-33cl", "component_article_id": "pkg-cap", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-33cl-label", "parent_article_id": "fmt-bottle-33cl", "component_article_id": "pkg-label", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+    ]
+
+    # Minimal beer identity (not a SKU; SKU is beer × format).
+    beers = [
+        {
+            "id": "beer-blond",
+            "biernaam": "Berlewalde Blond",
+            "stijl": "Blond",
+            "alcoholpercentage": 6.0,
+            "belastingsoort": "Accijns",
+            "tarief_accijns": "Hoog",
+            "btw_tarief": "21%",
+        }
+    ]
+
+    # SKUs (beer × format) + example non-beer SKU (hoodie) can be added later.
+    skus = [
+        {"id": "sku-blond-33cl", "beer_id": "beer-blond", "format_article_id": "fmt-bottle-33cl", "code": "BLOND-33", "name": "Berlewalde Blond - Fles 33cl", "active": True},
+        {"id": "sku-blond-24x33", "beer_id": "beer-blond", "format_article_id": "fmt-box-24x33cl", "code": "BLOND-24X33", "name": "Berlewalde Blond - Doos 24×33cl", "active": True},
+        {"id": "sku-blond-keg20", "beer_id": "beer-blond", "format_article_id": "fmt-keg-20l", "code": "BLOND-KEG20", "name": "Berlewalde Blond - Fust 20L", "active": True},
+    ]
+
+    # Minimal packaging component prices (per year) using the existing dataset name the UI expects.
+    packaging_component_prices = [
+        {"id": "price-bottle-33cl", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-bottle-33cl", "prijs_per_stuk": 0.22},
+        {"id": "price-cap", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-cap", "prijs_per_stuk": 0.03},
+        {"id": "price-label", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-label", "prijs_per_stuk": 0.05},
+        {"id": "price-box-24", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-box-24", "prijs_per_stuk": 1.10},
+    ]
+
+    # Provide a basic production year so cost allocation screens have a year anchor.
+    productie = {str(year_value): {"hoeveelheid_inkoop_l": 0, "hoeveelheid_productie_l": 0, "batchgrootte_eigen_productie_l": 0}}
+
+    with postgres_storage.transaction():
+        # SKU/Article core
+        postgres_storage.save_dataset("articles", [*packaging_components, *formats], overwrite=True)
+        postgres_storage.save_dataset("bom-lines", bom_lines, overwrite=True)
+        postgres_storage.save_dataset("skus", skus, overwrite=True)
+
+        # Legacy UI datasets (kept in sync for now)
+        dataset_store.save_dataset(
+            "packaging-components",
+            [
+                {"id": row["id"], "omschrijving": row["name"], "beschikbaar_voor_samengesteld": True}
+                for row in packaging_components
+            ],
+        )
+        dataset_store.save_dataset("packaging-component-prices", packaging_component_prices)
+        dataset_store.save_dataset("bieren", beers)
+        dataset_store.save_dataset("productie", productie)
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return {
+        "ok": True,
+        "year": year_value,
+        "seeded": {
+            "articles": len(packaging_components) + len(formats),
+            "bom_lines": len(bom_lines),
+            "skus": len(skus),
+            "bieren": len(beers),
+            "packaging_component_prices": len(packaging_component_prices),
+        },
+    }
+
+
 @router.get("/dev/seed/audit")
 def get_dev_seed_audit(
     year: int = Query(2025, description="Verwacht jaar voor demo checks (default 2025)."),

@@ -215,6 +215,18 @@ def _purge_legacy_row_once(dataset_name: str) -> None:
 
 def _get_table_storage(name: str):
     """Return a module that implements table-backed load/save for a dataset, or None."""
+    if name == "articles":
+        from app.domain import articles_storage
+
+        return articles_storage
+    if name == "skus":
+        from app.domain import skus_storage
+
+        return skus_storage
+    if name == "bom-lines":
+        from app.domain import bom_storage
+
+        return bom_storage
     if name == "verkoopprijzen":
         from app.domain import sales_pricing_storage
 

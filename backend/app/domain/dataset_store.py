@@ -91,6 +91,10 @@ DATASET_DEFAULTS: dict[str, Any] = {
         {"id": "glas-50cl", "label": "50 cl", "volume_ml": 500, "sort_order": 50, "active": True, "is_default": False},
     ],
     "variabele-kosten": {},
+    # Phase SKU: single source of truth for everything you can buy/sell/consume/compose.
+    "articles": [],
+    "skus": [],
+    "bom-lines": [],
     "products": [],
     "product-years": [],
     "product-year-components": [],
@@ -283,6 +287,9 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "cost-calc-results",
         "cost-calc-lines",
         "quotes",
+        "articles",
+        "skus",
+        "bom-lines",
         *MODEL_A_DATASET_NAMES,
     }
 
