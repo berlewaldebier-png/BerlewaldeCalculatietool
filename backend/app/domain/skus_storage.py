@@ -27,19 +27,25 @@ def ensure_schema() -> None:
                     """
                     CREATE TABLE IF NOT EXISTS skus (
                         id TEXT PRIMARY KEY,
+                        kind TEXT NOT NULL DEFAULT 'beer_format',
                         beer_id TEXT NOT NULL DEFAULT '',
                         format_article_id TEXT NOT NULL DEFAULT '',
+                        article_id TEXT NOT NULL DEFAULT '',
                         code TEXT NOT NULL DEFAULT '',
                         name TEXT NOT NULL DEFAULT '',
                         active BOOLEAN NOT NULL DEFAULT TRUE,
                         payload JSONB NOT NULL DEFAULT '{}'::jsonb,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                        CONSTRAINT skus_beer_format_ux UNIQUE (beer_id, format_article_id)
+                        CONSTRAINT skus_kind_scope_ux UNIQUE (kind, beer_id, format_article_id, article_id)
                     );
                     """
                 )
+                # Migrate from the old uniqueness constraint (beer_id, format_article_id).
+                cur.execute("ALTER TABLE skus DROP CONSTRAINT IF EXISTS skus_beer_format_ux;")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_beer ON skus(beer_id);")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_format ON skus(format_article_id);")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_kind ON skus(kind);")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_article ON skus(article_id);")
             if not postgres_storage.in_transaction():
                 conn.commit()
         _SCHEMA_READY = True
@@ -51,7 +57,7 @@ def load_dataset(default_value: Any) -> Any:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, beer_id, format_article_id, code, name, active, payload, updated_at
+                SELECT id, kind, beer_id, format_article_id, article_id, code, name, active, payload, updated_at
                 FROM skus
                 ORDER BY active DESC, name ASC, id ASC
                 """
@@ -60,7 +66,7 @@ def load_dataset(default_value: Any) -> Any:
     if not rows:
         return default_value
     out: list[dict[str, Any]] = []
-    for rid, beer_id, format_article_id, code, name, active, payload, updated_at in rows:
+    for rid, kind, beer_id, format_article_id, article_id, code, name, active, payload, updated_at in rows:
         if isinstance(payload, str):
             payload = json.loads(payload)
         if not isinstance(payload, dict):
@@ -69,8 +75,10 @@ def load_dataset(default_value: Any) -> Any:
             {
                 **payload,
                 "id": str(rid),
+                "kind": str(kind or "beer_format"),
                 "beer_id": str(beer_id or ""),
                 "format_article_id": str(format_article_id or ""),
+                "article_id": str(article_id or ""),
                 "code": str(code or ""),
                 "name": str(name or ""),
                 "naam": str(name or ""),
@@ -92,14 +100,16 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     params: list[tuple[Any, ...]] = []
     for row in rows:
         rid = str(row.get("id", "") or "").strip() or str(uuid4())
+        kind = str(row.get("kind", "") or "").strip().lower() or "beer_format"
         beer_id = str(row.get("beer_id", "") or "").strip()
         format_article_id = str(row.get("format_article_id", "") or "").strip()
+        article_id = str(row.get("article_id", "") or "").strip()
         code = str(row.get("code", "") or "").strip()
         name = str(row.get("name", row.get("naam", "")) or "").strip()
         active = bool(row.get("active", row.get("actief", True)))
         payload = {k: v for (k, v) in row.items() if k not in {"naam"}}
         incoming_ids.append(rid)
-        params.append((rid, beer_id, format_article_id, code, name, active, json.dumps(payload), now))
+        params.append((rid, kind, beer_id, format_article_id, article_id, code, name, active, json.dumps(payload), now))
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
@@ -111,11 +121,13 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
             if params:
                 cur.executemany(
                     """
-                    INSERT INTO skus (id, beer_id, format_article_id, code, name, active, payload, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    INSERT INTO skus (id, kind, beer_id, format_article_id, article_id, code, name, active, payload, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                     ON CONFLICT (id) DO UPDATE SET
+                        kind = EXCLUDED.kind,
                         beer_id = EXCLUDED.beer_id,
                         format_article_id = EXCLUDED.format_article_id,
+                        article_id = EXCLUDED.article_id,
                         code = EXCLUDED.code,
                         name = EXCLUDED.name,
                         active = EXCLUDED.active,
@@ -127,4 +139,3 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
         if not postgres_storage.in_transaction():
             conn.commit()
     return True
-

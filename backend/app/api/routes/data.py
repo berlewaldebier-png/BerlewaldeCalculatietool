@@ -34,6 +34,7 @@ _STANDARD_DATASETS = [
     "break-even-configuraties",
     "adviesprijzen",
     "channels",
+    "catalog-products",
     "variabele-kosten",
 ]
 

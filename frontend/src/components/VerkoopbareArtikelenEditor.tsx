@@ -430,7 +430,7 @@ export function VerkoopbareArtikelenEditor(props: {
     setStatus("");
     setIsSaving(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/data/dataset/catalog-products`, {
+      const response = await fetch(`${API_BASE_URL}/data/catalog-products`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(stripUiFields(rows))
@@ -440,7 +440,7 @@ export function VerkoopbareArtikelenEditor(props: {
         throw new Error(text || "Opslaan mislukt");
       }
       // Re-fetch canonical rows from the server so the UI always shows what is persisted.
-      const fresh = await fetch(`${API_BASE_URL}/data/dataset/catalog-products`, { method: "GET" });
+      const fresh = await fetch(`${API_BASE_URL}/data/catalog-products`, { method: "GET" });
       if (fresh.ok) {
         const nextPayload = (await fresh.json()) as GenericRecord[];
         const normalized = (Array.isArray(nextPayload) ? nextPayload : [])

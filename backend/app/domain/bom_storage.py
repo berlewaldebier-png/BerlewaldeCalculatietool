@@ -29,6 +29,7 @@ def ensure_schema() -> None:
                         id TEXT PRIMARY KEY,
                         parent_article_id TEXT NOT NULL,
                         component_article_id TEXT NOT NULL,
+                        component_sku_id TEXT NOT NULL DEFAULT '',
                         quantity NUMERIC NOT NULL DEFAULT 0,
                         uom TEXT NOT NULL DEFAULT 'stuk',
                         scrap_pct NUMERIC NOT NULL DEFAULT 0,
@@ -37,8 +38,10 @@ def ensure_schema() -> None:
                     );
                     """
                 )
+                cur.execute("ALTER TABLE bom_lines ADD COLUMN IF NOT EXISTS component_sku_id TEXT NOT NULL DEFAULT '';")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_bom_parent ON bom_lines(parent_article_id);")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_bom_component ON bom_lines(component_article_id);")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_bom_component_sku ON bom_lines(component_sku_id);")
             if not postgres_storage.in_transaction():
                 conn.commit()
         _SCHEMA_READY = True
@@ -50,7 +53,7 @@ def load_dataset(default_value: Any) -> Any:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, parent_article_id, component_article_id, quantity, uom, scrap_pct, payload, updated_at
+                SELECT id, parent_article_id, component_article_id, component_sku_id, quantity, uom, scrap_pct, payload, updated_at
                 FROM bom_lines
                 ORDER BY parent_article_id ASC, updated_at ASC, id ASC
                 """
@@ -59,7 +62,7 @@ def load_dataset(default_value: Any) -> Any:
     if not rows:
         return default_value
     out: list[dict[str, Any]] = []
-    for rid, parent_id, component_id, quantity, uom, scrap_pct, payload, updated_at in rows:
+    for rid, parent_id, component_id, component_sku_id, quantity, uom, scrap_pct, payload, updated_at in rows:
         if isinstance(payload, str):
             payload = json.loads(payload)
         if not isinstance(payload, dict):
@@ -70,6 +73,7 @@ def load_dataset(default_value: Any) -> Any:
                 "id": str(rid),
                 "parent_article_id": str(parent_id or ""),
                 "component_article_id": str(component_id or ""),
+                "component_sku_id": str(component_sku_id or ""),
                 "quantity": float(quantity or 0),
                 "uom": str(uom or "stuk"),
                 "scrap_pct": float(scrap_pct or 0),
@@ -91,6 +95,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
         rid = str(row.get("id", "") or "").strip() or str(uuid4())
         parent_id = str(row.get("parent_article_id", "") or "").strip()
         component_id = str(row.get("component_article_id", "") or "").strip()
+        component_sku_id = str(row.get("component_sku_id", "") or "").strip()
         try:
             quantity = float(row.get("quantity", 0) or 0.0)
         except (TypeError, ValueError):
@@ -102,7 +107,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
             scrap_pct = 0.0
         payload = dict(row)
         incoming_ids.append(rid)
-        params.append((rid, parent_id, component_id, float(quantity), uom, float(scrap_pct), json.dumps(payload), now))
+        params.append((rid, parent_id, component_id, component_sku_id, float(quantity), uom, float(scrap_pct), json.dumps(payload), now))
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
@@ -114,11 +119,12 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
             if params:
                 cur.executemany(
                     """
-                    INSERT INTO bom_lines (id, parent_article_id, component_article_id, quantity, uom, scrap_pct, payload, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    INSERT INTO bom_lines (id, parent_article_id, component_article_id, component_sku_id, quantity, uom, scrap_pct, payload, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         parent_article_id = EXCLUDED.parent_article_id,
                         component_article_id = EXCLUDED.component_article_id,
+                        component_sku_id = EXCLUDED.component_sku_id,
                         quantity = EXCLUDED.quantity,
                         uom = EXCLUDED.uom,
                         scrap_pct = EXCLUDED.scrap_pct,
@@ -130,4 +136,3 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
         if not postgres_storage.in_transaction():
             conn.commit()
     return True
-

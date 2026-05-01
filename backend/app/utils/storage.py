@@ -48,40 +48,243 @@ def _get_kostprijs_activation_storage_module():
     return kostprijs_activation_storage
 
 
-def _get_catalog_products_storage_module():
-    try:
-        from app.domain import catalog_products_storage  # type: ignore
-    except ImportError:
-        return None
-    return catalog_products_storage
-
-
 def load_catalog_products() -> list[dict[str, Any]]:
-    data = _load_postgres_first_list("catalog-products", CATALOG_PRODUCTS_FILE)
-    normalized: list[dict[str, Any]] = []
-    for row in data if isinstance(data, list) else []:
-        if not isinstance(row, dict):
+    """Laadt catalogusproducten.
+
+    Phase E (SKU-aanpak): catalogusproducten worden gemodelleerd als `articles(kind=bundle)`
+    met BOM-regels in `bom_lines` (component_article_id of component_sku_id).
+    We projecteren dit terug naar het legacy dataset-shape dat de UI verwacht.
+    """
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
+
+    articles = postgres_storage.load_dataset("articles", [])
+    skus = postgres_storage.load_dataset("skus", [])
+    bom_lines = postgres_storage.load_dataset("bom-lines", [])
+
+    if not isinstance(articles, list) or not isinstance(skus, list) or not isinstance(bom_lines, list):
+        return []
+
+    bundle_articles = [
+        row
+        for row in articles
+        if isinstance(row, dict) and str(row.get("kind", "") or "").strip().lower() == "bundle"
+    ]
+
+    sku_by_article: dict[str, dict[str, Any]] = {}
+    for sku in skus:
+        if not isinstance(sku, dict):
             continue
-        cleaned = dict(row)
-        cleaned["id"] = str(cleaned.get("id", "") or "")
-        cleaned["naam"] = str(cleaned.get("naam", cleaned.get("name", "")) or "")
-        cleaned["kind"] = str(cleaned.get("kind", "catalog") or "catalog").strip().lower()
-        cleaned["actief"] = bool(cleaned.get("actief", cleaned.get("active", True)))
-        cleaned["bom_lines"] = cleaned.get("bom_lines", []) if isinstance(cleaned.get("bom_lines", []), list) else []
-        if cleaned["id"]:
-            normalized.append(cleaned)
-    return normalized
+        if str(sku.get("kind", "") or "").strip().lower() != "article":
+            continue
+        article_id = str(sku.get("article_id", "") or "").strip()
+        if article_id:
+            sku_by_article[article_id] = sku
+
+    lines_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for line in bom_lines:
+        if not isinstance(line, dict):
+            continue
+        parent_id = str(line.get("parent_article_id", "") or "").strip()
+        if not parent_id:
+            continue
+        lines_by_parent.setdefault(parent_id, []).append(line)
+
+    out: list[dict[str, Any]] = []
+    for article in bundle_articles:
+        rid = str(article.get("id", "") or "").strip()
+        if not rid:
+            continue
+        payload = dict(article)
+        code = str(payload.get("code", "") or "").strip()
+        name = str(payload.get("name", payload.get("naam", "")) or "").strip()
+        active = bool(payload.get("active", payload.get("actief", True)))
+
+        product_lines: list[dict[str, Any]] = []
+        for raw_line in lines_by_parent.get(rid, []):
+            line_payload = dict(raw_line)
+            # Preserve legacy keys for the editor.
+            line_kind = str(line_payload.get("line_kind", "") or "").strip().lower() or "beer"
+            # Ensure ids are stable.
+            line_id = str(line_payload.get("id", "") or "").strip()
+            if not line_id:
+                continue
+            component_sku_id = str(line_payload.get("component_sku_id", "") or "").strip()
+            component_article_id = str(line_payload.get("component_article_id", "") or "").strip()
+
+            normalized = {
+                **line_payload,
+                "id": line_id,
+                "catalog_product_id": rid,
+                "line_kind": line_kind,
+                "quantity": float(line_payload.get("quantity", 0) or 0),
+                # Legacy fields (editor expects these)
+                "bier_id": str(line_payload.get("bier_id", "") or ""),
+                "product_id": str(line_payload.get("product_id", "") or ""),
+                "product_type": str(line_payload.get("product_type", "") or ""),
+                "packaging_component_id": str(line_payload.get("packaging_component_id", "") or ""),
+                # Phase E explicit refs
+                "component_sku_id": component_sku_id,
+                "component_article_id": component_article_id,
+            }
+            product_lines.append(normalized)
+
+        out.append(
+            {
+                **payload,
+                "id": rid,
+                "code": code,
+                "naam": name,
+                "name": name,
+                "kind": "bundle",
+                "actief": active,
+                "active": active,
+                "sku_id": str(sku_by_article.get(rid, {}).get("id", "") or ""),
+                "bom_lines": product_lines,
+            }
+        )
+
+    return out
 
 
 def save_catalog_products(data: list[dict[str, Any]]) -> bool:
-    """Slaat catalogusproducten (giftpacks/diensten/etc) op."""
+    """Slaat catalogusproducten op via Article(kind=bundle) + BOM + SKU(kind=article)."""
     postgres_storage = _get_postgres_storage_module()
-    catalog_storage = _get_catalog_products_storage_module()
-    if postgres_storage is None or catalog_storage is None:
-        raise RuntimeError("Catalog products storage is niet beschikbaar.")
-    if not postgres_storage.uses_postgres():
+    if postgres_storage is None or not postgres_storage.uses_postgres():
         raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
-    return bool(catalog_storage.save_dataset([row for row in data if isinstance(row, dict)], overwrite=True))
+
+    # Load current state so we can do replace semantics for only the bundle subset.
+    current_articles = postgres_storage.load_dataset("articles", [])
+    current_skus = postgres_storage.load_dataset("skus", [])
+    current_bom = postgres_storage.load_dataset("bom-lines", [])
+    if not isinstance(current_articles, list):
+        current_articles = []
+    if not isinstance(current_skus, list):
+        current_skus = []
+    if not isinstance(current_bom, list):
+        current_bom = []
+
+    incoming = [row for row in data if isinstance(row, dict)]
+    incoming_bundle_ids = {str(row.get("id", "") or "").strip() for row in incoming if str(row.get("id", "") or "").strip()}
+
+    # 1) Replace bundle articles.
+    kept_articles = [
+        row
+        for row in current_articles
+        if isinstance(row, dict) and str(row.get("kind", "") or "").strip().lower() != "bundle"
+    ]
+    next_articles: list[dict[str, Any]] = []
+    for row in incoming:
+        rid = str(row.get("id", "") or "").strip()
+        if not rid:
+            continue
+        code = str(row.get("code", "") or "").strip()
+        name = str(row.get("naam", row.get("name", "")) or "").strip()
+        active = bool(row.get("actief", row.get("active", True)))
+        payload = dict(row)
+        # Persist canonical fields on top-level, keep everything else in payload for debug/compat.
+        payload.update({"id": rid, "code": code, "name": name, "kind": "bundle", "active": active, "uom": payload.get("uom", "stuk"), "content_liter": payload.get("content_liter", 0)})
+        next_articles.append(payload)
+
+    # 2) Replace SKUs(kind=article) for bundles (one SKU per bundle article).
+    kept_skus = [
+        row
+        for row in current_skus
+        if isinstance(row, dict) and not (str(row.get("kind", "") or "").strip().lower() == "article" and str(row.get("article_id", "") or "").strip() in incoming_bundle_ids)
+    ]
+    next_bundle_skus: list[dict[str, Any]] = []
+    for bundle in next_articles:
+        rid = str(bundle.get("id", "") or "").strip()
+        if not rid:
+            continue
+        sku_id = str(bundle.get("sku_id", "") or "").strip() or f"sku-bundle-{rid}"
+        next_bundle_skus.append(
+            {
+                "id": sku_id,
+                "kind": "article",
+                "article_id": rid,
+                "beer_id": "",
+                "format_article_id": "",
+                "code": str(bundle.get("code", "") or "").strip(),
+                "name": str(bundle.get("name", bundle.get("naam", "")) or "").strip(),
+                "active": bool(bundle.get("active", bundle.get("actief", True))),
+            }
+        )
+
+    # 3) Replace BOM lines for these bundles.
+    kept_bom = [
+        row
+        for row in current_bom
+        if isinstance(row, dict) and str(row.get("parent_article_id", "") or "").strip() not in incoming_bundle_ids
+    ]
+    next_bundle_bom: list[dict[str, Any]] = []
+    for row in incoming:
+        parent_id = str(row.get("id", "") or "").strip()
+        if not parent_id:
+            continue
+        lines = row.get("bom_lines", [])
+        if not isinstance(lines, list):
+            continue
+        for line in lines:
+            if not isinstance(line, dict):
+                continue
+            line_id = str(line.get("id", "") or "").strip() or str(uuid4())
+            line_kind = str(line.get("line_kind", "") or "").strip().lower() or "beer"
+            component_article_id = str(line.get("component_article_id", "") or "").strip()
+            component_sku_id = str(line.get("component_sku_id", "") or "").strip()
+            # Legacy editor inputs: resolve beer lines into component_sku_id if possible.
+            if not component_sku_id and line_kind in {"beer", "beer_product"}:
+                bier_id = str(line.get("bier_id", "") or "").strip()
+                product_id = str(line.get("product_id", "") or "").strip()
+                if bier_id and product_id:
+                    # Find the SKU for (beer_id, format_article_id==product_id).
+                    for sku in current_skus:
+                        if not isinstance(sku, dict):
+                            continue
+                        if str(sku.get("kind", "") or "beer_format").strip().lower() != "beer_format":
+                            continue
+                        if str(sku.get("beer_id", "") or "").strip() == bier_id and str(sku.get("format_article_id", "") or "").strip() == product_id:
+                            component_sku_id = str(sku.get("id", "") or "").strip()
+                            break
+            try:
+                quantity = float(line.get("quantity", line.get("aantal", 0)) or 0.0)
+            except (TypeError, ValueError):
+                quantity = 0.0
+            uom = str(line.get("uom", "stuk") or "stuk").strip().lower()
+            try:
+                scrap_pct = float(line.get("scrap_pct", 0) or 0.0)
+            except (TypeError, ValueError):
+                scrap_pct = 0.0
+            payload = dict(line)
+            payload.update(
+                {
+                    "id": line_id,
+                    "parent_article_id": parent_id,
+                    "component_article_id": component_article_id,
+                    "component_sku_id": component_sku_id,
+                    "line_kind": line_kind,
+                }
+            )
+            next_bundle_bom.append(
+                {
+                    **payload,
+                    "id": line_id,
+                    "parent_article_id": parent_id,
+                    "component_article_id": component_article_id,
+                    "component_sku_id": component_sku_id,
+                    "quantity": quantity,
+                    "uom": uom,
+                    "scrap_pct": scrap_pct,
+                }
+            )
+
+    # Persist: we overwrite full datasets to keep things deterministic in dev.
+    return bool(
+        postgres_storage.save_dataset("articles", [*kept_articles, *next_articles], overwrite=True)
+        and postgres_storage.save_dataset("skus", [*kept_skus, *next_bundle_skus], overwrite=True)
+        and postgres_storage.save_dataset("bom-lines", [*kept_bom, *next_bundle_bom], overwrite=True)
+    )
 
 
 def _load_postgres_dataset(dataset_name: str) -> Any | None:
@@ -101,9 +304,8 @@ def _load_postgres_dataset(dataset_name: str) -> Any | None:
 
         return fixed_costs_storage.load_grouped_by_year()
     if dataset_name == "catalog-products":
-        from app.domain import catalog_products_storage  # type: ignore
-
-        return catalog_products_storage.load_dataset([])
+        # Phase E: project bundles from Article/BOM/SKU into the legacy dataset shape.
+        return load_catalog_products()
 
     payload = postgres_storage.load_dataset(dataset_name, None)
     _fail_if_wrapped_payload(dataset_name, payload)
@@ -155,11 +357,9 @@ def _save_postgres_dataset(dataset_name: str, data: Any) -> bool:
             raise ValueError("Ongeldig payload voor 'vaste-kosten': verwacht dict.")
         return bool(fixed_costs_storage.save_grouped_by_year(data))
     if dataset_name == "catalog-products":
-        from app.domain import catalog_products_storage  # type: ignore
-
         if not isinstance(data, list):
             raise ValueError("Ongeldig payload voor 'catalog-products': verwacht list.")
-        return bool(catalog_products_storage.save_dataset([row for row in data if isinstance(row, dict)], overwrite=True))
+        return bool(save_catalog_products([row for row in data if isinstance(row, dict)]))
 
     return postgres_storage.save_dataset(dataset_name, data, overwrite=True)
 

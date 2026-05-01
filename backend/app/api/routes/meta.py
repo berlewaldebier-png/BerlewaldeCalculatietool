@@ -585,9 +585,21 @@ def post_dev_seed_sku_foundation(
 
     # SKUs (beer × format) + example non-beer SKU (hoodie) can be added later.
     skus = [
-        {"id": "sku-blond-33cl", "beer_id": "beer-blond", "format_article_id": "fmt-bottle-33cl", "code": "BLOND-33", "name": "Berlewalde Blond - Fles 33cl", "active": True},
-        {"id": "sku-blond-24x33", "beer_id": "beer-blond", "format_article_id": "fmt-box-24x33cl", "code": "BLOND-24X33", "name": "Berlewalde Blond - Doos 24×33cl", "active": True},
-        {"id": "sku-blond-keg20", "beer_id": "beer-blond", "format_article_id": "fmt-keg-20l", "code": "BLOND-KEG20", "name": "Berlewalde Blond - Fust 20L", "active": True},
+        {"id": "sku-blond-33cl", "kind": "beer_format", "beer_id": "beer-blond", "format_article_id": "fmt-bottle-33cl", "article_id": "", "code": "BLOND-33", "name": "Berlewalde Blond - Fles 33cl", "active": True},
+        {"id": "sku-blond-24x33", "kind": "beer_format", "beer_id": "beer-blond", "format_article_id": "fmt-box-24x33cl", "article_id": "", "code": "BLOND-24X33", "name": "Berlewalde Blond - Doos 24×33cl", "active": True},
+        {"id": "sku-blond-keg20", "kind": "beer_format", "beer_id": "beer-blond", "format_article_id": "fmt-keg-20l", "article_id": "", "code": "BLOND-KEG20", "name": "Berlewalde Blond - Fust 20L", "active": True},
+    ]
+
+    # Demo bundle: model catalog/giftpacks as Article(kind=bundle) + SKU(kind=article) + BOM (can mix SKUs + articles).
+    bundle_articles = [
+        {"id": "bundle-giftpack-4", "code": "GIFT4", "name": "Geschenkset 4 bieren", "kind": "bundle", "uom": "set", "content_liter": 4 * 0.33, "active": True},
+    ]
+    bundle_skus = [
+        {"id": "sku-bundle-giftpack-4", "kind": "article", "beer_id": "", "format_article_id": "", "article_id": "bundle-giftpack-4", "code": "GIFT4", "name": "Geschenkset 4 bieren", "active": True},
+    ]
+    bundle_bom_lines = [
+        {"id": "bom-gift4-blond-33cl", "parent_article_id": "bundle-giftpack-4", "component_article_id": "", "component_sku_id": "sku-blond-33cl", "quantity": 4, "uom": "stuk", "scrap_pct": 0, "line_kind": "beer", "bier_id": "beer-blond", "product_id": "fmt-bottle-33cl", "product_type": "basis"},
+        {"id": "bom-gift4-box", "parent_article_id": "bundle-giftpack-4", "component_article_id": "pkg-box-24", "component_sku_id": "", "quantity": 1, "uom": "stuk", "scrap_pct": 0, "line_kind": "packaging_component", "packaging_component_id": "pkg-box-24"},
     ]
 
     # Minimal packaging component prices (per year) using the existing dataset name the UI expects.
@@ -603,9 +615,9 @@ def post_dev_seed_sku_foundation(
 
     with postgres_storage.transaction():
         # SKU/Article core
-        postgres_storage.save_dataset("articles", [*packaging_components, *formats], overwrite=True)
-        postgres_storage.save_dataset("bom-lines", bom_lines, overwrite=True)
-        postgres_storage.save_dataset("skus", skus, overwrite=True)
+        postgres_storage.save_dataset("articles", [*packaging_components, *formats, *bundle_articles], overwrite=True)
+        postgres_storage.save_dataset("bom-lines", [*bom_lines, *bundle_bom_lines], overwrite=True)
+        postgres_storage.save_dataset("skus", [*skus, *bundle_skus], overwrite=True)
 
         # Legacy UI datasets (kept in sync for now)
         dataset_store.save_dataset(
@@ -707,9 +719,9 @@ def post_dev_seed_sku_foundation(
         "ok": True,
         "year": year_value,
         "seeded": {
-            "articles": len(packaging_components) + len(formats),
-            "bom_lines": len(bom_lines),
-            "skus": len(skus),
+            "articles": len(packaging_components) + len(formats) + len(bundle_articles),
+            "bom_lines": len(bom_lines) + len(bundle_bom_lines),
+            "skus": len(skus) + len(bundle_skus),
             "bieren": len(beers),
             "packaging_component_prices": len(packaging_component_prices),
             "with_demo": bool(with_demo),
