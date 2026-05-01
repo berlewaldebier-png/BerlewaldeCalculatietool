@@ -580,10 +580,8 @@ def normalize_kostprijsproduct_activering_record(
     updated_at = str(source.get("updated_at", "") or "") or created_at
     return {
         "id": str(source.get("id", "") or uuid4()),
-        "bier_id": str(source.get("bier_id", "") or ""),
+        "sku_id": str(source.get("sku_id", "") or ""),
         "jaar": int(source.get("jaar", 0) or 0),
-        "product_id": str(source.get("product_id", "") or ""),
-        "product_type": str(source.get("product_type", "") or ""),
         "kostprijsversie_id": str(source.get("kostprijsversie_id", "") or ""),
         "effectief_vanaf": str(
             source.get("effectief_vanaf", "") or source.get("effective_from", "") or ""
@@ -593,6 +591,10 @@ def normalize_kostprijsproduct_activering_record(
         ),
         "created_at": created_at,
         "updated_at": updated_at,
+        # Legacy keys retained as empty placeholders; the canonical key is `sku_id`.
+        "bier_id": str(source.get("bier_id", "") or ""),
+        "product_id": str(source.get("product_id", "") or ""),
+        "product_type": str(source.get("product_type", "") or ""),
     }
 
 
@@ -627,10 +629,16 @@ def load_kostprijsproductactiveringen() -> list[dict[str, Any]]:
     ]
 
 
-def _known_bier_ids() -> set[str]:
+def _known_sku_ids() -> set[str]:
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is None or not postgres_storage.uses_postgres():
+        return set()
+    payload = postgres_storage.load_dataset("skus", [])
+    if not isinstance(payload, list):
+        return set()
     return {
         str(record.get("id", "") or "")
-        for record in load_bieren()
+        for record in payload
         if isinstance(record, dict) and str(record.get("id", "") or "")
     }
 
@@ -643,49 +651,29 @@ def _known_kostprijsversie_ids() -> set[str]:
     }
 
 
-def _known_product_refs() -> set[tuple[str, str]]:
-    refs: set[tuple[str, str]] = set()
-    for record in load_basisproducten():
-        if not isinstance(record, dict):
-            continue
-        product_id = str(record.get("id", "") or "")
-        if product_id:
-            refs.add((product_id, "basis"))
-    for record in load_samengestelde_producten():
-        if not isinstance(record, dict):
-            continue
-        product_id = str(record.get("id", "") or "")
-        if product_id:
-            refs.add((product_id, "samengesteld"))
-    return refs
-
-
 def _validate_kostprijsproductactiveringen(
     rows: list[dict[str, Any]],
     *,
-    known_bieren: set[str] | None = None,
+    known_skus: set[str] | None = None,
     known_versions: set[str] | None = None,
-    known_products: set[tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    known_bieren = known_bieren if known_bieren is not None else _known_bier_ids()
+    known_skus = known_skus if known_skus is not None else _known_sku_ids()
     known_versions = known_versions if known_versions is not None else _known_kostprijsversie_ids()
-    known_products = known_products if known_products is not None else _known_product_refs()
     validated: list[dict[str, Any]] = []
-    seen_keys: set[tuple[str, int, str]] = set()
+    seen_keys: set[tuple[str, int]] = set()
     invalid: list[dict[str, Any]] = []
-    duplicates: list[tuple[str, int, str]] = []
+    duplicates: list[tuple[str, int]] = []
     for row in rows:
         normalized = normalize_kostprijsproduct_activering_record(row)
-        bier_id = str(normalized.get("bier_id", "") or "")
-        product_id = str(normalized.get("product_id", "") or "")
-        product_type = str(normalized.get("product_type", "") or "").strip().lower()
+        sku_id = str(normalized.get("sku_id", "") or "")
         version_id = str(normalized.get("kostprijsversie_id", "") or "")
-        unique_key = (bier_id, int(normalized.get("jaar", 0) or 0), product_id)
-        if not bier_id or bier_id not in known_bieren:
-            invalid.append({"reason": "unknown_bier", "row": normalized})
+        year_value = int(normalized.get("jaar", 0) or 0)
+        unique_key = (sku_id, year_value)
+        if not sku_id or sku_id not in known_skus:
+            invalid.append({"reason": "unknown_sku", "row": normalized})
             continue
-        if not product_id or (product_id, product_type) not in known_products:
-            invalid.append({"reason": "unknown_product", "row": normalized})
+        if year_value <= 0:
+            invalid.append({"reason": "invalid_year", "row": normalized})
             continue
         if not version_id or version_id not in known_versions:
             invalid.append({"reason": "unknown_kostprijsversie", "row": normalized})
@@ -710,7 +698,7 @@ def _validate_kostprijsproductactiveringen(
             f"Aantallen per reden: {counts}. Voorbeelden: {samples}."
         )
     if duplicates:
-        raise ValueError("Dubbele kostprijsproductactiveringen gevonden voor hetzelfde bier/jaar/product.")
+        raise ValueError("Dubbele kostprijsproductactiveringen gevonden voor hetzelfde sku/jaar.")
     return validated
 
 
@@ -748,7 +736,7 @@ def upsert_kostprijsproductactiveringen(
     *,
     context: dict[str, Any] | None = None,
 ) -> bool:
-    """Voegt activaties toe of werkt ze bij per (bier,jaar,product) zonder de volledige set te vervangen."""
+    """Voegt activaties toe of werkt ze bij per (sku,jaar) zonder de volledige set te vervangen."""
     normalized = _validate_kostprijsproductactiveringen(
         [row for row in data if isinstance(row, dict)]
     )
@@ -772,17 +760,13 @@ def upsert_kostprijsproductactiveringen(
 
     # Fallback: merge and overwrite the dataset payload.
     existing = load_kostprijsproductactiveringen()
-    by_key: dict[tuple[str, int, str], dict[str, Any]] = {
-        (
-            str(row.get("bier_id", "") or ""),
-            int(row.get("jaar", 0) or 0),
-            str(row.get("product_id", "") or ""),
-        ): normalize_kostprijsproduct_activering_record(row)
+    by_key: dict[tuple[str, int], dict[str, Any]] = {
+        (str(row.get("sku_id", "") or ""), int(row.get("jaar", 0) or 0)): normalize_kostprijsproduct_activering_record(row)
         for row in existing
         if isinstance(row, dict)
     }
     for row in normalized:
-        key = (str(row.get("bier_id", "") or ""), int(row.get("jaar", 0) or 0), str(row.get("product_id", "") or ""))
+        key = (str(row.get("sku_id", "") or ""), int(row.get("jaar", 0) or 0))
         by_key[key] = normalize_kostprijsproduct_activering_record(row)
     return bool(_save_postgres_dataset("kostprijsproductactiveringen", list(by_key.values())))
 
@@ -6542,6 +6526,17 @@ def activate_kostprijsversie(
     bier_id = str(target.get("bier_id", "") or "")
     jaar = int(target.get("jaar", 0) or 0)
     effective_from = _now_iso()
+    # Map legacy product refs to SKU ids.
+    postgres_storage = _get_postgres_storage_module()
+    sku_rows = postgres_storage.load_dataset("skus", []) if postgres_storage is not None and postgres_storage.uses_postgres() else []
+    sku_by_id = {str(row.get("id", "") or ""): row for row in sku_rows if isinstance(row, dict)}
+    sku_by_beer_format: dict[tuple[str, str], str] = {}
+    for row in sku_by_id.values():
+        sku_id = str(row.get("id", "") or "").strip()
+        beer_key = str(row.get("beer_id", "") or "").strip()
+        format_key = str(row.get("format_article_id", "") or "").strip()
+        if sku_id and beer_key and format_key:
+            sku_by_beer_format[(beer_key, format_key)] = sku_id
     target_refs = _resolve_kostprijsproduct_refs(
         target,
         {
@@ -6563,16 +6558,21 @@ def activate_kostprijsversie(
         product_id = str(ref.get("product_id", "") or "")
         if not product_id:
             continue
+        sku_id = product_id if product_id in sku_by_id else sku_by_beer_format.get((bier_id, product_id), "")
+        if not sku_id:
+            continue
         activation_rows.append(
             {
-                "bier_id": bier_id,
+                "sku_id": sku_id,
                 "jaar": jaar,
-                "product_id": product_id,
-                "product_type": str(ref.get("product_type", "") or ""),
                 "kostprijsversie_id": str(kostprijsversie_id or ""),
                 "effectief_vanaf": effective_from,
                 "created_at": effective_from,
                 "updated_at": effective_from,
+                # Keep legacy fields for debugging/exports.
+                "bier_id": bier_id,
+                "product_id": product_id,
+                "product_type": str(ref.get("product_type", "") or ""),
             }
         )
 
@@ -6657,19 +6657,33 @@ def activate_kostprijsversie_products(
     bier_id = str(target.get("bier_id", "") or "")
     jaar = int(target.get("jaar", 0) or 0)
     effective_from = _now_iso()
+    postgres_storage = _get_postgres_storage_module()
+    sku_rows = postgres_storage.load_dataset("skus", []) if postgres_storage is not None and postgres_storage.uses_postgres() else []
+    sku_by_id = {str(row.get("id", "") or ""): row for row in sku_rows if isinstance(row, dict)}
+    sku_by_beer_format: dict[tuple[str, str], str] = {}
+    for row in sku_by_id.values():
+        sku_id = str(row.get("id", "") or "").strip()
+        beer_key = str(row.get("beer_id", "") or "").strip()
+        format_key = str(row.get("format_article_id", "") or "").strip()
+        if sku_id and beer_key and format_key:
+            sku_by_beer_format[(beer_key, format_key)] = sku_id
     activation_rows: list[dict[str, Any]] = []
     for product_id in valid_product_ids:
         ref = target_ref_by_product_id[product_id]
+        sku_id = product_id if product_id in sku_by_id else sku_by_beer_format.get((bier_id, product_id), "")
+        if not sku_id:
+            continue
         activation_rows.append(
             {
-                "bier_id": bier_id,
+                "sku_id": sku_id,
                 "jaar": jaar,
-                "product_id": product_id,
-                "product_type": str(ref.get("product_type", "") or ""),
                 "kostprijsversie_id": str(kostprijsversie_id or ""),
                 "effectief_vanaf": effective_from,
                 "created_at": effective_from,
                 "updated_at": effective_from,
+                "bier_id": bier_id,
+                "product_id": product_id,
+                "product_type": str(ref.get("product_type", "") or ""),
             }
         )
 

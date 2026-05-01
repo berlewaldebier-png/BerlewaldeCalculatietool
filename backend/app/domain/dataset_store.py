@@ -438,7 +438,7 @@ def save_dataset(name: str, data: Any) -> bool:
         return saved
     if name == "kostprijsproductactiveringen" and isinstance(data, list):
         payload = [record for record in data if isinstance(record, dict)]
-        saved = save_kostprijsproductactiveringen(payload)
+        saved = postgres_storage.save_dataset(name, payload, overwrite=True)
         if saved:
             dashboard_service.invalidate_dashboard_summary_cache()
         return saved
@@ -494,7 +494,11 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
             continue
         elif dataset_name == "kostprijsproductactiveringen":
             payload = json_seed.load_dataset("kostprijsproductactiveringen")
-            results[dataset_name] = save_kostprijsproductactiveringen(payload if isinstance(payload, list) else [])
+            results[dataset_name] = postgres_storage.save_dataset(
+                dataset_name,
+                payload if isinstance(payload, list) else [],
+                overwrite=overwrite,
+            )
             continue
         elif dataset_name in {"kostprijsversies", "berekeningen"}:
             payload = json_seed.load_dataset("kostprijsversies") if dataset_name == "kostprijsversies" else json_seed.load_dataset("berekeningen")
@@ -2204,40 +2208,21 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
     require_postgres()
 
     from app.domain import (
-        product_registry_storage,
         cost_versions_storage,
-        kostprijs_scenario_inkoop_storage,
         kostprijs_activation_storage,
+        kostprijs_scenario_inkoop_storage,
+        skus_storage,
     )
 
-    product_registry_storage.ensure_schema()
     cost_versions_storage.ensure_schema()
     kostprijs_scenario_inkoop_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
+    skus_storage.ensure_schema()
 
-    # NOTE: Do not rebuild the products registry here.
-    # Rebuilding (`DELETE FROM products_master`) is destructive and can fail once FK-dependent
-    # rows exist (even with NOT VALID constraints). Validation should be non-destructive.
     report: dict[str, Any] = {"ok": True, "validated": [], "already_valid": [], "missing": [], "failed": []}
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM products_master")
-            count_row = cur.fetchone()
-            report["products_master_count"] = int((count_row[0] if count_row else 0) or 0)
-    if int(report.get("products_master_count", 0) or 0) <= 0:
-        report["ok"] = False
-        report["failed"].append(
-            {
-                "constraint": "products_master",
-                "table": "products_master",
-                "error": "products_master is leeg; rebuild registry via seed import of admin tooling.",
-            }
-        )
 
     targets: list[dict[str, str]] = [
-        {"constraint": "fk_cost_version_rows_product", "table": "cost_version_product_rows"},
-        {"constraint": "fk_kostprijs_scenario_product", "table": "kostprijs_scenario_inkoop_rows"},
-        {"constraint": "fk_kostprijs_activations_product", "table": "kostprijs_product_activations"},
+        {"constraint": "fk_cost_version_sku_rows_sku", "table": "cost_version_sku_rows"},
     ]
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:

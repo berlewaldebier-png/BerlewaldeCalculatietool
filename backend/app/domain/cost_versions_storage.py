@@ -21,9 +21,6 @@ def ensure_schema() -> None:
         if _SCHEMA_READY:
             return
         postgres_storage.ensure_schema()
-        # Ensure master registry exists before we add FK constraints.
-        from app.domain import product_registry_storage
-        product_registry_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -97,13 +94,10 @@ def ensure_schema() -> None:
                 )
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS cost_version_product_rows (
+                    CREATE TABLE IF NOT EXISTS cost_version_sku_rows (
                         id TEXT PRIMARY KEY,
                         version_id TEXT NOT NULL REFERENCES cost_versions(id) ON DELETE CASCADE,
-                        kind TEXT NOT NULL,
-                        bier_id TEXT NOT NULL DEFAULT '',
-                        product_id TEXT NOT NULL DEFAULT '',
-                        product_type TEXT NOT NULL DEFAULT '',
+                        sku_id TEXT NOT NULL,
                         verpakking_label TEXT NOT NULL DEFAULT '',
                         inkoop NUMERIC NOT NULL DEFAULT 0,
                         verpakkingskosten NUMERIC NOT NULL DEFAULT 0,
@@ -114,28 +108,26 @@ def ensure_schema() -> None:
                     );
                     """
                 )
-                # Enforce product_id integrity against the master registry for snapshot rows.
-                # NOT VALID keeps existing legacy rows from blocking startup; new rows are checked.
+                # Keep SKU integrity when possible (NOT VALID avoids blocking startup on legacy data).
                 cur.execute(
                     """
                     DO $$
                     BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_constraint WHERE conname = 'fk_cost_version_rows_product'
-                        ) THEN
-                            ALTER TABLE cost_version_product_rows
-                            ADD CONSTRAINT fk_cost_version_rows_product
-                            FOREIGN KEY (product_id) REFERENCES products_master(id) ON DELETE RESTRICT
+                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='skus')
+                           AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_cost_version_sku_rows_sku') THEN
+                            ALTER TABLE cost_version_sku_rows
+                            ADD CONSTRAINT fk_cost_version_sku_rows_sku
+                            FOREIGN KEY (sku_id) REFERENCES skus(id) ON DELETE RESTRICT
                             NOT VALID;
                         END IF;
                     END $$;
                     """
                 )
                 cur.execute(
-                    "CREATE INDEX IF NOT EXISTS ix_cost_version_product_rows_version ON cost_version_product_rows(version_id)"
+                    "CREATE INDEX IF NOT EXISTS ix_cost_version_sku_rows_version ON cost_version_sku_rows(version_id)"
                 )
                 cur.execute(
-                    "CREATE INDEX IF NOT EXISTS ix_cost_version_product_rows_product ON cost_version_product_rows(product_id)"
+                    "CREATE INDEX IF NOT EXISTS ix_cost_version_sku_rows_sku ON cost_version_sku_rows(sku_id)"
                 )
                 cur.execute(
                     """
@@ -206,26 +198,35 @@ def load_dataset(default_value: Any) -> Any:
             version_rows = cur.fetchall()
             cur.execute(
                 """
-                SELECT id, version_id, kind, bier_id, product_id, product_type, verpakking_label,
+                SELECT id, version_id, sku_id, verpakking_label,
                        inkoop, verpakkingskosten, indirecte_kosten, accijns, kostprijs, sort_index
-                FROM cost_version_product_rows
-                ORDER BY version_id, kind, sort_index, id
+                FROM cost_version_sku_rows
+                ORDER BY version_id, sort_index, id
                 """
             )
-            product_rows = cur.fetchall()
+            sku_rows = cur.fetchall()
+            sku_meta: dict[str, dict[str, Any]] = {}
+            try:
+                cur.execute("SELECT id, beer_id, format_article_id, name, code FROM skus")
+                for sid, beer_id, format_article_id, name, code in cur.fetchall() or []:
+                    sku_meta[str(sid)] = {
+                        "id": str(sid),
+                        "beer_id": str(beer_id or ""),
+                        "format_article_id": str(format_article_id or ""),
+                        "name": str(name or ""),
+                        "code": str(code or ""),
+                    }
+            except Exception:
+                sku_meta = {}
 
     if not version_rows:
         return default_value
 
     basis_by_version: dict[str, list[dict[str, Any]]] = {}
-    sameng_by_version: dict[str, list[dict[str, Any]]] = {}
     for (
         row_id,
         version_id,
-        kind,
-        bier_id,
-        product_id,
-        product_type,
+        sku_id,
         verpakking_label,
         inkoop,
         verpakkingskosten,
@@ -233,15 +234,20 @@ def load_dataset(default_value: Any) -> Any:
         accijns,
         kostprijs,
         _sort_index,
-    ) in product_rows:
+    ) in sku_rows:
         verpakking_text = str(verpakking_label or "")
         inkoop_value = float(inkoop or 0)
         indirect_value = float(indirecte_kosten or 0)
+        sku_text = str(sku_id or "")
+        meta = sku_meta.get(sku_text, {})
+        beer_id_text = str(meta.get("beer_id", "") or "")
+        format_article_id = str(meta.get("format_article_id", "") or "")
         payload: dict[str, Any] = {
             "id": str(row_id),
-            "bier_id": str(bier_id or ""),
-            "product_id": str(product_id or ""),
-            "product_type": str(product_type or ""),
+            "sku_id": sku_text,
+            "bier_id": beer_id_text,
+            "product_id": format_article_id,
+            "product_type": "sku",
             "verpakking": verpakking_text,
             "verpakkingseenheid": verpakking_text,
             "verpakking_label": str(verpakking_label or ""),
@@ -259,10 +265,7 @@ def load_dataset(default_value: Any) -> Any:
             "accijns": float(accijns or 0),
             "kostprijs": float(kostprijs or 0),
         }
-        if str(kind or "") == "samengesteld":
-            sameng_by_version.setdefault(str(version_id), []).append(payload)
-        else:
-            basis_by_version.setdefault(str(version_id), []).append(payload)
+        basis_by_version.setdefault(str(version_id), []).append(payload)
 
     out: list[dict[str, Any]] = []
     for (
@@ -298,7 +301,7 @@ def load_dataset(default_value: Any) -> Any:
             producten = {}
         producten = dict(producten)
         producten["basisproducten"] = basis_by_version.get(str(version_id), [])
-        producten["samengestelde_producten"] = sameng_by_version.get(str(version_id), [])
+        producten["samengestelde_producten"] = []
 
         # Provide row-level display metadata (biernaam/soort) derived from the version itself,
         # so UIs can render a stable summary without having to recompute/guess.
@@ -430,6 +433,17 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                 )
                 row_params: list[tuple[Any, ...]] = []
                 row_ids_by_version: dict[str, set[str]] = {}
+                sku_by_beer_format: dict[tuple[str, str], str] = {}
+                try:
+                    cur.execute("SELECT id, beer_id, format_article_id FROM skus")
+                    for sid, beer_id, format_article_id in cur.fetchall() or []:
+                        sid_text = str(sid or "")
+                        beer_text = str(beer_id or "")
+                        fmt_text = str(format_article_id or "")
+                        if sid_text and beer_text and fmt_text:
+                            sku_by_beer_format[(beer_text, fmt_text)] = sid_text
+                except Exception:
+                    sku_by_beer_format = {}
                 for version in records:
                     version_id = str(version.get("id", "") or "").strip()
                     if not version_id:
@@ -441,22 +455,25 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     sameng = (producten or {}).get("samengestelde_producten") if isinstance(producten, dict) else []
 
                     sort_index = 0
-                    for item in basis if isinstance(basis, list) else []:
+                    for item in (basis if isinstance(basis, list) else []) + (sameng if isinstance(sameng, list) else []):
                         if not isinstance(item, dict):
                             continue
-                        product_id = str(item.get("product_id", "") or "").strip()
+                        sku_id = str(item.get("sku_id", "") or "").strip()
+                        if not sku_id:
+                            product_id = str(item.get("product_id", "") or "").strip()
+                            if product_id:
+                                sku_id = sku_by_beer_format.get((bier_id, product_id), "")
+                        if not sku_id:
+                            continue
                         row_id = str(item.get("id", "") or "").strip() or str(
-                            uuid5(NAMESPACE_URL, f"cost_version_row:{version_id}:basis:{product_id}")
+                            uuid5(NAMESPACE_URL, f"cost_version_sku_row:{version_id}:{sku_id}")
                         )
                         row_ids_by_version.setdefault(version_id, set()).add(row_id)
                         row_params.append(
                             (
                                 row_id,
                                 version_id,
-                                "basis",
-                                bier_id,
-                                product_id,
-                                str(item.get("product_type", "") or ""),
+                                sku_id,
                                 str(item.get("verpakkingseenheid", item.get("verpakking_label", "")) or ""),
                                 float(item.get("inkoop", item.get("primaire_kosten", item.get("variabele_kosten", 0))) or 0),
                                 float(item.get("verpakkingskosten", 0) or 0),
@@ -504,28 +521,25 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                             continue
                         ids = sorted(row_ids_by_version.get(version_id, set()))
                         if not ids:
-                            cur.execute("DELETE FROM cost_version_product_rows WHERE version_id = %s", (version_id,))
+                            cur.execute("DELETE FROM cost_version_sku_rows WHERE version_id = %s", (version_id,))
                             continue
                         placeholders = ", ".join(["%s"] * len(ids))
                         cur.execute(
-                            f"DELETE FROM cost_version_product_rows WHERE version_id = %s AND id NOT IN ({placeholders})",
+                            f"DELETE FROM cost_version_sku_rows WHERE version_id = %s AND id NOT IN ({placeholders})",
                             (version_id, *ids),
                         )
 
                 if row_params:
                     cur.executemany(
                         """
-                        INSERT INTO cost_version_product_rows (
-                            id, version_id, kind, bier_id, product_id, product_type, verpakking_label,
+                        INSERT INTO cost_version_sku_rows (
+                            id, version_id, sku_id, verpakking_label,
                             inkoop, verpakkingskosten, indirecte_kosten, accijns, kostprijs, sort_index
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
                             version_id = EXCLUDED.version_id,
-                            kind = EXCLUDED.kind,
-                            bier_id = EXCLUDED.bier_id,
-                            product_id = EXCLUDED.product_id,
-                            product_type = EXCLUDED.product_type,
+                            sku_id = EXCLUDED.sku_id,
                             verpakking_label = EXCLUDED.verpakking_label,
                             inkoop = EXCLUDED.inkoop,
                             verpakkingskosten = EXCLUDED.verpakkingskosten,
@@ -562,7 +576,7 @@ def count_versions_for_year(year: int) -> dict[str, int]:
             cur.execute(
                 """
                 SELECT COUNT(*)
-                FROM cost_version_product_rows r
+                FROM cost_version_sku_rows r
                 JOIN cost_versions v ON v.id = r.version_id
                 WHERE v.jaar = %s
                 """,

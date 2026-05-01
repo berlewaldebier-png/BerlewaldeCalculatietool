@@ -406,15 +406,20 @@ def post_dev_hard_reset(
     tables = [
         # Generic dataset store
         "app_datasets",
-        # Product registry (derived)
-        "products_master",
+        # SKU core
+        "articles",
+        "skus",
+        "bom_lines",
         # Core year setup
         "production_years",
         "fixed_cost_lines",
         "tarieven_heffingen_years",
         # Costing
+        "cost_version_sku_rows",
         "cost_version_product_rows",
         "cost_versions",
+        "kostprijs_sku_activations",
+        "kostprijs_sku_activation_events",
         "kostprijs_product_activations",
         "kostprijs_activation_events",
         "kostprijs_scenario_inkoop_rows",
