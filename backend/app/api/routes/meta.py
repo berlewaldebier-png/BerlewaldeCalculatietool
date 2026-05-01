@@ -385,6 +385,138 @@ def post_dev_reset(
     return report
 
 
+@router.post("/dev/hard-reset")
+def post_dev_hard_reset(
+    include_users: bool = Query(False, description="Wanneer true: reset ook app_users (kan je buitensluiten)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: drop all domain tables and start from a clean schema.
+
+    This is intentionally destructive and intended for development only.
+
+    Notes:
+    - Drops tables (not just rows), including Douano sync tables.
+    - Keeps auth by default (`app_users`) unless `include_users=true`.
+    - After this, the backend should be restarted so in-memory `_SCHEMA_READY` flags don't lie.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Hard reset is alleen toegestaan in local/dev.")
+
+    # Explicit allow-list: only tables we own (avoids nuking extensions/etc).
+    tables = [
+        # Generic dataset store
+        "app_datasets",
+        # Product registry (derived)
+        "products_master",
+        # Core year setup
+        "production_years",
+        "fixed_cost_lines",
+        "tarieven_heffingen_years",
+        # Costing
+        "cost_version_product_rows",
+        "cost_versions",
+        "kostprijs_product_activations",
+        "kostprijs_activation_events",
+        "kostprijs_scenario_inkoop_rows",
+        "kostprijs_activatie_drafts",
+        "new_year_drafts",
+        # Sales/pricing
+        "sales_pricing_records",
+        "advice_channel_pricing",
+        # Offers/quotes
+        "quote_drafts",
+        # Catalog/bundles
+        "catalog_product_bom_lines",
+        "catalog_products",
+        # Douano sync + analytics
+        "douano_sales_line_cost_snapshot",
+        "douano_product_mapping",
+        "douano_product_ignore",
+        "douano_oauth_tokens",
+        "douano_sales_invoice_lines",
+        "douano_sales_invoices",
+        "douano_sales_order_lines",
+        "douano_sales_orders",
+        "douano_products",
+        "douano_companies",
+        "douano_sync_state",
+        "douano_raw_objects",
+    ]
+    if include_users:
+        tables.append("app_users")
+
+    dropped: list[str] = []
+    with postgres_storage.transaction():
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                for table in tables:
+                    name = str(table or "").strip()
+                    if not name:
+                        continue
+                    cur.execute(f"DROP TABLE IF EXISTS {name} CASCADE")
+                    dropped.append(name)
+
+    # Best-effort: reset module-level schema flags (still recommend restart).
+    try:
+        from app.domain import (
+            adviesprijzen_storage,
+            catalog_products_storage,
+            cost_versions_storage,
+            douano_margin_snapshot_storage,
+            douano_oauth_storage,
+            douano_product_ignore_storage,
+            douano_product_mapping_storage,
+            douano_sync_storage,
+            fixed_costs_storage,
+            kostprijs_activatie_drafts_storage,
+            kostprijs_activation_storage,
+            kostprijs_scenario_inkoop_storage,
+            new_year_drafts_storage,
+            production_storage,
+            product_registry_storage,
+            quote_drafts_storage,
+            sales_pricing_storage,
+            tarieven_heffingen_storage,
+        )
+
+        for module in [
+            adviesprijzen_storage,
+            catalog_products_storage,
+            cost_versions_storage,
+            douano_margin_snapshot_storage,
+            douano_oauth_storage,
+            douano_product_ignore_storage,
+            douano_product_mapping_storage,
+            douano_sync_storage,
+            fixed_costs_storage,
+            kostprijs_activatie_drafts_storage,
+            kostprijs_activation_storage,
+            kostprijs_scenario_inkoop_storage,
+            new_year_drafts_storage,
+            production_storage,
+            product_registry_storage,
+            quote_drafts_storage,
+            sales_pricing_storage,
+            tarieven_heffingen_storage,
+        ]:
+            for flag_name in ["_SCHEMA_READY", "_schema_ready"]:
+                if hasattr(module, flag_name):
+                    try:
+                        setattr(module, flag_name, False)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return {
+        "ok": True,
+        "dropped_tables": dropped,
+        "include_users": bool(include_users),
+        "restart_backend": True,
+    }
+
+
 @router.get("/dev/seed/audit")
 def get_dev_seed_audit(
     year: int = Query(2025, description="Verwacht jaar voor demo checks (default 2025)."),
