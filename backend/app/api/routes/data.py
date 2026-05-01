@@ -35,6 +35,9 @@ _STANDARD_DATASETS = [
     "adviesprijzen",
     "channels",
     "catalog-products",
+    "trace-lots",
+    "trace-batches",
+    "trace-batch-consumptions",
     "variabele-kosten",
 ]
 

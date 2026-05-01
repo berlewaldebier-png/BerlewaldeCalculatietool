@@ -83,6 +83,9 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "adviesprijzen": [],
     "break-even-configuraties": [],
     "catalog-products": [],
+    "trace-lots": [],
+    "trace-batches": [],
+    "trace-batch-consumptions": [],
     "glasmaten": [
         {"id": "glas-20cl", "label": "20 cl", "volume_ml": 200, "sort_order": 10, "active": True, "is_default": False},
         {"id": "glas-25cl", "label": "25 cl", "volume_ml": 250, "sort_order": 20, "active": True, "is_default": True},
@@ -355,6 +358,18 @@ def load_dataset(name: str) -> Any:
         return load_samengestelde_producten()
     if name == "catalog-products":
         return load_catalog_products()
+    if name == "trace-lots":
+        from app.domain import traceability_storage
+
+        return traceability_storage.load_lots(deepcopy(DATASET_DEFAULTS[name]))
+    if name == "trace-batches":
+        from app.domain import traceability_storage
+
+        return traceability_storage.load_batches(deepcopy(DATASET_DEFAULTS[name]))
+    if name == "trace-batch-consumptions":
+        from app.domain import traceability_storage
+
+        return traceability_storage.load_consumptions(deepcopy(DATASET_DEFAULTS[name]))
     if name == "verpakkingsonderdelen":
         # Legacy projection expanded prices for every year; too heavy for interactive UIs.
         return load_verpakkingsonderdelen()
@@ -416,6 +431,21 @@ def save_dataset(name: str, data: Any) -> bool:
         if saved:
             dashboard_service.invalidate_dashboard_summary_cache()
         return bool(saved)
+    if name == "trace-lots" and isinstance(data, list):
+        from app.domain import traceability_storage
+
+        payload = [row for row in data if isinstance(row, dict)]
+        return bool(traceability_storage.save_lots(payload, overwrite=True))
+    if name == "trace-batches" and isinstance(data, list):
+        from app.domain import traceability_storage
+
+        payload = [row for row in data if isinstance(row, dict)]
+        return bool(traceability_storage.save_batches(payload, overwrite=True))
+    if name == "trace-batch-consumptions" and isinstance(data, list):
+        from app.domain import traceability_storage
+
+        payload = [row for row in data if isinstance(row, dict)]
+        return bool(traceability_storage.save_consumptions(payload, overwrite=True))
     if name == "basisproducten" and isinstance(data, list):
         payload = [row for row in data if isinstance(row, dict)]
         return save_basisproducten(payload)

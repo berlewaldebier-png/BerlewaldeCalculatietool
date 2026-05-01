@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -638,6 +639,53 @@ def post_dev_seed_sku_foundation(
                 {"id": "retail", "code": "retail", "naam": "Retail", "default_marge_pct": 30},
             ]
             dataset_store.save_dataset("channels", channels)
+
+            # Traceability-ready demo: one packaging lot + one production batch consuming it.
+            now_iso = datetime.now(UTC).isoformat()
+            dataset_store.save_dataset(
+                "trace-lots",
+                [
+                    {
+                        "id": f"lot-box-{year_value}",
+                        "kind": "purchase",
+                        "article_id": "pkg-box-24",
+                        "sku_id": "",
+                        "quantity": 100,
+                        "uom": "stuk",
+                        "received_at": now_iso,
+                        "supplier": "Demo leverancier",
+                        "external_ref": f"PO-DEMO-{year_value}",
+                    }
+                ],
+            )
+            dataset_store.save_dataset(
+                "trace-batches",
+                [
+                    {
+                        "id": f"batch-blond-33cl-{year_value}",
+                        "kind": "production",
+                        "sku_id": "sku-blond-33cl",
+                        "quantity": 1000,
+                        "uom": "stuk",
+                        "produced_at": now_iso,
+                        "external_ref": f"BREW-{year_value}-001",
+                    }
+                ],
+            )
+            dataset_store.save_dataset(
+                "trace-batch-consumptions",
+                [
+                    {
+                        "id": f"cons-box-{year_value}",
+                        "batch_id": f"batch-blond-33cl-{year_value}",
+                        "component_lot_id": f"lot-box-{year_value}",
+                        "component_article_id": "pkg-box-24",
+                        "component_sku_id": "",
+                        "quantity": 1,
+                        "uom": "stuk",
+                    }
+                ],
+            )
 
             # Minimal year strategy for sell-in (opslag %) so prices are non-zero.
             verkoopstrategie = [
