@@ -53,6 +53,7 @@ export function buildQuoteableProductOptions(
   const factsIndex = buildProductFacts({
     ...params,
     channelCode: strategyKey,
+    onlyReady: true,
   });
 
   const options = factsIndex.facts.map((fact) => {

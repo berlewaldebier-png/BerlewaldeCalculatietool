@@ -27,6 +27,7 @@ export type ProductFact = {
 type BuildProductFactsParams = {
   year: number;
   channelCode?: string | null;
+  onlyReady?: boolean;
   channels: GenericRecord[];
   bieren: GenericRecord[];
   kostprijsversies: GenericRecord[];
@@ -48,6 +49,8 @@ type ProductMaster = {
 
 export function buildProductFacts(params: BuildProductFactsParams) {
   const warnings: string[] = [];
+  const onlyReady = Boolean(params.onlyReady);
+  let skippedNotReady = 0;
   const bierNameById = new Map<string, string>();
   params.bieren.forEach((row) => {
     const id = text((row as any).id);
@@ -172,6 +175,15 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         if (sellInEx <= 0) warningsForFact.push("Sell-in prijs ontbreekt.");
       }
 
+      const isReady =
+        effectiveLitersPerUnit > 0 &&
+        effectiveCostPriceEx > 0 &&
+        (!params.channelCode || sellInEx > 0);
+      if (onlyReady && !isReady) {
+        skippedNotReady += 1;
+        return;
+      }
+
       const bierName = bierNameById.get(bierId) || bierId;
       facts.push({
         ref,
@@ -195,6 +207,11 @@ export function buildProductFacts(params: BuildProductFactsParams) {
   if (facts.length === 0) {
     warnings.push(
       `Geen actieve kostprijsproductactiveringen gevonden voor jaar ${params.year}.`
+    );
+  }
+  if (onlyReady && skippedNotReady > 0) {
+    warnings.push(
+      `${skippedNotReady} product(en) verborgen omdat kostprijs/literinhoud (of sell-in) ontbreekt.`
     );
   }
 

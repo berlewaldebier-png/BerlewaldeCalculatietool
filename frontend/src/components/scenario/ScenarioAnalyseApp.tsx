@@ -84,6 +84,7 @@ export function ScenarioAnalyseApp(props: Props) {
     return buildProductFacts({
       year: selectedYear,
       channelCode: "horeca",
+      onlyReady: true,
       channels: props.channels,
       bieren: props.bieren,
       skus: props.skus,

@@ -231,6 +231,7 @@ export function buildBreakEvenProductLines(params: {
   const factsIndex = buildProductFacts({
     ...params,
     channelCode: "horeca",
+    onlyReady: true,
   });
 
   return factsIndex.facts.map((fact) => ({
