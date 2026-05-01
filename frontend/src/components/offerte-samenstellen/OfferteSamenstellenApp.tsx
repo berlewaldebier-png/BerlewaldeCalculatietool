@@ -52,6 +52,8 @@ import type {
   ScenarioMetrics,
   ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
+import { WizardSteps } from "@/components/WizardSteps";
+import { buildLitersPerUnitOverrideMap, getScenario as getLocalScenario, getScenarioLabel } from "@/lib/scenarios";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -91,6 +93,7 @@ type Props = {
   vasteKosten: Record<string, unknown>;
   initialMode?: string;
   initialDraftId?: string | null;
+  scenarioId?: string | null;
 };
 
 const tones: Record<OptionType, string> = {
@@ -194,6 +197,7 @@ export function OfferteSamenstellenApp({
   vasteKosten,
   initialMode,
   initialDraftId,
+  scenarioId,
 }: Props) {
   const router = useRouter();
   const [currentYear, setCurrentYear] = useState<number>(year);
@@ -211,6 +215,17 @@ export function OfferteSamenstellenApp({
 
   const [basis, setBasis] = useState<BasisData>(() => createInitialBasisData());
 
+  const appliedScenario = useMemo(() => {
+    const id = String(scenarioId ?? "").trim();
+    if (!id) return null;
+    return getLocalScenario(id);
+  }, [scenarioId]);
+  const appliedScenarioLabel = useMemo(() => getScenarioLabel(appliedScenario), [appliedScenario]);
+  const litersPerUnitOverrides = useMemo(
+    () => buildLitersPerUnitOverrideMap(appliedScenario),
+    [appliedScenario]
+  );
+
   const productIndex = useMemo(() => {
     return buildQuoteableProductOptions({
       year: currentYear,
@@ -222,6 +237,8 @@ export function OfferteSamenstellenApp({
       verkoopprijzen,
       basisproducten,
       samengesteldeProducten,
+      litersPerUnitOverrides,
+      scenarioLabelSuffix: appliedScenarioLabel ? ` (${appliedScenarioLabel})` : " (scenario)",
     });
   }, [
     currentYear,
@@ -233,6 +250,8 @@ export function OfferteSamenstellenApp({
     verkoopprijzen,
     basisproducten,
     samengesteldeProducten,
+    litersPerUnitOverrides,
+    appliedScenarioLabel,
   ]);
 
   const breakEvenConfigs = useMemo(
@@ -709,32 +728,24 @@ export function OfferteSamenstellenApp({
 
         {draftError ? <div className="cpq-alert cpq-alert-warn">{draftError}</div> : null}
         {isLoadingDraft ? <div className="cpq-alert">Offerte wordt geladen...</div> : null}
+        {appliedScenarioLabel ? (
+          <div className="cpq-alert">
+            Scenario actief: <strong>{appliedScenarioLabel}</strong>. Kostprijs + sell-in per eenheid zijn aangepast op basis van literinhoud per eenheid.
+          </div>
+        ) : null}
 
-        <div className="cpq-grid">
+        <div className="cpq-grid cpq-grid-two">
           <aside className="cpq-left">
-            <div className="cpq-left-title">Stappen</div>
-            <div className="cpq-steps">
-              {steps.map((item, idx) => {
-                const active = item.id === step;
-                const done = steps.findIndex((s) => s.id === step) > idx;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setStep(item.id)}
-                    className={`cpq-step${active ? " active" : ""}${done ? " done" : ""}`}
-                    type="button"
-                  >
-                    <div className="cpq-step-row">
-                      <div className="cpq-step-dot">{done ? "✓" : idx + 1}</div>
-                      <div>
-                        <div className="cpq-step-title">{item.title}</div>
-                        <div className="cpq-step-desc">{item.desc}</div>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <WizardSteps
+              title="Stappen"
+              steps={steps.map((item) => ({ id: item.id, title: item.title, description: item.desc }))}
+              activeIndex={steps.findIndex((item) => item.id === step)}
+              onSelect={(index) => {
+                const next = steps[index];
+                if (!next) return;
+                setStep(next.id);
+              }}
+            />
 
             <div className="cpq-quick">
               <div className="cpq-quick-title">Quick view</div>
@@ -819,90 +830,6 @@ export function OfferteSamenstellenApp({
               />
             ) : null}
           </main>
-
-          <aside className="cpq-right">
-            <h2 className="cpq-right-kicker">Live inzicht</h2>
-            <div className="cpq-panel">
-              <div className="cpq-live-summary-head">
-                <div className="cpq-panel-title">Totaal</div>
-                <div className="cpq-panel-subtitle">
-                  {scenario.products.length} product{scenario.products.length === 1 ? "" : "en"}
-                </div>
-              </div>
-              <div className="cpq-live-summary-grid">
-                <LiveSummaryMetric label="Omzet" value={euro(rightMetrics.revenueEx)} />
-                <LiveSummaryMetric
-                  label="Kostprijs"
-                  value={euro(
-                    Math.max(
-                      0,
-                      rightMetrics.costEx - rightMetrics.extraCostEx - rightMetrics.transportCostEx
-                    )
-                  )}
-                />
-                <LiveSummaryMetric
-                  label="Transport"
-                  value={euro(rightMetrics.transportCostEx)}
-                />
-                <LiveSummaryMetric
-                  label="Extra kosten"
-                  value={euro(rightMetrics.extraCostEx)}
-                />
-                <LiveSummaryMetric
-                  label="Winst"
-                  value={euro(rightMetrics.revenueEx - rightMetrics.costEx)}
-                />
-                <LiveSummaryMetric
-                  label="Marge %"
-                  value={`${Math.round(rightMetrics.marginPct)}%`}
-                />
-              </div>
-            </div>
-
-            <div className="cpq-panel">
-              <div className="cpq-live-summary-head">
-                <div className="cpq-panel-title">Live break-even</div>
-                <div className="cpq-panel-subtitle">Impact van dit voorstel</div>
-              </div>
-              <div className="cpq-live-summary-grid">
-                <LiveSummaryMetric
-                  label="Break-even omzet"
-                  value={rightMetrics.breakEvenCurrent === null ? "Niet ingesteld" : euro(rightMetrics.breakEvenCurrent)}
-                />
-                <LiveSummaryMetric
-                  label="Boven / onder BE"
-                  value={rightMetrics.breakEvenProjected === null ? "-" : euro(rightMetrics.breakEvenProjected)}
-                />
-                <LiveSummaryMetric
-                  label="BE-dekking"
-                  value={
-                    rightMetrics.breakEvenCoveragePct === null
-                      ? "Niet beschikbaar"
-                      : `${Math.round(rightMetrics.breakEvenCoveragePct)}%`
-                  }
-                />
-              </div>
-              {effectiveBreakEvenSnapshot ? (
-                <p className="cpq-panel-text cpq-break-even-note">
-                  {draftMeta.status === "definitief"
-                    ? `Definitieve offerte rekent met snapshot ${effectiveBreakEvenSnapshot.configName}.`
-                    : hasFrozenBreakEvenSnapshot
-                      ? `Conceptofferte rekent met opgeslagen snapshot ${effectiveBreakEvenSnapshot.configName}. Nieuwe offertes gebruiken de actuele actieve break-even.`
-                      : `Actieve break-even: ${effectiveBreakEvenSnapshot.configName}. Bij de eerste save wordt deze snapshot vastgezet voor deze offerte.`}
-                </p>
-              ) : (
-                <p className="cpq-panel-text cpq-break-even-note">
-                  Geen actieve break-even configuratie voor {currentYear}. De offerte blijft werken,
-                  maar toont nog geen break-even referentie.
-                </p>
-              )}
-            </div>
-
-            <div className="cpq-panel">
-              <h3 className="cpq-panel-title">Actieve voorstel-notitie</h3>
-              <p className="cpq-panel-text">{scenario.note || "Geen notitie toegevoegd."}</p>
-            </div>
-          </aside>
         </div>
 
         {selectedOption ? (

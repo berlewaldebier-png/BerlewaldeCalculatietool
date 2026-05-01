@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 
 import { usePageShellHeader } from "@/components/PageShell";
+import { WizardSteps } from "@/components/WizardSteps";
 import { API_BASE_URL } from "@/lib/api";
 import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
 import {
@@ -49,6 +50,9 @@ type PendingDeleteDialog = {
   title: string;
   body: string;
   onConfirm: () => void;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  hideCancel?: boolean;
 };
 
 type ProductUnitOption = {
@@ -80,6 +84,19 @@ function createId() {
 
 function cloneRecord<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function unwrapDatasetListPayload(value: unknown): GenericRecord[] | null {
+  if (Array.isArray(value)) {
+    return value as GenericRecord[];
+  }
+  if (value && typeof value === "object") {
+    const data = (value as any).data;
+    if (Array.isArray(data)) {
+      return data as GenericRecord[];
+    }
+  }
+  return null;
 }
 
 function parseOptionalNumber(value: unknown): number | null {
@@ -903,8 +920,13 @@ export function BerekeningenWizard({
     rowsRef.current = rows;
   }, [rows]);
 
-  function requestDelete(title: string, body: string, onConfirm: () => void) {
-    setPendingDelete({ title, body, onConfirm });
+  function requestDelete(
+    title: string,
+    body: string,
+    onConfirm: () => void,
+    options?: Pick<PendingDeleteDialog, "confirmLabel" | "cancelLabel" | "hideCancel">
+  ) {
+    setPendingDelete({ title, body, onConfirm, ...options });
   }
 
   function buildResultaatSnapshot(row: GenericRecord): ResultaatSnapshot {
@@ -1070,7 +1092,7 @@ export function BerekeningenWizard({
         cache: "no-store"
       });
       const refreshedRows = refreshedResponse.ok
-        ? ((await refreshedResponse.json()) as GenericRecord[])
+        ? unwrapDatasetListPayload(await refreshedResponse.json()) ?? payload
         : payload;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
@@ -1139,7 +1161,7 @@ export function BerekeningenWizard({
         cache: "no-store"
       });
       const refreshedRows = refreshedResponse.ok
-        ? ((await refreshedResponse.json()) as GenericRecord[])
+        ? unwrapDatasetListPayload(await refreshedResponse.json()) ?? payload
         : payload;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
@@ -1234,7 +1256,7 @@ export function BerekeningenWizard({
       }
       const refreshedResponse = await fetch(KOSTPRIJSVERSIES_API, { cache: "no-store" });
       const refreshedRows = refreshedResponse.ok
-        ? ((await refreshedResponse.json()) as GenericRecord[])
+        ? unwrapDatasetListPayload(await refreshedResponse.json()) ?? rowsRef.current
         : rowsRef.current;
       rowsRef.current = refreshedRows;
       setRows(refreshedRows);
@@ -2309,22 +2331,25 @@ export function BerekeningenWizard({
     return renderSummaryStep();
   }
 
+  const headerBiernaam = String((current.basisgegevens as GenericRecord).biernaam ?? "").trim();
+  const headerTitle = headerBiernaam || "Nieuwe kostprijsberekening";
+  const headerYear = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0)) || 0;
+  const headerType = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+  const headerStatus = String(current.status ?? "concept");
+  const headerActive = Boolean(current.is_actief);
+  const insightSnapshot = buildResultaatSnapshot(current);
+
   return (
-    <section className="wizard-main-card">
-        <div className="wizard-main-header">
-          <div className="wizard-main-meta">
-            <span className="wizard-main-kicker">Kostprijswizard</span>
-            <span className="wizard-main-context">
-              {String((current.basisgegevens as GenericRecord).biernaam ?? "Nieuwe berekening")}
-            </span>
+    <div className="cpq-root">
+      <div className="cpq-frame">
+        <div className="cpq-topbar">
+          <div>
+            <div className="cpq-kicker">Kostprijswizard</div>
+            <h1 className="cpq-title">{headerTitle}</h1>
           </div>
-          <div className="wizard-main-header-actions">
+          <div className="cpq-topbar-actions">
             {onBackToLanding ? (
-              <button
-                type="button"
-                className="editor-button editor-button-secondary"
-                onClick={onBackToLanding}
-              >
+              <button type="button" className="editor-button editor-button-secondary" onClick={onBackToLanding}>
                 Terug
               </button>
             ) : null}
@@ -2333,6 +2358,7 @@ export function BerekeningenWizard({
                 type="button"
                 className="icon-button-table"
                 aria-label="Kostprijs verwijderen"
+                aria-disabled={!canDeleteCurrent || isSaving}
                 title={
                   !canDeleteCurrent
                     ? isCurrentDefinitive
@@ -2340,130 +2366,149 @@ export function BerekeningenWizard({
                       : "Deze kostprijsversie wordt nog gebruikt en kun je daarom niet verwijderen."
                     : "Verwijderen"
                 }
-                disabled={isSaving || !canDeleteCurrent}
-                onClick={() =>
+                disabled={isSaving}
+                onClick={() => {
+                  if (!canDeleteCurrent) {
+                    requestDelete(
+                      "Kostprijs verwijderen niet mogelijk",
+                      isCurrentDefinitive
+                        ? "Definitieve kostprijsversies kun je niet verwijderen. Activeer een andere versie of maak een nieuwe conceptversie."
+                        : "Deze kostprijsversie wordt nog gebruikt (bijv. door product-activaties) en kun je daarom niet verwijderen.",
+                      () => {},
+                      { confirmLabel: "Ok", hideCancel: true }
+                    );
+                    return;
+                  }
+
                   requestDelete(
                     "Kostprijs verwijderen",
                     `Weet je zeker dat je de kostprijs voor ${String(
                       (current.basisgegevens as GenericRecord)?.biernaam ?? "dit bier"
-                    )} wilt verwijderen?`,
+                    )} wilt verwijderen? Dit kan alleen bij conceptversies.`,
                     () => {
                       void handleDeleteCurrent();
                     }
-                  )
-                }
+                  );
+                }}
               >
                 <TrashIcon />
               </button>
             ) : null}
-            {String(current.status ?? "") === "definitief" && !Boolean(current.is_actief) ? (
+            {headerStatus === "definitief" && !headerActive ? (
               <button
                 type="button"
                 className="editor-button editor-button-secondary"
                 disabled={isSaving}
-                onClick={() => {
-                  void handleActivate();
-                }}
+                onClick={() => void handleActivate()}
               >
                 Activeer
               </button>
             ) : null}
             <span className="pill">
-              {String(current.status ?? "concept")}
-              {Boolean(current.is_actief) ? " | actief" : ""}
+              {headerStatus}
+              {headerActive ? " | actief" : ""}
             </span>
           </div>
         </div>
 
-        <div className="wizard-content-grid">
-          <aside className="wizard-inline-sidebar">
-            <div className="wizard-inline-sidebar-card">
-              <div className="page-shell-wizard-title">Wizard</div>
-              <div className="page-shell-wizard-list">
-                {steps.map((step, index) => (
-                  <button
-                    key={step.id}
-                    type="button"
-                    className={`page-shell-wizard-link${currentIndex === index ? " active" : ""}${
-                      index < currentIndex ? " completed" : ""
-                    }`}
-                    onClick={() => setActiveStepIndex(index)}
-                  >
-                    <span className="page-shell-wizard-rail">
-                      <span className="page-shell-wizard-dot">{index < currentIndex ? "\u2713" : ""}</span>
-                      {index < steps.length - 1 ? <span className="page-shell-wizard-line" /> : null}
-                    </span>
-                    <span className="page-shell-wizard-copy">
-                      <span className="page-shell-wizard-label">{step.label}</span>
-                      <span className="page-shell-wizard-text">{step.description}</span>
-                    </span>
-                  </button>
-                ))}
+        <div className="cpq-grid">
+          <aside className="cpq-left">
+            <WizardSteps
+              title="Stappen"
+              steps={steps.map((step) => ({ id: step.id, title: step.label, description: step.description }))}
+              activeIndex={currentIndex}
+              onSelect={(index) => setActiveStepIndex(index)}
+            />
+
+            <div className="cpq-quick">
+              <div className="cpq-quick-title">Quick view</div>
+              <div className="cpq-quick-grid">
+                <QuickCell label="Jaar" value={headerYear ? String(headerYear) : "—"} />
+                <QuickCell label="Type" value={headerType} />
+                <QuickCell label="Stap" value={`${currentIndex + 1} / ${steps.length}`} />
+                <QuickCell label="Status" value={headerActive ? `${headerStatus} (actief)` : headerStatus} />
               </div>
             </div>
           </aside>
 
-          <div className="wizard-shell wizard-shell-single">
-            <div className="wizard-step-card wizard-step-stage-card">
-              <div className="wizard-step-header">
-                <div>
-                  <div className="wizard-step-title">
-                    Stap {currentIndex + 1}: {currentStep.label}
+          <main className="cpq-main">
+            <div className="wizard-shell wizard-shell-single" style={{ marginTop: 0 }}>
+              <div className="wizard-step-card wizard-step-stage-card">
+                <div className="wizard-step-header">
+                  <div>
+                    <div className="wizard-step-title">
+                      Stap {currentIndex + 1}: {currentStep.label}
+                    </div>
+                    <div className="wizard-step-description">{currentStep.description}</div>
                   </div>
-                  <div className="wizard-step-description">{currentStep.description}</div>
                 </div>
-              </div>
 
-              <div className="wizard-step-body">{renderStepContent()}</div>
+                <div className="wizard-step-body">{renderStepContent()}</div>
 
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  {currentIndex > 0 ? (
+                <div className="editor-actions wizard-footer-actions">
+                  <div className="editor-actions-group">
+                    {currentIndex > 0 ? (
+                      <button
+                        type="button"
+                        className="editor-button editor-button-secondary"
+                        onClick={() => setActiveStepIndex(Math.max(0, currentIndex - 1))}
+                      >
+                        Vorige
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="editor-actions-group">
+                    <button type="button" className="editor-button editor-button-secondary" onClick={handleSave}>
+                      Opslaan
+                    </button>
                     <button
                       type="button"
-                      className="editor-button editor-button-secondary"
-                      onClick={() => setActiveStepIndex(Math.max(0, currentIndex - 1))}
-                    >
-                      Vorige
-                    </button>
-                  ) : null}
-                </div>
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={handleSave}
-                  >
-                    Opslaan
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button"
-                    onClick={async () => {
-                      if (currentStep.id === "summary") {
-                        const saved = await handleFinalize();
-                        if (saved) {
-                          onFinish?.();
+                      className="editor-button"
+                      onClick={async () => {
+                        if (currentStep.id === "summary") {
+                          const saved = await handleFinalize();
+                          if (saved) {
+                            onFinish?.();
+                          }
+                          return;
                         }
-                        return;
-                      }
 
-                      setActiveStepIndex(Math.min(steps.length - 1, currentIndex + 1));
-                    }}
-                    disabled={isSaving}
-                  >
-                    {isSaving ? "Opslaan..." : currentStep.id === "summary" ? "Afronden" : "Volgende"}
-                  </button>
+                        setActiveStepIndex(Math.min(steps.length - 1, currentIndex + 1));
+                      }}
+                      disabled={isSaving}
+                    >
+                      {isSaving ? "Opslaan..." : currentStep.id === "summary" ? "Afronden" : "Volgende"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+
+            {status ? (
+              <div className={`editor-status wizard-inline-status${statusTone ? ` ${statusTone}` : ""}`}>{status}</div>
+            ) : null}
+          </main>
+
+          <aside className="cpq-right">
+            <div className="cpq-right-kicker">Live inzicht</div>
+            <div className="stats-grid" style={{ gridTemplateColumns: "1fr", gap: "0.85rem" }}>
+              {[
+                ["Integrale kostprijs / L", insightSnapshot.integrale_kostprijs_per_liter],
+                ["Variabele kosten / L", insightSnapshot.variabele_kosten_per_liter],
+                [
+                  headerType === "Inkoop" ? "Indirecte vaste kosten / L" : "Directe vaste kosten / L",
+                  insightSnapshot.directe_vaste_kosten_per_liter
+                ]
+              ].map(([label, value]) => (
+                <div key={label} className="stat-card">
+                  <div className="stat-label">{label}</div>
+                  <div className="stat-value small">{String(value ?? "-")}</div>
+                </div>
+              ))}
+            </div>
+          </aside>
         </div>
-        {status ? (
-          <div className={`editor-status wizard-inline-status${statusTone ? ` ${statusTone}` : ""}`}>
-            {status}
-          </div>
-        ) : null}
+
         {pendingDelete ? (
           <div className="confirm-modal-overlay" role="presentation">
             <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
@@ -2472,13 +2517,15 @@ export function BerekeningenWizard({
               </div>
               <div className="confirm-modal-text">{pendingDelete.body}</div>
               <div className="confirm-modal-actions">
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={() => setPendingDelete(null)}
-                >
-                  Annuleren
-                </button>
+                {!pendingDelete.hideCancel ? (
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => setPendingDelete(null)}
+                  >
+                    {pendingDelete.cancelLabel ?? "Annuleren"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="editor-button"
@@ -2487,13 +2534,14 @@ export function BerekeningenWizard({
                     setPendingDelete(null);
                   }}
                 >
-                  Verwijderen
+                  {pendingDelete.confirmLabel ?? "Verwijderen"}
                 </button>
               </div>
             </div>
           </div>
         ) : null}
-    </section>
+      </div>
+    </div>
   );
 }
 
@@ -2502,6 +2550,15 @@ function CurrencyInput({ className = "", ...props }: InputHTMLAttributes<HTMLInp
     <div className={`currency-input-wrapper${props.readOnly ? " readonly" : ""}`}>
       <span className="currency-input-prefix">€</span>
       <input {...props} className={className} />
+    </div>
+  );
+}
+
+function QuickCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="cpq-quick-label">{label}</div>
+      <div className="cpq-quick-value">{value || "—"}</div>
     </div>
   );
 }

@@ -696,8 +696,18 @@ def _validate_kostprijsproductactiveringen(
         seen_keys.add(unique_key)
         validated.append(normalized)
     if invalid:
+        counts: dict[str, int] = {}
+        for item in invalid:
+            reason = str(item.get("reason", "") or "unknown").strip() or "unknown"
+            counts[reason] = counts.get(reason, 0) + 1
+        samples = [
+            item.get("row", {})
+            for item in invalid[:3]
+            if isinstance(item.get("row", {}), dict)
+        ]
         raise ValueError(
-            "Ongeldige kostprijsproductactiveringen: gevonden verwijzingen naar onbekende bier/product/kostprijsversie."
+            "Ongeldige kostprijsproductactiveringen: gevonden verwijzingen naar onbekende bier/product/kostprijsversie. "
+            f"Aantallen per reden: {counts}. Voorbeelden: {samples}."
         )
     if duplicates:
         raise ValueError("Dubbele kostprijsproductactiveringen gevonden voor hetzelfde bier/jaar/product.")
@@ -5891,164 +5901,201 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
     # causes surprising data loss (e.g. new concept versions disappearing after Save).
     cleaned_data = [record for record in data if isinstance(record, dict)]
 
-    # Phase E: ensure definitive kostprijsversies are linked to canonical bierstamdata.
-    # We do this on write, not on read, to avoid hidden side effects and "disappearing fields".
-    bieren = load_bieren()
-    bieren_by_id = {str(bier.get("id", "") or ""): bier for bier in bieren if isinstance(bier, dict)}
-    bieren_by_name = {
-        str(bier.get("biernaam", "") or "").strip().lower(): bier
-        for bier in bieren
-        if isinstance(bier, dict) and str(bier.get("biernaam", "") or "").strip()
-    }
-    bieren_changed = False
+    def _persist() -> bool:
+        # Phase E: ensure definitive kostprijsversies are linked to canonical bierstamdata.
+        # We do this on write, not on read, to avoid hidden side effects and "disappearing fields".
+        bieren = load_bieren()
+        bieren_by_id = {str(bier.get("id", "") or ""): bier for bier in bieren if isinstance(bier, dict)}
+        bieren_by_name = {
+            str(bier.get("biernaam", "") or "").strip().lower(): bier
+            for bier in bieren
+            if isinstance(bier, dict) and str(bier.get("biernaam", "") or "").strip()
+        }
+        bieren_changed = False
 
-    for record in cleaned_data:
-        try:
-            status = str(record.get("status", "") or "").strip().lower()
-        except Exception:
-            status = ""
-        if status != "definitief":
-            continue
-        bier_id = str(record.get("bier_id", "") or "").strip()
-        basisgegevens = record.get("basisgegevens", {})
-        if not isinstance(basisgegevens, dict):
-            basisgegevens = {}
-        biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
-        stijl = str(basisgegevens.get("stijl", "") or "").strip()
-        alcoholpercentage = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
-        belastingsoort = str(
-            basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT
-        )
-        tarief_accijns = str(
-            basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS
-        )
-        btw_tarief = str(basisgegevens.get("btw_tarief", DEFAULT_BTW_TARIEF) or DEFAULT_BTW_TARIEF)
-
-        existing_bier = bieren_by_id.get(bier_id) if bier_id else None
-        if existing_bier is None and biernaam and biernaam.lower() in bieren_by_name:
-            existing_bier = bieren_by_name[biernaam.lower()]
-            record["bier_id"] = str(existing_bier.get("id", "") or "")
-
-        if not biernaam:
-            # Fail hard: a definitive record must be attributable to a beer.
-            raise ValueError("Definitieve kostprijsversie mist biernaam (basisgegevens.biernaam).")
-        if existing_bier is None:
-            # Create the beer explicitly from the definitive basisgegevens snapshot.
-            new_bier = add_bier(
-                biernaam=biernaam,
-                stijl=stijl,
-                alcoholpercentage=alcoholpercentage,
-                belastingsoort=belastingsoort,
-                tarief_accijns=tarief_accijns,
-                btw_tarief=btw_tarief,
+        for record in cleaned_data:
+            try:
+                status = str(record.get("status", "") or "").strip().lower()
+            except Exception:
+                status = ""
+            if status != "definitief":
+                continue
+            bier_id = str(record.get("bier_id", "") or "").strip()
+            basisgegevens = record.get("basisgegevens", {})
+            if not isinstance(basisgegevens, dict):
+                basisgegevens = {}
+            biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
+            stijl = str(basisgegevens.get("stijl", "") or "").strip()
+            alcoholpercentage = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
+            belastingsoort = str(
+                basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT
             )
-            if not isinstance(new_bier, dict) or not str(new_bier.get("id", "") or "").strip():
-                raise ValueError("Kon bierstamdata niet aanmaken voor definitieve kostprijsversie.")
-            record["bier_id"] = str(new_bier.get("id", "") or "")
-            bieren_by_id[str(new_bier.get("id", "") or "")] = new_bier
-            bieren_by_name[biernaam.lower()] = new_bier
-            continue
+            tarief_accijns = str(
+                basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS
+            )
+            btw_tarief = str(basisgegevens.get("btw_tarief", DEFAULT_BTW_TARIEF) or DEFAULT_BTW_TARIEF)
 
-        updated_bier = normalize_bier_record(
-            {
-                **existing_bier,
-                "biernaam": biernaam,
-                "stijl": stijl,
-                "alcoholpercentage": alcoholpercentage,
-                "belastingsoort": belastingsoort,
-                "tarief_accijns": tarief_accijns,
-                "btw_tarief": btw_tarief,
-                "updated_at": _now_iso(),
-            }
-        )
-        if updated_bier != existing_bier:
-            for index, bier in enumerate(bieren):
-                if str(bier.get("id", "") or "") == str(updated_bier.get("id", "") or ""):
-                    bieren[index] = updated_bier
-                    break
-            bieren_by_id[str(updated_bier.get("id", "") or "")] = updated_bier
-            bieren_by_name[biernaam.lower()] = updated_bier
-            bieren_changed = True
+            existing_bier = bieren_by_id.get(bier_id) if bier_id else None
+            if existing_bier is None and biernaam and biernaam.lower() in bieren_by_name:
+                existing_bier = bieren_by_name[biernaam.lower()]
+                record["bier_id"] = str(existing_bier.get("id", "") or "")
 
-    if bieren_changed and not save_bieren(bieren):
-        raise ValueError("Kon bierstamdata niet bijwerken vanuit definitieve kostprijsversie.")
+            if not biernaam:
+                # Fail hard: a definitive record must be attributable to a beer.
+                raise ValueError("Definitieve kostprijsversie mist biernaam (basisgegevens.biernaam).")
+            if existing_bier is None:
+                # Create the beer explicitly from the definitive basisgegevens snapshot.
+                #
+                # Important: if the kostprijsversie already has a bier_id, we preserve it to keep
+                # referential integrity stable across activations and other datasets. This also
+                # prevents "unknown_bier" errors when auto-activating products for definitive records.
+                if bier_id:
+                    created_at = _now_iso()
+                    new_bier = normalize_bier_record(
+                        {
+                            "id": bier_id,
+                            "biernaam": biernaam,
+                            "stijl": stijl,
+                            "alcoholpercentage": alcoholpercentage,
+                            "belastingsoort": belastingsoort,
+                            "tarief_accijns": tarief_accijns,
+                            "btw_tarief": btw_tarief,
+                            "created_at": created_at,
+                            "updated_at": created_at,
+                        }
+                    )
+                    bieren.append(new_bier)
+                    if not save_bieren(bieren):
+                        raise ValueError("Kon bierstamdata niet aanmaken voor definitieve kostprijsversie.")
+                    record["bier_id"] = bier_id
+                    bieren_by_id[bier_id] = new_bier
+                    bieren_by_name[biernaam.lower()] = new_bier
+                    continue
 
-    # Prevent implicit destructive deletes: hard delete is only allowed for concept records
-    # that are not referenced anywhere. Definitive/active versions must be deactivated instead.
-    incoming_ids = {
-        str(record.get("id", "") or "").strip()
-        for record in cleaned_data
-        if isinstance(record, dict) and str(record.get("id", "") or "").strip()
-    }
-    # Only validate potentially removed records. During migrations we rewrite in-place, and
-    # loading/normalizing every record can fail on the very issues the migration is fixing.
-    existing_rows = _load_postgres_dataset("kostprijsversies")
-    existing_rows_list = existing_rows if isinstance(existing_rows, list) else []
-    existing_ids = {
-        str(record.get("id", "") or "").strip()
-        for record in existing_rows_list
-        if isinstance(record, dict) and str(record.get("id", "") or "").strip()
-    }
-    previous_status_by_id: dict[str, str] = {
-        str(record.get("id", "") or "").strip(): str(record.get("status", "") or "").strip().lower()
-        for record in existing_rows_list
-        if isinstance(record, dict) and str(record.get("id", "") or "").strip()
-    }
-    removed_ids = existing_ids - incoming_ids
-    if removed_ids:
-        raw_by_id = {
-            str(record.get("id", "") or "").strip(): record
+                new_bier = add_bier(
+                    biernaam=biernaam,
+                    stijl=stijl,
+                    alcoholpercentage=alcoholpercentage,
+                    belastingsoort=belastingsoort,
+                    tarief_accijns=tarief_accijns,
+                    btw_tarief=btw_tarief,
+                )
+                if not isinstance(new_bier, dict) or not str(new_bier.get("id", "") or "").strip():
+                    raise ValueError("Kon bierstamdata niet aanmaken voor definitieve kostprijsversie.")
+                record["bier_id"] = str(new_bier.get("id", "") or "")
+                bieren_by_id[str(new_bier.get("id", "") or "")] = new_bier
+                bieren_by_name[biernaam.lower()] = new_bier
+                continue
+
+            updated_bier = normalize_bier_record(
+                {
+                    **existing_bier,
+                    "biernaam": biernaam,
+                    "stijl": stijl,
+                    "alcoholpercentage": alcoholpercentage,
+                    "belastingsoort": belastingsoort,
+                    "tarief_accijns": tarief_accijns,
+                    "btw_tarief": btw_tarief,
+                    "updated_at": _now_iso(),
+                }
+            )
+            if updated_bier != existing_bier:
+                for index, bier in enumerate(bieren):
+                    if str(bier.get("id", "") or "") == str(updated_bier.get("id", "") or ""):
+                        bieren[index] = updated_bier
+                        break
+                bieren_by_id[str(updated_bier.get("id", "") or "")] = updated_bier
+                bieren_by_name[biernaam.lower()] = updated_bier
+                bieren_changed = True
+
+        if bieren_changed and not save_bieren(bieren):
+            raise ValueError("Kon bierstamdata niet bijwerken vanuit definitieve kostprijsversie.")
+
+        # Prevent implicit destructive deletes: hard delete is only allowed for concept records
+        # that are not referenced anywhere. Definitive/active versions must be deactivated instead.
+        incoming_ids = {
+            str(record.get("id", "") or "").strip()
+            for record in cleaned_data
+            if isinstance(record, dict) and str(record.get("id", "") or "").strip()
+        }
+        # Only validate potentially removed records. During migrations we rewrite in-place, and
+        # loading/normalizing every record can fail on the very issues the migration is fixing.
+        existing_rows = _load_postgres_dataset("kostprijsversies")
+        existing_rows_list = existing_rows if isinstance(existing_rows, list) else []
+        existing_ids = {
+            str(record.get("id", "") or "").strip()
             for record in existing_rows_list
             if isinstance(record, dict) and str(record.get("id", "") or "").strip()
         }
-        removed_existing_by_id: dict[str, dict[str, Any]] = {}
-        for version_id in removed_ids:
-            raw = raw_by_id.get(version_id)
-            if not raw:
-                continue
-            try:
-                removed_existing_by_id[version_id] = normalize_berekening_record(raw)
-            except ValueError as exc:
-                raise ValueError(
-                    "Kan kostprijsversies niet verwijderen zolang bestaande data ongeldig is. "
-                    "Draai eerst de admin migratie: POST /api/meta/migrate-product-ids."
-                ) from exc
-        referenced_ids = _collect_referenced_kostprijsversie_ids()
-        for version_id in removed_ids:
-            existing = removed_existing_by_id.get(version_id)
-            if not existing:
-                continue
-            status = str(existing.get("status", "") or "").strip().lower()
-            if status == "definitief":
-                raise ValueError(
-                    "Je kunt geen definitieve kostprijsversie verwijderen. "
-                    "Deactiveer eerst of activeer een andere versie."
-                )
-            if version_id in referenced_ids:
-                raise ValueError(
-                    "Je kunt deze kostprijsversie niet verwijderen omdat hij nog gebruikt wordt "
-                    "(bijv. actieve productkostprijzen of prijsvoorstellen)."
-                )
-    normalized_records, _ = _normalize_and_sync_kostprijsversie_state(cleaned_data)
-    saved = bool(_save_postgres_dataset("kostprijsversies", normalized_records))
-    if not saved:
-        return False
+        previous_status_by_id: dict[str, str] = {
+            str(record.get("id", "") or "").strip(): str(record.get("status", "") or "").strip().lower()
+            for record in existing_rows_list
+            if isinstance(record, dict) and str(record.get("id", "") or "").strip()
+        }
+        removed_ids = existing_ids - incoming_ids
+        if removed_ids:
+            raw_by_id = {
+                str(record.get("id", "") or "").strip(): record
+                for record in existing_rows_list
+                if isinstance(record, dict) and str(record.get("id", "") or "").strip()
+            }
+            removed_existing_by_id: dict[str, dict[str, Any]] = {}
+            for version_id in removed_ids:
+                raw = raw_by_id.get(version_id)
+                if not raw:
+                    continue
+                try:
+                    removed_existing_by_id[version_id] = normalize_berekening_record(raw)
+                except ValueError as exc:
+                    raise ValueError(
+                        "Kan kostprijsversies niet verwijderen zolang bestaande data ongeldig is. "
+                        "Draai eerst de admin migratie: POST /api/meta/migrate-product-ids."
+                    ) from exc
+            referenced_ids = _collect_referenced_kostprijsversie_ids()
+            for version_id in removed_ids:
+                existing = removed_existing_by_id.get(version_id)
+                if not existing:
+                    continue
+                status = str(existing.get("status", "") or "").strip().lower()
+                if status == "definitief":
+                    raise ValueError(
+                        "Je kunt geen definitieve kostprijsversie verwijderen. "
+                        "Deactiveer eerst of activeer een andere versie."
+                    )
+                if version_id in referenced_ids:
+                    raise ValueError(
+                        "Je kunt deze kostprijsversie niet verwijderen omdat hij nog gebruikt wordt "
+                        "(bijv. actieve productkostprijzen of prijsvoorstellen)."
+                    )
+        normalized_records, _ = _normalize_and_sync_kostprijsversie_state(cleaned_data)
+        saved = bool(_save_postgres_dataset("kostprijsversies", normalized_records))
+        if not saved:
+            return False
 
-    # Phase E: auto-activate on write for any definitive record.
-    #
-    # We intentionally do this on write (not on read) to avoid hidden side effects, but we also
-    # don't rely solely on the status transition. If an earlier finalize attempt saved the
-    # record but failed before writing activations, a later save should still heal the missing
-    # first-time scopes.
-    for record in normalized_records:
-        record_id = str(record.get("id", "") or "").strip()
-        if not record_id:
-            continue
-        new_status = str(record.get("status", "") or "").strip().lower()
-        if new_status == "definitief":
-            _auto_activate_first_time_products(record)
+        # Phase E: auto-activate on write for any definitive record.
+        #
+        # We intentionally do this on write (not on read) to avoid hidden side effects, but we also
+        # don't rely solely on the status transition. If an earlier finalize attempt saved the
+        # record but failed before writing activations, a later save should still heal the missing
+        # first-time scopes.
+        for record in normalized_records:
+            record_id = str(record.get("id", "") or "").strip()
+            if not record_id:
+                continue
+            new_status = str(record.get("status", "") or "").strip().lower()
+            if new_status == "definitief":
+                _auto_activate_first_time_products(record)
 
-    return True
+        return True
+
+    postgres_storage = _get_postgres_storage_module()
+    if postgres_storage is not None and postgres_storage.uses_postgres():
+        # Ensure all reads/writes (bieren + kostprijsversies + activations) see each other
+        # consistently within one request and commit/rollback atomically.
+        with postgres_storage.transaction():
+            return _persist()
+
+    return _persist()
 
 
 def _collect_referenced_kostprijsversie_ids() -> set[str]:

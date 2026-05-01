@@ -43,9 +43,15 @@ def transaction() -> Iterator[Any]:
     """
     ensure_schema()
     depth = int(_transaction_depth.get() or 0)
-    token = _transaction_depth.set(depth + 1)
+    depth_token = _transaction_depth.set(depth + 1)
+    request_token = None
+    existing_request_conn = _request_connection.get()
     try:
         with connect() as conn:
+            # Bind the connection for the duration of the transaction so that nested load/save calls
+            # see each other's uncommitted writes (bieren + kostprijsversies + activations, etc.).
+            if existing_request_conn is None:
+                request_token = set_request_connection(conn)
             try:
                 yield conn
                 if depth == 0:
@@ -57,8 +63,14 @@ def transaction() -> Iterator[Any]:
                     except Exception:
                         pass
                 raise
+            finally:
+                if request_token is not None:
+                    try:
+                        reset_request_connection(request_token)
+                    except Exception:
+                        pass
     finally:
-        _transaction_depth.reset(token)
+        _transaction_depth.reset(depth_token)
 
 
 def storage_provider() -> str:
