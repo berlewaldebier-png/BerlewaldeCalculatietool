@@ -262,10 +262,6 @@ export function OfferteSamenstellenApp({
     appliedScenarioLabel,
   ]);
 
-  const productOptionIds = useMemo(() => {
-    return new Set(productIndex.options.map((option) => option.optionId));
-  }, [productIndex.options]);
-
   const breakEvenConfigs = useMemo(
     () => normalizeConfigList(breakEvenConfiguraties, currentYear),
     [breakEvenConfiguraties, currentYear]
@@ -983,6 +979,10 @@ function BuilderStep({
   onSave: () => void;
   isSaving: boolean;
 }) {
+  const productOptionIds = useMemo(() => {
+    return new Set(productOptions.map((option) => option.optionId));
+  }, [productOptions]);
+
   const introBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "intro");
   const standardBlocks = scenario.blocks.filter(
     (block) => (block.appliesTo ?? "standard") === "standard"
