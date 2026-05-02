@@ -7,6 +7,15 @@ import { API_BASE_URL } from "@/lib/api";
 
 type GenericRecord = Record<string, unknown>;
 
+function unwrapListPayload(value: unknown): GenericRecord[] {
+  if (Array.isArray(value)) return value as GenericRecord[];
+  if (value && typeof value === "object") {
+    const data = (value as any).data;
+    if (Array.isArray(data)) return data as GenericRecord[];
+  }
+  return [];
+}
+
 type CatalogProductLineKind = "beer" | "packaging_component" | "labor" | "other";
 
 type CatalogProductLine = {
@@ -330,8 +339,10 @@ export function VerkoopbareArtikelenEditor(props: {
   );
 
   const [rows, setRows] = useState<CatalogProduct[]>(() => {
-    const src = Array.isArray(props.initialRows) ? props.initialRows : [];
-    return src.filter((row) => row && typeof row === "object").map((row) => normalizeCatalogProduct(row as any));
+    const src = unwrapListPayload(props.initialRows);
+    return src
+      .filter((row) => row && typeof row === "object")
+      .map((row) => normalizeCatalogProduct(row as any));
   });
 
   const [status, setStatus] = useState("");
@@ -460,8 +471,8 @@ export function VerkoopbareArtikelenEditor(props: {
       // Re-fetch canonical rows from the server so the UI always shows what is persisted.
       const fresh = await fetch(`${API_BASE_URL}/data/catalog-products`, { method: "GET" });
       if (fresh.ok) {
-        const nextPayload = (await fresh.json()) as GenericRecord[];
-        const normalized = (Array.isArray(nextPayload) ? nextPayload : [])
+        const nextPayload = await fresh.json();
+        const normalized = unwrapListPayload(nextPayload)
           .filter((row) => row && typeof row === "object")
           .map((row) => normalizeCatalogProduct(row as any));
         setRows(normalized);

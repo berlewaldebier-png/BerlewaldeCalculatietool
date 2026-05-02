@@ -2,6 +2,17 @@ import { PageShell } from "@/components/PageShell";
 import { ProductenVerpakkingWorkspace } from "@/components/ProductenVerpakkingWorkspace";
 import { getBootstrap } from "@/lib/apiServer";
 
+type GenericRecord = Record<string, unknown>;
+
+function unwrapList(value: unknown): GenericRecord[] {
+  if (Array.isArray(value)) return value as GenericRecord[];
+  if (value && typeof value === "object") {
+    const data = (value as any).data;
+    if (Array.isArray(data)) return data as GenericRecord[];
+  }
+  return [];
+}
+
 export default async function ProductenVerpakkingPage() {
   const bootstrap = await getBootstrap(
     [
@@ -21,16 +32,16 @@ export default async function ProductenVerpakkingPage() {
   );
 
   const navigation = bootstrap.navigation ?? [];
-  const verpakkingsonderdelen = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
-  const basisproducten = (bootstrap.datasets["base-product-masters"] as any[]) ?? [];
-  const samengestelde = (bootstrap.datasets["composite-product-masters"] as any[]) ?? [];
-  const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
-  const glasmaten = (bootstrap.datasets["glasmaten"] as any[]) ?? [];
-  const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
-  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const verpakkingsonderdelen = unwrapList(bootstrap.datasets["packaging-components"]);
+  const basisproducten = unwrapList(bootstrap.datasets["base-product-masters"]);
+  const samengestelde = unwrapList(bootstrap.datasets["composite-product-masters"]);
+  const catalogusproducten = unwrapList(bootstrap.datasets["catalog-products"]);
+  const glasmaten = unwrapList(bootstrap.datasets["glasmaten"]);
+  const verpakkingsonderdeelPrijzen = unwrapList(bootstrap.datasets["packaging-component-prices"]);
+  const bieren = unwrapList(bootstrap.datasets["bieren"]);
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
-  const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
-  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
+  const kostprijsversies = unwrapList(bootstrap.datasets["kostprijsversies"]);
+  const kostprijsproductactiveringen = unwrapList(bootstrap.datasets["kostprijsproductactiveringen"]);
 
   return (
     <PageShell
