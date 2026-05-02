@@ -466,6 +466,8 @@ def post_dev_hard_reset(
     try:
         from app.domain import (
             adviesprijzen_storage,
+            articles_storage,
+            bom_storage,
             cost_versions_storage,
             douano_margin_snapshot_storage,
             douano_oauth_storage,
@@ -481,11 +483,15 @@ def post_dev_hard_reset(
             product_registry_storage,
             quote_drafts_storage,
             sales_pricing_storage,
+            skus_storage,
             tarieven_heffingen_storage,
+            traceability_storage,
         )
 
         for module in [
             adviesprijzen_storage,
+            articles_storage,
+            bom_storage,
             cost_versions_storage,
             douano_margin_snapshot_storage,
             douano_oauth_storage,
@@ -501,7 +507,9 @@ def post_dev_hard_reset(
             product_registry_storage,
             quote_drafts_storage,
             sales_pricing_storage,
+            skus_storage,
             tarieven_heffingen_storage,
+            traceability_storage,
         ]:
             for flag_name in ["_SCHEMA_READY", "_schema_ready"]:
                 if hasattr(module, flag_name):
