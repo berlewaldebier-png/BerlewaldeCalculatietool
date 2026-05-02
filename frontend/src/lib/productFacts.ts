@@ -64,6 +64,12 @@ export function buildProductFacts(params: BuildProductFactsParams) {
     const name = text((row as any).name || (row as any).naam || id);
     articleNameById.set(id, name);
   });
+  const articleById = new Map<string, GenericRecord>();
+  (params.articles ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (!id) return;
+    articleById.set(id, row);
+  });
 
   const productMasterById = buildProductMasterById(
     params.basisproducten,
