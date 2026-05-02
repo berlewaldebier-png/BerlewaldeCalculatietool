@@ -154,6 +154,113 @@ def save_catalog_products(data: list[dict[str, Any]]) -> bool:
     if postgres_storage is None or not postgres_storage.uses_postgres():
         raise RuntimeError("PostgreSQL is verplicht voor runtime opslag (JSON fallback is verwijderd).")
 
+    def _now_iso() -> str:
+        return datetime.now(UTC).isoformat()
+
+    def _to_number(value: Any, fallback: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    def _resolve_latest_year() -> int:
+        years: set[int] = set()
+        try:
+            productie = production_storage.load_productie()
+            if isinstance(productie, dict):
+                for key in productie.keys():
+                    try:
+                        years.add(int(str(key)))
+                    except (TypeError, ValueError):
+                        continue
+        except Exception:
+            pass
+        try:
+            price_rows = load_packaging_component_prices()
+            if isinstance(price_rows, list):
+                for row in price_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    try:
+                        years.add(int(row.get("jaar", 0) or 0))
+                    except (TypeError, ValueError):
+                        continue
+        except Exception:
+            pass
+        return max([y for y in years if y > 0], default=datetime.now(UTC).year)
+
+    def _load_packaging_price_map(year: int) -> dict[str, float]:
+        prices: dict[str, float] = {}
+        rows = load_packaging_component_prices()
+        if not isinstance(rows, list):
+            return prices
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                jaar = int(row.get("jaar", 0) or 0)
+            except (TypeError, ValueError):
+                jaar = 0
+            if jaar != year:
+                continue
+            vid = str(row.get("verpakkingsonderdeel_id", "") or "").strip()
+            if not vid:
+                continue
+            prices[vid] = _to_number(row.get("prijs_per_stuk", 0), 0.0)
+        return prices
+
+    def _load_active_activation_map(year: int) -> dict[str, str]:
+        """Return sku_id -> kostprijsversie_id for the active activation in a given year."""
+        try:
+            rows = load_kostprijsproductactiveringen()
+        except Exception:
+            rows = []
+        if not isinstance(rows, list):
+            return {}
+        out: dict[str, str] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                jaar = int(row.get("jaar", 0) or 0)
+            except (TypeError, ValueError):
+                jaar = 0
+            if jaar != year:
+                continue
+            sku_id = str(row.get("sku_id", "") or "").strip()
+            version_id = str(row.get("kostprijsversie_id", "") or "").strip()
+            if sku_id and version_id:
+                out[sku_id] = version_id
+        return out
+
+    def _load_cost_by_sku(version_ids: set[str]) -> dict[str, float]:
+        """Return sku_id -> kostprijs from cost versions snapshot rows."""
+        if not version_ids:
+            return {}
+        versions = load_kostprijsversies()
+        if not isinstance(versions, list):
+            return {}
+        out: dict[str, float] = {}
+        for version in versions:
+            if not isinstance(version, dict):
+                continue
+            vid = str(version.get("id", "") or "").strip()
+            if vid not in version_ids:
+                continue
+            snapshot = version.get("resultaat_snapshot") if isinstance(version, dict) else {}
+            producten = (snapshot or {}).get("producten") if isinstance(snapshot, dict) else {}
+            basis = (producten or {}).get("basisproducten") if isinstance(producten, dict) else []
+            if not isinstance(basis, list):
+                continue
+            for row in basis:
+                if not isinstance(row, dict):
+                    continue
+                sku_id = str(row.get("sku_id", "") or "").strip()
+                if not sku_id:
+                    continue
+                out[sku_id] = _to_number(row.get("kostprijs", 0), 0.0)
+        return out
+
     # Load current state so we can do replace semantics for only the bundle subset.
     current_articles = postgres_storage.load_dataset("articles", [])
     current_skus = postgres_storage.load_dataset("skus", [])
@@ -280,11 +387,112 @@ def save_catalog_products(data: list[dict[str, Any]]) -> bool:
             )
 
     # Persist: we overwrite full datasets to keep things deterministic in dev.
-    return bool(
+    ok = bool(
         postgres_storage.save_dataset("articles", [*kept_articles, *next_articles], overwrite=True)
         and postgres_storage.save_dataset("skus", [*kept_skus, *next_bundle_skus], overwrite=True)
         and postgres_storage.save_dataset("bom-lines", [*kept_bom, *next_bundle_bom], overwrite=True)
     )
+    if not ok:
+        return False
+
+    # Phase SKU: ensure newly created bundle SKUs become "activatable"/quoteable once they have a cost.
+    # We compute a deterministic bundle cost from current active component SKU costs + packaging component prices.
+    # This writes a definitive cost version per bundle for the latest available year and activates it.
+    try:
+        from app.domain import kostprijs_activation_storage  # type: ignore
+    except Exception:
+        kostprijs_activation_storage = None
+
+    year_value = _resolve_latest_year()
+    price_by_component = _load_packaging_price_map(year_value)
+    active_versions_by_sku = _load_active_activation_map(year_value)
+    cost_by_component_sku = _load_cost_by_sku(set(active_versions_by_sku.values()))
+
+    # Compute per-bundle cost and persist as a cost version + activation.
+    now_iso = _now_iso()
+    existing_versions = load_kostprijsversies()
+    existing_versions = existing_versions if isinstance(existing_versions, list) else []
+    existing_for_year = [v for v in existing_versions if isinstance(v, dict) and int(v.get("jaar", 0) or 0) == year_value]
+    kept_other_years = [v for v in existing_versions if isinstance(v, dict) and int(v.get("jaar", 0) or 0) != year_value]
+    next_versions_for_year: list[dict[str, Any]] = list(existing_for_year)
+
+    activations_to_apply: list[dict[str, Any]] = []
+    for bundle in next_articles:
+        bundle_id = str(bundle.get("id", "") or "").strip()
+        if not bundle_id:
+            continue
+        bundle_sku_id = f"sku-bundle-{bundle_id}"
+        # Find matching sku id if custom id was used.
+        for sku in next_bundle_skus:
+            if str(sku.get("article_id", "") or "").strip() == bundle_id:
+                bundle_sku_id = str(sku.get("id", "") or bundle_sku_id)
+                break
+
+        # Sum BOM lines.
+        total_cost = 0.0
+        for line in next_bundle_bom:
+            if str(line.get("parent_article_id", "") or "").strip() != bundle_id:
+                continue
+            qty = _to_number(line.get("quantity", 0), 0.0)
+            if qty <= 0:
+                continue
+            component_sku_id = str(line.get("component_sku_id", "") or "").strip()
+            component_article_id = str(line.get("component_article_id", "") or "").strip()
+            if component_sku_id:
+                unit_cost = cost_by_component_sku.get(component_sku_id, 0.0)
+                total_cost += qty * unit_cost
+                continue
+            if component_article_id:
+                unit_cost = price_by_component.get(component_article_id, 0.0)
+                total_cost += qty * unit_cost
+                continue
+
+        version_id = f"kostprijs-bundle-{bundle_id}-{year_value}"
+        version_record = {
+            "id": version_id,
+            "jaar": year_value,
+            "status": "definitief",
+            "bier_id": "",
+            "versie_nummer": 1,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "finalized_at": now_iso,
+            "type": "bundle",
+            "brontype": "bundle_bom",
+            "basisgegevens": {"jaar": year_value},
+            "resultaat_snapshot": {
+                "producten": {
+                    "basisproducten": [
+                        {
+                            "sku_id": bundle_sku_id,
+                            "verpakking_label": str(bundle.get("name", bundle.get("naam", bundle_id)) or bundle_id),
+                            "kostprijs": round(total_cost, 6),
+                            "vaste_kosten": 0.0,
+                        }
+                    ],
+                    "samengestelde_producten": [],
+                }
+            },
+        }
+        # Replace or append in-year.
+        next_versions_for_year = [v for v in next_versions_for_year if str(v.get("id", "")) != version_id]
+        next_versions_for_year.append(version_record)
+        activations_to_apply.append(
+            {"sku_id": bundle_sku_id, "jaar": year_value, "kostprijsversie_id": version_id}
+        )
+
+    if next_versions_for_year:
+        # Save all years unchanged, only update the current year scope.
+        postgres_storage.save_dataset("kostprijsversies", [*kept_other_years, *next_versions_for_year], overwrite=True)
+
+    if activations_to_apply and kostprijs_activation_storage is not None:
+        # History-aware upsert.
+        kostprijs_activation_storage.upsert_activations(
+            activations_to_apply,
+            context=kostprijs_activation_storage.ActivationContext(action="bundle_auto_activate"),
+        )
+
+    return True
 
 
 def _load_postgres_dataset(dataset_name: str) -> Any | None:
