@@ -479,7 +479,6 @@ def post_dev_hard_reset(
             kostprijs_activation_storage,
             kostprijs_scenario_inkoop_storage,
             new_year_drafts_storage,
-            postgres_storage,
             production_storage,
             product_registry_storage,
             quote_drafts_storage,
