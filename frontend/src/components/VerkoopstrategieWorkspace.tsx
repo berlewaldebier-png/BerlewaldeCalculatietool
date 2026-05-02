@@ -262,6 +262,18 @@ export function VerkoopstrategieWorkspace({
     });
     return map;
   }, [articles]);
+  const bundleArticleById = useMemo(() => {
+    const map = new Map<string, { id: string; label: string }>();
+    (Array.isArray(articles) ? articles : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "").trim();
+      if (!id) return;
+      const kind = String((row as any)?.kind ?? "").trim().toLowerCase();
+      if (kind !== "bundle") return;
+      const label = String((row as any)?.name ?? (row as any)?.naam ?? id).trim() || id;
+      map.set(id, { id, label });
+    });
+    return map;
+  }, [articles]);
   const skuById = useMemo(() => {
     const map = new Map<string, GenericRecord>();
     (Array.isArray(skus) ? skus : []).forEach((row) => {
@@ -290,14 +302,31 @@ export function VerkoopstrategieWorkspace({
         const skuId = String((act as any)?.sku_id ?? "").trim();
         const sku = skuId ? (skuById.get(skuId) ?? null) : null;
         const formatId = String((sku as any)?.format_article_id ?? "").trim();
-        if (!formatId) return;
-        const format = formatArticleById.get(formatId);
-        if (!format) return;
-        seen.set(`basis:${format.id}`, { id: format.id, label: format.label, type: "basis" });
+        const articleId = String((sku as any)?.article_id ?? "").trim();
+        if (formatId) {
+          const format = formatArticleById.get(formatId);
+          if (format) {
+            seen.set(`basis:${format.id}`, { id: format.id, label: format.label, type: "basis" });
+          }
+          return;
+        }
+        if (articleId) {
+          const bundle = bundleArticleById.get(articleId);
+          if (bundle) {
+            seen.set(`basis:${bundle.id}`, { id: bundle.id, label: bundle.label, type: "basis" });
+          }
+        }
       });
     }
     return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
-  }, [basisproducten, samengesteldeProducten, formatArticleById, kostprijsproductactiveringen, skuById]);
+  }, [
+    basisproducten,
+    samengesteldeProducten,
+    bundleArticleById,
+    formatArticleById,
+    kostprijsproductactiveringen,
+    skuById,
+  ]);
   const basisProductParentMap = useMemo(() => {
     const parents = new Map<string, { productId: string; label: string; score: number }[]>();
     samengesteldeProducten.forEach((row) => {

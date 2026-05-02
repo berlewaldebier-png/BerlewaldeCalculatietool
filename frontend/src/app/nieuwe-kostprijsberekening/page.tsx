@@ -17,6 +17,9 @@ export default async function NieuweKostprijsberekeningPage({
       "basisproducten",
       "samengestelde-producten",
       "bieren",
+      "skus",
+      "articles",
+      "bom-lines",
       "productie",
       "vaste-kosten",
       "tarieven-heffingen",
@@ -31,6 +34,9 @@ export default async function NieuweKostprijsberekeningPage({
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
   const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
+  const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
+  const bomLines = (bootstrap.datasets["bom-lines"] as any[]) ?? [];
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
   const tarievenHeffingen = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
@@ -52,6 +58,9 @@ export default async function NieuweKostprijsberekeningPage({
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         bieren={bieren}
+        skus={skus}
+        articles={articles}
+        bomLines={bomLines}
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}

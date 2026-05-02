@@ -6,6 +6,10 @@ import {
   BerekeningenWizard,
   type BerekeningenWizardPersistResult
 } from "@/components/BerekeningenWizard";
+import {
+  ArticleKostprijsWizard,
+  type ArticleKostprijsWizardPersistResult,
+} from "@/components/ArticleKostprijsWizard";
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR, formatPercent0to2 } from "@/lib/formatters";
 
@@ -17,6 +21,9 @@ type KostprijsBeheerWorkspaceProps = {
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
+  bomLines: GenericRecord[];
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
@@ -26,6 +33,7 @@ type KostprijsBeheerWorkspaceProps = {
 };
 
 type WorkspaceMode = "landing" | "wizard-new" | "wizard-edit";
+type NewWizardKind = "beer" | "article";
 type ExistingFilterMode = "all" | "concept" | "definitief";
 
 export function KostprijsBeheerWorkspace({
@@ -34,6 +42,9 @@ export function KostprijsBeheerWorkspace({
   basisproducten,
   samengesteldeProducten,
   bieren,
+  skus,
+  articles,
+  bomLines,
   productie,
   vasteKosten,
   tarievenHeffingen,
@@ -51,6 +62,7 @@ export function KostprijsBeheerWorkspace({
       : "landing";
 
   const [mode, setMode] = useState<WorkspaceMode>(normalizedInitialMode);
+  const [newWizardKind, setNewWizardKind] = useState<NewWizardKind>("beer");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeSort, setActiveSort] = useState<{
@@ -245,6 +257,16 @@ export function KostprijsBeheerWorkspace({
   }
 
   function handlePersisted(result: BerekeningenWizardPersistResult) {
+    if (result.year > 0) {
+      setSelectedYear(result.year);
+    }
+    if (result.id) {
+      setSelectedId(result.id);
+    }
+    setExistingFilterMode(result.status === "definitief" ? "definitief" : "concept");
+  }
+
+  function handleArticlePersisted(result: ArticleKostprijsWizardPersistResult) {
     if (result.year > 0) {
       setSelectedYear(result.year);
     }
@@ -595,6 +617,24 @@ export function KostprijsBeheerWorkspace({
   }
 
   if (mode === "wizard-new") {
+    if (newWizardKind === "article") {
+      return (
+        <ArticleKostprijsWizard
+          initialRows={currentBerekeningen}
+          kostprijsproductactiveringen={kostprijsproductactiveringen}
+          skus={skus}
+          articles={articles}
+          bomLines={bomLines}
+          packagingComponentPrices={packagingComponentPrices}
+          startWithNew
+          onRowsChange={handleRowsChange}
+          onPersisted={handleArticlePersisted}
+          onFinish={() => setMode("landing")}
+          onBackToLanding={() => setMode("landing")}
+        />
+      );
+    }
+
     return (
       <BerekeningenWizard
         initialRows={currentBerekeningen}
@@ -615,6 +655,26 @@ export function KostprijsBeheerWorkspace({
   }
 
   if (mode === "wizard-edit" && selectedId) {
+    const record = berekeningenById.get(selectedId) ?? null;
+    const recordType = String((record as any)?.type ?? "").toLowerCase();
+    if (recordType === "bundle" || recordType === "article") {
+      return (
+        <ArticleKostprijsWizard
+          initialRows={currentBerekeningen}
+          kostprijsproductactiveringen={kostprijsproductactiveringen}
+          skus={skus}
+          articles={articles}
+          bomLines={bomLines}
+          packagingComponentPrices={packagingComponentPrices}
+          initialSelectedId={selectedId}
+          onRowsChange={handleRowsChange}
+          onPersisted={handleArticlePersisted}
+          onFinish={() => setMode("landing")}
+          onBackToLanding={() => setMode("landing")}
+        />
+      );
+    }
+
     return (
       <BerekeningenWizard
         initialRows={currentBerekeningen}
@@ -647,11 +707,28 @@ export function KostprijsBeheerWorkspace({
         <button
           type="button"
           className="dashboard-quick-card kostprijs-choice-card"
-          onClick={() => setMode("wizard-new")}
+          onClick={() => {
+            setNewWizardKind("beer");
+            setMode("wizard-new");
+          }}
         >
           <div className="dashboard-quick-card-title">Nieuwe berekening</div>
           <div className="dashboard-quick-card-text">
             Start direct een nieuwe kostprijswizard voor een bier of productflow.
+          </div>
+        </button>
+
+        <button
+          type="button"
+          className="dashboard-quick-card kostprijs-choice-card"
+          onClick={() => {
+            setNewWizardKind("article");
+            setMode("wizard-new");
+          }}
+        >
+          <div className="dashboard-quick-card-title">Nieuw artikel</div>
+          <div className="dashboard-quick-card-text">
+            Maak een kostprijsberekening voor een verkoopbaar artikel (bundle/SKU) op basis van de samenstelling.
           </div>
         </button>
 

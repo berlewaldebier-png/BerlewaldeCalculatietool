@@ -57,6 +57,13 @@ export function buildProductFacts(params: BuildProductFactsParams) {
     if (!id) return;
     bierNameById.set(id, text((row as any).biernaam || (row as any).naam || id));
   });
+  const articleNameById = new Map<string, string>();
+  (params.articles ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (!id) return;
+    const name = text((row as any).name || (row as any).naam || id);
+    articleNameById.set(id, name);
+  });
 
   const productMasterById = buildProductMasterById(
     params.basisproducten,
@@ -99,11 +106,17 @@ export function buildProductFacts(params: BuildProductFactsParams) {
     .forEach((activation) => {
       const skuId = text((activation as any).sku_id);
       const skuRow = skuId ? skuById.get(skuId) ?? null : null;
+      const skuKind = text((skuRow as any)?.kind).toLowerCase();
       const bierId = text((activation as any).bier_id) || text((skuRow as any)?.beer_id);
       const productId =
-        text((activation as any).product_id) || text((skuRow as any)?.format_article_id);
+        text((activation as any).product_id) ||
+        text((skuRow as any)?.format_article_id) ||
+        text((skuRow as any)?.article_id);
       const kostprijsversieId = text((activation as any).kostprijsversie_id);
-      if (!bierId || !productId || !kostprijsversieId) return;
+      if (!productId || !kostprijsversieId) return;
+      const effectiveBierId =
+        bierId || (skuId && skuKind === "article" ? `sku:${skuId}` : "");
+      if (!effectiveBierId) return;
 
       const ref = skuId ? `sku:${skuId}` : `beer:${bierId}:product:${productId}`;
       if (seen.has(ref)) return;
@@ -184,10 +197,13 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         return;
       }
 
-      const bierName = bierNameById.get(bierId) || bierId;
+      const isArticleSku = skuId && skuKind === "article";
+      const bierName = isArticleSku
+        ? articleNameById.get(text((skuRow as any)?.article_id) || productId) || packLabel
+        : bierNameById.get(bierId) || bierId;
       facts.push({
         ref,
-        bierId,
+        bierId: effectiveBierId,
         productId,
         kostprijsversieId,
         bierName,

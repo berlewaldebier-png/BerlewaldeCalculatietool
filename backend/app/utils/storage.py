@@ -395,102 +395,8 @@ def save_catalog_products(data: list[dict[str, Any]]) -> bool:
     if not ok:
         return False
 
-    # Phase SKU: ensure newly created bundle SKUs become "activatable"/quoteable once they have a cost.
-    # We compute a deterministic bundle cost from current active component SKU costs + packaging component prices.
-    # This writes a definitive cost version per bundle for the latest available year and activates it.
-    try:
-        from app.domain import kostprijs_activation_storage  # type: ignore
-    except Exception:
-        kostprijs_activation_storage = None
-
-    year_value = _resolve_latest_year()
-    price_by_component = _load_packaging_price_map(year_value)
-    active_versions_by_sku = _load_active_activation_map(year_value)
-    cost_by_component_sku = _load_cost_by_sku(set(active_versions_by_sku.values()))
-
-    # Compute per-bundle cost and persist as a cost version + activation.
-    now_iso = _now_iso()
-    existing_versions = load_kostprijsversies()
-    existing_versions = existing_versions if isinstance(existing_versions, list) else []
-    existing_for_year = [v for v in existing_versions if isinstance(v, dict) and int(v.get("jaar", 0) or 0) == year_value]
-    kept_other_years = [v for v in existing_versions if isinstance(v, dict) and int(v.get("jaar", 0) or 0) != year_value]
-    next_versions_for_year: list[dict[str, Any]] = list(existing_for_year)
-
-    activations_to_apply: list[dict[str, Any]] = []
-    for bundle in next_articles:
-        bundle_id = str(bundle.get("id", "") or "").strip()
-        if not bundle_id:
-            continue
-        bundle_sku_id = f"sku-bundle-{bundle_id}"
-        # Find matching sku id if custom id was used.
-        for sku in next_bundle_skus:
-            if str(sku.get("article_id", "") or "").strip() == bundle_id:
-                bundle_sku_id = str(sku.get("id", "") or bundle_sku_id)
-                break
-
-        # Sum BOM lines.
-        total_cost = 0.0
-        for line in next_bundle_bom:
-            if str(line.get("parent_article_id", "") or "").strip() != bundle_id:
-                continue
-            qty = _to_number(line.get("quantity", 0), 0.0)
-            if qty <= 0:
-                continue
-            component_sku_id = str(line.get("component_sku_id", "") or "").strip()
-            component_article_id = str(line.get("component_article_id", "") or "").strip()
-            if component_sku_id:
-                unit_cost = cost_by_component_sku.get(component_sku_id, 0.0)
-                total_cost += qty * unit_cost
-                continue
-            if component_article_id:
-                unit_cost = price_by_component.get(component_article_id, 0.0)
-                total_cost += qty * unit_cost
-                continue
-
-        version_id = f"kostprijs-bundle-{bundle_id}-{year_value}"
-        version_record = {
-            "id": version_id,
-            "jaar": year_value,
-            "status": "definitief",
-            "bier_id": "",
-            "versie_nummer": 1,
-            "created_at": now_iso,
-            "updated_at": now_iso,
-            "finalized_at": now_iso,
-            "type": "bundle",
-            "brontype": "bundle_bom",
-            "basisgegevens": {"jaar": year_value},
-            "resultaat_snapshot": {
-                "producten": {
-                    "basisproducten": [
-                        {
-                            "sku_id": bundle_sku_id,
-                            "verpakking_label": str(bundle.get("name", bundle.get("naam", bundle_id)) or bundle_id),
-                            "kostprijs": round(total_cost, 6),
-                            "vaste_kosten": 0.0,
-                        }
-                    ],
-                    "samengestelde_producten": [],
-                }
-            },
-        }
-        # Replace or append in-year.
-        next_versions_for_year = [v for v in next_versions_for_year if str(v.get("id", "")) != version_id]
-        next_versions_for_year.append(version_record)
-        activations_to_apply.append(
-            {"sku_id": bundle_sku_id, "jaar": year_value, "kostprijsversie_id": version_id}
-        )
-
-    if next_versions_for_year:
-        # Save all years unchanged, only update the current year scope.
-        postgres_storage.save_dataset("kostprijsversies", [*kept_other_years, *next_versions_for_year], overwrite=True)
-
-    if activations_to_apply and kostprijs_activation_storage is not None:
-        # History-aware upsert.
-        kostprijs_activation_storage.upsert_activations(
-            activations_to_apply,
-            context=kostprijs_activation_storage.ActivationContext(action="bundle_auto_activate"),
-        )
+    # Bundles become quoteable only after a user creates a definitive kostprijsversie and activates it
+    # via Kostprijsbeheer. We intentionally do not auto-create/auto-activate costs here.
 
     return True
 
@@ -1576,10 +1482,11 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     basis_biernaam = str(
         basisgegevens.get("biernaam", record.get("biernaam", "")) or ""
     )
+    bier_id_for_validation = str(record.get("bier_id", "") or "").strip()
     basis_raw_alcohol = basisgegevens.get(
         "alcoholpercentage", record.get("alcoholpercentage", None)
     )
-    if status == "definitief" and basis_biernaam.strip() and (
+    if status == "definitief" and bier_id_for_validation and basis_biernaam.strip() and (
         basis_raw_alcohol is None or basis_raw_alcohol == ""
     ):
         raise ValueError("Alcohol % is verplicht voor definitieve kostprijsberekeningen.")
@@ -1588,26 +1495,20 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     )
 
     basisgegevens = {
-        "jaar": int(
-            basisgegevens.get("jaar", record.get("jaar", 0)) or 0
-        ),
+        "jaar": int(basisgegevens.get("jaar", record.get("jaar", 0)) or 0),
         "biernaam": basis_biernaam,
-        "stijl": str(
-            basisgegevens.get("stijl", record.get("stijl", "")) or ""
-        ),
+        "stijl": str(basisgegevens.get("stijl", record.get("stijl", "")) or ""),
         "alcoholpercentage": basis_alcoholpercentage,
         "belastingsoort": str(
-            basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT)
-            or DEFAULT_BELASTINGSOORT
+            basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT
         ),
         "tarief_accijns": str(
-            basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS)
-            or DEFAULT_TARIEF_ACCIJNS
+            basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS
         ),
-        "btw_tarief": str(
-            basisgegevens.get("btw_tarief", DEFAULT_BTW_TARIEF)
-            or DEFAULT_BTW_TARIEF
-        ),
+        "btw_tarief": str(basisgegevens.get("btw_tarief", DEFAULT_BTW_TARIEF) or DEFAULT_BTW_TARIEF),
+        # SKU-aanpak: preserve non-beer scope identifiers for article/bundle cost versions.
+        "article_id": str(basisgegevens.get("article_id", record.get("article_id", "")) or ""),
+        "sku_id": str(basisgegevens.get("sku_id", record.get("sku_id", "")) or ""),
     }
 
     soort_berekening = record.get("soort_berekening", {})
@@ -6648,10 +6549,15 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
                 status = ""
             if status != "definitief":
                 continue
+            record_cost_type = str(record.get("type", "") or "").strip().lower()
             bier_id = str(record.get("bier_id", "") or "").strip()
             basisgegevens = record.get("basisgegevens", {})
             if not isinstance(basisgegevens, dict):
                 basisgegevens = {}
+            # SKU-aanpak: articles/bundles are not beers and must not create/link bierstamdata.
+            is_article_cost = bool(str(basisgegevens.get("article_id", "") or "").strip()) or record_cost_type in {"bundle", "article"}
+            if is_article_cost:
+                continue
             biernaam = str(basisgegevens.get("biernaam", "") or "").strip()
             stijl = str(basisgegevens.get("stijl", "") or "").strip()
             alcoholpercentage = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
@@ -6800,19 +6706,8 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
         if not saved:
             return False
 
-        # Phase E: auto-activate on write for any definitive record.
-        #
-        # We intentionally do this on write (not on read) to avoid hidden side effects, but we also
-        # don't rely solely on the status transition. If an earlier finalize attempt saved the
-        # record but failed before writing activations, a later save should still heal the missing
-        # first-time scopes.
-        for record in normalized_records:
-            record_id = str(record.get("id", "") or "").strip()
-            if not record_id:
-                continue
-            new_status = str(record.get("status", "") or "").strip().lower()
-            if new_status == "definitief":
-                _auto_activate_first_time_products(record)
+        # SKU-aanpak: activaties zijn expliciet en worden nooit automatisch aangemaakt bij opslaan.
+        # Definitieve kostprijsversies worden pas "quoteable" na een expliciete activate call.
 
         return True
 
@@ -7275,12 +7170,56 @@ def activate_kostprijsversie(
     sku_rows = postgres_storage.load_dataset("skus", []) if postgres_storage is not None and postgres_storage.uses_postgres() else []
     sku_by_id = {str(row.get("id", "") or ""): row for row in sku_rows if isinstance(row, dict)}
     sku_by_beer_format: dict[tuple[str, str], str] = {}
+    sku_by_article: dict[str, str] = {}
     for row in sku_by_id.values():
         sku_id = str(row.get("id", "") or "").strip()
         beer_key = str(row.get("beer_id", "") or "").strip()
         format_key = str(row.get("format_article_id", "") or "").strip()
+        article_key = str(row.get("article_id", "") or "").strip()
         if sku_id and beer_key and format_key:
             sku_by_beer_format[(beer_key, format_key)] = sku_id
+        if sku_id and article_key:
+            sku_by_article[article_key] = sku_id
+
+    # SKU-aanpak: article/bundle kostprijsversies activeren zichzelf (1 SKU per versie).
+    basisgegevens = target.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    record_cost_type = str(target.get("type", "") or "").strip().lower()
+    article_id = str(basisgegevens.get("article_id", "") or "").strip()
+    requested_sku_id = str(basisgegevens.get("sku_id", "") or "").strip()
+    if article_id or record_cost_type in {"bundle", "article"}:
+        sku_id = requested_sku_id if requested_sku_id in sku_by_id else ""
+        if not sku_id and article_id:
+            sku_id = sku_by_article.get(article_id, "")
+        if not sku_id:
+            return None
+        activation_row = {
+            "sku_id": sku_id,
+            "jaar": jaar,
+            "kostprijsversie_id": str(kostprijsversie_id or ""),
+            "effectief_vanaf": effective_from,
+            "created_at": effective_from,
+            "updated_at": effective_from,
+            # Keep legacy fields for exports/debugging.
+            "bier_id": bier_id,
+            "product_id": article_id or str(sku_by_id.get(sku_id, {}).get("article_id", "") or ""),
+            "product_type": "article",
+        }
+        if not upsert_kostprijsproductactiveringen(
+            [activation_row],
+            context={"action": "activate_version", **(context or {})},
+        ):
+            return None
+        return next(
+            (
+                record
+                for record in load_kostprijsversies()
+                if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+            ),
+            None,
+        )
+
     target_refs = _resolve_kostprijsproduct_refs(
         target,
         {
@@ -7302,7 +7241,11 @@ def activate_kostprijsversie(
         product_id = str(ref.get("product_id", "") or "")
         if not product_id:
             continue
-        sku_id = product_id if product_id in sku_by_id else sku_by_beer_format.get((bier_id, product_id), "")
+        sku_id = product_id if product_id in sku_by_id else ""
+        if not sku_id:
+            sku_id = sku_by_beer_format.get((bier_id, product_id), "")
+        if not sku_id:
+            sku_id = sku_by_article.get(product_id, "")
         if not sku_id:
             continue
         activation_rows.append(
@@ -7367,6 +7310,59 @@ def activate_kostprijsversie_products(
     if str(target.get("status", "") or "") != "definitief":
         return None
 
+    basisgegevens = target.get("basisgegevens", {})
+    if not isinstance(basisgegevens, dict):
+        basisgegevens = {}
+    record_cost_type = str(target.get("type", "") or "").strip().lower()
+    article_id = str(basisgegevens.get("article_id", "") or "").strip()
+    requested_sku_id = str(basisgegevens.get("sku_id", "") or "").strip()
+
+    # SKU-aanpak: article/bundle kostprijsversies activeren zichzelf (1 SKU per versie).
+    if article_id or record_cost_type in {"bundle", "article"}:
+        if not (requested_product_ids.intersection({article_id, requested_sku_id})):
+            return None
+        bier_id = str(target.get("bier_id", "") or "")
+        jaar = int(target.get("jaar", 0) or 0)
+        effective_from = _now_iso()
+        postgres_storage = _get_postgres_storage_module()
+        sku_rows = postgres_storage.load_dataset("skus", []) if postgres_storage is not None and postgres_storage.uses_postgres() else []
+        sku_by_id = {str(row.get("id", "") or ""): row for row in sku_rows if isinstance(row, dict)}
+        sku_by_article: dict[str, str] = {}
+        for row in sku_by_id.values():
+            sku_id = str(row.get("id", "") or "").strip()
+            article_key = str(row.get("article_id", "") or "").strip()
+            if sku_id and article_key:
+                sku_by_article[article_key] = sku_id
+        sku_id = requested_sku_id if requested_sku_id in sku_by_id else ""
+        if not sku_id and article_id:
+            sku_id = sku_by_article.get(article_id, "")
+        if not sku_id:
+            return None
+        activation_row = {
+            "sku_id": sku_id,
+            "jaar": jaar,
+            "kostprijsversie_id": str(kostprijsversie_id or ""),
+            "effectief_vanaf": effective_from,
+            "created_at": effective_from,
+            "updated_at": effective_from,
+            "bier_id": bier_id,
+            "product_id": article_id or str(sku_by_id.get(sku_id, {}).get("article_id", "") or ""),
+            "product_type": "article",
+        }
+        if not upsert_kostprijsproductactiveringen(
+            [activation_row],
+            context={"action": "activate_products", **(context or {})},
+        ):
+            return None
+        return next(
+            (
+                record
+                for record in load_kostprijsversies()
+                if str(record.get("id", "") or "") == str(kostprijsversie_id or "")
+            ),
+            None,
+        )
+
     basisproducten = [
         row for row in load_basisproducten() if isinstance(row, dict)
     ]
@@ -7405,16 +7401,24 @@ def activate_kostprijsversie_products(
     sku_rows = postgres_storage.load_dataset("skus", []) if postgres_storage is not None and postgres_storage.uses_postgres() else []
     sku_by_id = {str(row.get("id", "") or ""): row for row in sku_rows if isinstance(row, dict)}
     sku_by_beer_format: dict[tuple[str, str], str] = {}
+    sku_by_article: dict[str, str] = {}
     for row in sku_by_id.values():
         sku_id = str(row.get("id", "") or "").strip()
         beer_key = str(row.get("beer_id", "") or "").strip()
         format_key = str(row.get("format_article_id", "") or "").strip()
+        article_key = str(row.get("article_id", "") or "").strip()
         if sku_id and beer_key and format_key:
             sku_by_beer_format[(beer_key, format_key)] = sku_id
+        if sku_id and article_key:
+            sku_by_article[article_key] = sku_id
     activation_rows: list[dict[str, Any]] = []
     for product_id in valid_product_ids:
         ref = target_ref_by_product_id[product_id]
-        sku_id = product_id if product_id in sku_by_id else sku_by_beer_format.get((bier_id, product_id), "")
+        sku_id = product_id if product_id in sku_by_id else ""
+        if not sku_id:
+            sku_id = sku_by_beer_format.get((bier_id, product_id), "")
+        if not sku_id:
+            sku_id = sku_by_article.get(product_id, "")
         if not sku_id:
             continue
         activation_rows.append(

@@ -1092,6 +1092,7 @@ function BuilderStep({
               <tbody>
                 {scenario.products.map((product) => {
                   const productRef = getProductRef(product);
+                  const hasCurrentOption = productRef ? productOptionIds.has(productRef) : false;
                   const pricing = metrics.pricingByRef[productRef];
                   const display =
                     unitMode === "liters"
@@ -1113,10 +1114,16 @@ function BuilderStep({
                       <td>
                         <select
                           className="cpq-select"
-                          value={productOptionIds.has(getProductRef(product)) ? getProductRef(product) : ""}
+                          value={productRef || ""}
                           onChange={(e) => onSelectRowOption(product.id, e.target.value)}
                         >
                           <option value="">Kies product…</option>
+                          {!hasCurrentOption && productRef ? (
+                            <option value={productRef}>
+                              {(product.name || "Geselecteerd product") + (product.pack ? ` · ${product.pack}` : "")}{" "}
+                              (niet actief)
+                            </option>
+                          ) : null}
                           {productOptions.map((opt) => (
                             <option key={opt.optionId} value={opt.optionId}>
                               {opt.label}
