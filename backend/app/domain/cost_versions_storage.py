@@ -207,12 +207,13 @@ def load_dataset(default_value: Any) -> Any:
             sku_rows = cur.fetchall()
             sku_meta: dict[str, dict[str, Any]] = {}
             try:
-                cur.execute("SELECT id, beer_id, format_article_id, name, code FROM skus")
-                for sid, beer_id, format_article_id, name, code in cur.fetchall() or []:
+                cur.execute("SELECT id, beer_id, format_article_id, article_id, name, code FROM skus")
+                for sid, beer_id, format_article_id, article_id, name, code in cur.fetchall() or []:
                     sku_meta[str(sid)] = {
                         "id": str(sid),
                         "beer_id": str(beer_id or ""),
                         "format_article_id": str(format_article_id or ""),
+                        "article_id": str(article_id or ""),
                         "name": str(name or ""),
                         "code": str(code or ""),
                     }
@@ -242,12 +243,18 @@ def load_dataset(default_value: Any) -> Any:
         meta = sku_meta.get(sku_text, {})
         beer_id_text = str(meta.get("beer_id", "") or "")
         format_article_id = str(meta.get("format_article_id", "") or "")
+        article_id = str(meta.get("article_id", "") or "")
+        # Historically UIs expect `product_id` to be present in snapshot rows for definitive versions.
+        # In the SKU model, format SKUs map to `format_article_id`, while article SKUs (bundles/packaging)
+        # map to `article_id`.
+        product_id = format_article_id or article_id
+        product_type = "sku" if format_article_id else ("article" if article_id else "sku")
         payload: dict[str, Any] = {
             "id": str(row_id),
             "sku_id": sku_text,
             "bier_id": beer_id_text,
-            "product_id": format_article_id,
-            "product_type": "sku",
+            "product_id": product_id,
+            "product_type": product_type,
             "verpakking": verpakking_text,
             "verpakkingseenheid": verpakking_text,
             "verpakking_label": str(verpakking_label or ""),
