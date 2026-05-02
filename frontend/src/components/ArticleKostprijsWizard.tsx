@@ -23,6 +23,7 @@ type Props = {
   bomLines: GenericRecord[];
   packagingComponentPrices: GenericRecord[];
   initialSelectedId?: string;
+  initialBundleSkuId?: string;
   startWithNew?: boolean;
   onRowsChange?: (rows: GenericRecord[]) => void;
   onPersisted?: (result: ArticleKostprijsWizardPersistResult) => void;
@@ -155,6 +156,11 @@ export function ArticleKostprijsWizard(props: Props) {
   const [stepIndex, setStepIndex] = useState<number>(0);
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
   const [selectedBundleSkuId, setSelectedBundleSkuId] = useState<string>(() => {
+    const forcedSkuId = text(props.initialBundleSkuId);
+    if (forcedSkuId) {
+      const exists = skuById.get(forcedSkuId);
+      if (exists) return forcedSkuId;
+    }
     const initialSelected = text(props.initialSelectedId);
     if (initialSelected) {
       const found = rows.find((row) => text((row as any).id) === initialSelected) ?? null;

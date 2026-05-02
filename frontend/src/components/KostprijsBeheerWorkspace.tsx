@@ -30,6 +30,8 @@ type KostprijsBeheerWorkspaceProps = {
   packagingComponentPrices: GenericRecord[];
   initialMode?: string;
   initialFocus?: string;
+  initialWizardKind?: string;
+  initialSkuId?: string;
 };
 
 type WorkspaceMode = "landing" | "wizard-new" | "wizard-edit";
@@ -50,7 +52,9 @@ export function KostprijsBeheerWorkspace({
   tarievenHeffingen,
   packagingComponentPrices,
   initialMode,
-  initialFocus
+  initialFocus,
+  initialWizardKind,
+  initialSkuId
 }: KostprijsBeheerWorkspaceProps) {
   const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(
     Array.isArray(berekeningen) ? berekeningen : []
@@ -62,7 +66,11 @@ export function KostprijsBeheerWorkspace({
       : "landing";
 
   const [mode, setMode] = useState<WorkspaceMode>(normalizedInitialMode);
-  const [newWizardKind, setNewWizardKind] = useState<NewWizardKind>("beer");
+  const normalizedInitialWizardKind =
+    normalizedInitialMode === "wizard-new" && String(initialWizardKind ?? "") === "article"
+      ? "article"
+      : "beer";
+  const [newWizardKind, setNewWizardKind] = useState<NewWizardKind>(normalizedInitialWizardKind);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeSort, setActiveSort] = useState<{
@@ -626,6 +634,7 @@ export function KostprijsBeheerWorkspace({
           articles={articles}
           bomLines={bomLines}
           packagingComponentPrices={packagingComponentPrices}
+          initialBundleSkuId={typeof initialSkuId === "string" ? initialSkuId : ""}
           startWithNew
           onRowsChange={handleRowsChange}
           onPersisted={handleArticlePersisted}

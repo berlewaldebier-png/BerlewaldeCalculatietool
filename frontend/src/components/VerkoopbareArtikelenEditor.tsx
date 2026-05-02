@@ -294,6 +294,21 @@ export function VerkoopbareArtikelenEditor(props: {
     return out;
   }, [beerById, kostprijsversieById, props.kostprijsproductactiveringen, selectedYear]);
 
+  const activeSkuIds = useMemo(() => {
+    const out = new Set<string>();
+    (Array.isArray(props.kostprijsproductactiveringen) ? props.kostprijsproductactiveringen : [])
+      .filter((row) => row && typeof row === "object")
+      .forEach((row: any) => {
+        const year = toNumber(row.jaar ?? 0, 0);
+        if (year !== selectedYear) return;
+        const tot = String(row.effectief_tot ?? "");
+        if (tot) return;
+        const skuId = String(row.sku_id ?? "");
+        if (skuId) out.add(skuId);
+      });
+    return out;
+  }, [props.kostprijsproductactiveringen, selectedYear]);
+
   const beerProductOptions = useMemo(() => {
     const out: { value: string; label: string; payload: Partial<CatalogProductLine> }[] = [];
     for (const [key, val] of activeBeerCostsByKey.entries()) {
@@ -322,6 +337,9 @@ export function VerkoopbareArtikelenEditor(props: {
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [activationPrompt, setActivationPrompt] = useState<null | { articleId: string; skuId: string; naam: string }>(
+    null
+  );
 
   function addCatalogProduct() {
     const id = createLocalId();
@@ -447,6 +465,19 @@ export function VerkoopbareArtikelenEditor(props: {
           .filter((row) => row && typeof row === "object")
           .map((row) => normalizeCatalogProduct(row as any));
         setRows(normalized);
+
+        const candidateId = expandedId ? String(expandedId) : normalized[normalized.length - 1]?.id ?? "";
+        const candidate = candidateId ? normalized.find((row) => row.id === candidateId) ?? null : null;
+        if (candidate) {
+          const skuId = `sku-${candidate.id}`;
+          if (!activeSkuIds.has(skuId)) {
+            setActivationPrompt({
+              articleId: candidate.id,
+              skuId,
+              naam: String(candidate.naam ?? "") || candidate.id
+            });
+          }
+        }
       }
       setStatus("Opgeslagen.");
     } catch {
@@ -458,6 +489,48 @@ export function VerkoopbareArtikelenEditor(props: {
 
   return (
     <section className="module-card">
+      {activationPrompt ? (
+        <div className="cpq-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="cpq-modal">
+            <div className="cpq-modal-header">
+              <div>
+                <h3 className="cpq-modal-title">Kostprijs activeren?</h3>
+                <div className="cpq-modal-subtitle">
+                  <strong>{activationPrompt.naam}</strong> is opgeslagen, maar heeft nog geen actieve kostprijs in {selectedYear}. Wil je nu de kostprijsberekening starten?
+                </div>
+              </div>
+              <button
+                type="button"
+                className="cpq-icon-action"
+                onClick={() => setActivationPrompt(null)}
+                aria-label="Sluiten"
+                title="Sluiten"
+              >
+                ×
+              </button>
+            </div>
+            <div className="cpq-modal-body">
+              <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+                <button type="button" className="cpq-button cpq-button-secondary" onClick={() => setActivationPrompt(null)}>
+                  Later
+                </button>
+                <button
+                  type="button"
+                  className="cpq-button cpq-button-primary"
+                  onClick={() => {
+                    const url = `/nieuwe-kostprijsberekening?mode=wizard-new&kind=article&sku_id=${encodeURIComponent(
+                      activationPrompt.skuId
+                    )}&focus=activations`;
+                    window.location.href = url;
+                  }}
+                >
+                  Naar kostprijsbeheer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="module-card-header">
         <div className="module-card-title">Verkoopbare artikelen</div>
         <div className="module-card-text">
