@@ -136,7 +136,14 @@ export function buildProductFacts(params: BuildProductFactsParams) {
             (snapshotRow as any).inhoud_per_eenheid_liter,
           0
         );
-      const costPriceEx = toNumber((snapshotRow as any).kostprijs, 0);
+      const fallbackArticleLiters =
+        skuKind === "article" ? toNumber((articleById.get(productId) as any)?.content_liter, 0) : 0;
+      const fallbackArticleCost =
+        skuKind === "article" ? toNumber((version as any)?.kostprijs, 0) : 0;
+      const effectiveLitersPerUnit =
+        litersPerUnit > 0 ? litersPerUnit : fallbackArticleLiters;
+      const costPriceEx =
+        toNumber((snapshotRow as any).kostprijs, 0) || fallbackArticleCost;
       const fixedCostAllocationEx = toNumber(
         (snapshotRow as any).vaste_kosten ?? (snapshotRow as any).vaste_directe_kosten,
         0
@@ -150,18 +157,19 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       if (fixedCostAllocationEx <= 0)
         warningsForFact.push("Vaste kostentoerekening ontbreekt.");
 
-      const overrideLitersPerUnit = params.litersPerUnitOverrides?.get(skuId || productId) ?? null;
+      const overrideLitersPerUnit =
+        params.litersPerUnitOverrides?.get(skuId || productId) ?? null;
       const hasOverride =
         Number.isFinite(overrideLitersPerUnit as number) &&
         (overrideLitersPerUnit as number) > 0;
-      const baselineLitersPerUnit = litersPerUnit > 0 ? litersPerUnit : 0.001;
+      const baselineLitersPerUnit = effectiveLitersPerUnit > 0 ? effectiveLitersPerUnit : 0.001;
       const costPerLiter = costPriceEx / baselineLitersPerUnit;
       const fixedPerLiter = fixedCostAllocationEx / baselineLitersPerUnit;
       const variablePerLiter = variableCostEx / baselineLitersPerUnit;
 
       const effectiveLitersPerUnit = hasOverride
         ? (overrideLitersPerUnit as number)
-        : litersPerUnit;
+        : effectiveLitersPerUnit;
       const effectiveCostPriceEx = hasOverride
         ? costPerLiter * effectiveLitersPerUnit
         : costPriceEx;
