@@ -346,7 +346,8 @@ export function KostprijsBeheerWorkspace({
     const warningThresholdPct = 10;
     const rows = (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [])
       .filter((row) => Number((row as any)?.jaar ?? 0) === selectedYear)
-      .map((row) => {
+      .map((row, index) => {
+        const skuId = String((row as any)?.sku_id ?? "");
         const bierId = String((row as any)?.bier_id ?? "");
         const productId = String((row as any)?.product_id ?? "");
         const productType = String((row as any)?.product_type ?? "");
@@ -355,7 +356,10 @@ export function KostprijsBeheerWorkspace({
 
         const bierNaam = bierenById.get(bierId) ?? bierId ?? "-";
         const productNaam =
-          basisById.get(productId) ?? samengesteldById.get(productId) ?? productId ?? "-";
+          basisById.get(productId) ??
+          samengesteldById.get(productId) ??
+          productId ??
+          (skuId ? skuId : "-");
 
         const versie = versieId ? berekeningenById.get(versieId) : undefined;
         const versieNummer = Number((versie as any)?.versie_nummer ?? 0) || 0;
@@ -507,8 +511,10 @@ export function KostprijsBeheerWorkspace({
         const hasUpdate = Boolean(recommendedVersionId) && recommendedVersionId !== versieId;
         const isWarning = hasUpdate && deltaPct !== null && deltaPct >= warningThresholdPct;
 
+        const rowKeyBase = skuId || `${bierId}|${productId}`;
         return {
-          key: `${bierId}|${productId}`,
+          key: rowKeyBase ? rowKeyBase : `row-${index}`,
+          skuId,
           bierNaam,
           productNaam,
           productType,
