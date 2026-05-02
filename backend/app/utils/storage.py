@@ -1713,7 +1713,14 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         finalized_at = updated_at or created_at
     jaar = int(basisgegevens.get("jaar", 0) or 0)
     soort = "inkoop" if calculation_type == "Inkoop" else "productie"
-    kostprijs = _snapshot_float(resultaat_snapshot.get("integrale_kostprijs_per_liter"))
+    # SKU-aanpak: allow non-beer cost versions (articles/bundles) to carry their own kind.
+    stored_kind = str(record.get("type", "") or "").strip().lower()
+    if str(basisgegevens.get("article_id", "") or "").strip() or stored_kind in {"bundle", "article"}:
+        soort = stored_kind if stored_kind in {"bundle", "article"} else "bundle"
+    # For articles/bundles we store a unit cost in `record.kostprijs` and snapshot rows, not per-liter metrics.
+    kostprijs = _snapshot_float(
+        record.get("kostprijs", resultaat_snapshot.get("integrale_kostprijs_per_liter"))
+    )
     calculation_variant = str(
         record.get("calculation_variant", "origineel") or "origineel"
     )
