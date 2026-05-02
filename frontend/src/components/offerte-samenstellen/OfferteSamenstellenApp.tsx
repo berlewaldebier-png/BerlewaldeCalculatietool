@@ -262,6 +262,10 @@ export function OfferteSamenstellenApp({
     appliedScenarioLabel,
   ]);
 
+  const productOptionIds = useMemo(() => {
+    return new Set(productIndex.options.map((option) => option.optionId));
+  }, [productIndex.options]);
+
   const breakEvenConfigs = useMemo(
     () => normalizeConfigList(breakEvenConfiguraties, currentYear),
     [breakEvenConfiguraties, currentYear]
@@ -510,6 +514,7 @@ export function OfferteSamenstellenApp({
       costPriceEx: option.costPriceEx,
       vatRatePct: option.vatRatePct,
       source: {
+        sku_id: optionId.startsWith("sku:") ? optionId.slice("sku:".length) : undefined,
         bier_id: option.bierId,
         product_id: option.productId,
         kostprijsversie_id: option.kostprijsversieId,
@@ -1108,11 +1113,7 @@ function BuilderStep({
                       <td>
                         <select
                           className="cpq-select"
-                          value={
-                            product.source?.bier_id && product.source?.product_id
-                              ? `beer:${product.source.bier_id}:product:${product.source.product_id}`
-                              : ""
-                          }
+                          value={productOptionIds.has(getProductRef(product)) ? getProductRef(product) : ""}
                           onChange={(e) => onSelectRowOption(product.id, e.target.value)}
                         >
                           <option value="">Kies product…</option>
