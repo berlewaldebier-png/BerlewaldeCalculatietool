@@ -463,70 +463,51 @@ def post_dev_hard_reset(
                     dropped.append(name)
 
     # Best-effort: reset module-level schema flags (still recommend restart).
+    # Important: don't import a long list in one statement; a single import error would skip resetting
+    # everything and leave stale `_SCHEMA_READY` flags behind (causing "relation does not exist").
     try:
-        from app.domain import (
-            adviesprijzen_storage,
-            articles_storage,
-            bom_storage,
-            cost_versions_storage,
-            douano_margin_snapshot_storage,
-            douano_oauth_storage,
-            douano_product_ignore_storage,
-            douano_product_mapping_storage,
-            douano_sync_storage,
-            fixed_costs_storage,
-            kostprijs_activatie_drafts_storage,
-            kostprijs_activation_storage,
-            kostprijs_scenario_inkoop_storage,
-            new_year_drafts_storage,
-            production_storage,
-            product_registry_storage,
-            quote_drafts_storage,
-            sales_pricing_storage,
-            skus_storage,
-            tarieven_heffingen_storage,
-            traceability_storage,
-        )
-
         # postgres_storage caches base schema readiness + legacy purge state; hard-reset drops `app_datasets`,
         # so we must force it to recreate the table on next use.
-        for flag_name in ["_schema_ready"]:
-            if hasattr(postgres_storage, flag_name):
-                try:
-                    setattr(postgres_storage, flag_name, False)
-                except Exception:
-                    pass
-        for attr_name in ["_legacy_purged"]:
-            if hasattr(postgres_storage, attr_name):
-                try:
-                    getattr(postgres_storage, attr_name).clear()  # type: ignore[union-attr]
-                except Exception:
-                    pass
+        try:
+            if hasattr(postgres_storage, "_schema_ready"):
+                setattr(postgres_storage, "_schema_ready", False)
+            if hasattr(postgres_storage, "_legacy_purged"):
+                getattr(postgres_storage, "_legacy_purged").clear()  # type: ignore[union-attr]
+        except Exception:
+            pass
 
-        for module in [
-            adviesprijzen_storage,
-            articles_storage,
-            bom_storage,
-            cost_versions_storage,
-            douano_margin_snapshot_storage,
-            douano_oauth_storage,
-            douano_product_ignore_storage,
-            douano_product_mapping_storage,
-            douano_sync_storage,
-            fixed_costs_storage,
-            kostprijs_activatie_drafts_storage,
-            kostprijs_activation_storage,
-            kostprijs_scenario_inkoop_storage,
-            new_year_drafts_storage,
-            production_storage,
-            product_registry_storage,
-            quote_drafts_storage,
-            sales_pricing_storage,
-            skus_storage,
-            tarieven_heffingen_storage,
-            traceability_storage,
-        ]:
-            for flag_name in ["_SCHEMA_READY", "_schema_ready"]:
+        import importlib
+
+        module_names = [
+            "app.domain.adviesprijzen_storage",
+            "app.domain.articles_storage",
+            "app.domain.bom_storage",
+            "app.domain.cost_versions_storage",
+            "app.domain.douano_margin_snapshot_storage",
+            "app.domain.douano_oauth_storage",
+            "app.domain.douano_product_ignore_storage",
+            "app.domain.douano_product_mapping_storage",
+            "app.domain.douano_sync_storage",
+            "app.domain.fixed_costs_storage",
+            "app.domain.kostprijs_activatie_drafts_storage",
+            "app.domain.kostprijs_activation_storage",
+            "app.domain.kostprijs_scenario_inkoop_storage",
+            "app.domain.new_year_drafts_storage",
+            "app.domain.production_storage",
+            "app.domain.product_registry_storage",
+            "app.domain.quote_drafts_storage",
+            "app.domain.sales_pricing_storage",
+            "app.domain.skus_storage",
+            "app.domain.tarieven_heffingen_storage",
+            "app.domain.traceability_storage",
+        ]
+
+        for module_name in module_names:
+            try:
+                module = importlib.import_module(module_name)
+            except Exception:
+                continue
+            for flag_name in ("_SCHEMA_READY", "_schema_ready"):
                 if hasattr(module, flag_name):
                     try:
                         setattr(module, flag_name, False)
