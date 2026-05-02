@@ -3477,12 +3477,27 @@ def _build_active_packaging_component_price_projection(
 
 
 def load_packaging_component_masters() -> list[dict[str, Any]]:
-    data = _load_postgres_first_list("packaging-components", VERPAKKINGSONDERDELEN_FILE)
-    normalized = [
-        _normalize_packaging_component_master_record(record)
-        for record in data
-        if isinstance(record, dict)
-    ]
+    # SKU-aanpak: packaging components are canonical Articles(kind=packaging_component).
+    postgres_payload = _load_postgres_dataset("articles")
+    data = postgres_payload if isinstance(postgres_payload, list) else []
+    normalized: list[dict[str, Any]] = []
+    for record in data:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("kind", "") or "").strip().lower() != "packaging_component":
+            continue
+        normalized.append(
+            _normalize_packaging_component_master_record(
+                {
+                    "id": str(record.get("id", "") or ""),
+                    "component_key": str(record.get("code", "") or record.get("id", "") or ""),
+                    "omschrijving": str(record.get("name", record.get("omschrijving", "")) or ""),
+                    "beschikbaar_voor_samengesteld": bool(
+                        record.get("beschikbaar_voor_samengesteld", True)
+                    ),
+                }
+            )
+        )
     return sorted(
         normalized,
         key=lambda item: (
@@ -3493,12 +3508,40 @@ def load_packaging_component_masters() -> list[dict[str, Any]]:
 
 
 def save_packaging_component_masters(data: list[dict[str, Any]]) -> bool:
+    # SKU-aanpak: writes update Articles(kind=packaging_component); "packaging-components" is a legacy projection.
     normalized = [
         _normalize_packaging_component_master_record(record)
         for record in data
         if isinstance(record, dict)
     ]
-    return _save_postgres_dataset("packaging-components", normalized)
+    postgres_payload = _load_postgres_dataset("articles")
+    existing_articles = postgres_payload if isinstance(postgres_payload, list) else []
+    kept_articles = [
+        row
+        for row in existing_articles
+        if isinstance(row, dict)
+        and str(row.get("kind", "") or "").strip().lower() != "packaging_component"
+    ]
+    next_packaging_articles: list[dict[str, Any]] = []
+    for row in normalized:
+        rid = str(row.get("id", "") or "").strip()
+        if not rid:
+            continue
+        code = str(row.get("component_key", "") or rid).strip() or rid
+        name = str(row.get("omschrijving", "") or "").strip() or rid
+        next_packaging_articles.append(
+            {
+                "id": rid,
+                "code": code,
+                "name": name,
+                "kind": "packaging_component",
+                "active": True,
+                "beschikbaar_voor_samengesteld": bool(
+                    row.get("beschikbaar_voor_samengesteld", True)
+                ),
+            }
+        )
+    return bool(_save_postgres_dataset("articles", [*kept_articles, *next_packaging_articles]))
 
 
 def load_packaging_component_price_versions() -> list[dict[str, Any]]:
