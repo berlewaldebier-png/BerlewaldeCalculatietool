@@ -331,6 +331,8 @@ export function ArticleKostprijsWizard(props: Props) {
     return { productkosten, verpakkingskosten, opslag, accijnzen, kostprijs, warnings };
   }, [bomCostLines, selectedBundleSkuId]);
 
+  const hasBlockingIssues = summary.warnings.length > 0;
+
   function buildRecordPayload(nextStatus: "concept" | "definitief") {
     const ts = nowIso();
     const snapshotRow =
@@ -613,7 +615,7 @@ export function ArticleKostprijsWizard(props: Props) {
                   <button
                     type="button"
                     className="editor-button"
-                    disabled={isSaving || (currentStep.id === "samenvatting" && summary.warnings.length > 0)}
+                    disabled={isSaving || (currentStep.id === "samenvatting" && hasBlockingIssues)}
                     onClick={() => {
                       if (currentStep.id === "samenvatting") {
                         void persist("definitief", { activate: true });
@@ -629,7 +631,33 @@ export function ArticleKostprijsWizard(props: Props) {
             </div>
           </div>
 
-          {status ? <div className="editor-status wizard-inline-status">{status}</div> : null}
+          {currentStep.id === "samenvatting" && hasBlockingIssues ? (
+            <div className="editor-status wizard-inline-status" style={{ background: "rgba(245, 158, 11, 0.08)", borderColor: "rgba(245, 158, 11, 0.3)" }}>
+              <strong>Afronden is geblokkeerd.</strong> Los eerst dit op: {summary.warnings.slice(0, 4).join(" ")}
+              {summary.warnings.includes("Samenstelling (BOM) is leeg.") ? (
+                <div style={{ marginTop: "0.6rem", display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => setStepIndex(1)}
+                  >
+                    Naar samenstelling
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => {
+                      window.location.href = "/producten-verpakking";
+                    }}
+                  >
+                    Naar artikelen
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : status ? (
+            <div className="editor-status wizard-inline-status">{status}</div>
+          ) : null}
         </main>
       </div>
     </div>
