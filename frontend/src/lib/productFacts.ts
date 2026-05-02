@@ -140,8 +140,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         skuKind === "article" ? toNumber((articleById.get(productId) as any)?.content_liter, 0) : 0;
       const fallbackArticleCost =
         skuKind === "article" ? toNumber((version as any)?.kostprijs, 0) : 0;
-      const effectiveLitersPerUnit =
-        litersPerUnit > 0 ? litersPerUnit : fallbackArticleLiters;
+      const baseLitersPerUnit = litersPerUnit > 0 ? litersPerUnit : fallbackArticleLiters;
       const costPriceEx =
         toNumber((snapshotRow as any).kostprijs, 0) || fallbackArticleCost;
       const fixedCostAllocationEx = toNumber(
@@ -152,7 +151,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       const vatRatePct = readVatRatePct(version);
       const warningsForFact: string[] = [];
 
-      if (litersPerUnit <= 0) warningsForFact.push("Literinhoud ontbreekt.");
+      if (baseLitersPerUnit <= 0) warningsForFact.push("Literinhoud ontbreekt.");
       if (costPriceEx <= 0) warningsForFact.push("Kostprijs ontbreekt.");
       if (fixedCostAllocationEx <= 0)
         warningsForFact.push("Vaste kostentoerekening ontbreekt.");
@@ -162,14 +161,14 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       const hasOverride =
         Number.isFinite(overrideLitersPerUnit as number) &&
         (overrideLitersPerUnit as number) > 0;
-      const baselineLitersPerUnit = effectiveLitersPerUnit > 0 ? effectiveLitersPerUnit : 0.001;
+      const baselineLitersPerUnit = baseLitersPerUnit > 0 ? baseLitersPerUnit : 0.001;
       const costPerLiter = costPriceEx / baselineLitersPerUnit;
       const fixedPerLiter = fixedCostAllocationEx / baselineLitersPerUnit;
       const variablePerLiter = variableCostEx / baselineLitersPerUnit;
 
       const effectiveLitersPerUnit = hasOverride
         ? (overrideLitersPerUnit as number)
-        : effectiveLitersPerUnit;
+        : baseLitersPerUnit;
       const effectiveCostPriceEx = hasOverride
         ? costPerLiter * effectiveLitersPerUnit
         : costPriceEx;
