@@ -48,6 +48,12 @@ def transaction() -> Iterator[Any]:
     existing_request_conn = _request_connection.get()
     try:
         with connect() as conn:
+            # Defensive: a pooled connection can be returned in an aborted/in-transaction
+            # state if a previous request crashed mid-transaction. Ensure we start clean.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             # Bind the connection for the duration of the transaction so that nested load/save calls
             # see each other's uncommitted writes (bieren + kostprijsversies + activations, etc.).
             if existing_request_conn is None:
