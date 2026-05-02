@@ -479,6 +479,7 @@ def post_dev_hard_reset(
             kostprijs_activation_storage,
             kostprijs_scenario_inkoop_storage,
             new_year_drafts_storage,
+            postgres_storage,
             production_storage,
             product_registry_storage,
             quote_drafts_storage,
@@ -487,6 +488,21 @@ def post_dev_hard_reset(
             tarieven_heffingen_storage,
             traceability_storage,
         )
+
+        # postgres_storage caches base schema readiness + legacy purge state; hard-reset drops `app_datasets`,
+        # so we must force it to recreate the table on next use.
+        for flag_name in ["_schema_ready"]:
+            if hasattr(postgres_storage, flag_name):
+                try:
+                    setattr(postgres_storage, flag_name, False)
+                except Exception:
+                    pass
+        for attr_name in ["_legacy_purged"]:
+            if hasattr(postgres_storage, attr_name):
+                try:
+                    getattr(postgres_storage, attr_name).clear()  # type: ignore[union-attr]
+                except Exception:
+                    pass
 
         for module in [
             adviesprijzen_storage,
