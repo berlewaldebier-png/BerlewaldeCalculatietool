@@ -41,7 +41,6 @@ def transaction() -> Iterator[Any]:
     - Ensures save_dataset does not commit per call while inside the transaction.
     - Commits on success, rolls back on error (outermost transaction only).
     """
-    ensure_schema()
     depth = int(_transaction_depth.get() or 0)
     depth_token = _transaction_depth.set(depth + 1)
     request_token = None
@@ -54,6 +53,8 @@ def transaction() -> Iterator[Any]:
                 conn.rollback()
             except Exception:
                 pass
+            # Ensure base schema exists after we have a clean connection.
+            ensure_schema()
             # Bind the connection for the duration of the transaction so that nested load/save calls
             # see each other's uncommitted writes (bieren + kostprijsversies + activations, etc.).
             if existing_request_conn is None:
