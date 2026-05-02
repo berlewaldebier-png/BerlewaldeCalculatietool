@@ -92,6 +92,13 @@ async def postgres_request_connection(request, call_next):
             try:
                 response = await call_next(request)
             finally:
+                # Always rollback at end-of-request to ensure the pooled connection
+                # is not left in an aborted/in-transaction state after an exception.
+                # This is safe even when the request committed successfully.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
                 postgres_storage.reset_request_connection(token)
             return response
 
