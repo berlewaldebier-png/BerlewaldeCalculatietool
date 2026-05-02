@@ -466,7 +466,6 @@ def post_dev_hard_reset(
     try:
         from app.domain import (
             adviesprijzen_storage,
-            catalog_products_storage,
             cost_versions_storage,
             douano_margin_snapshot_storage,
             douano_oauth_storage,
@@ -487,7 +486,6 @@ def post_dev_hard_reset(
 
         for module in [
             adviesprijzen_storage,
-            catalog_products_storage,
             cost_versions_storage,
             douano_margin_snapshot_storage,
             douano_oauth_storage,
