@@ -386,6 +386,62 @@ def save_catalog_products(data: list[dict[str, Any]]) -> bool:
                 }
             )
 
+    # Phase SKU: derive bundle content_liter deterministically from its BOM (sum of liquid SKUs).
+    # This is required so bundles are selectable in offers (liters_per_unit > 0) without manual entry.
+    format_liters_by_article: dict[str, float] = {}
+    for art in current_articles:
+        if not isinstance(art, dict):
+            continue
+        if str(art.get("kind", "") or "").strip().lower() != "format":
+            continue
+        art_id = str(art.get("id", "") or "").strip()
+        if not art_id:
+            continue
+        try:
+            liters = float(art.get("content_liter", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            liters = 0.0
+        format_liters_by_article[art_id] = liters
+
+    sku_liters_by_id: dict[str, float] = {}
+    for sku in current_skus:
+        if not isinstance(sku, dict):
+            continue
+        if str(sku.get("kind", "") or "").strip().lower() != "beer_format":
+            continue
+        sku_id = str(sku.get("id", "") or "").strip()
+        format_id = str(sku.get("format_article_id", "") or "").strip()
+        if not sku_id:
+            continue
+        sku_liters_by_id[sku_id] = float(format_liters_by_article.get(format_id, 0.0) or 0.0)
+
+    liters_by_bundle: dict[str, float] = {bid: 0.0 for bid in incoming_bundle_ids if bid}
+    for line in next_bundle_bom:
+        if not isinstance(line, dict):
+            continue
+        parent_id = str(line.get("parent_article_id", "") or "").strip()
+        if parent_id not in liters_by_bundle:
+            continue
+        component_sku_id = str(line.get("component_sku_id", "") or "").strip()
+        if not component_sku_id:
+            continue
+        try:
+            qty = float(line.get("quantity", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        if qty <= 0:
+            continue
+        liters_by_bundle[parent_id] += qty * float(sku_liters_by_id.get(component_sku_id, 0.0) or 0.0)
+
+    for bundle in next_articles:
+        if not isinstance(bundle, dict):
+            continue
+        bid = str(bundle.get("id", "") or "").strip()
+        if not bid:
+            continue
+        if bid in liters_by_bundle:
+            bundle["content_liter"] = round(float(liters_by_bundle[bid] or 0.0), 6)
+
     # Persist: we overwrite full datasets to keep things deterministic in dev.
     ok = bool(
         postgres_storage.save_dataset("articles", [*kept_articles, *next_articles], overwrite=True)
