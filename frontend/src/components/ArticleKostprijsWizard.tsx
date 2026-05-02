@@ -432,6 +432,7 @@ export function ArticleKostprijsWizard(props: Props) {
     ],
     []
   );
+  const currentStep = steps[stepIndex] ?? steps[0];
 
   return (
     <div className="cpq-frame">
@@ -445,14 +446,25 @@ export function ArticleKostprijsWizard(props: Props) {
           />
         </aside>
 
-        <section className="cpq-main">
-          <div className="content-card">
-            <div className="content-card-header">
-              <div className="content-card-title">{selectedLabel}</div>
-              <div className="content-card-subtitle">
-                Houd dezelfde structuur aan als bier-kostprijzen: Productkosten + Verpakkingskosten + Opslag + Accijnzen.
+        <main className="cpq-main">
+          <div className="wizard-shell wizard-shell-single" style={{ marginTop: 0 }}>
+            <div className="wizard-step-card wizard-step-stage-card">
+              <div className="wizard-step-header">
+                <div>
+                  <div className="wizard-step-title">
+                    Stap {stepIndex + 1}: {currentStep.label}
+                  </div>
+                  <div className="wizard-step-description">{currentStep.description}</div>
+                </div>
               </div>
-            </div>
+
+              <div className="wizard-step-body">
+                <div className="content-card-header">
+                  <div className="content-card-title">{selectedLabel}</div>
+                  <div className="content-card-subtitle">
+                    Houd dezelfde structuur aan als bier-kostprijzen: Productkosten + Verpakkingskosten + Opslag + Accijnzen.
+                  </div>
+                </div>
 
             {stepIndex === 0 ? (
               <div className="wizard-form-grid">
@@ -567,57 +579,52 @@ export function ArticleKostprijsWizard(props: Props) {
               </div>
             ) : null}
 
-            <div className="wizard-footer">
-              <div className="wizard-footer-left">
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={() => props.onBackToLanding?.()}
-                >
-                  Terug
-                </button>
               </div>
-              <div className="wizard-footer-right">
-                {status ? <div className="editor-status">{status}</div> : null}
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  disabled={isSaving}
-                  onClick={() => void persist("concept", { activate: false })}
-                >
-                  Opslaan
-                </button>
-                <button
-                  type="button"
-                  className="editor-button"
-                  disabled={isSaving || summary.warnings.length > 0}
-                  onClick={() => void persist("definitief", { activate: true })}
-                >
-                  Afronden & activeren
-                </button>
+
+              <div className="editor-actions wizard-footer-actions">
+                <div className="editor-actions-group">
+                  {stepIndex > 0 ? (
+                    <button
+                      type="button"
+                      className="editor-button editor-button-secondary"
+                      onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
+                    >
+                      Vorige
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => props.onBackToLanding?.()}
+                  >
+                    Terug
+                  </button>
+                </div>
+                <div className="editor-actions-group">
+                  <button type="button" className="editor-button editor-button-secondary" onClick={() => void persist("concept", { activate: false })}>
+                    Opslaan
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-button"
+                    disabled={isSaving || (currentStep.id === "samenvatting" && summary.warnings.length > 0)}
+                    onClick={() => {
+                      if (currentStep.id === "samenvatting") {
+                        void persist("definitief", { activate: true });
+                        return;
+                      }
+                      setStepIndex((i) => Math.min(steps.length - 1, i + 1));
+                    }}
+                  >
+                    {isSaving ? "Opslaan..." : currentStep.id === "samenvatting" ? "Afronden" : "Volgende"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="cpq-toolbar" style={{ marginTop: 12 }}>
-            <button
-              type="button"
-              className="editor-button editor-button-secondary"
-              disabled={stepIndex <= 0}
-              onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
-            >
-              Vorige
-            </button>
-            <button
-              type="button"
-              className="editor-button"
-              disabled={stepIndex >= steps.length - 1}
-              onClick={() => setStepIndex((i) => Math.min(steps.length - 1, i + 1))}
-            >
-              Volgende
-            </button>
-          </div>
-        </section>
+          {status ? <div className="editor-status wizard-inline-status">{status}</div> : null}
+        </main>
       </div>
     </div>
   );
