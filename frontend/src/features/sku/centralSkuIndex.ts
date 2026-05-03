@@ -161,22 +161,22 @@ export function buildCentralSkuIndex(params: {
   const channelCodes = Array.from(channelDefaultOpslag.keys()).sort((a, b) => a.localeCompare(b));
 
   const rows: CentralSkuRow[] = [];
-  for (const [skuId, activation] of activeActivationBySku.entries()) {
-    const sku = skuById.get(skuId);
-    if (!sku) continue;
 
+  function pushRow(args: {
+    skuId: string;
+    sku: GenericRecord;
+    article: GenericRecord | null;
+    productId: string;
+    activation: GenericRecord | null;
+    version: GenericRecord | undefined;
+  }) {
+    const { skuId, sku, article, productId, activation, version } = args;
     const skuKind = text((sku as any)?.kind).toLowerCase();
-    const productId =
-      text((activation as any)?.product_id) ||
-      text((sku as any)?.format_article_id) ||
-      text((sku as any)?.article_id);
-    const versionId = text((activation as any)?.kostprijsversie_id);
-    const version = versionById.get(versionId);
-    const article = productId ? articleById.get(productId) ?? null : null;
-
     const subtype = inferSubtypeFromSku(sku, article);
     const pricingMethod = inferPricingMethod(subtype, sku, article);
-    const uom = normalizeUom((article as any)?.uom || (sku as any)?.uom || (readArticlePayload(article ?? {}) as any)?.uom);
+    const uom = normalizeUom(
+      (article as any)?.uom || (sku as any)?.uom || (readArticlePayload(article ?? {}) as any)?.uom
+    );
     const contentLiter = toNumber((article as any)?.content_liter, 0);
     const manualRateEx = readManualRateEx(sku, article);
 
@@ -232,9 +232,40 @@ export function buildCentralSkuIndex(params: {
     });
   }
 
+  // Primary list: active cost activations (cost_plus and bundles that are costed).
+  for (const [skuId, activation] of activeActivationBySku.entries()) {
+    const sku = skuById.get(skuId);
+    if (!sku) continue;
+    const productId =
+      text((activation as any)?.product_id) ||
+      text((sku as any)?.format_article_id) ||
+      text((sku as any)?.article_id);
+    const versionId = text((activation as any)?.kostprijsversie_id);
+    const version = versionById.get(versionId);
+    const article = productId ? articleById.get(productId) ?? null : null;
+    pushRow({ skuId, sku, article, productId, activation, version });
+  }
+
+  // Secondary list: manual-rate services that exist as SKUs (even without cost activation).
+  // This matches the UX expectation: once a service is created and "afgerond" (tarief present),
+  // it should appear in selectors without requiring liters/cost.
+  for (const [skuId, sku] of skuById.entries()) {
+    const kind = text((sku as any)?.kind).toLowerCase();
+    if (kind !== "article") continue;
+    if (rows.some((row) => row.skuId === skuId)) continue;
+    const articleId = text((sku as any)?.article_id);
+    if (!articleId) continue;
+    const article = articleById.get(articleId) ?? null;
+    const subtype = inferSubtypeFromSku(sku, article);
+    const pricingMethod = inferPricingMethod(subtype, sku, article);
+    if (pricingMethod !== "manual_rate") continue;
+    const manualRateEx = readManualRateEx(sku, article);
+    if (manualRateEx <= 0) continue;
+    pushRow({ skuId, sku, article, productId: articleId, activation: null, version: undefined });
+  }
+
   return {
     rows: rows.sort((a, b) => a.label.localeCompare(b.label, "nl-NL")),
     bySkuId: new Map(rows.map((row) => [row.skuId, row])),
   };
 }
-

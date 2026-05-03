@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { NestedCollectionEditor } from "@/components/NestedCollectionEditor";
@@ -630,6 +631,17 @@ export function ProductenVerpakkingWorkspace({
           <div className="module-card-text">
             Stamdata, glasmaten en jaarprijzen zijn uit elkaar getrokken. In de eerste tabs beheer
             je de structuur; glasmaten gebruik je later voor glas-economie in offertes en bijlagen.
+          </div>
+        </div>
+
+        <div className="editor-toolbar" style={{ marginTop: 10 }}>
+          <div className="editor-toolbar-meta">
+            <span className="muted">Nieuw: gebruik de wizard als primaire flow.</span>
+          </div>
+          <div className="editor-toolbar-actions">
+            <Link href="/product-samenstellen" className="cpq-button cpq-button-primary">
+              Product samenstellen
+            </Link>
           </div>
         </div>
 
