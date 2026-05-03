@@ -492,34 +492,6 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         )
                         sort_index += 1
 
-                    sort_index = 0
-                    for item in sameng if isinstance(sameng, list) else []:
-                        if not isinstance(item, dict):
-                            continue
-                        product_id = str(item.get("product_id", "") or "").strip()
-                        row_id = str(item.get("id", "") or "").strip() or str(
-                            uuid5(NAMESPACE_URL, f"cost_version_row:{version_id}:samengesteld:{product_id}")
-                        )
-                        row_ids_by_version.setdefault(version_id, set()).add(row_id)
-                        row_params.append(
-                            (
-                                row_id,
-                                version_id,
-                                "samengesteld",
-                                bier_id,
-                                product_id,
-                                str(item.get("product_type", "") or ""),
-                                str(item.get("verpakkingseenheid", item.get("verpakking_label", "")) or ""),
-                                float(item.get("inkoop", item.get("primaire_kosten", item.get("variabele_kosten", 0))) or 0),
-                                float(item.get("verpakkingskosten", 0) or 0),
-                                float(item.get("indirecte_kosten", item.get("vaste_kosten", 0)) or 0),
-                                float(item.get("accijns", 0) or 0),
-                                float(item.get("kostprijs", 0) or 0),
-                                int(sort_index),
-                            )
-                        )
-                        sort_index += 1
-
                 # Replace-by-scope for snapshot rows: per version_id, delete rows that are no longer present.
                 if overwrite:
                     for version in records:
