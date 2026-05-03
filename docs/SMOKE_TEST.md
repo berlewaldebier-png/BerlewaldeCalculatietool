@@ -3,13 +3,11 @@
 Deze checklist is bedoeld voor een snelle “werkt alles nog?” ronde na grote modelwijzigingen (SKU/Article/BOM).
 
 ## Prereqs
-
 - Backend draait op `http://127.0.0.1:8000`
 - Frontend draait op `http://localhost:3000`
 - Log in als admin via `http://localhost:3000/login`
 
 ## 1) Hard reset + seed
-
 1. Ga naar Swagger: `http://127.0.0.1:8000/docs`
 2. Run:
    - `POST /api/meta/dev/hard-reset`
@@ -20,7 +18,6 @@ Verwacht:
 - Demo bundle “Geschenkset 4 bieren”
 
 ## 2) Offerte
-
 1. Open `http://localhost:3000/offerte-samenstellen`
 2. Kies kanaal (Horeca/Retail) en voeg product toe
 3. Opslaan concept (draft) werkt
@@ -28,8 +25,14 @@ Verwacht:
 Verwacht:
 - Productpicker toont alleen “ready” items (actieve kostprijs + liters + sell-in)
 
-## 3) Break-even
+## 2b) Offerte (checkpoint: non-liter items)
+Doel: bewaken dat merch/services niet “crashen” op liter aannames.
 
+Verwacht (na Phase 1+):
+- Een dienst (uom=`uur`) kan in de productpicker verschijnen zodra die is afgerond (tarief aanwezig).
+- Een merch/product (uom=`stuk`) kan in offerte/selectors bestaan zonder liters.
+
+## 3) Break-even
 1. Open `http://localhost:3000/break-even`
 2. Maak basisconfig → Opslaan
 3. Activeer basis voor offertes → Opslaan
@@ -39,7 +42,6 @@ Verwacht:
 - Statusmeldingen tonen succes/fout
 
 ## 4) Verkoopstrategie
-
 1. Open `http://localhost:3000/verkoopstrategie`
 2. Je ziet formats (Fles/Doos/Fust) in de lijst
 3. Pas opslag% aan → Opslaan
@@ -49,7 +51,6 @@ Verwacht:
 - Geen lege productlijst na hard reset + seed
 
 ## 5) Adviesprijzen
-
 1. Open `http://localhost:3000/adviesprijzen`
 2. Vul opslag per kanaal → Opslaan
 
@@ -57,7 +58,6 @@ Verwacht:
 - Opslaan werkt zonder 404
 
 ## 6) Producten & verpakking
-
 1. Open `http://localhost:3000/producten-verpakking`
 2. Tabs:
    - Verpakkingsonderdelen
@@ -70,7 +70,6 @@ Verwacht:
    - “Verkoopbare artikelen” toont demo bundle
 
 ## 7) Scenario analyse
-
 1. Open `http://localhost:3000/scenario-analyse`
 2. Selecteer product → voer override in → compare
 
