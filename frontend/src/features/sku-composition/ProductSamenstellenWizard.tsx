@@ -71,6 +71,8 @@ export function ProductSamenstellenWizard(props: Props) {
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [manualRateEx, setManualRateEx] = useState<number>(125);
+  const [createdSkuId, setCreatedSkuId] = useState<string>("");
+  const [createdArticleId, setCreatedArticleId] = useState<string>("");
 
   const steps = useMemo(
     () => [
@@ -226,13 +228,11 @@ export function ProductSamenstellenWizard(props: Props) {
       await saveList("/data/skus", nextSkus);
       await saveList("/data/bom-lines", mergedBom);
 
-      setStatus("Opgeslagen. Doorsturen naar kostprijsbeheer…");
-      if (sellableKind === "dienst") {
-        // Service items are selectable immediately (manual rate) and don't require cost activation.
-        setStepIndex(4);
-        return;
-      }
-      window.location.href = `/nieuwe-kostprijsberekening?mode=wizard-new&kind=article&sku_id=${encodeURIComponent(skuId)}&focus=activations`;
+      setCreatedSkuId(skuId);
+      setCreatedArticleId(articleId);
+      setStatus("Opgeslagen.");
+      // Always land on the list step; from there the user can continue to kostprijsbeheer if needed.
+      setStepIndex(4);
     } catch (err) {
       setStatus(`Opslaan mislukt: ${String((err as any)?.message ?? err)}`);
     } finally {
@@ -626,8 +626,41 @@ export function ProductSamenstellenWizard(props: Props) {
                 ) : null}
 
                 {currentStep.id === "lijst" ? (
-                  <div className="dataset-empty">
-                    Na afronden word je automatisch doorgestuurd naar kostprijsbeheer om te activeren.
+                  <div className="wizard-form-grid">
+                    <div className="editor-status wizard-inline-status" style={{ gridColumn: "1 / -1" }}>
+                      <strong>Toegevoegd:</strong> {name}
+                      {createdSkuId ? (
+                        <div style={{ marginTop: 6 }} className="muted">
+                          SKU: <code>{createdSkuId}</code>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {sellableKind === "dienst" ? (
+                      <div className="dataset-empty" style={{ gridColumn: "1 / -1" }}>
+                        Dienstverlening gebruikt een uur-tarief en is direct selecteerbaar in offertes zodra het tarief is ingevuld.
+                      </div>
+                    ) : (
+                      <div className="dataset-empty" style={{ gridColumn: "1 / -1" }}>
+                        Volgende stap: rond de kostprijs af en activeer dit verkoopbaar artikel in kostprijsbeheer.
+                      </div>
+                    )}
+
+                    {sellableKind !== "dienst" && createdSkuId ? (
+                      <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          className="cpq-button cpq-button-primary"
+                          onClick={() => {
+                            window.location.href = `/nieuwe-kostprijsberekening?mode=wizard-new&kind=article&sku_id=${encodeURIComponent(
+                              createdSkuId
+                            )}&focus=activations`;
+                          }}
+                        >
+                          Naar kostprijsbeheer
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

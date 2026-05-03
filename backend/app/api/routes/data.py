@@ -42,6 +42,10 @@ _STANDARD_DATASETS = [
     "trace-batches",
     "trace-batch-consumptions",
     "variabele-kosten",
+    # SKU-aanpak canonical datasets
+    "articles",
+    "skus",
+    "bom-lines",
 ]
 
 # Create generic CRUD router for standard datasets
