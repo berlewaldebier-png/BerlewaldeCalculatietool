@@ -121,6 +121,7 @@ export type ErpDashboardOrdersTrendPoint = {
 
 export type ErpDashboardPayload = {
   range: { basis: "order"; since: string; until: string };
+  available_years?: number[];
   empty_reason?: string;
   kpis: ErpDashboardKpis | null;
   trends: { revenue: ErpDashboardRevenueTrendPoint[]; orders: ErpDashboardOrdersTrendPoint[] };

@@ -36,10 +36,29 @@ import {
 import { NavigationSidebar } from "@/components/NavigationSidebar";
 import { formatMoneyEUR } from "@/lib/formatters";
 import type { ErpDashboardPayload, NavigationItem } from "@/lib/apiShared";
+import {
+  calculateBreakEvenResult,
+  normalizeConfigList,
+  buildBreakEvenProductLines,
+  type BreakEvenConfig,
+} from "@/components/break-even/breakEvenUtils";
 
 type Props = {
   navigation: NavigationItem[];
   payload: ErpDashboardPayload;
+  breakEvenContext?: {
+    configs?: unknown;
+    vasteKosten?: unknown;
+    channels?: unknown;
+    bieren?: unknown;
+    kostprijsversies?: unknown;
+    kostprijsproductactiveringen?: unknown;
+    verkoopprijzen?: unknown;
+    skus?: unknown;
+    articles?: unknown;
+    basisproducten?: unknown;
+    samengesteldeProducten?: unknown;
+  };
 };
 
 type KpiDef = {
@@ -103,17 +122,86 @@ function EmptyState({ title, body, href, hrefLabel }: { title: string; body: str
   );
 }
 
-export function ErpDashboard({ navigation, payload }: Props) {
+export function ErpDashboard({ navigation, payload, breakEvenContext }: Props) {
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
   const [sinceInput, setSinceInput] = useState(payload.range?.since || "");
   const [untilInput, setUntilInput] = useState(payload.range?.until || "");
+  const [yearInput, setYearInput] = useState<string>("");
+
+  const availableYears = (payload.available_years ?? []).filter((y) => Number.isFinite(y) && y > 0);
+
+  const hasValidRange = useMemo(() => {
+    if (!sinceInput.trim() || !untilInput.trim()) return true;
+    return sinceInput.trim() <= untilInput.trim();
+  }, [sinceInput, untilInput]);
+
+  const breakEvenTrend = useMemo(() => {
+    const ctx = breakEvenContext ?? {};
+    const configsRaw = ctx.configs;
+    const vasteKostenRaw = ctx.vasteKosten;
+    const channels = Array.isArray(ctx.channels) ? (ctx.channels as any[]) : [];
+    const bieren = Array.isArray(ctx.bieren) ? (ctx.bieren as any[]) : [];
+    const skus = Array.isArray(ctx.skus) ? (ctx.skus as any[]) : [];
+    const articles = Array.isArray(ctx.articles) ? (ctx.articles as any[]) : [];
+    const kostprijsversies = Array.isArray(ctx.kostprijsversies) ? (ctx.kostprijsversies as any[]) : [];
+    const kostprijsproductactiveringen = Array.isArray(ctx.kostprijsproductactiveringen)
+      ? (ctx.kostprijsproductactiveringen as any[])
+      : [];
+    const verkoopprijzen = Array.isArray(ctx.verkoopprijzen) ? (ctx.verkoopprijzen as any[]) : [];
+    const basisproducten = Array.isArray(ctx.basisproducten) ? (ctx.basisproducten as any[]) : [];
+    const samengesteldeProducten = Array.isArray(ctx.samengesteldeProducten) ? (ctx.samengesteldeProducten as any[]) : [];
+
+    const yearFromRange = Number(String(payload.range?.since || "").slice(0, 4)) || new Date().getFullYear();
+    const year = Number(yearInput || yearFromRange) || yearFromRange;
+
+    const configs = normalizeConfigList(configsRaw, year);
+    const active =
+      configs.find((c) => c.is_active_for_quotes && c.jaar === year) ??
+      configs.find((c) => c.jaar === year) ??
+      null;
+    if (!active) return { breakEvenRevenue: 0, scaled: 0, line: [] as Array<{ date: string; breakEven: number }> };
+
+    const lines = buildBreakEvenProductLines({
+      year,
+      channels,
+      bieren,
+      skus,
+      articles,
+      kostprijsversies,
+      kostprijsproductactiveringen,
+      verkoopprijzen,
+      basisproducten,
+      samengesteldeProducten,
+    });
+
+    const vasteKosten = (vasteKostenRaw && typeof vasteKostenRaw === "object") ? (vasteKostenRaw as any) : {};
+    const result = calculateBreakEvenResult(active as BreakEvenConfig, lines as any, vasteKosten);
+    const breakEvenRevenueYear = Number(result.breakEvenRevenue || 0) || 0;
+
+    const since = payload.range?.since ? new Date(payload.range.since) : new Date();
+    const until = payload.range?.until ? new Date(payload.range.until) : new Date();
+    const periodDays = Math.max(1, Math.round((until.getTime() - since.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    const yearDays = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) ? 366 : 365;
+    const scaled = breakEvenRevenueYear * (periodDays / yearDays);
+
+    const points = (payload.trends?.revenue ?? []).map((row) => row.date).filter(Boolean);
+    const totalPoints = Math.max(1, points.length);
+    const line = points.map((d, idx) => ({
+      date: shortDateLabel(d),
+      breakEven: scaled * ((idx + 1) / totalPoints),
+    }));
+
+    return { breakEvenRevenue: breakEvenRevenueYear, scaled, line };
+  }, [breakEvenContext, payload.range?.since, payload.range?.until, payload.trends?.revenue, yearInput]);
 
   const kpis = useMemo<KpiDef[]>(() => {
     const k = payload.kpis;
     if (!k) return [];
-    const breakEvenSub = payload.break_even?.active_config ? "Break-even configuratie actief" : "Geen break-even configuratie actief";
-    const breakEvenValue = payload.break_even?.active_config ? "Actief" : "—";
+    const hasBreakEven = Boolean(payload.break_even?.active_config);
+    const delta = hasBreakEven ? k.total_revenue_ex - (breakEvenTrend.scaled || 0) : 0;
+    const breakEvenValue = hasBreakEven ? (delta >= 0 ? `+${euro(delta)}` : `-${euro(Math.abs(delta))}`) : "—";
+    const breakEvenSub = hasBreakEven ? "t.o.v. break-even (geschaald)" : "Geen break-even configuratie actief";
 
     return [
       {
@@ -153,15 +241,19 @@ export function ErpDashboard({ navigation, payload }: Props) {
         icon: AlertTriangle,
       },
     ];
-  }, [payload]);
+  }, [payload, breakEvenTrend.scaled]);
 
   const revenueData = useMemo(() => {
-    return (payload.trends?.revenue ?? []).map((row) => ({
+    const beByDate = new Map((breakEvenTrend.line ?? []).map((p) => [p.date, p.breakEven]));
+    return (payload.trends?.revenue ?? []).map((row) => {
+      const dateLabel = shortDateLabel(row.date);
+      return {
       date: shortDateLabel(row.date),
       omzet: Number(row.revenue_ex || 0),
-      breakEven: Number(row.break_even_ex || 0),
-    }));
-  }, [payload.trends?.revenue]);
+      breakEven: Number(beByDate.get(dateLabel) || 0),
+    };
+    });
+  }, [payload.trends?.revenue, breakEvenTrend.line]);
 
   const ordersData = useMemo(() => {
     return (payload.trends?.orders ?? []).map((row) => ({
@@ -227,6 +319,22 @@ export function ErpDashboard({ navigation, payload }: Props) {
                 </div>
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                  <label className="editor-field" style={{ minWidth: 180 }}>
+                    <div className="editor-label">Jaar</div>
+                    <select
+                      className="editor-input"
+                      value={yearInput}
+                      onChange={(e) => setYearInput(e.target.value)}
+                      aria-label="Jaar"
+                    >
+                      <option value="">Auto</option>
+                      {availableYears.slice().reverse().map((y) => (
+                        <option key={y} value={String(y)}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="editor-field" style={{ minWidth: 220 }}>
                     <div className="editor-label">Sinds</div>
                     <input
@@ -250,8 +358,10 @@ export function ErpDashboard({ navigation, payload }: Props) {
                     <button
                       type="button"
                       className="editor-button"
+                      disabled={!hasValidRange}
                       onClick={() => {
                         const params = new URLSearchParams();
+                        if (yearInput.trim()) params.set("year", yearInput.trim());
                         if (sinceInput.trim()) params.set("since", sinceInput.trim());
                         if (untilInput.trim()) params.set("until", untilInput.trim());
                         const qs = params.toString();
@@ -267,6 +377,7 @@ export function ErpDashboard({ navigation, payload }: Props) {
                       onClick={() => {
                         setSinceInput(payload.range?.since || "");
                         setUntilInput(payload.range?.until || "");
+                        setYearInput("");
                         setShowFilters(false);
                       }}
                     >
@@ -279,6 +390,7 @@ export function ErpDashboard({ navigation, payload }: Props) {
                         router.push("/");
                         setSinceInput(payload.range?.since || "");
                         setUntilInput(payload.range?.until || "");
+                        setYearInput("");
                         setShowFilters(false);
                       }}
                       title="Verwijder filters"
@@ -286,6 +398,56 @@ export function ErpDashboard({ navigation, payload }: Props) {
                       Reset
                     </button>
                   </div>
+                </div>
+                {!hasValidRange ? (
+                  <div className="editor-status error" style={{ marginTop: 10 }}>
+                    Ongeldige periode: “Tot” moet op of na “Sinds” liggen.
+                  </div>
+                ) : null}
+                <div className="editor-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => {
+                      const now = new Date();
+                      const y = now.getFullYear();
+                      const m = String(now.getMonth() + 1).padStart(2, "0");
+                      setSinceInput(`${y}-${m}-01`);
+                      setUntilInput(new Date(y, now.getMonth() + 1, 0).toISOString().slice(0, 10));
+                      setYearInput(String(y));
+                    }}
+                  >
+                    Deze maand
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => {
+                      const now = new Date();
+                      const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                      const y = d.getFullYear();
+                      const m = d.getMonth();
+                      const mm = String(m + 1).padStart(2, "0");
+                      setSinceInput(`${y}-${mm}-01`);
+                      setUntilInput(new Date(y, m + 1, 0).toISOString().slice(0, 10));
+                      setYearInput(String(y));
+                    }}
+                  >
+                    Vorige maand
+                  </button>
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => {
+                      const now = new Date();
+                      const y = now.getFullYear();
+                      setSinceInput(`${y}-01-01`);
+                      setUntilInput(now.toISOString().slice(0, 10));
+                      setYearInput(String(y));
+                    }}
+                  >
+                    YTD
+                  </button>
                 </div>
               </Card>
             ) : null}

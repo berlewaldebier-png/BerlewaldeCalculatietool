@@ -141,6 +141,7 @@ def get_erp_dashboard(
     since: str = "",
     until: str = "",
     basis: str = "order",
+    year: int = 0,
 ) -> dict[str, Any]:
     """
     ERP performance dashboard read-model.
@@ -155,15 +156,36 @@ def get_erp_dashboard(
         basis = "order"
 
     default = _default_range_today_month()
-    range_since = _parse_date(since, default.since)
-    range_until = _parse_date(until, default.until)
+    year_int = int(year or 0)
+    if year_int > 0 and not str(since or "").strip() and not str(until or "").strip():
+        range_since = date(year_int, 1, 1)
+        range_until = date(year_int, 12, 31)
+    else:
+        range_since = _parse_date(since, default.since)
+        range_until = _parse_date(until, default.until)
     if range_until < range_since:
         range_until = range_since
+
+    # Available years for the filter dropdown.
+    postgres_storage.ensure_schema()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT EXTRACT(YEAR FROM order_date)::int AS y
+                FROM douano_sales_orders
+                WHERE order_date IS NOT NULL
+                ORDER BY y ASC
+                """
+            )
+            years_rows = cur.fetchall() or []
+    available_years = [int(r[0] or 0) for r in years_rows if int(r[0] or 0) > 0]
 
     if not _has_any_douano_orders():
         year = int(range_since.year)
         return {
             "range": {"basis": "order", "since": range_since.isoformat(), "until": range_until.isoformat()},
+            "available_years": available_years,
             "empty_reason": "Geen Douano orders gevonden. Synchroniseer eerst orders via Beheer → API.",
             "kpis": None,
             "trends": {"revenue": [], "orders": []},
@@ -350,6 +372,7 @@ def get_erp_dashboard(
 
     return {
         "range": {"basis": "order", "since": range_since.isoformat(), "until": range_until.isoformat()},
+        "available_years": available_years,
         "kpis": {
             "total_revenue_ex": revenue_total,
             "total_orders": int(total_orders),

@@ -165,6 +165,7 @@ def get_bootstrap(
     since: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
     until: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
     basis: str = Query("order", description="Optioneel: basis voor ERP dashboard (order)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: jaarfilter voor ERP dashboard (0 = auto)"),
     session: dict = Depends(require_user),
 ) -> dict[str, Any]:
     names = [name.strip() for name in (datasets or "").split(",") if name.strip()]
@@ -193,6 +194,7 @@ def get_bootstrap(
                     since=since,
                     until=until,
                     basis=basis,
+                    year=int(year or 0),
                 )
                 continue
             if name == "auth-status":
