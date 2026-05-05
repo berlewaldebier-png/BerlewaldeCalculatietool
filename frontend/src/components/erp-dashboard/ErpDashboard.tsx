@@ -2,7 +2,8 @@
 
 import type { Route } from "next";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   AlertTriangle,
@@ -103,6 +104,11 @@ function EmptyState({ title, body, href, hrefLabel }: { title: string; body: str
 }
 
 export function ErpDashboard({ navigation, payload }: Props) {
+  const router = useRouter();
+  const [showFilters, setShowFilters] = useState(false);
+  const [sinceInput, setSinceInput] = useState(payload.range?.since || "");
+  const [untilInput, setUntilInput] = useState(payload.range?.until || "");
+
   const kpis = useMemo<KpiDef[]>(() => {
     const k = payload.kpis;
     if (!k) return [];
@@ -206,11 +212,83 @@ export function ErpDashboard({ navigation, payload }: Props) {
                   type="button"
                   className="erp-dashboard-pill"
                   title="Filters (volgt)"
+                  onClick={() => setShowFilters((prev) => !prev)}
                 >
                   <Filter className="h-4 w-4" /> Filters
                 </button>
               </div>
             </header>
+
+            {showFilters ? (
+              <Card className="erp-pad" aria-label="Filters">
+                <div className="module-card-title">Filters</div>
+                <div className="module-card-text" style={{ marginTop: 4 }}>
+                  Kies een periode (YYYY-MM-DD). Basis is altijd Douano orders.
+                </div>
+
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                  <label className="editor-field" style={{ minWidth: 220 }}>
+                    <div className="editor-label">Sinds</div>
+                    <input
+                      className="editor-input"
+                      type="date"
+                      value={sinceInput}
+                      onChange={(e) => setSinceInput(e.target.value)}
+                    />
+                  </label>
+                  <label className="editor-field" style={{ minWidth: 220 }}>
+                    <div className="editor-label">Tot</div>
+                    <input
+                      className="editor-input"
+                      type="date"
+                      value={untilInput}
+                      onChange={(e) => setUntilInput(e.target.value)}
+                    />
+                  </label>
+
+                  <div className="editor-actions" style={{ marginTop: 22 }}>
+                    <button
+                      type="button"
+                      className="editor-button"
+                      onClick={() => {
+                        const params = new URLSearchParams();
+                        if (sinceInput.trim()) params.set("since", sinceInput.trim());
+                        if (untilInput.trim()) params.set("until", untilInput.trim());
+                        const qs = params.toString();
+                        router.push(qs ? `/?${qs}` : "/");
+                        setShowFilters(false);
+                      }}
+                    >
+                      Toepassen
+                    </button>
+                    <button
+                      type="button"
+                      className="editor-button editor-button-secondary"
+                      onClick={() => {
+                        setSinceInput(payload.range?.since || "");
+                        setUntilInput(payload.range?.until || "");
+                        setShowFilters(false);
+                      }}
+                    >
+                      Annuleren
+                    </button>
+                    <button
+                      type="button"
+                      className="editor-button editor-button-secondary"
+                      onClick={() => {
+                        router.push("/");
+                        setSinceInput(payload.range?.since || "");
+                        setUntilInput(payload.range?.until || "");
+                        setShowFilters(false);
+                      }}
+                      title="Verwijder filters"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            ) : null}
 
             {payload.kpis ? (
               <section className="erp-kpi-grid" aria-label="KPI's">

@@ -53,8 +53,23 @@ export async function apiGetServer<T>(path: string, nextPath: string): Promise<T
   return (await response.json()) as T;
 }
 
-export function getBootstrap(datasets: string[], includeNavigation = true, nextPath = "/") {
+export function getBootstrap(
+  datasets: string[],
+  includeNavigation = true,
+  nextPath = "/",
+  extraParams: Record<string, string> | null = null
+) {
   const encoded = encodeURIComponent(datasets.join(","));
   const nav = includeNavigation ? "true" : "false";
-  return apiGetServer<BootstrapResponse>(`/meta/bootstrap?datasets=${encoded}&navigation=${nav}`, nextPath);
+  const params = new URLSearchParams({ datasets: datasets.join(","), navigation: nav });
+  if (extraParams) {
+    for (const [key, value] of Object.entries(extraParams)) {
+      const cleanKey = String(key || "").trim();
+      if (!cleanKey) continue;
+      const cleanValue = String(value ?? "").trim();
+      if (!cleanValue) continue;
+      params.set(cleanKey, cleanValue);
+    }
+  }
+  return apiGetServer<BootstrapResponse>(`/meta/bootstrap?${params.toString()}`, nextPath);
 }

@@ -162,6 +162,9 @@ def get_dashboard_summary() -> DashboardSummary:
 def get_bootstrap(
     datasets: str = Query("", description="Comma-separated dataset names"),
     navigation: bool = Query(True, description="Include navigation items"),
+    since: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
+    until: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
+    basis: str = Query("order", description="Optioneel: basis voor ERP dashboard (order)"),
     session: dict = Depends(require_user),
 ) -> dict[str, Any]:
     names = [name.strip() for name in (datasets or "").split(",") if name.strip()]
@@ -186,7 +189,11 @@ def get_bootstrap(
                 }
                 continue
             if name == "erp-dashboard":
-                payload["datasets"][name] = erp_dashboard_service.get_erp_dashboard()
+                payload["datasets"][name] = erp_dashboard_service.get_erp_dashboard(
+                    since=since,
+                    until=until,
+                    basis=basis,
+                )
                 continue
             if name == "auth-status":
                 payload["datasets"][name] = auth_service.auth_status()
