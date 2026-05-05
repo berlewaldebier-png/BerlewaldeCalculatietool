@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from app.domain import auth_service, dataset_store
-from app.domain import product_registry_storage
 from app.utils.seed_bundles import SeedProfile, read_seed_bundle, write_seed_bundle
 
 
@@ -30,9 +29,6 @@ def _foundation_dataset_names() -> list[str]:
         "channels",
         "packaging-components",
         "packaging-component-price-versions",
-        "base-product-masters",
-        "composite-product-masters",
-        "catalog-products",
         "products",
         "sales-strategy-years",
         "sales-strategy-products",
@@ -169,8 +165,6 @@ def _import_dataset_order(profile: SeedProfile) -> list[str]:
         "channels",
         "packaging-components",
         "packaging-component-price-versions",
-        "base-product-masters",
-        "composite-product-masters",
         "products",
         "sales-strategy-years",
         "sales-strategy-products",
@@ -199,14 +193,10 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
     report["reset"] = dataset_store.reset_all_datasets_to_defaults()
 
     dataset_names = set(dataset_store.get_dataset_names())
-    imported_masters = False
+    # SKU-aanpak: product masters zijn verwijderd; seed bundles importeren direct de datasets.
+    imported_masters = True
 
-    fk_dependent = {
-        # Table-backed stores that enforce FK(product_id -> products_master.id).
-        "kostprijsversies",
-        "kostprijsproductactiveringen",
-        "prijsvoorstellen",
-    }
+    fk_dependent: set[str] = set()
 
     for name in _import_dataset_order(profile):
         if name not in datasets:
@@ -214,46 +204,13 @@ def import_seed_bundle(profile: SeedProfile) -> dict[str, Any]:
         if name not in dataset_names:
             continue
 
-        # Ensure product registry exists before importing FK-dependent datasets.
-        if name in fk_dependent and not imported_masters:
-            try:
-                registry_report = product_registry_storage.rebuild_registry(
-                    validate_constraints=False
-                )
-            except Exception as exc:
-                raise ValueError(f"Seed import: kon products registry niet opbouwen: {exc}") from exc
-            if int(registry_report.get("count", 0) or 0) <= 0:
-                raise ValueError(
-                    "Seed import: products registry is leeg. Controleer of base/composite product masters in de seed bundle zitten."
-                )
-            report["maintenance"]["product_registry_pre"] = registry_report
-            imported_masters = True
+        # Legacy product registry (base/composite masters) is removed in SKU-aanpak.
 
         payload = _unwrap_legacy_wrapper(datasets.get(name))
         # Writes are validated inside save_dataset.
         report["saved"][name] = bool(dataset_store.save_dataset(name, payload))
 
-        # Phase G: table-backed stores enforce FK(product_id -> products_master.id) on new rows.
-        # Seed bundles store product masters as datasets; we must rebuild the registry before
-        # importing any table that references products_master (cost versions, activations, quote lines).
-        if not imported_masters and name in {"base-product-masters", "composite-product-masters"}:
-            # When both masters exist in the seed bundle, we rebuild after the second one is imported.
-            have_base = bool(report["saved"].get("base-product-masters")) or ("base-product-masters" not in datasets)
-            have_comp = bool(report["saved"].get("composite-product-masters")) or ("composite-product-masters" not in datasets)
-            if have_base and have_comp:
-                try:
-                    registry_report = product_registry_storage.rebuild_registry(
-                        validate_constraints=False
-                    )
-                except Exception as exc:
-                    # Fail hard: without a product registry, downstream imports must not proceed.
-                    raise ValueError(f"Seed import: kon products registry niet opbouwen: {exc}") from exc
-                if int(registry_report.get("count", 0) or 0) <= 0:
-                    raise ValueError(
-                        "Seed import: products registry is leeg na import van product masters."
-                    )
-                report["maintenance"]["product_registry_pre"] = registry_report
-                imported_masters = True
+        # Legacy product masters removed; no registry rebuild needed.
 
     # Align with current invariants.
     report["maintenance"]["wrapped_payloads"] = dataset_store.migrate_wrapped_payloads(dry_run=False)
@@ -298,8 +255,6 @@ def audit_live_data(*, expected_year: int) -> dict[str, Any]:
         "tarieven-heffingen",
         "packaging-component-price-versions",
         "packaging-components",
-        "base-product-masters",
-        "composite-product-masters",
         "products",
         "sales-strategy-years",
         "sales-strategy-products",

@@ -1,18 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { WizardSteps } from "@/components/WizardSteps";
 import { buildCentralSkuIndex } from "@/features/sku/centralSkuIndex";
 import { API_BASE_URL } from "@/lib/api";
-
-type GenericRecord = Record<string, unknown>;
+import { StepControle } from "@/features/sku-composition/steps/StepControle";
+import { StepLijst } from "@/features/sku-composition/steps/StepLijst";
+import {
+  text,
+  toNumber,
+  type CompositionLine,
+  type GenericRecord,
+  type PackagingLine,
+} from "@/features/sku-composition/skuCompositionUtils";
+import { saveAfvuleenheidFormat, saveSellableSkuBundle } from "@/features/sku-composition/skuCompositionIo";
 
 type FlowMode = "afvuleenheid" | "verkoopbaar";
 type SellableKind = "product" | "dienst";
 
 type Props = {
   year: number;
+  initialMode?: FlowMode;
+  editFormatId?: string;
   channels: GenericRecord[];
   verkoopprijzen: GenericRecord[];
   skus: GenericRecord[];
@@ -24,44 +34,13 @@ type Props = {
   packagingComponentPrices: GenericRecord[];
 };
 
-function text(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function toNumber(value: unknown, fallback = 0) {
-  const parsed =
-    typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function slugifyId(value: string) {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  return normalized || `new-${Date.now()}`;
-}
-
-type CompositionLine = {
-  id: string;
-  componentSkuId: string;
-  qty: number;
-};
-
-type PackagingLine = {
-  id: string;
-  componentId: string;
-  qty: number;
-};
-
 export function ProductSamenstellenWizard(props: Props) {
   const [stepIndex, setStepIndex] = useState(0);
-  const [mode, setMode] = useState<FlowMode>("verkoopbaar");
+  const [mode, setMode] = useState<FlowMode>(props.initialMode ?? "verkoopbaar");
   const [sellableKind, setSellableKind] = useState<SellableKind>("product");
 
   const [name, setName] = useState("Nieuw artikel");
-  const [uom, setUom] = useState<"stuk" | "pakket" | "uur">("pakket");
+  const [uom, setUom] = useState<"stuk" | "pakket" | "uur" | "doos" | "fust">("pakket");
   const [contentLiter, setContentLiter] = useState<number>(0);
 
   const [composition, setComposition] = useState<CompositionLine[]>([]);
@@ -73,6 +52,7 @@ export function ProductSamenstellenWizard(props: Props) {
   const [manualRateEx, setManualRateEx] = useState<number>(125);
   const [createdSkuId, setCreatedSkuId] = useState<string>("");
   const [createdArticleId, setCreatedArticleId] = useState<string>("");
+  const [didLoadEditFormat, setDidLoadEditFormat] = useState(false);
 
   const steps = useMemo(
     () => [
@@ -120,9 +100,71 @@ export function ProductSamenstellenWizard(props: Props) {
       .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
   }, [props.packagingComponents]);
 
+  const formatOptions = useMemo(() => {
+    return (Array.isArray(props.articles) ? props.articles : [])
+      .filter((row) => text((row as any).kind).toLowerCase() === "format")
+      .map((row) => ({
+        value: text((row as any).id),
+        label: text((row as any).name) || text((row as any).id),
+        contentLiter: toNumber((row as any).content_liter, 0),
+      }))
+      .filter((row) => row.value && row.label)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [props.articles]);
+
+  useEffect(() => {
+    if (didLoadEditFormat) return;
+    if (!props.editFormatId) return;
+    const editId = text(props.editFormatId);
+    if (!editId) return;
+
+    const format = (Array.isArray(props.articles) ? props.articles : []).find((row) => text((row as any).id) === editId);
+    if (!format) return;
+    if (text((format as any).kind).toLowerCase() !== "format") return;
+
+    const formatsById = new Map<string, GenericRecord>();
+    (Array.isArray(props.articles) ? props.articles : []).forEach((row) => {
+      const id = text((row as any).id);
+      if (id) formatsById.set(id, row);
+    });
+
+    const lines = (Array.isArray(props.bomLines) ? props.bomLines : []).filter(
+      (row) => text((row as any).parent_article_id) === editId
+    );
+
+    setMode("afvuleenheid");
+    setSellableKind("product");
+    setName(text((format as any).name) || editId);
+    setUom((text((format as any).uom) as any) || "stuk");
+    setContentLiter(toNumber((format as any).content_liter, 0));
+    setAfvulParts(
+      lines.map((row) => {
+        const componentId = text((row as any).component_article_id);
+        const component = formatsById.get(componentId);
+        const kind = text((component as any)?.kind).toLowerCase() === "format" ? "format" : "packaging_component";
+        return {
+          id: `edit-${editId}-${text((row as any).id) || Math.random().toString(16).slice(2)}`,
+          kind: kind as any,
+          componentId,
+          qty: Math.max(0, toNumber((row as any).quantity, 0)),
+        };
+      })
+    );
+    setCreatedArticleId(editId);
+    setDidLoadEditFormat(true);
+  }, [didLoadEditFormat, props.articles, props.bomLines, props.editFormatId]);
+
   const totals = useMemo(() => {
     let liters = 0;
     let cost = 0;
+    if (mode === "verkoopbaar" && sellableKind === "dienst") {
+      // Services are priced as a manual rate per UOM (e.g. €/uur) and do not have liters,
+      // composition items, or packaging costs.
+      liters = 0;
+      cost = Math.max(0, toNumber(manualRateEx, 0));
+      return { liters, cost, packagingCost: 0, totalCost: cost };
+    }
+
     composition.forEach((line) => {
       const sku = central.bySkuId.get(line.componentSkuId);
       if (!sku) return;
@@ -138,14 +180,86 @@ export function ProductSamenstellenWizard(props: Props) {
       if (!id) return;
       packagingCostById.set(id, toNumber((row as any).prijs_per_stuk, 0));
     });
+
+    const articlesById = new Map<string, GenericRecord>();
+    (Array.isArray(props.articles) ? props.articles : []).forEach((row) => {
+      const id = text((row as any).id);
+      if (id) articlesById.set(id, row);
+    });
+    const bomByParent = new Map<string, GenericRecord[]>();
+    (Array.isArray(props.bomLines) ? props.bomLines : []).forEach((row) => {
+      const parent = text((row as any).parent_article_id);
+      if (!parent) return;
+      const next = bomByParent.get(parent) ?? [];
+      next.push(row);
+      bomByParent.set(parent, next);
+    });
+    const formatCostMemo = new Map<string, number>();
+    const visiting = new Set<string>();
+    const computeFormatPackagingCost = (formatId: string): number => {
+      if (formatCostMemo.has(formatId)) return formatCostMemo.get(formatId)!;
+      if (visiting.has(formatId)) return 0;
+      visiting.add(formatId);
+      const lines = bomByParent.get(formatId) ?? [];
+      let subtotal = 0;
+      lines.forEach((line) => {
+        const componentArticleId = text((line as any).component_article_id);
+        if (!componentArticleId) return;
+        const qty = Math.max(0, toNumber((line as any).quantity, 0));
+        if (qty === 0) return;
+        const component = articlesById.get(componentArticleId);
+        const kind = text((component as any)?.kind).toLowerCase();
+        if (kind === "packaging_component") {
+          subtotal += qty * (packagingCostById.get(componentArticleId) ?? 0);
+          return;
+        }
+        if (kind === "format") {
+          subtotal += qty * computeFormatPackagingCost(componentArticleId);
+        }
+      });
+      visiting.delete(formatId);
+      formatCostMemo.set(formatId, subtotal);
+      return subtotal;
+    };
+
     let packagingCost = 0;
     const allPackaging = mode === "afvuleenheid" ? afvulParts : packaging;
     allPackaging.forEach((line) => {
       const qty = Math.max(0, toNumber(line.qty, 0));
-      packagingCost += qty * (packagingCostById.get(line.componentId) ?? 0);
+      if (mode === "afvuleenheid" && line.kind === "format") {
+        packagingCost += qty * computeFormatPackagingCost(line.componentId);
+      } else {
+        packagingCost += qty * (packagingCostById.get(line.componentId) ?? 0);
+      }
     });
+
+    if (mode === "afvuleenheid") {
+      liters =
+        toNumber(contentLiter, 0) > 0
+          ? Math.max(0, toNumber(contentLiter, 0))
+          : afvulParts.reduce((sum, line) => {
+              if (line.kind !== "format") return sum;
+              const opt = formatOptions.find((candidate) => candidate.value === line.componentId);
+              if (!opt) return sum;
+              return sum + Math.max(0, toNumber(line.qty, 0)) * (opt.contentLiter || 0);
+            }, 0);
+    }
     return { liters, cost, packagingCost, totalCost: cost + packagingCost };
-  }, [central.bySkuId, composition, packaging, afvulParts, props.packagingComponentPrices, props.year, mode]);
+  }, [
+    central.bySkuId,
+    composition,
+    packaging,
+    afvulParts,
+    props.packagingComponentPrices,
+    props.articles,
+    props.bomLines,
+    props.year,
+    mode,
+    sellableKind,
+    manualRateEx,
+    contentLiter,
+    formatOptions,
+  ]);
 
   const blockingWarnings = useMemo(() => {
     const warnings: string[] = [];
@@ -166,67 +280,19 @@ export function ProductSamenstellenWizard(props: Props) {
     setIsSaving(true);
     setStatus("");
     try {
-      const articleId = `bundle-${slugifyId(name)}`;
-      const skuId = `sku-${articleId}`;
-
-      const articlePayload: GenericRecord = {
-        id: articleId,
+      const { skuId, articleId } = await saveSellableSkuBundle({
+        apiBaseUrl: API_BASE_URL,
         name,
-        kind: "bundle",
         uom,
-        content_liter: totals.liters,
-        sellable_subtype: sellableKind === "dienst" ? "dienst" : "product",
-        pricing_method: sellableKind === "dienst" ? "manual_rate" : "cost_plus",
-        manual_rate_ex: sellableKind === "dienst" ? toNumber(manualRateEx, 0) : 0,
-      };
-
-      const nextArticles = [...(Array.isArray(props.articles) ? props.articles : []), articlePayload];
-      const nextSkus = [
-        ...(Array.isArray(props.skus) ? props.skus : []),
-        { id: skuId, kind: "article", article_id: articleId, name, pricing_method: articlePayload.pricing_method, manual_rate_ex: articlePayload.manual_rate_ex },
-      ];
-
-      const nextBomLines: GenericRecord[] = [];
-      composition.forEach((line, idx) => {
-        nextBomLines.push({
-          id: `bom-${articleId}-sku-${idx}`,
-          parent_article_id: articleId,
-          component_sku_id: line.componentSkuId,
-          component_article_id: "",
-          quantity: line.qty,
-          uom: "stuk",
-        });
+        totalsLiters: totals.liters,
+        sellableKind,
+        manualRateEx,
+        composition,
+        packaging,
+        existingArticles: Array.isArray(props.articles) ? props.articles : [],
+        existingSkus: Array.isArray(props.skus) ? props.skus : [],
+        existingBomLines: Array.isArray(props.bomLines) ? props.bomLines : [],
       });
-      packaging.forEach((line, idx) => {
-        nextBomLines.push({
-          id: `bom-${articleId}-pkg-${idx}`,
-          parent_article_id: articleId,
-          component_article_id: line.componentId,
-          component_sku_id: "",
-          quantity: line.qty,
-          uom: "stuk",
-        });
-      });
-      const mergedBom = [
-        ...(Array.isArray(props.bomLines) ? props.bomLines : []),
-        ...nextBomLines,
-      ];
-
-      const saveList = async (endpoint: string, payload: unknown) => {
-        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const msg = await res.text();
-          throw new Error(msg || `Opslaan mislukt (${endpoint})`);
-        }
-      };
-
-      await saveList("/data/articles", nextArticles);
-      await saveList("/data/skus", nextSkus);
-      await saveList("/data/bom-lines", mergedBom);
 
       setCreatedSkuId(skuId);
       setCreatedArticleId(articleId);
@@ -244,42 +310,18 @@ export function ProductSamenstellenWizard(props: Props) {
     setIsSaving(true);
     setStatus("");
     try {
-      const articleId = `fmt-${slugifyId(name)}`;
-      const articlePayload: GenericRecord = {
-        id: articleId,
+      const { articleId } = await saveAfvuleenheidFormat({
+        apiBaseUrl: API_BASE_URL,
         name,
-        kind: "format",
-        uom: "stuk",
-        content_liter: Math.max(0, Number(contentLiter) || 0),
-      };
-
-      const nextArticles = [...(Array.isArray(props.articles) ? props.articles : []), articlePayload];
-      const nextBomLines: GenericRecord[] = afvulParts.map((line, idx) => ({
-        id: `bom-${articleId}-pc-${idx}`,
-        parent_article_id: articleId,
-        component_article_id: line.componentId,
-        component_sku_id: "",
-        quantity: line.qty,
-        uom: "stuk",
-      }));
-      const mergedBom = [...(Array.isArray(props.bomLines) ? props.bomLines : []), ...nextBomLines];
-
-      const saveList = async (endpoint: string, payload: unknown) => {
-        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const msg = await res.text();
-          throw new Error(msg || `Opslaan mislukt (${endpoint})`);
-        }
-      };
-
-      await saveList("/data/articles", nextArticles);
-      await saveList("/data/bom-lines", mergedBom);
-
+        uom,
+        totalsLiters: totals.liters,
+        afvulParts,
+        existingArticles: Array.isArray(props.articles) ? props.articles : [],
+        existingBomLines: Array.isArray(props.bomLines) ? props.bomLines : [],
+        editFormatId: props.editFormatId,
+      });
       setStatus("Afvuleenheid opgeslagen.");
+      setCreatedArticleId(articleId);
       setStepIndex(4);
     } catch (err) {
       setStatus(`Opslaan mislukt: ${String((err as any)?.message ?? err)}`);
@@ -382,11 +424,19 @@ export function ProductSamenstellenWizard(props: Props) {
                               }
                             >
                               <option value="">Kies item…</option>
-                              {selectableSkuOptions.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                  {opt.label}
-                                </option>
-                              ))}
+                              {selectableSkuOptions
+                                .filter(
+                                  (opt) =>
+                                    opt.value === line.componentSkuId ||
+                                    !composition.some(
+                                      (row) => row.id !== line.id && row.componentSkuId === opt.value
+                                    )
+                                )
+                                .map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
                             </select>
                             <input
                               className="dataset-input"
@@ -429,7 +479,24 @@ export function ProductSamenstellenWizard(props: Props) {
                           Verpakkingsonderdelen
                         </div>
                         {afvulParts.map((line) => (
-                          <div key={line.id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 40px", gap: 10, marginBottom: 10 }}>
+                          <div
+                            key={line.id}
+                            style={{ display: "grid", gridTemplateColumns: "160px 1fr 120px 40px", gap: 10, marginBottom: 10 }}
+                          >
+                            <select
+                              className="dataset-input"
+                              value={line.kind}
+                              onChange={(e) =>
+                                setAfvulParts((current) =>
+                                  current.map((row) =>
+                                    row.id === line.id ? { ...row, kind: e.target.value as any, componentId: "" } : row
+                                  )
+                                )
+                              }
+                            >
+                              <option value="format">Afvuleenheid</option>
+                              <option value="packaging_component">Verpakkingsonderdeel</option>
+                            </select>
                             <select
                               className="dataset-input"
                               value={line.componentId}
@@ -442,11 +509,18 @@ export function ProductSamenstellenWizard(props: Props) {
                               }
                             >
                               <option value="">Kies onderdeel…</option>
-                              {packagingOptions.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                  {opt.label}
-                                </option>
-                              ))}
+                              {(line.kind === "format" ? formatOptions : packagingOptions)
+                                .filter((opt) => {
+                                  const selected = afvulParts.some(
+                                    (row) => row.id !== line.id && row.kind === line.kind && row.componentId === opt.value
+                                  );
+                                  return opt.value === line.componentId || !selected;
+                                })
+                                .map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
                             </select>
                             <input
                               className="dataset-input"
@@ -476,7 +550,7 @@ export function ProductSamenstellenWizard(props: Props) {
                           onClick={() =>
                             setAfvulParts((current) => [
                               ...current,
-                              { id: `ap-${Date.now()}-${Math.random().toString(16).slice(2)}`, componentId: "", qty: 1 },
+                              { id: `ap-${Date.now()}-${Math.random().toString(16).slice(2)}`, kind: "packaging_component", componentId: "", qty: 1 },
                             ])
                           }
                         >
@@ -499,16 +573,26 @@ export function ProductSamenstellenWizard(props: Props) {
                         </select>
                       </label>
                     ) : (
-                      <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                        <span>Inhoud (liter) (optioneel)</span>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          step="any"
-                          value={String(contentLiter)}
-                          onChange={(e) => setContentLiter(toNumber(e.target.value, 0))}
-                        />
-                      </label>
+                      <>
+                        <label className="nested-field">
+                          <span>Eenheid</span>
+                          <select className="dataset-input" value={uom} onChange={(e) => setUom(e.target.value as any)}>
+                            <option value="stuk">stuk</option>
+                            <option value="doos">doos</option>
+                            <option value="fust">fust</option>
+                          </select>
+                        </label>
+                        <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
+                          <span>Inhoud (L) (optioneel, anders afgeleid)</span>
+                          <input
+                            className="dataset-input"
+                            type="number"
+                            step="any"
+                            value={String(contentLiter)}
+                            onChange={(e) => setContentLiter(toNumber(e.target.value, 0))}
+                          />
+                        </label>
+                      </>
                     )}
 
                     {mode === "verkoopbaar" && sellableKind === "dienst" ? (
@@ -577,7 +661,7 @@ export function ProductSamenstellenWizard(props: Props) {
                         onClick={() =>
                           setPackaging((current) => [
                             ...current,
-                            { id: `p-${Date.now()}-${Math.random().toString(16).slice(2)}`, componentId: "", qty: 1 },
+                            { id: `p-${Date.now()}-${Math.random().toString(16).slice(2)}`, kind: "packaging_component", componentId: "", qty: 1 },
                           ])
                         }
                       >
@@ -589,79 +673,25 @@ export function ProductSamenstellenWizard(props: Props) {
                 ) : null}
 
                 {currentStep.id === "controle" ? (
-                  <div className="wizard-form-grid">
-                    <div className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                      <span>Samenvatting</span>
-                      <div className="dataset-editor-scroll" style={{ borderRadius: 12 }}>
-                        <table className="dataset-editor-table">
-                          <thead>
-                            <tr>
-                              <th>Naam</th>
-                              <th>UoM</th>
-                              <th>Liters (afgeleid)</th>
-                              <th>Kostprijs items</th>
-                              <th>Verpakking</th>
-                              <th>Totaal</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td>{name}</td>
-                              <td>{uom}</td>
-                              <td>{totals.liters.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                              <td>{totals.cost.toLocaleString("nl-NL", { style: "currency", currency: "EUR" })}</td>
-                              <td>{totals.packagingCost.toLocaleString("nl-NL", { style: "currency", currency: "EUR" })}</td>
-                              <td>{totals.totalCost.toLocaleString("nl-NL", { style: "currency", currency: "EUR" })}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                    {blockingWarnings.length > 0 ? (
-                      <div className="editor-status wizard-inline-status" style={{ gridColumn: "1 / -1" }}>
-                        <strong>Kan niet afronden:</strong> {blockingWarnings.join(" ")}
-                      </div>
-                    ) : null}
-                  </div>
+                  <StepControle
+                    mode={mode}
+                    sellableKind={sellableKind}
+                    name={name}
+                    uom={uom}
+                    totals={totals}
+                    blockingWarnings={blockingWarnings}
+                  />
                 ) : null}
 
                 {currentStep.id === "lijst" ? (
-                  <div className="wizard-form-grid">
-                    <div className="editor-status wizard-inline-status" style={{ gridColumn: "1 / -1" }}>
-                      <strong>Toegevoegd:</strong> {name}
-                      {createdSkuId ? (
-                        <div style={{ marginTop: 6 }} className="muted">
-                          SKU: <code>{createdSkuId}</code>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    {sellableKind === "dienst" ? (
-                      <div className="dataset-empty" style={{ gridColumn: "1 / -1" }}>
-                        Dienstverlening gebruikt een uur-tarief en is direct selecteerbaar in offertes zodra het tarief is ingevuld.
-                      </div>
-                    ) : (
-                      <div className="dataset-empty" style={{ gridColumn: "1 / -1" }}>
-                        Volgende stap: rond de kostprijs af en activeer dit verkoopbaar artikel in kostprijsbeheer.
-                      </div>
-                    )}
-
-                    {sellableKind !== "dienst" && createdSkuId ? (
-                      <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                        <button
-                          type="button"
-                          className="cpq-button cpq-button-primary"
-                          onClick={() => {
-                            window.location.href = `/nieuwe-kostprijsberekening?mode=wizard-new&kind=article&sku_id=${encodeURIComponent(
-                              createdSkuId
-                            )}&focus=activations`;
-                          }}
-                        >
-                          Naar kostprijsbeheer
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
+                  <StepLijst
+                    mode={mode}
+                    sellableKind={sellableKind}
+                    name={name}
+                    createdSkuId={createdSkuId}
+                    createdArticleId={createdArticleId}
+                    onBackToControle={() => setStepIndex(3)}
+                  />
                 ) : null}
               </div>
 
@@ -681,24 +711,26 @@ export function ProductSamenstellenWizard(props: Props) {
                   <button type="button" className="editor-button editor-button-secondary" onClick={() => window.history.back()}>
                     Terug
                   </button>
-                  <button
-                    type="button"
-                    className="editor-button"
-                    disabled={isSaving || (currentStep.id === "controle" && blockingWarnings.length > 0)}
-                    onClick={() => {
-                      if (currentStep.id === "controle") {
-                        if (mode === "afvuleenheid") {
-                          void createAfvuleenheid();
+                  {currentStep.id === "lijst" ? null : (
+                    <button
+                      type="button"
+                      className="editor-button"
+                      disabled={isSaving || (currentStep.id === "controle" && blockingWarnings.length > 0)}
+                      onClick={() => {
+                        if (currentStep.id === "controle") {
+                          if (mode === "afvuleenheid") {
+                            void createAfvuleenheid();
+                            return;
+                          }
+                          void createSellableAndRouteToKostprijs();
                           return;
                         }
-                        void createSellableAndRouteToKostprijs();
-                        return;
-                      }
-                      setStepIndex((i) => Math.min(steps.length - 1, i + 1));
-                    }}
-                  >
-                    {isSaving ? "Opslaan..." : currentStep.id === "controle" ? "Afronden" : "Volgende"}
-                  </button>
+                        setStepIndex((i) => Math.min(steps.length - 1, i + 1));
+                      }}
+                    >
+                      {isSaving ? "Opslaan..." : currentStep.id === "controle" ? "Opslaan" : "Volgende"}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

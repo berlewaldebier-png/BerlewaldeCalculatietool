@@ -157,7 +157,8 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       const vatRatePct = readVatRatePct(version);
       const warningsForFact: string[] = [];
 
-      if (baseLitersPerUnit <= 0) warningsForFact.push("Literinhoud ontbreekt.");
+      const isArticleSku = skuId && skuKind === "article";
+      if (baseLitersPerUnit <= 0 && !isArticleSku) warningsForFact.push("Literinhoud ontbreekt.");
       if (costPriceEx <= 0) warningsForFact.push("Kostprijs ontbreekt.");
       if (fixedCostAllocationEx <= 0)
         warningsForFact.push("Vaste kostentoerekening ontbreekt.");
@@ -201,8 +202,11 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         if (sellInEx <= 0) warningsForFact.push("Sell-in prijs ontbreekt.");
       }
 
+      // SKU-aanpak: niet elk verkoopbaar artikel heeft liters (merch/dienst/bundles zonder inhoud).
+      // Voor bier/formats blijven liters wel verplicht.
+      const litersOk = isArticleSku ? true : effectiveLitersPerUnit > 0;
       const isReady =
-        effectiveLitersPerUnit > 0 &&
+        litersOk &&
         effectiveCostPriceEx > 0 &&
         (!params.channelCode || sellInEx > 0);
       if (onlyReady && !isReady) {
@@ -210,7 +214,6 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         return;
       }
 
-      const isArticleSku = skuId && skuKind === "article";
       const bierName = isArticleSku
         ? articleNameById.get(text((skuRow as any)?.article_id) || productId) || packLabel
         : bierNameById.get(bierId) || bierId;

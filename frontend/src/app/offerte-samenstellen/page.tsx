@@ -23,7 +23,6 @@ export default async function OfferteSamenstellenPage({
       "channels",
       "basisproducten",
       "samengestelde-producten",
-      "catalog-products",
       "packaging-components",
       "packaging-component-prices",
       "break-even-configuraties",
@@ -44,7 +43,6 @@ export default async function OfferteSamenstellenPage({
   const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
   const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
-  const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
   const verpakkingsonderdelen = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
   const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const breakEvenConfiguraties = bootstrap.datasets["break-even-configuraties"] ?? [];
@@ -79,7 +77,6 @@ export default async function OfferteSamenstellenPage({
         verkoopprijzen={verkoopprijzen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
-        catalogusproducten={catalogusproducten}
         verpakkingsonderdelen={verpakkingsonderdelen}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
         breakEvenConfiguraties={breakEvenConfiguraties}

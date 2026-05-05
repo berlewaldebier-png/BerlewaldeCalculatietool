@@ -28,7 +28,6 @@ DATASET_FILES: dict[str, str] = {
     "prijsvoorstellen": "prijsvoorstellen.json",
     "break-even-configuraties": "break_even_configuraties.json",
     "variabele-kosten": "variabele_kosten.json",
-    "catalog-products": "catalog_products.json",
 }
 
 DATASET_DEFAULTS: dict[str, Any] = {
@@ -46,7 +45,6 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "prijsvoorstellen": [],
     "break-even-configuraties": [],
     "variabele-kosten": {},
-    "catalog-products": [],
 }
 
 

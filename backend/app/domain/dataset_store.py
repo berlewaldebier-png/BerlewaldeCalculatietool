@@ -28,7 +28,6 @@ from app.utils.storage import (
     load_packaging_component_prices,
     load_packaging_component_price_versions,
     load_samengestelde_producten,
-    load_catalog_products,
     load_verpakkingsonderdelen,
     load_all_verkoop_records,
     normalize_any_verkoop_record,
@@ -49,7 +48,6 @@ from app.utils.storage import (
     save_packaging_component_price_versions,
     save_verpakkingsonderdelen,
     save_samengestelde_producten,
-    save_catalog_products,
 )
 
 from datetime import UTC, datetime
@@ -73,8 +71,6 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "packaging-components": [],
     "packaging-component-prices": [],
     "packaging-component-price-versions": [],
-    "base-product-masters": [],
-    "composite-product-masters": [],
     "bieren": [],
     "kostprijsversies": [],
     "kostprijsproductactiveringen": [],
@@ -82,7 +78,6 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "verkoopprijzen": [],
     "adviesprijzen": [],
     "break-even-configuraties": [],
-    "catalog-products": [],
     "trace-lots": [],
     "trace-batches": [],
     "trace-batch-consumptions": [],
@@ -266,7 +261,6 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "bieren",
         "adviesprijzen",
         "break-even-configuraties",
-        "catalog-products",
         "trace-lots",
         "trace-batches",
         "trace-batch-consumptions",
@@ -280,8 +274,6 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "packaging-components",
         "packaging-component-prices",
         "packaging-component-price-versions",
-        "base-product-masters",
-        "composite-product-masters",
         "products",
         "product-years",
         "product-year-components",
@@ -355,12 +347,6 @@ def load_dataset(name: str) -> Any:
         return load_packaging_component_prices()
     if name == "packaging-component-price-versions":
         return load_packaging_component_price_versions()
-    if name == "base-product-masters":
-        return load_basisproducten()
-    if name == "composite-product-masters":
-        return load_samengestelde_producten()
-    if name == "catalog-products":
-        return load_catalog_products()
     if name == "trace-lots":
         from app.domain import traceability_storage
 
@@ -422,18 +408,6 @@ def save_dataset(name: str, data: Any) -> bool:
     if name == "verpakkingsonderdelen" and isinstance(data, list):
         payload = [row for row in data if isinstance(row, dict)]
         return save_verpakkingsonderdelen(payload)
-    if name == "base-product-masters" and isinstance(data, list):
-        payload = [row for row in data if isinstance(row, dict)]
-        return save_basisproducten(payload)
-    if name == "composite-product-masters" and isinstance(data, list):
-        payload = [row for row in data if isinstance(row, dict)]
-        return save_samengestelde_producten(payload)
-    if name == "catalog-products" and isinstance(data, list):
-        payload = [row for row in data if isinstance(row, dict)]
-        saved = save_catalog_products(payload)
-        if saved:
-            dashboard_service.invalidate_dashboard_summary_cache()
-        return bool(saved)
     if name == "trace-lots" and isinstance(data, list):
         from app.domain import traceability_storage
 
@@ -517,14 +491,6 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
             payload = load_packaging_component_prices()
         elif dataset_name == "packaging-component-price-versions":
             payload = load_packaging_component_price_versions()
-        elif dataset_name == "base-product-masters":
-            payload = json_seed.load_dataset("basisproducten")
-            results[dataset_name] = save_basisproducten(payload if isinstance(payload, list) else [])
-            continue
-        elif dataset_name == "composite-product-masters":
-            payload = json_seed.load_dataset("samengestelde-producten")
-            results[dataset_name] = save_samengestelde_producten(payload if isinstance(payload, list) else [])
-            continue
         elif dataset_name == "kostprijsproductactiveringen":
             payload = json_seed.load_dataset("kostprijsproductactiveringen")
             results[dataset_name] = postgres_storage.save_dataset(

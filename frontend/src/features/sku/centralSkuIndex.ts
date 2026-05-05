@@ -1,6 +1,16 @@
 import { buildSellInLookup, resolveSellInPriceEx } from "@/components/offerte-samenstellen/sellInResolver";
-
-type GenericRecord = Record<string, unknown>;
+import { normalizeUom, text, toNumber, type GenericRecord } from "@/features/sku/adapters/common";
+import {
+  normalizeActivation,
+  normalizeArticle,
+  normalizeKostprijsVersie,
+  normalizeSku,
+  parseBtwPct,
+  type NormalizedActivation,
+  type NormalizedArticle,
+  type NormalizedKostprijsVersie,
+  type NormalizedSku,
+} from "@/features/sku/normalizers";
 
 export type SellableSubtype = "bier" | "product" | "dienst";
 export type PricingMethod = "cost_plus" | "manual_rate";
@@ -13,6 +23,7 @@ export type CentralSkuRow = {
   pricingMethod: PricingMethod;
   uom: Uom;
   contentLiter: number;
+  isActive: boolean;
   hasActiveCost: boolean;
   kostprijsEx: number;
   btwPct: number;
@@ -21,72 +32,27 @@ export type CentralSkuRow = {
   warnings: string[];
 };
 
-function text(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function toNumber(value: unknown, fallback = 0) {
-  const parsed =
-    typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function parseBtwPct(value: unknown) {
-  const raw = text(value);
-  if (!raw) return 0;
-  const match = raw.match(/(\d+(?:[.,]\d+)?)\s*%/);
-  if (!match) return 0;
-  const parsed = Number(String(match[1]).replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function readArticlePayload(row: GenericRecord) {
-  const payload = (row as any)?.payload;
-  return payload && typeof payload === "object" ? (payload as GenericRecord) : {};
-}
-
-function readSkuPayload(row: GenericRecord) {
-  const payload = (row as any)?.payload;
-  return payload && typeof payload === "object" ? (payload as GenericRecord) : {};
-}
-
-function normalizeUom(raw: unknown): Uom {
-  const value = text(raw).toLowerCase();
-  if (value === "uur") return "uur";
-  if (value === "pakket") return "pakket";
-  if (value === "liter" || value === "l") return "liter";
-  return "stuk";
-}
-
-function inferSubtypeFromSku(sku: GenericRecord, article: GenericRecord | null): SellableSubtype {
-  const beerId = text((sku as any)?.beer_id);
+function inferSubtypeFromSku(sku: NormalizedSku, article: NormalizedArticle | null): SellableSubtype {
+  const beerId = text(sku.beerId);
   if (beerId) return "bier";
-  const articlePayload = article ? readArticlePayload(article) : {};
-  const explicit =
-    text((articlePayload as any)?.sellable_subtype) ||
-    text((article as any)?.sellable_subtype) ||
-    text((sku as any)?.sellable_subtype);
+  const explicit = text(article?.sellableSubtypeRaw) || text(sku.sellableSubtypeRaw);
   const normalized = explicit.toLowerCase();
   if (normalized === "dienst" || normalized === "service") return "dienst";
   if (normalized === "bier") return "bier";
   return "product";
 }
 
-function inferPricingMethod(subtype: SellableSubtype, sku: GenericRecord, article: GenericRecord | null): PricingMethod {
-  const articlePayload = article ? readArticlePayload(article) : {};
-  const explicit =
-    text((articlePayload as any)?.pricing_method) ||
-    text((article as any)?.pricing_method) ||
-    text((sku as any)?.pricing_method);
+function inferPricingMethod(subtype: SellableSubtype, sku: NormalizedSku, article: NormalizedArticle | null): PricingMethod {
+  const explicit = text(article?.pricingMethodRaw) || text(sku.pricingMethodRaw);
   const normalized = explicit.toLowerCase();
   if (normalized === "manual_rate" || normalized === "rate" || normalized === "manual") return "manual_rate";
   if (subtype === "dienst") return "manual_rate";
   return "cost_plus";
 }
 
-function readManualRateEx(sku: GenericRecord, article: GenericRecord | null): number {
-  const skuPayload = readSkuPayload(sku);
-  const articlePayload = article ? readArticlePayload(article) : {};
+function readManualRateEx(sku: NormalizedSku, article: NormalizedArticle | null): number {
+  const skuPayload = sku.payload ?? {};
+  const articlePayload = article?.payload ?? {};
   return (
     toNumber((skuPayload as any)?.manual_rate_ex, NaN) ||
     toNumber((articlePayload as any)?.manual_rate_ex, NaN) ||
@@ -95,9 +61,9 @@ function readManualRateEx(sku: GenericRecord, article: GenericRecord | null): nu
   );
 }
 
-function getSnapshotProductRow(version: GenericRecord | undefined, ids: { skuId: string; productId: string }) {
+function getSnapshotProductRow(version: NormalizedKostprijsVersie | undefined, ids: { skuId: string; productId: string }) {
   if (!version) return null;
-  const products = ((version as any).resultaat_snapshot ?? (version as any).resultaatSnapshot ?? {}).producten ?? {};
+  const products = (version.resultaatSnapshot as any)?.producten ?? {};
   const rows = [
     ...(Array.isArray(products.basisproducten) ? products.basisproducten : []),
     ...(Array.isArray(products.samengestelde_producten) ? products.samengestelde_producten : []),
@@ -122,33 +88,33 @@ export function buildCentralSkuIndex(params: {
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
 }) {
-  const skuById = new Map<string, GenericRecord>();
+  const skuById = new Map<string, NormalizedSku>();
   (Array.isArray(params.skus) ? params.skus : []).forEach((row) => {
-    const id = text((row as any)?.id);
-    if (id) skuById.set(id, row);
+    const normalized = normalizeSku(row);
+    if (normalized) skuById.set(normalized.id, normalized);
   });
-  const articleById = new Map<string, GenericRecord>();
+  const articleById = new Map<string, NormalizedArticle>();
   (Array.isArray(params.articles) ? params.articles : []).forEach((row) => {
-    const id = text((row as any)?.id);
-    if (id) articleById.set(id, row);
+    const normalized = normalizeArticle(row);
+    if (normalized) articleById.set(normalized.id, normalized);
   });
-  const versionById = new Map<string, GenericRecord>();
+  const versionById = new Map<string, NormalizedKostprijsVersie>();
   (Array.isArray(params.kostprijsversies) ? params.kostprijsversies : []).forEach((row) => {
-    const id = text((row as any)?.id);
-    if (id) versionById.set(id, row);
+    const normalized = normalizeKostprijsVersie(row);
+    if (normalized) versionById.set(normalized.id, normalized);
   });
 
-  const activeActivationBySku = new Map<string, GenericRecord>();
+  const activeActivationBySku = new Map<string, NormalizedActivation>();
   (Array.isArray(params.kostprijsproductactiveringen) ? params.kostprijsproductactiveringen : [])
-    .filter((row) => toNumber((row as any)?.jaar, 0) === params.year)
+    .map((row) => normalizeActivation(row))
+    .filter((row): row is NormalizedActivation => Boolean(row))
+    .filter((row) => row.year === params.year)
     .forEach((row) => {
-      const skuId = text((row as any)?.sku_id);
-      const tot = text((row as any)?.effectief_tot);
-      if (!skuId || tot) return;
-      const existing = activeActivationBySku.get(skuId);
-      const score = text((row as any)?.effectief_vanaf) || text((row as any)?.created_at);
-      const existingScore = existing ? text((existing as any)?.effectief_vanaf) || text((existing as any)?.created_at) : "";
-      if (!existing || score >= existingScore) activeActivationBySku.set(skuId, row);
+      if (row.effectiefTot) return;
+      const existing = activeActivationBySku.get(row.skuId);
+      const score = row.effectiefVanaf || row.createdAt;
+      const existingScore = existing ? existing.effectiefVanaf || existing.createdAt : "";
+      if (!existing || score >= existingScore) activeActivationBySku.set(row.skuId, row);
     });
 
   const sellInLookup = buildSellInLookup(params.verkoopprijzen, params.year);
@@ -164,33 +130,29 @@ export function buildCentralSkuIndex(params: {
 
   function pushRow(args: {
     skuId: string;
-    sku: GenericRecord;
-    article: GenericRecord | null;
+    sku: NormalizedSku;
+    article: NormalizedArticle | null;
     productId: string;
-    activation: GenericRecord | null;
-    version: GenericRecord | undefined;
+    activation: NormalizedActivation | null;
+    version: NormalizedKostprijsVersie | undefined;
   }) {
     const { skuId, sku, article, productId, activation, version } = args;
-    const skuKind = text((sku as any)?.kind).toLowerCase();
+    const skuKind = text(sku.kind).toLowerCase();
     const subtype = inferSubtypeFromSku(sku, article);
     const pricingMethod = inferPricingMethod(subtype, sku, article);
-    const uom = normalizeUom(
-      (article as any)?.uom || (sku as any)?.uom || (readArticlePayload(article ?? {}) as any)?.uom
-    );
-    const contentLiter = toNumber((article as any)?.content_liter, 0);
+    const uom = normalizeUom(text(article?.uom) || text(sku.uom));
+    const contentLiter = toNumber(article?.contentLiter, 0);
     const manualRateEx = readManualRateEx(sku, article);
 
     const snapshotRow = getSnapshotProductRow(version, { skuId, productId });
     const kostprijsFromSnapshot = toNumber((snapshotRow as any)?.kostprijs, 0);
-    const kostprijsFromVersion = toNumber((version as any)?.kostprijs, 0);
+    const kostprijsFromVersion = toNumber(version?.kostprijs, 0);
     const kostprijsEx = kostprijsFromSnapshot || (skuKind === "article" ? kostprijsFromVersion : 0);
 
-    const btwPct = parseBtwPct(((version as any)?.basisgegevens ?? {}).btw_tarief);
+    const btwPct = parseBtwPct(version?.basisBtwTarief);
     const label =
-      text((sku as any)?.name) ||
-      text((article as any)?.name) ||
-      text((sku as any)?.naam) ||
-      text((article as any)?.naam) ||
+      text(sku.name) ||
+      text(article?.name) ||
       skuId;
 
     const warnings: string[] = [];
@@ -205,7 +167,7 @@ export function buildCentralSkuIndex(params: {
     if (pricingMethod === "cost_plus") {
       for (const channelCode of channelCodes) {
         const resolved = resolveSellInPriceEx({
-          bierId: text((activation as any)?.bier_id) || text((sku as any)?.beer_id),
+          bierId: text(activation?.bierId) || text(sku.beerId),
           productId,
           costPriceEx: kostprijsEx,
           channelCode,
@@ -216,6 +178,9 @@ export function buildCentralSkuIndex(params: {
       }
     }
 
+    const isActive = Boolean(activation);
+    const hasCost = pricingMethod === "cost_plus" ? kostprijsEx > 0 : false;
+
     rows.push({
       skuId,
       label,
@@ -223,7 +188,8 @@ export function buildCentralSkuIndex(params: {
       pricingMethod,
       uom,
       contentLiter,
-      hasActiveCost: pricingMethod === "cost_plus" ? kostprijsEx > 0 : false,
+      isActive,
+      hasActiveCost: hasCost,
       kostprijsEx,
       btwPct,
       manualRateEx,
@@ -237,10 +203,10 @@ export function buildCentralSkuIndex(params: {
     const sku = skuById.get(skuId);
     if (!sku) continue;
     const productId =
-      text((activation as any)?.product_id) ||
-      text((sku as any)?.format_article_id) ||
-      text((sku as any)?.article_id);
-    const versionId = text((activation as any)?.kostprijsversie_id);
+      text(activation.productId) ||
+      text(sku.formatArticleId) ||
+      text(sku.articleId);
+    const versionId = text(activation.kostprijsversieId);
     const version = versionById.get(versionId);
     const article = productId ? articleById.get(productId) ?? null : null;
     pushRow({ skuId, sku, article, productId, activation, version });
@@ -250,10 +216,10 @@ export function buildCentralSkuIndex(params: {
   // This matches the UX expectation: once a service is created and "afgerond" (tarief present),
   // it should appear in selectors without requiring liters/cost.
   for (const [skuId, sku] of skuById.entries()) {
-    const kind = text((sku as any)?.kind).toLowerCase();
+    const kind = text(sku.kind).toLowerCase();
     if (kind !== "article") continue;
     if (rows.some((row) => row.skuId === skuId)) continue;
-    const articleId = text((sku as any)?.article_id);
+    const articleId = text(sku.articleId);
     if (!articleId) continue;
     const article = articleById.get(articleId) ?? null;
     const subtype = inferSubtypeFromSku(sku, article);

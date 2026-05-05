@@ -16,14 +16,15 @@ function unwrapList(value: unknown): GenericRecord[] {
 export default async function ProductenVerpakkingPage() {
   const bootstrap = await getBootstrap(
     [
+      "productie",
+      "channels",
+      "verkoopprijzen",
       "packaging-components",
-      "base-product-masters",
-      "composite-product-masters",
-      "catalog-products",
       "glasmaten",
       "packaging-component-prices",
-      "bieren",
-      "productie",
+      "articles",
+      "skus",
+      "bom-lines",
       "kostprijsversies",
       "kostprijsproductactiveringen"
     ],
@@ -32,33 +33,35 @@ export default async function ProductenVerpakkingPage() {
   );
 
   const navigation = bootstrap.navigation ?? [];
+  const productie = (bootstrap.datasets["productie"] ?? {}) as Record<string, unknown>;
+  const channels = unwrapList(bootstrap.datasets["channels"]);
+  const verkoopprijzen = unwrapList(bootstrap.datasets["verkoopprijzen"]);
   const verpakkingsonderdelen = unwrapList(bootstrap.datasets["packaging-components"]);
-  const basisproducten = unwrapList(bootstrap.datasets["base-product-masters"]);
-  const samengestelde = unwrapList(bootstrap.datasets["composite-product-masters"]);
-  const catalogusproducten = unwrapList(bootstrap.datasets["catalog-products"]);
   const glasmaten = unwrapList(bootstrap.datasets["glasmaten"]);
   const verpakkingsonderdeelPrijzen = unwrapList(bootstrap.datasets["packaging-component-prices"]);
-  const bieren = unwrapList(bootstrap.datasets["bieren"]);
-  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
+  const articles = unwrapList(bootstrap.datasets["articles"]);
+  const skus = unwrapList(bootstrap.datasets["skus"]);
+  const bomLines = unwrapList(bootstrap.datasets["bom-lines"]);
   const kostprijsversies = unwrapList(bootstrap.datasets["kostprijsversies"]);
   const kostprijsproductactiveringen = unwrapList(bootstrap.datasets["kostprijsproductactiveringen"]);
 
   return (
     <PageShell
       title="Producten & verpakking"
-      subtitle="Beheer verpakkingsonderdelen, basisproducten en samengestelde producten als stamdata in een overzichtelijke workspace."
+      subtitle="Beheer verpakkingsonderdelen, glasmaten en verkoopbare artikelen op basis van de centrale SKU-lijst."
       activePath="/producten-verpakking"
       navigation={navigation}
     >
       <ProductenVerpakkingWorkspace
+        productie={productie}
+        channels={channels}
+        verkoopprijzen={verkoopprijzen}
         verpakkingsonderdelen={verpakkingsonderdelen}
-        basisproducten={basisproducten}
-        samengesteldeProducten={samengestelde}
-        catalogusproducten={catalogusproducten}
         glasmaten={glasmaten}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
-        bieren={bieren}
-        productie={productie}
+        articles={articles}
+        skus={skus}
+        bomLines={bomLines}
         kostprijsversies={kostprijsversies}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
       />

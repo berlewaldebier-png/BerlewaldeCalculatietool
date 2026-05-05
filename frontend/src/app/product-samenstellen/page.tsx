@@ -2,7 +2,12 @@ import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 import { ProductSamenstellenWizard } from "@/features/sku-composition/ProductSamenstellenWizard";
 
-export default async function ProductSamenstellenPage() {
+export default async function ProductSamenstellenPage({
+  searchParams,
+}: {
+  // Next.js generates `PageProps` types; keep this permissive to avoid mismatch across Next versions.
+  searchParams?: any;
+}) {
   const bootstrap = await getBootstrap(
     [
       "channels",
@@ -38,6 +43,9 @@ export default async function ProductSamenstellenPage() {
     .sort((left, right) => right - left);
   const year = yearOptions.length > 0 ? yearOptions[0] : new Date().getFullYear();
 
+  const modeParam = typeof searchParams?.mode === "string" ? searchParams.mode : "";
+  const formatIdParam = typeof searchParams?.format_id === "string" ? searchParams.format_id : "";
+
   return (
     <PageShell
       title="Product samenstellen"
@@ -47,6 +55,8 @@ export default async function ProductSamenstellenPage() {
     >
       <ProductSamenstellenWizard
         year={year}
+        initialMode={modeParam === "afvuleenheid" ? "afvuleenheid" : "verkoopbaar"}
+        editFormatId={formatIdParam || ""}
         channels={channels}
         verkoopprijzen={verkoopprijzen}
         skus={skus}
@@ -60,4 +70,3 @@ export default async function ProductSamenstellenPage() {
     </PageShell>
   );
 }
-

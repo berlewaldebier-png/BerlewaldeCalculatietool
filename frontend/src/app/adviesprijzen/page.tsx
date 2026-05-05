@@ -14,7 +14,6 @@ export default async function AdviesprijzenPage() {
       "articles",
       "kostprijsversies",
       "kostprijsproductactiveringen",
-      "catalog-products",
       "packaging-components",
       "packaging-component-price-versions"
     ],
@@ -31,7 +30,6 @@ export default async function AdviesprijzenPage() {
   const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
   const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
-  const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
   const verpakkingscomponenten = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
   const verpakkingscomponentPrijsversies = (bootstrap.datasets["packaging-component-price-versions"] as any[]) ?? [];
 
@@ -52,7 +50,6 @@ export default async function AdviesprijzenPage() {
         initialArticles={articles}
         initialKostprijsversies={kostprijsversies}
         initialKostprijsproductactiveringen={kostprijsproductactiveringen}
-        initialCatalogusproducten={catalogusproducten}
         initialPackagingComponents={verpakkingscomponenten}
         initialPackagingComponentPriceVersions={verpakkingscomponentPrijsversies}
       />

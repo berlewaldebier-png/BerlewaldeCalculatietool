@@ -1,1221 +1,205 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
-import { NestedCollectionEditor } from "@/components/NestedCollectionEditor";
-import { VerkoopbareArtikelenEditor } from "@/components/VerkoopbareArtikelenEditor";
+import { VerkoopbareArtikelenWorkspace } from "@/components/VerkoopbareArtikelenWorkspace";
 import { API_BASE_URL } from "@/lib/api";
+import { determineDefaultYear, type GenericRecord } from "@/components/producten-verpakking/productenVerpakkingUtils";
+import {
+  buildAvailablePriceYears,
+  buildYearPricesDraft,
+  buildYearPricesPayload,
+  saveYearPricesLayer,
+} from "@/components/producten-verpakking/productenVerpakkingYearPrices";
+import { ProductenVerpakkingHero } from "@/components/producten-verpakking/ProductenVerpakkingHero";
+import { ProductenVerpakkingTabs } from "@/components/producten-verpakking/ProductenVerpakkingTabs";
+import { AfvuleenhedenTab } from "@/components/producten-verpakking/AfvuleenhedenTab";
+import { YearPricesTab } from "@/components/producten-verpakking/YearPricesTab";
 
-type GenericRecord = Record<string, unknown>;
-
-type ProductenVerpakkingWorkspaceProps = {
-  verpakkingsonderdelen: GenericRecord[];
-  basisproducten: GenericRecord[];
-  samengesteldeProducten: GenericRecord[];
-  catalogusproducten: GenericRecord[];
-  glasmaten: GenericRecord[];
-  verpakkingsonderdeelPrijzen: GenericRecord[];
-  bieren: GenericRecord[];
-  productie?: Record<string, any>;
-  kostprijsversies?: GenericRecord[];
-  kostprijsproductactiveringen?: GenericRecord[];
-};
-
-type SortDirection = "asc" | "desc";
-
-type YearOverviewRow = {
-  jaar: number;
-  aantalOnderdelen: number;
-  ingevuld: number;
-};
-
-type CostOverviewRow = {
-  id: string;
-  naam: string;
-  type: string;
-  costs: Record<number, number>;
-};
-
-function determineDefaultYear(prijsRows: GenericRecord[]) {
-  const years = prijsRows
-    .map((row) => Number(row.jaar ?? 0))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  return years.length > 0 ? Math.max(...years) : new Date().getFullYear();
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
-function createLocalId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function buildPriceRows(
-  verpakkingsonderdelen: GenericRecord[],
-  verpakkingsonderdeelPrijzen: GenericRecord[]
-) {
-  const descriptionById = new Map(
-    verpakkingsonderdelen.map((row) => [String(row.id ?? ""), String(row.omschrijving ?? "")])
-  );
-
-  return verpakkingsonderdeelPrijzen.map((row) => ({
-    id: String(row.id ?? ""),
-    verpakkingsonderdeel_id: String(row.verpakkingsonderdeel_id ?? ""),
-    omschrijving:
-      descriptionById.get(String(row.verpakkingsonderdeel_id ?? "")) ??
-      String(row.omschrijving ?? ""),
-    jaar: Number(row.jaar ?? new Date().getFullYear()),
-    prijs_per_stuk: Number(row.prijs_per_stuk ?? 0)
-  }));
-}
-
-function findPreviousPriceYear(rows: GenericRecord[], selectedYear: number) {
-  const previousYears = rows
-    .map((row) => Number(row.jaar ?? 0))
-    .filter((year) => Number.isFinite(year) && year > 0 && year < selectedYear);
-
-  return previousYears.length > 0 ? Math.max(...previousYears) : null;
-}
-
-function getNextDuplicateYear(existingYears: number[], sourceYear: number) {
-  let candidate = sourceYear + 1;
-  const yearSet = new Set(existingYears);
-  while (yearSet.has(candidate)) {
-    candidate += 1;
-  }
-  return candidate;
-}
-
-function DuplicateIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 9h10v10H9z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 7V5h6v2" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 7l1 12h8l1-12" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v5M14 11v5" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ expanded }: { expanded: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="svg-icon"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      style={{
-        transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-        transition: "transform 120ms ease"
-      }}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function SortIcon({ direction }: { direction: SortDirection | null }) {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8 10 4-4 4 4" opacity={direction === "desc" ? 0.35 : 1} />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m16 14-4 4-4-4" opacity={direction === "asc" ? 0.35 : 1} />
-    </svg>
-  );
-}
+type TabKey = "verkoopbaar" | "verpakking" | "afvuleenheden" | "jaarprijzen" | "glasmaten";
 
 export function ProductenVerpakkingWorkspace({
+  productie,
+  channels,
+  verkoopprijzen,
   verpakkingsonderdelen,
-  basisproducten,
-  samengesteldeProducten,
-  catalogusproducten,
   glasmaten,
   verpakkingsonderdeelPrijzen,
-  bieren,
-  productie,
+  articles,
+  skus,
+  bomLines,
   kostprijsversies,
-  kostprijsproductactiveringen
-}: ProductenVerpakkingWorkspaceProps) {
+  kostprijsproductactiveringen,
+}: {
+  productie: Record<string, unknown>;
+  channels: GenericRecord[];
+  verkoopprijzen: GenericRecord[];
+  verpakkingsonderdelen: GenericRecord[];
+  glasmaten: GenericRecord[];
+  verpakkingsonderdeelPrijzen: GenericRecord[];
+  articles: GenericRecord[];
+  skus: GenericRecord[];
+  bomLines: GenericRecord[];
+  kostprijsversies: GenericRecord[];
+  kostprijsproductactiveringen: GenericRecord[];
+}) {
   const router = useRouter();
-  const verpakkingsonderdelenRows = Array.isArray(verpakkingsonderdelen) ? verpakkingsonderdelen : [];
-  const basisproductenRows = Array.isArray(basisproducten) ? basisproducten : [];
-  const samengesteldeProductenRows = Array.isArray(samengesteldeProducten)
-    ? samengesteldeProducten
-    : [];
-  const catalogusproductenRows = Array.isArray(catalogusproducten) ? catalogusproducten : [];
-  const glasmatenRows = Array.isArray(glasmaten) ? glasmaten : [];
-  const verpakkingsonderdeelPrijsRows = Array.isArray(verpakkingsonderdeelPrijzen)
-    ? verpakkingsonderdeelPrijzen
-    : [];
-  const bierenRows = Array.isArray(bieren) ? bieren : [];
-  const productieMap = (productie && typeof productie === "object" ? (productie as Record<string, any>) : {}) ?? {};
-  const kostprijsversieRows = Array.isArray(kostprijsversies) ? kostprijsversies : [];
-  const kostprijsActivationRows = Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [];
+  const [activeTab, setActiveTab] = useState<TabKey>("verkoopbaar");
+  const [yearPricesYear, setYearPricesYear] = useState<number | null>(null);
+  const [yearPricesDraft, setYearPricesDraft] = useState<Record<string, number>>({});
+  const [yearPricesStatus, setYearPricesStatus] = useState<string>("");
+  const [isSavingYearPrices, setIsSavingYearPrices] = useState<boolean>(false);
+  const [formatsYear, setFormatsYear] = useState<number | null>(null);
 
-  const [activeTab, setActiveTab] = useState<
-    "onderdelen" | "basis" | "samengesteld" | "catalogus" | "glasmaten" | "jaarprijzen" | "kostenoverzicht"
-  >("onderdelen");
-  const [priceStatus, setPriceStatus] = useState("");
-  const [isSavingPrices, setIsSavingPrices] = useState(false);
-  const [yearOverviewSort, setYearOverviewSort] = useState<{ key: keyof YearOverviewRow; direction: SortDirection }>({
-    key: "jaar",
-    direction: "desc"
-  });
-  const [costOverviewSort, setCostOverviewSort] = useState<{ key: "type" | "naam" | number; direction: SortDirection }>({
-    key: "type",
-    direction: "asc"
-  });
+  const packagingMasters = Array.isArray(verpakkingsonderdelen) ? verpakkingsonderdelen : [];
+  const packagingPrices = Array.isArray(verpakkingsonderdeelPrijzen) ? verpakkingsonderdeelPrijzen : [];
+  const canonicalArticles = Array.isArray(articles) ? articles : [];
+  const canonicalBomLines = Array.isArray(bomLines) ? bomLines : [];
 
-  const defaultYear = useMemo(
-    () => determineDefaultYear(verpakkingsonderdeelPrijsRows),
-    [verpakkingsonderdeelPrijsRows]
-  );
+  const formatArticles = useMemo(() => {
+    return canonicalArticles
+      .filter((row) => String((row as any)?.kind ?? "").toLowerCase() === "format")
+      .slice()
+      .sort((a, b) => String((a as any)?.name ?? "").localeCompare(String((b as any)?.name ?? ""), "nl-NL"));
+  }, [canonicalArticles]);
 
-  const [expandedPriceYear, setExpandedPriceYear] = useState<number | null>(null);
+  const productieYears = useMemo(() => {
+    return buildAvailablePriceYears({ productie, packagingPrices }).productieYears;
+  }, [packagingPrices, productie]);
 
-  const packagingComponentOptions = useMemo(
-    () =>
-      verpakkingsonderdelenRows.map((row) => {
-        const id = String(row.id ?? "");
-        return {
-          value: id,
-          label: String(row.omschrijving ?? ""),
-          payload: {
-            omschrijving: String(row.omschrijving ?? ""),
-            verpakkingsonderdeel_id: id
-          }
-        };
-      }),
-    [verpakkingsonderdelenRows]
-  );
+  const year = useMemo(() => buildAvailablePriceYears({ productie, packagingPrices }).defaultYear, [packagingPrices, productie]);
 
-  const basisproductOptions = useMemo(
-    () => [
-      ...basisproductenRows.map((row) => {
-        const id = String(row.id ?? "");
-        const inhoud = Number(row.inhoud_per_eenheid_liter ?? 0);
-        return {
-          value: id,
-          label: String(row.omschrijving ?? ""),
-          payload: {
-            omschrijving: String(row.omschrijving ?? ""),
-            basisproduct_id: id,
-            inhoud_per_eenheid_liter: inhoud
-          }
-        };
-      }),
-      ...verpakkingsonderdelenRows
-        .filter((row) => Boolean(row.beschikbaar_voor_samengesteld))
-        .map((row) => {
-          const id = String(row.id ?? "");
-          const componentRef = `verpakkingsonderdeel:${id}`;
-          return {
-            value: componentRef,
-            label: String(row.omschrijving ?? ""),
-            payload: {
-              omschrijving: String(row.omschrijving ?? ""),
-              basisproduct_id: componentRef,
-              inhoud_per_eenheid_liter: 0
-            }
-          };
-      })
-    ],
-    [basisproductenRows, verpakkingsonderdelenRows]
-  );
-
-  // Beer options are now resolved via kostprijs activeringen inside VerkoopbareArtikelenEditor.
-
-  const usageByComponentId = useMemo(() => {
-    const usage = new Map<string, number>();
-    basisproductenRows.forEach((basisproduct) => {
-      const onderdelen = Array.isArray(basisproduct.onderdelen)
-        ? (basisproduct.onderdelen as GenericRecord[])
-        : [];
-      onderdelen.forEach((onderdeel) => {
-        const componentId = String(onderdeel.verpakkingsonderdeel_id ?? "");
-        if (!componentId) {
-          return;
-        }
-        usage.set(componentId, (usage.get(componentId) ?? 0) + 1);
-      });
-    });
-    samengesteldeProductenRows.forEach((samengesteldProduct) => {
-      const basisproducten = Array.isArray(samengesteldProduct.basisproducten)
-        ? (samengesteldProduct.basisproducten as GenericRecord[])
-        : [];
-      basisproducten.forEach((onderdeel) => {
-        const basisproductId = String(onderdeel.basisproduct_id ?? "");
-        if (!basisproductId.startsWith("verpakkingsonderdeel:")) {
-          return;
-        }
-        const componentId = basisproductId.replace("verpakkingsonderdeel:", "");
-        if (!componentId) {
-          return;
-        }
-        usage.set(componentId, (usage.get(componentId) ?? 0) + 1);
-      });
-    });
-    return usage;
-  }, [basisproductenRows, samengesteldeProductenRows]);
-
-  const packagingPriceRows = useMemo(
-    () => buildPriceRows(verpakkingsonderdelenRows, verpakkingsonderdeelPrijsRows),
-    [verpakkingsonderdelenRows, verpakkingsonderdeelPrijsRows]
-  );
-
-  const [allPriceRows, setAllPriceRows] = useState<GenericRecord[]>(packagingPriceRows);
+  const availablePriceYears = useMemo(() => buildAvailablePriceYears({ productie, packagingPrices }).availablePriceYears, [packagingPrices, productie]);
 
   useEffect(() => {
-    setAllPriceRows(packagingPriceRows);
-  }, [packagingPriceRows]);
+    if (yearPricesYear !== null) return;
+    setYearPricesYear(year);
+  }, [year, yearPricesYear]);
 
-  const availablePriceYears = useMemo(() => {
-    const years = new Set<number>();
-    allPriceRows.forEach((row) => {
-      const year = Number(row.jaar ?? 0);
-      if (Number.isFinite(year) && year > 0) {
-        years.add(year);
-      }
-    });
-    return [...years].sort((left, right) => right - left);
-  }, [allPriceRows]);
+  const activeYearForPrices = yearPricesYear ?? year;
+  const activeYearForFormats = formatsYear ?? year;
 
-  const latestOverviewYears = useMemo(() => availablePriceYears.slice(0, 5), [availablePriceYears]);
+  useEffect(() => {
+    setYearPricesDraft(buildYearPricesDraft({ packagingMasters, packagingPrices, activeYearForPrices }));
+  }, [activeYearForPrices, packagingMasters, packagingPrices]);
 
-  const componentPriceByYear = useMemo(() => {
-    const result = new Map<number, Map<string, number>>();
-    allPriceRows.forEach((row) => {
-      const year = Number(row.jaar ?? 0);
-      const componentId = String(row.verpakkingsonderdeel_id ?? "");
-      if (!year || !componentId) {
-        return;
-      }
-      if (!result.has(year)) {
-        result.set(year, new Map<string, number>());
-      }
-      result.get(year)?.set(componentId, Number(row.prijs_per_stuk ?? 0));
-    });
-    return result;
-  }, [allPriceRows]);
-
-  const basisProductCostByYear = useMemo(() => {
-    const result = new Map<number, Map<string, number>>();
-
-    latestOverviewYears.forEach((year) => {
-      const componentPrices = componentPriceByYear.get(year) ?? new Map<string, number>();
-      const yearCosts = new Map<string, number>();
-
-      basisproductenRows.forEach((basisproduct) => {
-        const basisproductId = String(basisproduct.id ?? "");
-        const onderdelen = Array.isArray(basisproduct.onderdelen)
-          ? (basisproduct.onderdelen as GenericRecord[])
-          : [];
-
-        const total = onderdelen.reduce((sum, onderdeel) => {
-          const componentId = String(onderdeel.verpakkingsonderdeel_id ?? "");
-          const quantity = Number(onderdeel.hoeveelheid ?? 0);
-          return sum + (componentPrices.get(componentId) ?? 0) * quantity;
-        }, 0);
-
-        yearCosts.set(basisproductId, total);
-      });
-
-      result.set(year, yearCosts);
-    });
-
-    return result;
-  }, [basisproductenRows, componentPriceByYear, latestOverviewYears]);
-
-  const costOverviewRows = useMemo<CostOverviewRow[]>(() => {
-    function resolveCompositeCost(
-      row: GenericRecord,
-      year: number,
-      stack = new Set<string>()
-    ): number {
-      const compositeId = String(row.id ?? "");
-      if (compositeId && stack.has(compositeId)) {
-        return 0;
-      }
-
-      const nextStack = new Set(stack);
-      if (compositeId) {
-        nextStack.add(compositeId);
-      }
-
-      const componentPrices = componentPriceByYear.get(year) ?? new Map<string, number>();
-      const basisCosts = basisProductCostByYear.get(year) ?? new Map<string, number>();
-      const onderdelen = Array.isArray(row.basisproducten)
-        ? (row.basisproducten as GenericRecord[])
-        : [];
-
-      return onderdelen.reduce((sum, onderdeel) => {
-        const basisproductId = String(onderdeel.basisproduct_id ?? "");
-        const aantal = Number(onderdeel.aantal ?? 0);
-
-        if (basisproductId.startsWith("verpakkingsonderdeel:")) {
-          const componentId = basisproductId.replace("verpakkingsonderdeel:", "");
-          return sum + (componentPrices.get(componentId) ?? 0) * aantal;
-        }
-
-        if (basisCosts.has(basisproductId)) {
-          return sum + (basisCosts.get(basisproductId) ?? 0) * aantal;
-        }
-
-        const nestedComposite = samengesteldeProductenRows.find(
-          (candidate) => String(candidate.id ?? "") === basisproductId
-        );
-        if (nestedComposite) {
-          return sum + resolveCompositeCost(nestedComposite, year, nextStack) * aantal;
-        }
-
-        return sum;
-      }, 0);
-    }
-
-    const basisRows = basisproductenRows.map((row) => ({
-      id: `basis:${String(row.id ?? "")}`,
-      naam: String(row.omschrijving ?? ""),
-      type: "Basisproduct",
-      costs: Object.fromEntries(
-        latestOverviewYears.map((year) => [
-          year,
-          basisProductCostByYear.get(year)?.get(String(row.id ?? "")) ?? 0
-        ])
-      )
-    }));
-
-    const compositeRows = samengesteldeProductenRows.map((row) => ({
-      id: `samengesteld:${String(row.id ?? "")}`,
-      naam: String(row.omschrijving ?? ""),
-      type: "Samengesteld",
-      costs: Object.fromEntries(
-        latestOverviewYears.map((year) => [year, resolveCompositeCost(row, year)])
-      )
-    }));
-
-    const typeOrder = new Map<string, number>([
-      ["Basisproduct", 0],
-      ["Samengesteld", 1]
-    ]);
-
-    return [...basisRows, ...compositeRows].sort((left, right) => {
-      const directionFactor = costOverviewSort.direction === "asc" ? 1 : -1;
-
-      if (costOverviewSort.key === "type") {
-        const typeDiff = (typeOrder.get(left.type) ?? 99) - (typeOrder.get(right.type) ?? 99);
-        if (typeDiff !== 0) {
-          return typeDiff * directionFactor;
-        }
-        return left.naam.localeCompare(right.naam, "nl-NL");
-      }
-
-      if (costOverviewSort.key === "naam") {
-        return left.naam.localeCompare(right.naam, "nl-NL") * directionFactor;
-      }
-
-      return ((left.costs[costOverviewSort.key] ?? 0) - (right.costs[costOverviewSort.key] ?? 0)) * directionFactor;
-    });
-  }, [
-    basisProductCostByYear,
-    basisproductenRows,
-    componentPriceByYear,
-    costOverviewSort,
-    latestOverviewYears,
-    samengesteldeProductenRows
-  ]);
-
-  const yearOverviewRows = useMemo<YearOverviewRow[]>(() => {
-      const rows = availablePriceYears.map((year) => {
-        const yearRows = allPriceRows.filter((row) => Number(row.jaar ?? 0) === year);
-        const pricedCount = yearRows.filter((row) => Number(row.prijs_per_stuk ?? 0) > 0).length;
-        return {
-          jaar: year,
-          aantalOnderdelen: verpakkingsonderdelenRows.length,
-          ingevuld: pricedCount
-        };
-      });
-
-      return [...rows].sort((left, right) => {
-        const directionFactor = yearOverviewSort.direction === "asc" ? 1 : -1;
-        if (yearOverviewSort.key === "jaar") {
-          return (left.jaar - right.jaar) * directionFactor;
-        }
-        if (yearOverviewSort.key === "aantalOnderdelen") {
-          return (left.aantalOnderdelen - right.aantalOnderdelen) * directionFactor;
-        }
-        return (left.ingevuld - right.ingevuld) * directionFactor;
-      });
-    },
-    [allPriceRows, availablePriceYears, verpakkingsonderdelenRows.length, yearOverviewSort]
-  );
-
-  const expandedYearRows = useMemo(() => {
-    if (!expandedPriceYear) {
-      return [];
-    }
-
-    const existingByComponentId = new Map(
-      allPriceRows
-        .filter((row) => Number(row.jaar ?? 0) === expandedPriceYear)
-        .map((row) => [String(row.verpakkingsonderdeel_id ?? ""), row])
-    );
-
-    return verpakkingsonderdelenRows
-      .map((onderdeel) => {
-        const componentId = String(onderdeel.id ?? "");
-        const existing = existingByComponentId.get(componentId);
-        return {
-          id: String(existing?.id ?? ""),
-          verpakkingsonderdeel_id: componentId,
-          omschrijving: String(onderdeel.omschrijving ?? ""),
-          jaar: expandedPriceYear,
-          prijs_per_stuk: Number(existing?.prijs_per_stuk ?? 0)
-        };
-      })
-      .sort((left, right) =>
-        String(left.omschrijving).localeCompare(String(right.omschrijving), "nl-NL")
-      );
-  }, [allPriceRows, expandedPriceYear, verpakkingsonderdelenRows]);
-
-  function mergeYearRows(targetYear: number, rowsForYear: GenericRecord[]) {
-    setAllPriceRows((current) => {
-      const otherYears = current.filter((row) => Number(row.jaar ?? 0) !== targetYear);
-      return [...otherYears, ...rowsForYear];
-    });
-  }
-
-  function updateExpandedYearPrice(componentId: string, value: number) {
-    if (!expandedPriceYear) {
-      return;
-    }
-
-    const rowsForYear = expandedYearRows.map((row) =>
-      String(row.verpakkingsonderdeel_id ?? "") === componentId
-        ? { ...row, prijs_per_stuk: value }
-        : row
-    );
-    mergeYearRows(expandedPriceYear, rowsForYear);
-  }
-
-  async function persistPriceRows(nextRows: GenericRecord[], successMessage: string) {
-    setPriceStatus("");
-    setIsSavingPrices(true);
-
+  async function handleSaveYearPricesLayer() {
+    setYearPricesStatus("");
+    setIsSavingYearPrices(true);
     try {
-      const payload = nextRows
-        .map((row) => ({
-          id: String(row.id ?? ""),
-          verpakkingsonderdeel_id: String(row.verpakkingsonderdeel_id ?? ""),
-          jaar: Number(row.jaar ?? 0),
-          prijs_per_stuk: Number(row.prijs_per_stuk ?? 0)
-        }))
-        .filter((row) => row.verpakkingsonderdeel_id && row.jaar > 0);
-
-      const response = await fetch(`${API_BASE_URL}/data/packaging-component-prices`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
+      const payload = buildYearPricesPayload({
+        packagingMasters,
+        packagingPrices,
+        activeYearForPrices,
+        yearPricesDraft,
       });
-
-      if (!response.ok) {
-        throw new Error("Opslaan mislukt");
-      }
-
-      setAllPriceRows(payload);
-      setPriceStatus(successMessage);
+      const status = await saveYearPricesLayer({ activeYearForPrices, payload });
+      setYearPricesStatus(status);
       router.refresh();
-    } catch {
-      setPriceStatus("Opslaan van jaarprijzen mislukt.");
+    } catch (err) {
+      setYearPricesStatus(`Opslaan mislukt: ${String((err as any)?.message ?? err)}`);
     } finally {
-      setIsSavingPrices(false);
+      setIsSavingYearPrices(false);
     }
-  }
-
-  async function saveExpandedYearPrices() {
-    if (!expandedPriceYear) {
-      return;
-    }
-
-    await persistPriceRows(allPriceRows, `Jaarprijzen voor ${expandedPriceYear} opgeslagen.`);
-  }
-
-  async function duplicatePriceYear(sourceYear: number) {
-    const targetYear = getNextDuplicateYear(availablePriceYears, sourceYear);
-    const rowsToCopy = allPriceRows
-      .filter((row) => Number(row.jaar ?? 0) === sourceYear)
-      .map((row) => ({
-        id: createLocalId(),
-        verpakkingsonderdeel_id: String(row.verpakkingsonderdeel_id ?? ""),
-        jaar: targetYear,
-        prijs_per_stuk: Number(row.prijs_per_stuk ?? 0)
-      }));
-
-    const existingIds = new Set(rowsToCopy.map((row) => String(row.verpakkingsonderdeel_id ?? "")));
-    verpakkingsonderdelenRows.forEach((onderdeel) => {
-      const componentId = String(onderdeel.id ?? "");
-      if (!existingIds.has(componentId)) {
-        rowsToCopy.push({
-          id: createLocalId(),
-          verpakkingsonderdeel_id: componentId,
-          jaar: targetYear,
-          prijs_per_stuk: 0
-        });
-      }
-    });
-
-    await persistPriceRows(
-      [...allPriceRows, ...rowsToCopy],
-      `Jaarlaag ${sourceYear} gedupliceerd naar ${targetYear}.`
-    );
-    setExpandedPriceYear(targetYear);
-  }
-
-  async function deletePriceYear(targetYear: number) {
-    await persistPriceRows(
-      allPriceRows.filter((row) => Number(row.jaar ?? 0) !== targetYear),
-      `Jaarlaag ${targetYear} verwijderd.`
-    );
-
-    if (expandedPriceYear === targetYear) {
-      const remainingYears = availablePriceYears.filter((year) => year !== targetYear);
-      setExpandedPriceYear(remainingYears[0] ?? null);
-    }
-  }
-
-  function toggleYearOverviewSort(key: keyof YearOverviewRow) {
-    setYearOverviewSort((current) =>
-      current.key === key
-        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
-        : { key, direction: key === "jaar" ? "desc" : "asc" }
-    );
-  }
-
-  function toggleCostOverviewSort(key: "type" | "naam" | number) {
-    setCostOverviewSort((current) =>
-      current.key === key
-        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
-        : { key, direction: key === "type" ? "asc" : "desc" }
-    );
   }
 
   return (
-    <section className="stack" style={{ gap: "1rem" }}>
-      <section className="module-card">
-        <div className="module-card-header">
-          <div className="module-card-title">Producten &amp; verpakkingen</div>
-          <div className="module-card-text">
-            Stamdata, glasmaten en jaarprijzen zijn uit elkaar getrokken. In de eerste tabs beheer
-            je de structuur; glasmaten gebruik je later voor glas-economie in offertes en bijlagen.
-          </div>
+    <div className="workspace">
+      <div className="workspace-intro">
+        <div className="muted">
+          Stamdata, glasmaten en jaarprijzen. Verkoopbare artikelen komen uit de centrale SKU-lijst (actieve
+          kostprijzen).
         </div>
+      </div>
 
-        <div className="editor-toolbar" style={{ marginTop: 10 }}>
-          <div className="editor-toolbar-meta">
-            <span className="muted">Nieuw: gebruik de wizard als primaire flow.</span>
-          </div>
-          <div className="editor-toolbar-actions">
-            <Link href="/product-samenstellen" className="cpq-button cpq-button-primary">
-              Product samenstellen
-            </Link>
-          </div>
+      <ProductenVerpakkingHero />
+
+      <ProductenVerpakkingTabs activeTab={activeTab} setActiveTab={setActiveTab} />
+
+      {activeTab === "verkoopbaar" ? (
+        <div className="content-card">
+          <VerkoopbareArtikelenWorkspace
+            year={year}
+            channels={Array.isArray(channels) ? channels : []}
+            verkoopprijzen={Array.isArray(verkoopprijzen) ? verkoopprijzen : []}
+            skus={Array.isArray(skus) ? skus : []}
+            articles={Array.isArray(articles) ? articles : []}
+            kostprijsversies={Array.isArray(kostprijsversies) ? kostprijsversies : []}
+            kostprijsproductactiveringen={
+              Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []
+            }
+          />
         </div>
+      ) : null}
 
-        <div className="tab-strip">
-          <button
-            type="button"
-            className={`tab-button ${activeTab === "onderdelen" ? "active" : ""}`}
-            onClick={() => setActiveTab("onderdelen")}
-          >
-            Verpakkingsonderdelen
-          </button>
-          <button
-            type="button"
-            className={`tab-button ${activeTab === "basis" ? "active" : ""}`}
-            onClick={() => setActiveTab("basis")}
-          >
-            Afvuleenheden
-          </button>
-          <button
-            type="button"
-            className={`tab-button ${activeTab === "samengesteld" ? "active" : ""}`}
-            onClick={() => setActiveTab("samengesteld")}
-          >
-            Afvulsamenstellingen
-          </button>
-          <button
-            type="button"
-            className={`tab-button ${activeTab === "catalogus" ? "active" : ""}`}
-            onClick={() => setActiveTab("catalogus")}
-          >
-            Verkoopbare artikelen
-          </button>
-          <button
-            type="button"
-            className={`tab-button ${activeTab === "glasmaten" ? "active" : ""}`}
-            onClick={() => setActiveTab("glasmaten")}
-          >
-            Glasmaten
-          </button>
-          <button
-            type="button"
-            className={`tab-button ${activeTab === "jaarprijzen" ? "active" : ""}`}
-            onClick={() => setActiveTab("jaarprijzen")}
-          >
-            Jaarprijzen
-          </button>
-          <button
-            type="button"
-            className={`tab-button ${activeTab === "kostenoverzicht" ? "active" : ""}`}
-            onClick={() => setActiveTab("kostenoverzicht")}
-          >
-            Kostenoverzicht
-          </button>
+      {activeTab === "verpakking" ? (
+        <div className="content-card">
+          <DatasetTableEditor
+            endpoint="/data/packaging-components"
+            title="Verpakkingsonderdelen"
+            description="Onderdelen die je gebruikt in afvuleenheden en samengestelde artikelen (bijv. dop, doos, giftbox)."
+            columns={[
+              { key: "omschrijving", label: "Omschrijving", type: "text" },
+              { key: "beschikbaar_voor_samengesteld", label: "Beschikbaar", type: "checkbox", width: "140px" },
+            ]}
+            initialRows={Array.isArray(verpakkingsonderdelen) ? (verpakkingsonderdelen as any) : []}
+            addRowTemplate={{
+              id: "",
+              omschrijving: "",
+              beschikbaar_voor_samengesteld: true,
+            }}
+          />
         </div>
-      </section>
-
-      {activeTab === "onderdelen" ? (
-        <DatasetTableEditor
-          endpoint="/data/packaging-components"
-          initialRows={verpakkingsonderdelenRows.map((row) => {
-            const componentId = String(row.id ?? "");
-            return {
-              id: componentId,
-              component_key: String(row.component_key ?? ""),
-              omschrijving: String(row.omschrijving ?? ""),
-              beschikbaar_voor_samengesteld: Boolean(row.beschikbaar_voor_samengesteld),
-              in_gebruik: Boolean(usageByComponentId.get(componentId))
-            };
-          })}
-          addRowTemplate={{
-            id: "",
-            component_key: "",
-            omschrijving: "",
-            beschikbaar_voor_samengesteld: false,
-            in_gebruik: false
-          }}
-          columns={[
-            { key: "omschrijving", label: "Omschrijving", width: "320px" },
-            {
-              key: "beschikbaar_voor_samengesteld",
-              label: "Beschikbaar voor samengesteld",
-              type: "checkbox",
-              width: "220px"
-            },
-            {
-              key: "in_gebruik",
-              label: "In gebruik",
-              type: "checkbox",
-              width: "160px",
-              readOnly: true
-            }
-          ]}
-          title="Verpakkingsonderdelen"
-          description="Stamgegevens van losse verpakkingsonderdelen. Prijzen beheer je apart per jaar."
-        />
       ) : null}
 
-      {activeTab === "basis" ? (
-        <NestedCollectionEditor
-          endpoint="/data/base-product-masters"
-          initialRows={basisproductenRows}
-          addRowTemplate={{
-            id: "",
-            omschrijving: "",
-            inhoud_per_eenheid_liter: 0,
-            onderdelen: []
-          }}
-          fields={[
-            { key: "omschrijving", label: "Omschrijving" },
-            {
-              key: "inhoud_per_eenheid_liter",
-              label: "Inhoud per eenheid (liter)",
-              type: "number",
-              readOnly: true
-            }
-          ]}
-          nestedKey="onderdelen"
-          nestedLabel="Onderdelen"
-          nestedRowTemplate={{
-            hoeveelheid: 1,
-            omschrijving: "",
-            verpakkingsonderdeel_id: ""
-          }}
-          nestedFields={[
-            {
-              key: "verpakkingsonderdeel_id",
-              label: "Verpakkingsonderdeel",
-              type: "select",
-              options: ({ nestedRows, nestedIndex, nestedRow }) => {
-                const selectedIds = new Set(
-                  nestedRows
-                    .filter((_, index) => index !== nestedIndex)
-                    .map((row) => String(row.verpakkingsonderdeel_id ?? ""))
-                    .filter(Boolean)
-                );
-                const currentId = String(nestedRow.verpakkingsonderdeel_id ?? "");
-                return packagingComponentOptions.filter(
-                  (option) => option.value === currentId || !selectedIds.has(option.value)
-                );
-              },
-              resetOnSelect: true,
-              preserveOnSelect: ["hoeveelheid"]
-            },
-            { key: "omschrijving", label: "Omschrijving", readOnly: true },
-            { key: "hoeveelheid", label: "Hoeveelheid", type: "number" }
-          ]}
-          compactSummaryColumns={[
-            { key: "omschrijving", label: "Naam" },
-            { key: "inhoud_per_eenheid_liter", label: "Liter", type: "number" },
-            { key: "onderdelen", label: "Onderdelen", type: "count" }
-          ]}
-          title="Basisproducten"
-          description="Afvuleenheden met unieke verpakkingsonderdelen per eenheid."
-        />
-      ) : null}
-
-      {activeTab === "samengesteld" ? (
-        <NestedCollectionEditor
-          endpoint="/data/composite-product-masters"
-          initialRows={samengesteldeProductenRows}
-          addRowTemplate={{
-            id: "",
-            omschrijving: "",
-            basisproducten: [],
-            totale_inhoud_liter: 0
-          }}
-          fields={[
-            { key: "omschrijving", label: "Omschrijving" },
-            {
-              key: "totale_inhoud_liter",
-              label: "Totale inhoud (liter)",
-              type: "number",
-              readOnly: true
-            }
-          ]}
-          nestedKey="basisproducten"
-          nestedLabel="Basisproducten"
-          nestedRowTemplate={{
-            aantal: 1,
-            omschrijving: "",
-            basisproduct_id: "",
-            totale_inhoud_liter: 0,
-            inhoud_per_eenheid_liter: 0
-          }}
-          nestedFields={[
-            {
-              key: "basisproduct_id",
-              label: "Basisproduct / onderdeel",
-              type: "select",
-              options: ({ nestedRows, nestedIndex, nestedRow }) => {
-                const selectedIds = new Set(
-                  nestedRows
-                    .filter((_, index) => index !== nestedIndex)
-                    .map((row) => String(row.basisproduct_id ?? ""))
-                    .filter(Boolean)
-                );
-                const currentId = String(nestedRow.basisproduct_id ?? "");
-                return basisproductOptions.filter(
-                  (option) => option.value === currentId || !selectedIds.has(option.value)
-                );
-              },
-              resetOnSelect: true,
-              preserveOnSelect: ["aantal"]
-            },
-            { key: "omschrijving", label: "Omschrijving", readOnly: true },
-            {
-              key: "inhoud_per_eenheid_liter",
-              label: "Inhoud per eenheid (liter)",
-              type: "number",
-              readOnly: true
-            },
-            { key: "aantal", label: "Aantal", type: "number" },
-            {
-              key: "totale_inhoud_liter",
-              label: "Totale inhoud (liter)",
-              type: "number",
-              readOnly: true
-            }
-          ]}
-          nestedComputedFields={[
-            {
-              targetKey: "totale_inhoud_liter",
-              leftKey: "aantal",
-              rightKey: "inhoud_per_eenheid_liter"
-            }
-          ]}
-          parentAggregates={[
-            {
-              targetKey: "totale_inhoud_liter",
-              sourceKey: "totale_inhoud_liter"
-            }
-          ]}
-          compactSummaryColumns={[
-            { key: "omschrijving", label: "Naam" },
-            { key: "totale_inhoud_liter", label: "Liter", type: "number" },
-            { key: "basisproducten", label: "Onderdelen", type: "count" }
-          ]}
-          title="Afvulsamenstellingen"
-          description="Afvulsamenstellingen (dozen/combi's) opgebouwd uit afvuleenheden en eventueel bouwstenen."
-        />
-      ) : null}
-
-      {activeTab === "catalogus" ? (
-        <VerkoopbareArtikelenEditor
-          initialRows={catalogusproductenRows}
-          basisproducten={basisproductenRows}
-          samengesteldeProducten={samengesteldeProductenRows}
-          verpakkingsonderdelen={verpakkingsonderdelenRows}
-          verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijsRows}
-          productie={productieMap}
-          bieren={bierenRows}
-          kostprijsversies={kostprijsversieRows}
-          kostprijsproductactiveringen={kostprijsActivationRows}
-        />
-      ) : null}
-
-      {activeTab === "glasmaten" ? (
-        <DatasetTableEditor
-          endpoint="/data/glasmaten"
-          initialRows={glasmatenRows.map((row) => ({
-            id: String(row.id ?? ""),
-            label: String(row.label ?? ""),
-            volume_ml: Number(row.volume_ml ?? 0),
-            sort_order: Number(row.sort_order ?? 0),
-            active: Boolean(row.active),
-            is_default: Boolean(row.is_default),
-          }))}
-          addRowTemplate={{
-            id: "",
-            label: "",
-            volume_ml: 250,
-            sort_order: 0,
-            active: true,
-            is_default: false,
-          }}
-          columns={[
-            { key: "label", label: "Label", width: "180px" },
-            { key: "volume_ml", label: "Inhoud (ml)", type: "number", width: "150px" },
-            { key: "sort_order", label: "Volgorde", type: "number", width: "120px" },
-            { key: "active", label: "Actief", type: "checkbox", width: "120px" },
-            { key: "is_default", label: "Standaard", type: "checkbox", width: "140px" },
-          ]}
-          title="Glasmaten"
-          description="Centrale glasmaten voor offerte-bijlagen en glas-economie. Aantal glazen per verpakking leiden we af uit liters per verpakking gedeeld door deze glasmaat."
+      {activeTab === "afvuleenheden" ? (
+        <AfvuleenhedenTab
+          formatArticles={formatArticles}
+          activeYearForFormats={activeYearForFormats}
+          availablePriceYears={availablePriceYears}
+          setFormatsYear={setFormatsYear}
+          packagingPrices={packagingPrices}
+          canonicalBomLines={canonicalBomLines}
+          canonicalArticles={canonicalArticles}
         />
       ) : null}
 
       {activeTab === "jaarprijzen" ? (
-        <section className="module-card">
-          <div className="module-card-header">
-            <div className="module-card-title">Jaarprijzen verpakkingsonderdelen</div>
-            <div className="module-card-text">
-              Beheer per jaar een complete prijslaag voor alle verpakkingsonderdelen. Klik op een
-              jaarregel om de onderliggende onderdelen en prijzen te openen.
-            </div>
-          </div>
-
-          <div className="editor-toolbar">
-            <div className="editor-toolbar-meta">
-              <span className="editor-pill">{availablePriceYears.length} jaarlagen</span>
-              <span className="muted">
-                Nieuwe jaren maak je aan door een bestaande jaarlaag te dupliceren.
-              </span>
-            </div>
-          </div>
-
-          <div className="dataset-editor-scroll">
-            <table className="dataset-editor-table">
-              <thead>
-                <tr>
-                  <th>
-                    <button
-                      type="button"
-                      className="table-sort-button"
-                      onClick={() => toggleYearOverviewSort("jaar")}
-                    >
-                      Jaar
-                      <SortIcon direction={yearOverviewSort.key === "jaar" ? yearOverviewSort.direction : null} />
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className="table-sort-button"
-                      onClick={() => toggleYearOverviewSort("aantalOnderdelen")}
-                    >
-                      Aantal onderdelen
-                      <SortIcon
-                        direction={
-                          yearOverviewSort.key === "aantalOnderdelen" ? yearOverviewSort.direction : null
-                        }
-                      />
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className="table-sort-button"
-                      onClick={() => toggleYearOverviewSort("ingevuld")}
-                    >
-                      Ingevuld
-                      <SortIcon
-                        direction={yearOverviewSort.key === "ingevuld" ? yearOverviewSort.direction : null}
-                      />
-                    </button>
-                  </th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {yearOverviewRows.length === 0 ? (
-                  <tr>
-                    <td className="dataset-empty" colSpan={4}>
-                      Voeg eerst verpakkingsonderdelen toe en maak daarna een eerste jaarlaag aan.
-                    </td>
-                  </tr>
-                ) : null}
-                {yearOverviewRows.map((row) => {
-                  const isExpanded = expandedPriceYear === row.jaar;
-                  return (
-                    <Fragment key={row.jaar}>
-                      <tr
-                        onClick={() =>
-                          setExpandedPriceYear((current) => (current === row.jaar ? null : row.jaar))
-                        }
-                        style={{ cursor: "pointer" }}
-                      >
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
-                            <ChevronIcon expanded={isExpanded} />
-                            <strong>{row.jaar}</strong>
-                          </div>
-                        </td>
-                        <td>{row.aantalOnderdelen}</td>
-                        <td>{row.ingevuld}</td>
-                        <td>
-                          <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.55rem" }}>
-                            <button
-                              type="button"
-                              className="icon-button-table icon-button-neutral"
-                              aria-label={`Dupliceer jaar ${row.jaar}`}
-                              title={`Dupliceer jaar ${row.jaar}`}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void duplicatePriceYear(row.jaar);
-                              }}
-                            >
-                              <DuplicateIcon />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-button-table"
-                              aria-label={`Verwijder jaar ${row.jaar}`}
-                              title={`Verwijder jaar ${row.jaar}`}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void deletePriceYear(row.jaar);
-                              }}
-                            >
-                              <TrashIcon />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      {isExpanded ? (
-                        <tr>
-                          <td colSpan={4} style={{ background: "rgba(248, 251, 255, 0.9)" }}>
-                            <div className="dataset-editor-scroll" style={{ marginTop: "0.2rem" }}>
-                              <table className="dataset-editor-table wizard-table-compact">
-                                <thead>
-                                  <tr>
-                                    <th>Verpakkingsonderdeel</th>
-                                    <th>Prijs per stuk</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {expandedYearRows.map((detailRow) => (
-                                    <tr key={String(detailRow.verpakkingsonderdeel_id ?? "")}>
-                                      <td>
-                                        <div className="dataset-input dataset-input-readonly">
-                                          {String(detailRow.omschrijving ?? "")}
-                                        </div>
-                                      </td>
-                                      <td>
-                                        <div className="currency-input-wrapper">
-                                          <span className="currency-input-prefix">€</span>
-                                          <input
-                                            className="dataset-input"
-                                            type="number"
-                                            step="0.0001"
-                                            value={String(detailRow.prijs_per_stuk ?? 0)}
-                                            onChange={(event) =>
-                                              updateExpandedYearPrice(
-                                                String(detailRow.verpakkingsonderdeel_id ?? ""),
-                                                event.target.value === ""
-                                                  ? 0
-                                                  : Number(event.target.value)
-                                              )
-                                            }
-                                          />
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            <div className="editor-actions" style={{ marginTop: "0.85rem" }}>
-                              <div className="editor-actions-group">
-                                <span className="muted">
-                                  Pas de prijzen aan en sla deze jaarlaag daarna op.
-                                </span>
-                              </div>
-                              <div className="editor-actions-group">
-                                <button
-                                  type="button"
-                                  className="editor-button"
-                                  onClick={() => {
-                                    void saveExpandedYearPrices();
-                                  }}
-                                  disabled={isSavingPrices}
-                                >
-                                  {isSavingPrices ? "Opslaan..." : `Jaar ${row.jaar} opslaan`}
-                                </button>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="editor-actions">
-            <div className="editor-actions-group">
-              {priceStatus ? <span className="editor-status">{priceStatus}</span> : null}
-            </div>
-          </div>
-        </section>
+        <YearPricesTab
+          packagingMasters={packagingMasters}
+          availablePriceYears={availablePriceYears}
+          activeYearForPrices={activeYearForPrices}
+          setYearPricesYear={setYearPricesYear}
+          yearPricesDraft={yearPricesDraft}
+          setYearPricesDraft={setYearPricesDraft}
+          isSavingYearPrices={isSavingYearPrices}
+          handleSaveYearPricesLayer={handleSaveYearPricesLayer}
+          yearPricesStatus={yearPricesStatus}
+        />
       ) : null}
 
-      {activeTab === "kostenoverzicht" ? (
-        <section className="module-card">
-          <div className="module-card-header">
-            <div className="module-card-title">Kostenoverzicht</div>
-            <div className="module-card-text">
-              Overzicht van de totale productkosten op basis van de hoogste 5 bekende jaarlagen.
-            </div>
-          </div>
-
-          <div className="editor-toolbar">
-            <div className="editor-toolbar-meta">
-              <span className="editor-pill">{costOverviewRows.length} producten</span>
-              <span className="muted">
-                {latestOverviewYears.length > 0
-                  ? `Getoond: ${latestOverviewYears.join(", ")}`
-                  : "Voeg eerst jaarprijzen toe om productkosten te kunnen zien."}
-              </span>
-            </div>
-          </div>
-
-          <div className="dataset-editor-scroll">
-            <table className="dataset-editor-table">
-              <thead>
-                <tr>
-                  <th>
-                    <button
-                      type="button"
-                      className="table-sort-button"
-                      onClick={() => toggleCostOverviewSort("naam")}
-                    >
-                      Product
-                      <SortIcon direction={costOverviewSort.key === "naam" ? costOverviewSort.direction : null} />
-                    </button>
-                  </th>
-                  <th>
-                    <button
-                      type="button"
-                      className="table-sort-button"
-                      onClick={() => toggleCostOverviewSort("type")}
-                    >
-                      Type
-                      <SortIcon direction={costOverviewSort.key === "type" ? costOverviewSort.direction : null} />
-                    </button>
-                  </th>
-                  {latestOverviewYears.map((year) => (
-                    <th key={year}>
-                      <button
-                        type="button"
-                        className="table-sort-button"
-                        onClick={() => toggleCostOverviewSort(year)}
-                      >
-                        {year}
-                        <SortIcon
-                          direction={costOverviewSort.key === year ? costOverviewSort.direction : null}
-                        />
-                      </button>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {costOverviewRows.length === 0 ? (
-                  <tr>
-                    <td className="dataset-empty" colSpan={Math.max(3, latestOverviewYears.length + 2)}>
-                      Voeg eerst producten en jaarprijzen toe om het kostenoverzicht te tonen.
-                    </td>
-                  </tr>
-                ) : null}
-                {costOverviewRows.map((row) => (
-                  <tr key={row.id}>
-                    <td>
-                      <div className="dataset-input dataset-input-readonly">{row.naam}</div>
-                    </td>
-                    <td>
-                      <div className="dataset-input dataset-input-readonly">{row.type}</div>
-                    </td>
-                    {latestOverviewYears.map((year) => (
-                      <td key={`${row.id}:${year}`}>
-                        <div className="dataset-input dataset-input-readonly">
-                          {formatCurrency(Number(row.costs[year] ?? 0))}
-                        </div>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+      {activeTab === "glasmaten" ? (
+        <div className="content-card">
+          <DatasetTableEditor
+            endpoint="/data/glasmaten"
+            title="Glasmaten"
+            description="Gebruik glasmaten in offertes/bijlagen (bijv. proefglas 15cl)."
+            columns={[
+              { key: "id", label: "ID", type: "text", width: "220px" },
+              { key: "omschrijving", label: "Omschrijving", type: "text" },
+              { key: "inhoud_liter", label: "Inhoud (L)", type: "number", width: "160px" },
+            ]}
+            initialRows={Array.isArray(glasmaten) ? (glasmaten as any) : []}
+            addRowTemplate={{
+              id: "",
+              omschrijving: "",
+              inhoud_liter: 0,
+            }}
+          />
+        </div>
       ) : null}
-    </section>
+    </div>
   );
 }

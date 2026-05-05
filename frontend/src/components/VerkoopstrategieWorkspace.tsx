@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
@@ -11,21 +11,22 @@ import {
 import { VerkoopstrategiePrijsinstellingenAccordion } from "@/components/verkoopstrategie/VerkoopstrategiePrijsinstellingenAccordion";
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
 import type { BeerViewRow, ProductViewRow } from "@/components/verkoopstrategie/verkoopstrategieTypes";
+import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
+import {
+  DEFAULT_CHANNELS,
+  STRATEGY_RECORD_TYPES,
+  buildEmptyYearStrategyRow,
+  computeDraftSignature,
+  createUiId,
+  normalizeChannels,
+  normalizeLabel,
+  normalizeStrategyRow,
+  type ChannelRow,
+  type StrategyRow,
+} from "@/components/verkoopstrategie/verkoopstrategieWorkspaceUtils";
+import { buildArticleLabelMap, buildBasisProductParentMap, buildProductSources, stripInternal } from "@/components/verkoopstrategie/verkoopstrategieWorkspaceDerivations";
 
 type GenericRecord = Record<string, unknown>;
-type ChannelRow = { id: string; code: string; naam: string; actief: boolean; volgorde: number; default_marge_pct: number };
-type StrategyRow = {
-  id: string; record_type: string; jaar: number; bier_id: string; biernaam: string; product_id: string;
-  product_type: "basis" | "samengesteld" | ""; verpakking: string; strategie_type: string; kostprijs: number;
-  sell_in_margins: Record<string, number>;
-  sell_in_prices: Record<string, number | "">;
-  _uiId: string;
-};
-const STRATEGY_RECORD_TYPES = new Set([
-  "jaarstrategie",
-  "verkoopstrategie_product",
-  "verkoopstrategie_verpakking"
-]);
 type Props = {
   endpoint: string;
   verkoopprijzen: GenericRecord[];
@@ -53,163 +54,6 @@ type Props = {
   exposeSave?: Dispatch<SetStateAction<(() => Promise<void>) | null>>;
   mode?: "server" | "draft";
   onDraftSave?: (rows: GenericRecord[]) => Promise<void> | void;
-};
-
-const DEFAULT_CHANNELS: ChannelRow[] = [
-  { id: "horeca", code: "horeca", naam: "Horeca", actief: true, volgorde: 10, default_marge_pct: 50 },
-  { id: "retail", code: "retail", naam: "Supermarkt", actief: true, volgorde: 20, default_marge_pct: 30 },
-  { id: "slijterij", code: "slijterij", naam: "Slijterij", actief: true, volgorde: 30, default_marge_pct: 40 },
-  { id: "zakelijk", code: "zakelijk", naam: "Speciaalzaak", actief: true, volgorde: 40, default_marge_pct: 45 },
-  { id: "particulier", code: "particulier", naam: "Particulier", actief: false, volgorde: 50, default_marge_pct: 50 }
-];
-
-const createUiId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
-// Pricing helpers are shared across screens via `lib/pricingEngine.ts`.
-const normalizeLabel = (value: unknown) => String(value ?? "").trim().toLowerCase();
-function computeDraftSignature(records: GenericRecord[], channelCodes: string[]) {
-  const mapToSortedPairs = (raw: unknown) => {
-    const src = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
-    return channelCodes
-      .slice()
-      .sort((a, b) => a.localeCompare(b))
-      .flatMap((code) => {
-        const value = src[code];
-        if (value === "" || value === null || value === undefined) return [];
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed)) return [];
-        return [[code, parsed] as const];
-      });
-  };
-
-  const normalized = (Array.isArray(records) ? records : [])
-    .map((row) => ({
-      id: String(row.id ?? ""),
-      record_type: String(row.record_type ?? ""),
-      jaar: Number(row.jaar ?? 0),
-      bier_id: String((row as any).bier_id ?? ""),
-      product_id: String((row as any).product_id ?? ""),
-      sell_in_margins: mapToSortedPairs((row as any).sell_in_margins ?? (row as any).kanaalmarges ?? {}),
-      sell_in_prices: mapToSortedPairs((row as any).sell_in_prices ?? (row as any).kanaalprijzen ?? {})
-    }))
-    .sort((a, b) => {
-      const rt = a.record_type.localeCompare(b.record_type);
-      if (rt !== 0) return rt;
-      const y = a.jaar - b.jaar;
-      if (y !== 0) return y;
-      const bi = a.bier_id.localeCompare(b.bier_id);
-      if (bi !== 0) return bi;
-      const pi = a.product_id.localeCompare(b.product_id);
-      if (pi !== 0) return pi;
-      return a.id.localeCompare(b.id);
-    });
-
-  return JSON.stringify(normalized);
-}
-
-function normalizeChannels(raw: GenericRecord[]) {
-  const source = Array.isArray(raw) && raw.length > 0 ? raw : DEFAULT_CHANNELS;
-  const byCode = new Map(DEFAULT_CHANNELS.map((row) => [row.code, row]));
-  source.forEach((row) => {
-    const code = String(row.code ?? row.id ?? "").trim().toLowerCase();
-    if (!code) return;
-    byCode.set(code, {
-      id: String(row.id ?? row.code ?? createUiId()),
-      code,
-      naam: String(row.naam ?? ("label" in row ? row.label : undefined) ?? row.code ?? "").trim(),
-      actief: Boolean(row.actief ?? true),
-      volgorde: Number(row.volgorde ?? 999),
-      default_marge_pct: Number(row.default_marge_pct ?? byCode.get(code)?.default_marge_pct ?? 50),
-    });
-  });
-  return [...byCode.values()].map((row) => ({
-    id: String(row.id ?? row.code ?? createUiId()),
-    code: String(row.code ?? row.id ?? "").trim().toLowerCase(),
-    naam: String(row.naam ?? ("label" in row ? row.label : undefined) ?? row.code ?? "").trim(),
-    actief: Boolean(row.actief ?? true),
-    volgorde: Number(row.volgorde ?? 999),
-    default_marge_pct: Number(row.default_marge_pct ?? 50),
-  })).filter((row) => row.code && row.naam && row.code !== "groothandel").sort((a, b) => (a.volgorde === b.volgorde ? a.naam.localeCompare(b.naam, "nl-NL") : a.volgorde - b.volgorde));
-}
-
-function buildEmptyYearStrategyRow({
-  year,
-  channelDefaults
-}: {
-  year: number;
-  channelDefaults: Record<string, { opslag: number }>;
-}): StrategyRow {
-  // This is a year-specific defaults record. It becomes the single source of truth for default margins/factors per year.
-  return {
-    id: "",
-    record_type: "jaarstrategie",
-    jaar: year,
-    bier_id: "",
-    biernaam: "",
-    product_id: "",
-    product_type: "",
-    verpakking: "",
-    strategie_type: "default",
-    kostprijs: 0,
-    // NOTE: despite the legacy field name `sell_in_margins`, we now persist opslag% as the source of truth.
-    sell_in_margins: Object.fromEntries(Object.entries(channelDefaults).map(([code, def]) => [code, Number(def.opslag ?? 50)])),
-    sell_in_prices: {},
-    _uiId: createUiId()
-  };
-}
-
-function normalizeStrategyRow(row: GenericRecord, channelCodes: string[]): StrategyRow {
-  const marginsSrcRaw = (row.sell_in_margins ?? row.kanaalmarges ?? {}) as unknown;
-  const marginsSrc =
-    typeof marginsSrcRaw === "object" && marginsSrcRaw !== null
-      ? (marginsSrcRaw as Record<string, unknown>)
-      : {};
-  const pricesSrcRaw = (row.sell_in_prices ?? row.kanaalprijzen ?? {}) as unknown;
-  const pricesSrc =
-    typeof pricesSrcRaw === "object" && pricesSrcRaw !== null
-      ? (pricesSrcRaw as Record<string, unknown>)
-      : {};
-  return {
-    id: String(row.id ?? ""), record_type: String(row.record_type ?? "verkoopstrategie_verpakking"), jaar: Number(row.jaar ?? new Date().getFullYear()),
-    bier_id: String(row.bier_id ?? ""), biernaam: String(row.biernaam ?? ""), product_id: String(row.product_id ?? ""),
-    product_type: String(row.product_type ?? "") === "basis" || String(row.product_type ?? "") === "samengesteld" ? (String(row.product_type ?? "") as "basis" | "samengesteld") : "",
-    verpakking: String(row.verpakking ?? ""), strategie_type: String(row.strategie_type ?? "default"), kostprijs: Number(row.kostprijs ?? 0),
-    sell_in_margins: (() => {
-      const allowed = new Set(channelCodes);
-      const out: Record<string, number> = {};
-      Object.entries(marginsSrc).forEach(([key, value]) => {
-        if (!allowed.has(key)) return;
-        if (value === "" || value === null || value === undefined) return;
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed)) return;
-        out[key] = parsed;
-      });
-      return out;
-    })(),
-    sell_in_prices: (() => {
-      const allowed = new Set(channelCodes);
-      const out: Record<string, number> = {};
-      Object.entries(pricesSrc).forEach(([key, value]) => {
-        if (!allowed.has(key)) return;
-        if (value === "" || value === null || value === undefined) return;
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed)) return;
-        out[key] = parsed;
-      });
-      return out;
-    })(),
-    _uiId: String(row.id ?? createUiId())
-  };
-}
-
-const stripInternal = (row: StrategyRow) => {
-  const { _uiId, sell_in_margins, sell_in_prices, ...rest } = row;
-  return {
-    ...rest,
-    kanaalmarges: sell_in_margins,
-    sell_in_margins,
-    kanaalprijzen: sell_in_prices,
-    sell_in_prices
-  };
 };
 
 export function VerkoopstrategieWorkspace({
@@ -251,28 +95,10 @@ export function VerkoopstrategieWorkspace({
     return verkoopprijzen.filter((row) => STRATEGY_RECORD_TYPES.has(String(row.record_type ?? "")));
   }, [verkoopprijzen]);
   const formatArticleById = useMemo(() => {
-    const map = new Map<string, { id: string; label: string }>();
-    (Array.isArray(articles) ? articles : []).forEach((row) => {
-      const id = String((row as any)?.id ?? "").trim();
-      if (!id) return;
-      const kind = String((row as any)?.kind ?? "").trim().toLowerCase();
-      if (kind !== "format") return;
-      const label = String((row as any)?.name ?? (row as any)?.naam ?? id).trim() || id;
-      map.set(id, { id, label });
-    });
-    return map;
+    return buildArticleLabelMap(Array.isArray(articles) ? articles : [], "format");
   }, [articles]);
   const bundleArticleById = useMemo(() => {
-    const map = new Map<string, { id: string; label: string }>();
-    (Array.isArray(articles) ? articles : []).forEach((row) => {
-      const id = String((row as any)?.id ?? "").trim();
-      if (!id) return;
-      const kind = String((row as any)?.kind ?? "").trim().toLowerCase();
-      if (kind !== "bundle") return;
-      const label = String((row as any)?.name ?? (row as any)?.naam ?? id).trim() || id;
-      map.set(id, { id, label });
-    });
-    return map;
+    return buildArticleLabelMap(Array.isArray(articles) ? articles : [], "bundle");
   }, [articles]);
   const skuById = useMemo(() => {
     const map = new Map<string, GenericRecord>();
@@ -282,45 +108,85 @@ export function VerkoopstrategieWorkspace({
     });
     return map;
   }, [skus]);
+
+  // Year selection must be available before we derive SKU-driven product sources.
+  const productieYears = useMemo(() => {
+    const out: number[] = [];
+    if (!productie) return out;
+    if (Array.isArray(productie)) {
+      productie.forEach((row) => {
+        const year = Number((row as any)?.jaar ?? 0);
+        if (Number.isFinite(year) && year > 0) out.push(year);
+      });
+      return Array.from(new Set(out)).sort((a, b) => a - b);
+    }
+    if (typeof productie === "object") {
+      Object.keys(productie as Record<string, unknown>).forEach((key) => {
+        const year = Number(key);
+        if (Number.isFinite(year) && year > 0) out.push(year);
+      });
+      return Array.from(new Set(out)).sort((a, b) => a - b);
+    }
+    return out;
+  }, [productie]);
+
+  const computedDefaultYear = useMemo(() => {
+    if (productieYears.length > 0) return Math.max(...productieYears);
+    // If productie has no years yet, do not guess based on other datasets.
+    // We render an explicit empty-state instead of silently selecting a future year (e.g. 2026).
+    return new Date().getFullYear();
+  }, [berekeningen, productieYears, verkoopprijzen]);
+
+  const resolvedInitialYear =
+    typeof initialYear === "number" && Number.isFinite(initialYear) ? initialYear : computedDefaultYear;
+  const [selectedYear, setSelectedYear] = useState<number>(resolvedInitialYear);
+  const effectiveSelectedYear = lockYear ? resolvedInitialYear : selectedYear;
+
+  const centralSkuIndex = useCentralSkuIndex({
+    year: effectiveSelectedYear,
+    channels: Array.isArray(channels) ? channels : [],
+    verkoopprijzen: Array.isArray(verkoopprijzen) ? (verkoopprijzen as any[]) : [],
+    skus: Array.isArray(skus) ? skus : [],
+    articles: Array.isArray(articles) ? articles : [],
+    kostprijsversies: Array.isArray(berekeningen) ? (berekeningen as any[]) : [],
+    kostprijsproductactiveringen: Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [],
+  });
+
+  const serviceRows = useMemo(() => {
+    return centralSkuIndex.rows
+      .filter((row) => row.pricingMethod === "manual_rate")
+      .filter((row) => row.subtype === "dienst")
+      .filter((row) => row.manualRateEx > 0)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [
+    effectiveSelectedYear,
+    channels,
+    verkoopprijzen,
+    skus,
+    articles,
+    berekeningen,
+    kostprijsproductactiveringen,
+    centralSkuIndex.rows,
+  ]);
   const productSources = useMemo(() => {
-    const seen = new Map<string, { id: string; label: string; type: "basis" | "samengesteld" }>();
-    basisproducten.forEach((row) => {
-      const id = String(row.id ?? "");
-      const label = String(row.omschrijving ?? "");
-      if (id && label) seen.set(`basis:${id}`, { id, label, type: "basis" });
-    });
-    samengesteldeProducten.forEach((row) => {
-      const id = String(row.id ?? "");
-      const label = String(row.omschrijving ?? "");
-      if (id && label) seen.set(`samengesteld:${id}`, { id, label, type: "samengesteld" });
+    return buildProductSources({
+      basisproducten,
+      samengesteldeProducten,
+      centralSkuRows: centralSkuIndex.rows as any,
+      skuById,
+      bundleArticleById,
+      formatArticleById,
+      kostprijsproductactiveringen: Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [],
     });
 
-    // SKU-aanpak: na hard reset zijn basis-/samengestelde productlijsten leeg.
-    // Gebruik dan de actieve activaties om de beschikbare formats (verpakking) te tonen.
-    if (seen.size === 0 && formatArticleById.size > 0) {
-      (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).forEach((act) => {
-        const skuId = String((act as any)?.sku_id ?? "").trim();
-        const sku = skuId ? (skuById.get(skuId) ?? null) : null;
-        const formatId = String((sku as any)?.format_article_id ?? "").trim();
-        const articleId = String((sku as any)?.article_id ?? "").trim();
-        if (formatId) {
-          const format = formatArticleById.get(formatId);
-          if (format) {
-            seen.set(`basis:${format.id}`, { id: format.id, label: format.label, type: "basis" });
-          }
-          return;
-        }
-        if (articleId) {
-          const bundle = bundleArticleById.get(articleId);
-          if (bundle) {
-            seen.set(`basis:${bundle.id}`, { id: bundle.id, label: bundle.label, type: "basis" });
-          }
-        }
-      });
-    }
-    return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
   }, [
     basisproducten,
+    berekeningen,
+    channels,
+    verkoopprijzen,
+    skus,
+    articles,
+    effectiveSelectedYear,
     samengesteldeProducten,
     bundleArticleById,
     formatArticleById,
@@ -328,37 +194,8 @@ export function VerkoopstrategieWorkspace({
     skuById,
   ]);
   const basisProductParentMap = useMemo(() => {
-    const parents = new Map<string, { productId: string; label: string; score: number }[]>();
-    samengesteldeProducten.forEach((row) => {
-      const compositeId = String(row.id ?? "");
-      const compositeLabel = String(row.omschrijving ?? "");
-      const basisRows = Array.isArray(row.basisproducten) ? (row.basisproducten as GenericRecord[]) : [];
-      basisRows.forEach((basisRow) => {
-        const basisId = String(basisRow.basisproduct_id ?? "");
-        if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) return;
-        const current = parents.get(basisId) ?? [];
-        const scoreRaw = Number((basisRow as any)?.aantal ?? 0);
-        const score = Number.isFinite(scoreRaw) ? scoreRaw : 0;
-        current.push({ productId: compositeId, label: compositeLabel, score });
-        parents.set(basisId, current);
-      });
-    });
+    return buildBasisProductParentMap(samengesteldeProducten);
 
-    // If a basisproduct is used in multiple composed products, pick the "primary" parent deterministically.
-    // We default to the highest quantity usage (e.g. 24x33cl over 12x33cl), then fall back to label/id ordering.
-    const resolved = new Map<string, { productId: string; label: string }>();
-    for (const [basisId, items] of parents.entries()) {
-      if (!items || items.length === 0) continue;
-      const sorted = [...items].sort((left, right) => {
-        const scoreDiff = Number(right.score ?? 0) - Number(left.score ?? 0);
-        if (scoreDiff !== 0) return scoreDiff;
-        const labelDiff = String(left.label ?? "").localeCompare(String(right.label ?? ""), "nl-NL");
-        if (labelDiff !== 0) return labelDiff;
-        return String(left.productId ?? "").localeCompare(String(right.productId ?? ""));
-      });
-      resolved.set(basisId, { productId: sorted[0].productId, label: sorted[0].label });
-    }
-    return resolved;
   }, [samengesteldeProducten]);
   const [rows, setRows] = useState<StrategyRow[]>(() => verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
   const [status, setStatus] = useState("");
@@ -409,26 +246,6 @@ export function VerkoopstrategieWorkspace({
     setStatus("Concept herladen.");
   }
 
-  const productieYears = useMemo(() => {
-    const out: number[] = [];
-    if (!productie) return out;
-    if (Array.isArray(productie)) {
-      productie.forEach((row) => {
-        const year = Number((row as any)?.jaar ?? 0);
-        if (Number.isFinite(year) && year > 0) out.push(year);
-      });
-      return Array.from(new Set(out)).sort((a, b) => a - b);
-    }
-    if (typeof productie === "object") {
-      Object.keys(productie as Record<string, unknown>).forEach((key) => {
-        const year = Number(key);
-        if (Number.isFinite(year) && year > 0) out.push(year);
-      });
-      return Array.from(new Set(out)).sort((a, b) => a - b);
-    }
-    return out;
-  }, [productie]);
-
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -451,16 +268,6 @@ export function VerkoopstrategieWorkspace({
       });
     }
   }, [activeChannels]);
-  const computedDefaultYear = useMemo(() => {
-    if (productieYears.length > 0) return Math.max(...productieYears);
-    // If productie has no years yet, do not guess based on other datasets.
-    // We render an explicit empty-state instead of silently selecting a future year (e.g. 2026).
-    return new Date().getFullYear();
-  }, [berekeningen, productieYears, verkoopprijzen]);
-  const resolvedInitialYear =
-    typeof initialYear === "number" && Number.isFinite(initialYear) ? initialYear : computedDefaultYear;
-  const [selectedYear, setSelectedYear] = useState<number>(resolvedInitialYear);
-  const effectiveSelectedYear = lockYear ? resolvedInitialYear : selectedYear;
   const yearStrategyRow = useMemo(() => {
     return rows.find((row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === effectiveSelectedYear) ?? null;
   }, [rows, effectiveSelectedYear]);
@@ -651,72 +458,42 @@ export function VerkoopstrategieWorkspace({
       return out.sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
     }
 
-    const bierById = new Map(bieren.map((bier) => [String(bier.id ?? ""), bier]));
+    // SKU-aanpak: in runtime mode, use the canonical CentralSkuIndex for active beer-format SKUs.
+    // This avoids legacy activation/snapshot matching quirks and ensures selectors match offerte/adviesprijzen.
     const productById = new Map(productOverrideRows.map((row) => [row.productId, row]));
     const beerOverrides = new Map(
       rows
         .filter((row) => row.jaar === effectiveSelectedYear && row.record_type === "verkoopstrategie_product")
         .map((row) => [`${row.bier_id}::${row.product_id}`, row])
     );
-    const definitiveVersions = berekeningen.filter((record) => {
-      const basisgegevens = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? (record.basisgegevens as GenericRecord) : {};
-      return (
-        String(record.status ?? "").toLowerCase() === "definitief" &&
-        Number(record.jaar ?? basisgegevens.jaar ?? 0) === effectiveSelectedYear
-      );
-    });
-    const versionById = new Map(definitiveVersions.map((record) => [String(record.id ?? ""), record]));
-    const activationByBeerProduct = new Map<string, GenericRecord>();
-    actieveProductActiveringen.forEach((row) => {
-      const key = `${String(row.bier_id ?? "")}::${String(row.product_id ?? "")}`;
-      const current = activationByBeerProduct.get(key);
-      if (!current || String(row.effectief_vanaf ?? row.updated_at ?? "").localeCompare(String(current.effectief_vanaf ?? current.updated_at ?? "")) > 0) {
-        activationByBeerProduct.set(key, row);
-      }
-    });
-    const getRowsForRecord = (record: GenericRecord) => {
-      const outByProduct = new Map<string, { productId: string; productType: "basis" | "samengesteld" | ""; product: string; kostprijs: number }>();
-      const producten = typeof record.resultaat_snapshot === "object" && record.resultaat_snapshot !== null ? ((record.resultaat_snapshot as GenericRecord).producten as GenericRecord | undefined) : undefined;
-      const productRows = [
-        ...(Array.isArray(producten?.basisproducten) ? (producten?.basisproducten as GenericRecord[]) : []),
-        ...(Array.isArray(producten?.samengestelde_producten) ? (producten?.samengestelde_producten as GenericRecord[]) : [])
-      ];
-      productRows.forEach((productRow) => {
-        const rawProduct = String(productRow.verpakking ?? productRow.verpakkingseenheid ?? productRow.omschrijving ?? "").trim();
-        const productType = (String(productRow.product_type ?? "") as "basis" | "samengesteld" | "") || "";
-        const productId = String(productRow.product_id ?? "");
-        const product = rawProduct;
-        if (!productId || !product) return;
-        outByProduct.set(productId, {
-          productId,
-          productType,
-          product,
-          kostprijs: Number(productRow.kostprijs ?? 0)
-        });
-      });
-      return [...outByProduct.values()];
-    };
+
     const out: BeerViewRow[] = [];
-    if (activationByBeerProduct.size > 0) {
-      activationByBeerProduct.forEach((activation) => {
-        const bierId = String(activation.bier_id ?? "");
-        const productId = String(activation.product_id ?? "");
-        const record = versionById.get(String(activation.kostprijsversie_id ?? ""));
-        if (!record || !bierId || !productId) return;
-        const basisgegevens = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? (record.basisgegevens as GenericRecord) : {};
-        const biernaam = String(basisgegevens.biernaam ?? "").trim() || String((bierById.get(bierId) ?? {}).biernaam ?? "").trim();
-        const productRow = getRowsForRecord(record).find((row) => row.productId === productId);
-        if (!biernaam || !productRow) return;
+    centralSkuIndex.rows
+      .filter((row) => row.subtype === "bier")
+      .filter((row) => row.pricingMethod === "cost_plus")
+      .filter((row) => row.isActive)
+      .forEach((centralRow) => {
+        const sku = skuById.get(centralRow.skuId) ?? null;
+        const bierId = String((sku as any)?.beer_id ?? "").trim();
+        const productId = String((sku as any)?.format_article_id ?? "").trim();
+        if (!bierId || !productId) return;
+        const biernaam = String((sku as any)?.name ?? "").split(" - ")[0]?.trim() || bierId;
         const productDefaults = productById.get(productId);
         const followProductId = productDefaults?.followsProductId ?? "";
         const productOpslags =
           productDefaults?.activeOpslags ??
-          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<string, number>);
+          (Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<
+            string,
+            number
+          >);
+
         const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
-        const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
-          const value = override?.sell_in_margins?.[code];
-          return [code, value === undefined || value === productOpslags[code] ? "" : Number(value)];
-        })) as Record<string, number | "">;
+        const opslagOverrides = Object.fromEntries(
+          channelCodes.map((code) => {
+            const value = override?.sell_in_margins?.[code];
+            return [code, value === undefined || value === productOpslags[code] ? "" : Number(value)];
+          })
+        ) as Record<string, number | "">;
         const sellInPriceOverrides = Object.fromEntries(
           channelCodes.map((code) => {
             const value = (override as any)?.sell_in_prices?.[code];
@@ -725,8 +502,12 @@ export function VerkoopstrategieWorkspace({
             return [code, Number.isFinite(parsed) ? parsed : ""];
           })
         ) as Record<string, number | "">;
-        const activeOpslags = Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])) as Record<string, number>;
-        const kostprijs = Number(productRow.kostprijs ?? 0);
+
+        const activeOpslags = Object.fromEntries(
+          channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])
+        ) as Record<string, number>;
+
+        const kostprijs = Number(centralRow.kostprijsEx ?? 0);
         const sellInPrices = Object.fromEntries(
           channelCodes.map((code) => {
             const explicit = sellInPriceOverrides[code];
@@ -734,58 +515,44 @@ export function VerkoopstrategieWorkspace({
             return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
           })
         ) as Record<string, number>;
-        out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
-      });
-    } else {
-      definitiveVersions.forEach((record) => {
-        const basisgegevens = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? (record.basisgegevens as GenericRecord) : {};
-        const bierId = String(record.bier_id ?? "");
-        const biernaam = String(basisgegevens.biernaam ?? "").trim() || String((bierById.get(bierId) ?? {}).biernaam ?? "").trim();
-        if (!biernaam) return;
-        getRowsForRecord(record).forEach((productRow) => {
-          const productId = productRow.productId;
-          const productDefaults = productById.get(productId);
-          const followProductId = productDefaults?.followsProductId ?? "";
-          const productOpslags = productDefaults?.activeOpslags ?? Object.fromEntries(channelCodes.map((code) => [code, channelYearDefaults[code]?.opslag ?? 50])) as Record<string, number>;
-          const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
-          const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
-            const value = override?.sell_in_margins?.[code];
-            return [code, value === undefined || value === productOpslags[code] ? "" : Number(value)];
-          })) as Record<string, number | "">;
-          const sellInPriceOverrides = Object.fromEntries(
-            channelCodes.map((code) => {
-              const value = (override as any)?.sell_in_prices?.[code];
-              if (value === "" || value === undefined || value === null) return [code, ""];
-              const parsed = Number(value);
-              return [code, Number.isFinite(parsed) ? parsed : ""];
-            })
-          ) as Record<string, number | "">;
-          const activeOpslags = Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])) as Record<string, number>;
-          const kostprijs = Number(productRow.kostprijs ?? 0);
-          const sellInPrices = Object.fromEntries(
-            channelCodes.map((code) => {
-              const explicit = sellInPriceOverrides[code];
-              if (explicit !== "") return [code, Number(explicit)];
-              return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
-            })
-          ) as Record<string, number>;
-          out.push({ id: override?.id || `${bierId}:${productId}`, bierId, biernaam, productId, productType: productRow.productType, product: productRow.product, kostprijs, productOpslags, opslagOverrides, sellInPriceOverrides, activeOpslags, sellInPrices, isReadOnly: Boolean(productDefaults?.isReadOnly), followsProductId: followProductId, followsProductLabel: productDefaults?.followsProductLabel ?? "" });
+
+        const formatLabel = formatArticleById.get(productId)?.label ?? productId;
+        out.push({
+          id: override?.id || `${bierId}:${productId}`,
+          bierId,
+          biernaam,
+          productId,
+          productType: (productDefaults?.productType ?? "basis") as any,
+          product: formatLabel,
+          kostprijs,
+          productOpslags,
+          opslagOverrides,
+          sellInPriceOverrides,
+          activeOpslags,
+          sellInPrices,
+          isReadOnly: Boolean(productDefaults?.isReadOnly),
+          followsProductId: followProductId,
+          followsProductLabel: productDefaults?.followsProductLabel ?? ""
         });
       });
-    }
+
     return out.sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
   }, [
-    actieveProductActiveringen,
-    basisById,
-    bieren,
+    effectiveSelectedYear,
+    mode,
+    channels,
+    verkoopprijzen,
+    skus,
+    articles,
     berekeningen,
+    kostprijsproductactiveringen,
+    skuById,
+    formatArticleById,
     channelCodes,
     channelYearDefaults,
     draftKostprijsPreviewRows,
     productOverrideRows,
     rows,
-    effectiveSelectedYear,
-    samengesteldById
   ]);
 
   const normalizedFilter = useMemo(() => sellFilter.trim().toLowerCase(), [sellFilter]);
@@ -1123,6 +890,9 @@ export function VerkoopstrategieWorkspace({
           <div className="editor-toolbar">
             <div className="editor-toolbar-meta">
               <span className="editor-pill">{productSources.length} producten</span>
+              {serviceRows.length > 0 ? (
+                <span className="editor-pill">{serviceRows.length} diensten</span>
+              ) : null}
               <span className="muted">Actieve kanalen: {activeChannels.map((channel) => channel.naam).join(", ") || "geen"}</span>
             </div>
             <div className="editor-actions-group">
@@ -1177,6 +947,36 @@ export function VerkoopstrategieWorkspace({
             updateBeerMargin={updateBeerMargin}
             resetChannelOverrides={resetChannelOverrides}
           />
+
+          {serviceRows.length > 0 ? (
+            <div className="module-card compact-card" style={{ marginTop: "1rem" }}>
+              <div className="module-card-title">Dienstverlening (uurtarieven)</div>
+              <div className="module-card-text">
+                Diensten hebben een vast tarief (ex) en worden niet via opslag% per kanaal berekend.
+                Pas het tarief aan via Producten &amp; verpakking â†’ Samenstellen.
+              </div>
+              <div className="dataset-editor-scroll" style={{ marginTop: 12, borderRadius: 12 }}>
+                <table className="dataset-editor-table">
+                  <thead>
+                    <tr>
+                      <th>Naam</th>
+                      <th>UoM</th>
+                      <th>Tarief (ex)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {serviceRows.map((row) => (
+                      <tr key={row.skuId}>
+                        <td>{row.label}</td>
+                        <td>{row.uom}</td>
+                        <td>{row.manualRateEx.toLocaleString("nl-NL", { style: "currency", currency: "EUR" })}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           <div className="editor-actions">
             <div className="editor-actions-group" />
