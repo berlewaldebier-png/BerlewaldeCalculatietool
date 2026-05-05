@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.domain import dataset_store
 from app.domain import dashboard_service
+from app.domain import erp_dashboard_service
 from app.domain import auth_service
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
@@ -183,6 +184,9 @@ def get_bootstrap(
                     "aflopende_offertes": summary.aflopende_offertes,
                     "aflopende_offertes_items": summary.aflopende_offertes_items,
                 }
+                continue
+            if name == "erp-dashboard":
+                payload["datasets"][name] = erp_dashboard_service.get_erp_dashboard()
                 continue
             if name == "auth-status":
                 payload["datasets"][name] = auth_service.auth_status()

@@ -59,3 +59,77 @@ export type BootstrapResponse = {
   navigation?: NavigationItem[];
   datasets: Record<string, unknown>;
 };
+
+export type ErpDashboardAlertTone = "default" | "warning" | "error";
+
+export type ErpDashboardAlert = {
+  key: string;
+  title: string;
+  description: string;
+  tone: ErpDashboardAlertTone;
+  count?: number;
+  href?: string;
+};
+
+export type ErpDashboardKpis = {
+  total_revenue_ex: number;
+  total_orders: number;
+  average_order_value_ex: number;
+  total_cost_ex: number;
+  total_margin_ex: number;
+  margin_pct: number;
+  mapped_lines: number;
+  missing_cost_lines: number;
+};
+
+export type ErpDashboardTopCustomerRow = {
+  company_id: number;
+  company_name: string;
+  revenue_ex: number;
+  margin_ex: number;
+  margin_pct: number;
+};
+
+export type ErpDashboardOrderRow = {
+  order_number: string;
+  order_date: string;
+  status: string;
+  company_id: number;
+  company_name: string;
+  revenue_ex: number;
+  cost_ex: number;
+  missing_cost_lines: number;
+};
+
+export type ErpDashboardUnderBreakEvenRow = {
+  order_number: string;
+  company_name: string;
+  margin_ex: number;
+};
+
+export type ErpDashboardRevenueTrendPoint = {
+  date: string;
+  revenue_ex: number;
+  break_even_ex?: number;
+};
+
+export type ErpDashboardOrdersTrendPoint = {
+  date: string;
+  orders: number;
+  aov_ex: number;
+};
+
+export type ErpDashboardPayload = {
+  range: { basis: "order"; since: string; until: string };
+  empty_reason?: string;
+  kpis: ErpDashboardKpis | null;
+  trends: { revenue: ErpDashboardRevenueTrendPoint[]; orders: ErpDashboardOrdersTrendPoint[] };
+  tables: {
+    top_customers: ErpDashboardTopCustomerRow[];
+    latest_orders: ErpDashboardOrderRow[];
+    under_break_even: ErpDashboardUnderBreakEvenRow[];
+    product_groups: Array<{ group: string; margin_pct: number; margin_ex: number }>;
+  };
+  break_even: { year: number; active_config: unknown | null };
+  alerts: ErpDashboardAlert[];
+};

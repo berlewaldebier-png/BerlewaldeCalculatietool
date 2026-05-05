@@ -1,19 +1,17 @@
-import { HomeDashboard } from "@/components/HomeDashboard";
+import { ErpDashboard } from "@/components/erp-dashboard/ErpDashboard";
 import { getBootstrap } from "@/lib/apiServer";
 
 export default async function HomePage() {
-  const bootstrap = await getBootstrap(["dashboard-summary"], true, "/");
+  const bootstrap = await getBootstrap(["erp-dashboard"], true, "/");
   const navigation = bootstrap.navigation ?? [];
-  const summary = (bootstrap.datasets["dashboard-summary"] as any) ?? {
-    concept_berekeningen: 0,
-    definitieve_berekeningen: 0,
-    concept_prijsvoorstellen: 0,
-    definitieve_prijsvoorstellen: 0,
-    klaar_om_te_activeren: 0,
-    klaar_om_te_activeren_waarschuwing: 0,
-    aflopende_offertes: 0,
-    aflopende_offertes_items: []
+  const payload = (bootstrap.datasets["erp-dashboard"] as any) ?? {
+    range: { basis: "order", since: "", until: "" },
+    kpis: null,
+    trends: { revenue: [], orders: [] },
+    tables: { top_customers: [], latest_orders: [], under_break_even: [], product_groups: [] },
+    break_even: { year: 0, active_config: null },
+    alerts: []
   };
 
-  return <HomeDashboard navigation={navigation} summary={summary} />;
+  return <ErpDashboard navigation={navigation} payload={payload} />;
 }
