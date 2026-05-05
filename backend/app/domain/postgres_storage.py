@@ -41,13 +41,20 @@ def transaction() -> Iterator[Any]:
     - Ensures save_dataset does not commit per call while inside the transaction.
     - Commits on success, rolls back on error (outermost transaction only).
     """
-    ensure_schema()
     depth = int(_transaction_depth.get() or 0)
     depth_token = _transaction_depth.set(depth + 1)
     request_token = None
     existing_request_conn = _request_connection.get()
     try:
         with connect() as conn:
+            # Defensive: a pooled connection can be returned in an aborted/in-transaction
+            # state if a previous request crashed mid-transaction. Ensure we start clean.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            # Ensure base schema exists after we have a clean connection.
+            ensure_schema()
             # Bind the connection for the duration of the transaction so that nested load/save calls
             # see each other's uncommitted writes (bieren + kostprijsversies + activations, etc.).
             if existing_request_conn is None:
@@ -215,6 +222,18 @@ def _purge_legacy_row_once(dataset_name: str) -> None:
 
 def _get_table_storage(name: str):
     """Return a module that implements table-backed load/save for a dataset, or None."""
+    if name == "articles":
+        from app.domain import articles_storage
+
+        return articles_storage
+    if name == "skus":
+        from app.domain import skus_storage
+
+        return skus_storage
+    if name == "bom-lines":
+        from app.domain import bom_storage
+
+        return bom_storage
     if name == "verkoopprijzen":
         from app.domain import sales_pricing_storage
 
@@ -227,6 +246,10 @@ def _get_table_storage(name: str):
         from app.domain import cost_versions_storage
 
         return cost_versions_storage
+    if name == "kostprijsproductactiveringen":
+        from app.domain import kostprijs_activation_storage
+
+        return kostprijs_activation_storage
     if name == "new-year-drafts":
         from app.domain import new_year_drafts_storage
 

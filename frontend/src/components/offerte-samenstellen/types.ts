@@ -12,6 +12,7 @@ export type QuoteBlockContext = "intro" | "standard" | "global";
 export type QuoteProductUnit = "fust" | "doos" | "fles";
 
 export type QuoteProductSource = {
+  sku_id?: string;
   bier_id?: string;
   product_id?: string;
   kostprijsversie_id?: string;
@@ -249,16 +250,18 @@ export type OfferteSamenstellenProps = {
   year: number;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
-  catalogusproducten: GenericRecord[];
   verpakkingsonderdelen: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
   breakEvenConfiguraties: unknown;
   vasteKosten: Record<string, unknown>;
   initialMode?: string;
   initialDraftId?: string | null;
+  scenarioId?: string | null;
 };

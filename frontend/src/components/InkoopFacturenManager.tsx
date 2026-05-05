@@ -3,8 +3,40 @@
 import { Fragment, useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
-
-type GenericRecord = Record<string, unknown>;
+import {
+  cloneValue,
+  normalizeFactuur,
+  normalizeFactuurRegel,
+} from "@/components/inkoopfacturen/inkoopFacturenUtils";
+import { TrashIcon } from "@/components/inkoopfacturen/InkoopFacturenParts";
+import { InkoopFactuurEditor } from "@/components/inkoopfacturen/InkoopFactuurEditor";
+import {
+  inferSkuType,
+  normalizeBerekening,
+  type GenericRecord,
+} from "@/components/inkoopfacturen/inkoopFacturenManagerUtils";
+import {
+  calculateInkoopExtraKostenPerRegel,
+  calculateInkoopPrijsPerEenheid,
+  calculateInkoopPrijsPerLiter,
+  createFactuurVersieFromSource,
+  formatCurrency,
+  formatCurrencyDisplay,
+  formatDecimalValue,
+  getFactuurRegelAfvulkostenFust,
+  getFactuurRegelLiters,
+  getFactuurTotals,
+  getProductUnitOptions,
+  getRecordYear,
+  getInkoopFacturen,
+  isConceptFactuurVersie,
+  isDraftValid,
+  isInkoopRecord,
+  roundValue,
+  sanitizeFacturen,
+  setInkoopFacturen,
+  type PendingAction,
+} from "@/components/inkoopfacturen/inkoopFacturenManagerDerivations";
 
 type InkoopFacturenManagerProps = {
   initialRows: GenericRecord[];
@@ -16,249 +48,6 @@ const KOSTPRIJSVERSIES_API = `${API_BASE_URL}/data/kostprijsversies`;
 
 type DraftMode = "new" | "edit";
 
-type PendingAction = {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  onConfirm: () => void;
-};
-
-function createId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function cloneValue<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function normalizeFactuurRegel(raw?: GenericRecord): GenericRecord {
-  const row = raw ? cloneValue(raw) : {};
-  return {
-    id: String(row.id ?? createId()),
-    aantal: Number(row.aantal ?? 0),
-    eenheid: String(row.eenheid ?? ""),
-    liters: Number(row.liters ?? 0),
-    subfactuurbedrag: Number(row.subfactuurbedrag ?? 0)
-  };
-}
-
-function normalizeFactuur(raw?: GenericRecord): GenericRecord {
-  const factuur = raw ? cloneValue(raw) : {};
-  const rows = Array.isArray(factuur.factuurregels)
-    ? (factuur.factuurregels as GenericRecord[]).map((row) => normalizeFactuurRegel(row))
-    : [];
-
-  return {
-    id: String(factuur.id ?? createId()),
-    factuurnummer: String(factuur.factuurnummer ?? ""),
-    factuurdatum: String(factuur.factuurdatum ?? ""),
-    verzendkosten: Number(factuur.verzendkosten ?? 0),
-    overige_kosten: Number(factuur.overige_kosten ?? 0),
-    factuurregels: rows
-  };
-}
-
-function normalizeBerekening(raw: GenericRecord): GenericRecord {
-  const row = cloneValue(raw);
-  const basisgegevens =
-    typeof row.basisgegevens === "object" && row.basisgegevens !== null
-      ? (row.basisgegevens as GenericRecord)
-      : {};
-  const soort =
-    typeof row.soort_berekening === "object" && row.soort_berekening !== null
-      ? (row.soort_berekening as GenericRecord)
-      : {};
-  const invoer =
-    typeof row.invoer === "object" && row.invoer !== null ? (row.invoer as GenericRecord) : {};
-  const inkoop =
-    typeof invoer.inkoop === "object" && invoer.inkoop !== null
-      ? (invoer.inkoop as GenericRecord)
-      : {};
-
-  row.id = String(row.id ?? createId());
-  row.status = String(row.status ?? "concept");
-  row.jaar = Number(row.jaar ?? basisgegevens.jaar ?? 0);
-  row.versie_nummer = Number(row.versie_nummer ?? 0);
-  row.brontype = String(row.brontype ?? "stam");
-  row.bron_id = String(row.bron_id ?? "");
-  row.bron_berekening_id = String(row.bron_berekening_id ?? "");
-  row.is_actief = Boolean(row.is_actief ?? false);
-  row.effectief_vanaf = String(row.effectief_vanaf ?? "");
-  row.basisgegevens = {
-    jaar: Number(basisgegevens.jaar ?? 0),
-    biernaam: String(basisgegevens.biernaam ?? ""),
-    stijl: String(basisgegevens.stijl ?? "")
-  };
-  row.soort_berekening = {
-    type: String(soort.type ?? "")
-  };
-  row.invoer = {
-    ...invoer,
-    inkoop: {
-      ...inkoop,
-      facturen: Array.isArray(inkoop.facturen)
-        ? (inkoop.facturen as GenericRecord[]).map((factuur) => normalizeFactuur(factuur))
-        : [],
-      factuurnummer: String(inkoop.factuurnummer ?? ""),
-      factuurdatum: String(inkoop.factuurdatum ?? ""),
-      verzendkosten: Number(inkoop.verzendkosten ?? 0),
-      overige_kosten: Number(inkoop.overige_kosten ?? 0),
-      factuurregels: Array.isArray(inkoop.factuurregels)
-        ? (inkoop.factuurregels as GenericRecord[]).map((regel) => normalizeFactuurRegel(regel))
-        : []
-    }
-  };
-  return row;
-}
-
-function isInkoopRecord(row: GenericRecord) {
-  return String(((row.soort_berekening as GenericRecord)?.type ?? "")).toLowerCase() === "inkoop";
-}
-
-function isMeaningfulFactuur(factuur: GenericRecord) {
-  const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
-  return (
-    String(factuur.factuurnummer ?? "").trim() !== "" ||
-    String(factuur.factuurdatum ?? "").trim() !== "" ||
-    Number(factuur.verzendkosten ?? 0) > 0 ||
-    Number(factuur.overige_kosten ?? 0) > 0 ||
-    regels.some(
-      (regel) =>
-        Number(regel.aantal ?? 0) > 0 ||
-        String(regel.eenheid ?? "").trim() !== "" ||
-        Number(regel.liters ?? 0) > 0 ||
-        Number(regel.subfactuurbedrag ?? 0) > 0
-    )
-  );
-}
-
-function sanitizeFacturen(facturen: GenericRecord[]) {
-  return facturen.map((factuur) => normalizeFactuur(factuur)).filter((factuur) => isMeaningfulFactuur(factuur));
-}
-
-function isConceptFactuurVersie(row: GenericRecord) {
-  return (
-    String(row.status ?? "").toLowerCase() === "concept" &&
-    String(row.brontype ?? "").toLowerCase() === "factuur"
-  );
-}
-
-function getRecordYear(row: GenericRecord) {
-  return Number(row.jaar ?? ((row.basisgegevens as GenericRecord | undefined)?.jaar ?? 0));
-}
-
-function setInkoopFacturen(row: GenericRecord, facturen: GenericRecord[]) {
-  const invoer =
-    typeof row.invoer === "object" && row.invoer !== null ? (row.invoer as GenericRecord) : {};
-  const inkoop =
-    typeof invoer.inkoop === "object" && invoer.inkoop !== null
-      ? (invoer.inkoop as GenericRecord)
-      : {};
-  const normalized = facturen.map((factuur) => normalizeFactuur(factuur));
-  const primary = normalized[0] ?? normalizeFactuur();
-  row.invoer = {
-    ...invoer,
-    inkoop: {
-      ...inkoop,
-      facturen: normalized,
-      factuurnummer: String(primary.factuurnummer ?? ""),
-      factuurdatum: String(primary.factuurdatum ?? ""),
-      verzendkosten: Number(primary.verzendkosten ?? 0),
-      overige_kosten: Number(primary.overige_kosten ?? 0),
-      factuurregels: Array.isArray(primary.factuurregels) ? primary.factuurregels : []
-    }
-  };
-}
-
-function getInkoopFacturen(row: GenericRecord) {
-  const inkoop = (((row.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {}) as GenericRecord;
-  return Array.isArray(inkoop.facturen)
-    ? (inkoop.facturen as GenericRecord[]).map((factuur) => normalizeFactuur(factuur))
-    : [];
-}
-
-function createFactuurVersieFromSource(source: GenericRecord, factuur: GenericRecord) {
-  const nowIso = new Date().toISOString();
-  const draft = cloneValue(source);
-  draft.id = createId();
-  draft.status = "concept";
-  draft.is_actief = false;
-  draft.effectief_vanaf = "";
-  draft.versie_nummer = Number(draft.versie_nummer ?? 0) || 0;
-  draft.brontype = "factuur";
-  draft.calculation_variant = "factuur";
-  draft.bron_id = String(factuur.id ?? "");
-  draft.bron_berekening_id = String(source.id ?? "");
-  draft.created_at = nowIso;
-  draft.updated_at = nowIso;
-  draft.aangemaakt_op = nowIso;
-  draft.aangepast_op = nowIso;
-  draft.finalized_at = "";
-  draft.resultaat_snapshot = {};
-  setInkoopFacturen(draft, [factuur]);
-  return normalizeBerekening(draft);
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR"
-  }).format(value || 0);
-}
-
-function getFactuurTotals(factuur: GenericRecord) {
-  const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
-  const liters = regels.reduce((sum, regel) => sum + Number(regel.liters ?? 0), 0);
-  const bedrag =
-    regels.reduce((sum, regel) => sum + Number(regel.subfactuurbedrag ?? 0), 0) +
-    Number(factuur.verzendkosten ?? 0) +
-    Number(factuur.overige_kosten ?? 0);
-  return { liters, bedrag, regels: regels.length };
-}
-
-function isDraftValid(factuur: GenericRecord) {
-  if (String(factuur.factuurnummer ?? "").trim() === "") {
-    return false;
-  }
-  if (String(factuur.factuurdatum ?? "").trim() === "") {
-    return false;
-  }
-  const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
-  if (regels.length === 0) {
-    return false;
-  }
-  return regels.every(
-    (regel) =>
-      Number(regel.aantal ?? 0) > 0 &&
-      String(regel.eenheid ?? "").trim() !== "" &&
-      Number(regel.liters ?? 0) > 0 &&
-      Number(regel.subfactuurbedrag ?? 0) > 0
-  );
-}
-
-function getProductUnitOptions(
-  basisproducten: GenericRecord[],
-  samengesteldeProducten: GenericRecord[]
-) {
-  return [
-    ...basisproducten.map((row) => ({
-      id: String(row.id ?? ""),
-      label: String(row.omschrijving ?? ""),
-      litersPerUnit: Number(row.inhoud_per_eenheid_liter ?? 0)
-    })),
-    ...samengesteldeProducten.map((row) => ({
-      id: String(row.id ?? ""),
-      label: String(row.omschrijving ?? ""),
-      litersPerUnit: Number(row.totale_inhoud_liter ?? 0)
-    }))
-  ]
-    .filter((option) => option.id && option.label)
-    .sort((left, right) => left.label.localeCompare(right.label, "nl-NL"));
-}
 
 export function InkoopFacturenManager({
   initialRows,
@@ -279,6 +68,9 @@ export function InkoopFacturenManager({
     onConfirm: () => void;
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingNewTargetKey, setPendingNewTargetKey] = useState<string>("");
+  const [showNewTargetPicker, setShowNewTargetPicker] = useState(false);
+  const [draftSourceKey, setDraftSourceKey] = useState<string>("");
 
   const unitOptions = useMemo(
     () => getProductUnitOptions(basisproducten, samengesteldeProducten),
@@ -299,11 +91,13 @@ export function InkoopFacturenManager({
       .filter((row) => isInkoopRecord(row))
       .forEach((row) => {
         const basis = (row.basisgegevens as GenericRecord) ?? {};
-        const key = `${String(row.bier_id ?? "")}::${getRecordYear(row)}`;
+        const skuType = inferSkuType(row, basis);
+        const baseKey = String(row.bier_id ?? "").trim() || String(basis.biernaam ?? "").trim();
+        const key = `${skuType}::${baseKey}::${getRecordYear(row)}`;
         const current = grouped.get(key);
         const next = current ?? {
           key,
-          biernaam: String(basis.biernaam ?? "Onbekend bier"),
+          biernaam: String(basis.biernaam ?? "Onbekend item"),
           stijl: String(basis.stijl ?? ""),
           jaar: getRecordYear(row),
           records: []
@@ -345,6 +139,7 @@ export function InkoopFacturenManager({
       : null;
   const editingStatus = String((editingRecord as any)?.status ?? "").toLowerCase();
   const canEditDraft = Boolean(draftFactuur) && editingStatus !== "definitief";
+  const draftContextRecord = draftMode === "edit" ? editingRecord : selectedActiveRecord ?? null;
 
   function requestDelete(title: string, body: string, onConfirm: () => void) {
     setPendingDelete({ title, body, onConfirm });
@@ -354,12 +149,23 @@ export function InkoopFacturenManager({
     setPendingAction(next);
   }
 
-  function startDraftForRecord(sourceRecord: GenericRecord | null) {
+  function getActiveRecordForGroup(group: { records: GenericRecord[] }) {
+    return (
+      group.records.find(
+        (row) => String(row.status ?? "").toLowerCase() === "definitief" && Boolean(row.is_actief)
+      ) ??
+      group.records.find((row) => String(row.status ?? "").toLowerCase() === "definitief") ??
+      null
+    );
+  }
+
+  function startDraftForRecord(sourceRecord: GenericRecord | null, sourceKey?: string) {
     if (!sourceRecord) {
       return;
     }
     setDraftMode("new");
     setDraftVersionId("");
+    setDraftSourceKey(String(sourceKey ?? selectedBeerKey ?? ""));
     setDraftFactuur(
       normalizeFactuur({
         factuurregels: [normalizeFactuurRegel()]
@@ -437,6 +243,7 @@ export function InkoopFacturenManager({
     setDraftFactuur(null);
     setDraftVersionId("");
     setDraftMode("new");
+    setDraftSourceKey("");
     setStatus("");
   }
 
@@ -677,6 +484,7 @@ export function InkoopFacturenManager({
       setDraftFactuur(null);
       setDraftVersionId("");
       setDraftMode("new");
+      setDraftSourceKey("");
       setStatus("Factuurversie afgerond als definitief.");
     } catch {
       setStatus("Afronden mislukt.");
@@ -690,23 +498,46 @@ export function InkoopFacturenManager({
       <div className="module-card-header">
         <div className="module-card-title">Inkoopfacturen beheren</div>
         <div className="module-card-text">
-          Klik op een bier om de onderliggende facturen te bekijken. Met `+` start je een nieuwe
-          concept-factuurversie.
+          Kies een artikel om de onderliggende facturen te bekijken. Voeg daarna een nieuwe concept-factuurversie toe.
         </div>
       </div>
 
       <div className="wizard-shell wizard-shell-single">
+        <section className="module-card proposal-hub-hero" style={{ marginBottom: 14 }}>
+          <div className="proposal-hub-hero-copy">
+            <div className="module-card-title">Nieuwe factuur toevoegen</div>
+            <div className="module-card-text">
+              Kies eerst waarvoor je de factuur toevoegt (bier, artikel of dienst) en vul daarna de factuurregels in.
+            </div>
+          </div>
+          <div className="proposal-hub-hero-actions">
+            <button
+              type="button"
+              className="cpq-button cpq-button-primary"
+              onClick={() => {
+                if (!pendingNewTargetKey) {
+                  setPendingNewTargetKey(selectedGroup?.key ?? bierGroups[0]?.key ?? "");
+                }
+                setShowNewTargetPicker(true);
+              }}
+              disabled={bierGroups.length === 0}
+            >
+              Nieuwe factuur toevoegen
+            </button>
+          </div>
+        </section>
+
         <div className="wizard-step-card">
           <div className="wizard-panel-header">
-            <div className="wizard-panel-title">Inkoopbieren</div>
-            <div className="wizard-panel-text">{bierGroups.length} bieren zichtbaar</div>
+            <div className="wizard-panel-title">Inkoopitems</div>
+            <div className="wizard-panel-text">{bierGroups.length} items zichtbaar</div>
           </div>
 
           <div className="dataset-editor-scroll">
             <table className="dataset-editor-table">
               <thead>
                 <tr>
-                  <th>Biernaam</th>
+                  <th>Artikel</th>
                   <th>Datum actief</th>
                   <th />
                 </tr>
@@ -714,13 +545,7 @@ export function InkoopFacturenManager({
               <tbody>
                 {bierGroups.length > 0 ? (
                   bierGroups.map((group) => {
-                    const activeRecord =
-                      group.records.find(
-                        (row) =>
-                          String(row.status ?? "").toLowerCase() === "definitief" && Boolean(row.is_actief)
-                      ) ??
-                      group.records.find((row) => String(row.status ?? "").toLowerCase() === "definitief") ??
-                      null;
+                    const activeRecord = getActiveRecordForGroup(group);
                     const isSelected = group.key === (selectedGroup?.key ?? "");
                     const factuurRows = group.records.flatMap((record) =>
                       getInkoopFacturen(record).map((factuur) => ({
@@ -757,7 +582,7 @@ export function InkoopFacturenManager({
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setSelectedBeerKey(group.key);
-                                startDraftForRecord(activeRecord);
+                                startDraftForRecord(activeRecord, group.key);
                               }}
                             >
                               +
@@ -858,155 +683,70 @@ export function InkoopFacturenManager({
               </div>
             </div>
 
-            <div className="wizard-form-grid">
-              {[
-                { label: "Factuurnummer", key: "factuurnummer", type: "text", required: true },
-                { label: "Factuurdatum", key: "factuurdatum", type: "date", required: true },
-                { label: "Verzendkosten", key: "verzendkosten", type: "number", required: false },
-                { label: "Overige kosten", key: "overige_kosten", type: "number", required: false }
-              ].map(({ label, key, type, required }) => (
-                <label key={key} className="nested-field">
-                  <span>
-                    {label}
-                    {required ? <span style={{ color: "#c62828" }}> *</span> : null}
-                  </span>
-                  <input
-                    className="dataset-input"
-                    type={type}
-                    step={type === "number" ? "any" : undefined}
-                    value={String(draftFactuur[key] ?? "")}
-                    readOnly={!canEditDraft}
-                    onChange={(event) =>
-                      updateDraftField(
-                        key,
-                        type === "number"
-                          ? event.target.value === ""
-                            ? 0
-                            : Number(event.target.value)
-                          : event.target.value
-                      )
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="dataset-editor-scroll">
-              <table className="dataset-editor-table">
-                <thead>
-                  <tr>
-                    <th>Aantal *</th>
-                    <th>Eenheid *</th>
-                    <th>Liters *</th>
-                    <th>Subfactuurbedrag *</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.isArray(draftFactuur.factuurregels) &&
-                  (draftFactuur.factuurregels as GenericRecord[]).length > 0 ? (
-                    (draftFactuur.factuurregels as GenericRecord[]).map((regel) => (
-                      <tr key={String(regel.id)}>
-                        <td>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            step="any"
-                            value={String(regel.aantal ?? "")}
-                            readOnly={!canEditDraft}
-                            onChange={(event) =>
-                              updateDraftRegel(
-                                String(regel.id),
-                                "aantal",
-                                event.target.value === "" ? 0 : Number(event.target.value)
-                              )
-                            }
-                          />
-                        </td>
-                        <td>
-                          <select
-                            className="dataset-input"
-                            value={String(regel.eenheid ?? "")}
-                            disabled={!canEditDraft}
-                            onChange={(event) =>
-                              updateDraftRegel(String(regel.id), "eenheid", event.target.value)
-                            }
-                          >
-                            <option value="">Selecteer product</option>
-                            {unitOptions.map((option) => (
-                              <option key={option.id} value={option.id}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input
-                            className="dataset-input dataset-input-readonly"
-                            type="number"
-                            step="any"
-                            value={String(regel.liters ?? "")}
-                            readOnly
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            step="any"
-                            value={String(regel.subfactuurbedrag ?? "")}
-                            readOnly={!canEditDraft}
-                            onChange={(event) =>
-                              updateDraftRegel(
-                                String(regel.id),
-                                "subfactuurbedrag",
-                                event.target.value === "" ? 0 : Number(event.target.value)
-                              )
-                            }
-                          />
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="icon-button-table"
-                            aria-label="Factuurregel verwijderen"
-                            title="Factuurregel verwijderen"
-                            disabled={!canEditDraft}
-                            onClick={() =>
-                              requestDelete(
-                                "Factuurregel verwijderen",
-                                "Weet je zeker dat je deze factuurregel wilt verwijderen?",
-                                () => removeDraftRegel(String(regel.id))
-                              )
-                            }
-                          >
-                            <TrashIcon />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td className="dataset-empty" colSpan={5}>
-                        Nog geen factuurregels.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <InkoopFactuurEditor
+              subjectType={
+                (String(((draftContextRecord as any)?.basisgegevens ?? {})?.sku_type ?? "bier").trim() || "bier") as any
+              }
+              uom={String(((draftContextRecord as any)?.basisgegevens ?? {})?.uom ?? "stuk")}
+              uomValue={
+                (String(((draftContextRecord as any)?.basisgegevens ?? {})?.sku_type ?? "bier").trim() || "bier") === "bier"
+                  ? "stuk"
+                  : String(
+                      (Array.isArray(draftFactuur.factuurregels) && (draftFactuur.factuurregels as GenericRecord[])[0])
+                        ? String(((draftFactuur.factuurregels as GenericRecord[])[0] as any)?.eenheid ?? "stuk")
+                        : "stuk"
+                    )
+              }
+              onChangeUomValue={(nextUom) => {
+                const regels = Array.isArray(draftFactuur.factuurregels) ? (draftFactuur.factuurregels as GenericRecord[]) : [];
+                regels.forEach((regel) => {
+                  updateDraftRegel(String(regel.id), "eenheid", nextUom);
+                  updateDraftRegel(String(regel.id), "liters", 0);
+                  updateDraftRegel(String(regel.id), "afvulkosten_fust", null);
+                });
+              }}
+              year={draftContextRecord ? getRecordYear(draftContextRecord) : 0}
+              inkoop={draftFactuur}
+              factuurregels={Array.isArray(draftFactuur.factuurregels) ? (draftFactuur.factuurregels as GenericRecord[]) : []}
+              unitOptions={unitOptions}
+              basisproducten={basisproducten}
+              samengesteldeProducten={samengesteldeProducten}
+              canEdit={canEditDraft}
+              onChangeInkoopField={(key, value) => updateDraftField(key, value)}
+              onChangeRegel={(index, patch) => {
+                const regels = Array.isArray(draftFactuur.factuurregels) ? (draftFactuur.factuurregels as GenericRecord[]) : [];
+                const regel = regels[index];
+                if (!regel) return;
+                const id = String(regel.id);
+                Object.entries(patch).forEach(([k, v]) => updateDraftRegel(id, k, v));
+              }}
+              onDeleteRegel={(index) => {
+                const regels = Array.isArray(draftFactuur.factuurregels) ? (draftFactuur.factuurregels as GenericRecord[]) : [];
+                const regel = regels[index];
+                if (!regel) return;
+                removeDraftRegel(String(regel.id));
+              }}
+              onAddRegel={(regel) => {
+                const regels = Array.isArray(draftFactuur.factuurregels) ? (draftFactuur.factuurregels as GenericRecord[]) : [];
+                setDraftFactuur({
+                  ...draftFactuur,
+                  factuurregels: [...regels, normalizeFactuurRegel(regel)],
+                });
+              }}
+              requestDelete={(title, body, onConfirm) => requestDelete(title, body, onConfirm)}
+              getFactuurRegelLiters={(regel) => getFactuurRegelLiters(regel, litersPerUnitById)}
+              formatCurrencyDisplay={formatCurrencyDisplay}
+              formatDecimalValue={formatDecimalValue}
+              calculateInkoopExtraKostenPerRegel={calculateInkoopExtraKostenPerRegel}
+              calculateInkoopPrijsPerEenheid={calculateInkoopPrijsPerEenheid}
+              calculateInkoopPrijsPerLiter={(regel, extraPer) =>
+                calculateInkoopPrijsPerLiter(regel, extraPer, litersPerUnitById)
+              }
+              getFactuurRegelAfvulkostenFust={getFactuurRegelAfvulkostenFust}
+            />
 
             <div className="editor-actions">
-              <div className="editor-actions-group">
-                <button
-                  type="button"
-                  className="editor-button editor-button-secondary"
-                  onClick={addDraftRegel}
-                  disabled={!canEditDraft}
-                >
-                  Regel toevoegen
-                </button>
-              </div>
+              <div className="editor-actions-group" />
               <div className="editor-actions-group">
                 {status ? <span className="editor-status">{status}</span> : null}
                 <button
@@ -1039,6 +779,62 @@ export function InkoopFacturenManager({
                   disabled={isSaving || !canEditDraft || !isDraftValid(draftFactuur)}
                 >
                   Afronden
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showNewTargetPicker ? (
+          <div className="confirm-modal-overlay" role="presentation">
+            <div className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-new-factuur-title">
+              <div className="confirm-modal-title" id="confirm-new-factuur-title">
+                Nieuwe factuur toevoegen
+              </div>
+              <div className="confirm-modal-text">
+                Kies waarvoor je de factuur toevoegt. Daarna kun je de factuurregels invullen.
+              </div>
+              <label className="nested-field" style={{ marginTop: 10 }}>
+                <span>Artikel</span>
+                <select
+                  className="dataset-input"
+                  value={pendingNewTargetKey}
+                  onChange={(event) => setPendingNewTargetKey(event.target.value)}
+                >
+                  {bierGroups.map((group) => (
+                    <option key={group.key} value={group.key}>
+                      {`${group.biernaam} · ${group.jaar}${group.stijl ? ` · ${group.stijl}` : ""}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="confirm-modal-actions">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={() => setShowNewTargetPicker(false)}
+                >
+                  Annuleren
+                </button>
+                <button
+                  type="button"
+                  className="editor-button"
+                  onClick={() => {
+                    const key = String(pendingNewTargetKey || "");
+                    const target = bierGroups.find((g) => g.key === key) ?? null;
+                    const record = target ? getActiveRecordForGroup(target) : null;
+                    if (target && record) {
+                      setSelectedBeerKey(key);
+                      setShowNewTargetPicker(false);
+                      setStatus("");
+                      startDraftForRecord(record, key);
+                    } else {
+                      setShowNewTargetPicker(false);
+                      setStatus("Kies eerst een artikel om een factuur toe te voegen.");
+                    }
+                  }}
+                >
+                  Doorgaan
                 </button>
               </div>
             </div>
@@ -1117,14 +913,3 @@ export function InkoopFacturenManager({
   );
 }
 
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="M4 7h16" />
-      <path d="M9 4h6" />
-      <path d="M7 7l1 12h8l1-12" />
-      <path d="M10 11v5" />
-      <path d="M14 11v5" />
-    </svg>
-  );
-}

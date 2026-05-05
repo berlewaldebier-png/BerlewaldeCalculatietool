@@ -12,16 +12,16 @@ type DouanoProduct = {
 };
 
 type ActiveCombo = {
-  bier_id: string;
-  product_id: string;
-  product_type?: string;
+  sku_id: string;
   label: string;
+  naam?: string;
+  beer_id?: string;
+  format_article_id?: string;
 };
 
 type Mapping = {
   douano_product_id: number;
-  bier_id: string;
-  product_id: string;
+  sku_id: string;
   updated_at: string;
 };
 
@@ -124,8 +124,8 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   const combosByKey = useMemo(() => {
     const map = new Map<string, ActiveCombo>();
     combos.forEach((c) => {
-      const key = `${c.bier_id}::${c.product_id}`;
-      map.set(key, c);
+      const key = String((c as any)?.sku_id ?? "").trim();
+      if (key) map.set(key, c);
     });
     return map;
   }, [combos]);
@@ -172,8 +172,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
 
   async function save(productId: number) {
     const selected = String(draft[productId] ?? "").trim();
-    const [bier_id, product_id] = selected.split("::");
-    if (!bier_id || !product_id) {
+    if (!selected) {
       setStatus("Selecteer eerst een bier — verpakking combinatie.");
       setTone("error");
       return;
@@ -181,7 +180,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
     setStatus("Opslaan…");
     setTone("");
     try {
-      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", { bier_id, product_id });
+      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", { sku_id: selected });
       await refreshAll();
       setStatus("Opgeslagen");
       setTone("success");
@@ -285,7 +284,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
             {filteredProducts.slice(0, 500).map((p) => {
               const id = Number(p.product_id || 0);
               const mapping = mappingsById.get(id);
-              const mappedKey = mapping ? `${mapping.bier_id}::${mapping.product_id}` : "";
+              const mappedKey = mapping ? String((mapping as any).sku_id ?? "").trim() : "";
               const value = String(draft[id] ?? mappedKey ?? "");
               const isMapped = Boolean(mapping);
               const mappedLabel = mappedKey ? combosByKey.get(mappedKey)?.label ?? mappedKey : "";
@@ -311,7 +310,8 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
                     >
                       <option value="">{isMapped ? mappedLabel || "—" : "Selecteer bier — verpakking"}</option>
                       {combos.map((c) => {
-                        const key = `${c.bier_id}::${c.product_id}`;
+                        const key = String((c as any)?.sku_id ?? "").trim();
+                        if (!key) return null;
                         return (
                           <option key={key} value={key}>
                             {c.label}

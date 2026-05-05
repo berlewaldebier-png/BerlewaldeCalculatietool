@@ -27,11 +27,14 @@ export type ProductFact = {
 type BuildProductFactsParams = {
   year: number;
   channelCode?: string | null;
+  onlyReady?: boolean;
   channels: GenericRecord[];
   bieren: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
+  skus?: GenericRecord[];
+  articles?: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   litersPerUnitOverrides?: Map<string, number>;
@@ -46,17 +49,52 @@ type ProductMaster = {
 
 export function buildProductFacts(params: BuildProductFactsParams) {
   const warnings: string[] = [];
+  const onlyReady = Boolean(params.onlyReady);
+  let skippedNotReady = 0;
   const bierNameById = new Map<string, string>();
   params.bieren.forEach((row) => {
     const id = text((row as any).id);
     if (!id) return;
     bierNameById.set(id, text((row as any).biernaam || (row as any).naam || id));
   });
+  const articleNameById = new Map<string, string>();
+  (params.articles ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (!id) return;
+    const name = text((row as any).name || (row as any).naam || id);
+    articleNameById.set(id, name);
+  });
+  const articleById = new Map<string, GenericRecord>();
+  (params.articles ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (!id) return;
+    articleById.set(id, row);
+  });
 
   const productMasterById = buildProductMasterById(
     params.basisproducten,
     params.samengesteldeProducten
   );
+
+  const skuById = new Map<string, GenericRecord>();
+  (params.skus ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (id) skuById.set(id, row);
+  });
+
+  const formatById = new Map<string, ProductMaster>();
+  (params.articles ?? []).forEach((row) => {
+    const id = text((row as any).id);
+    if (!id) return;
+    const kind = text((row as any).kind).toLowerCase();
+    if (kind !== "format") return;
+    const packLabel = text((row as any).name || (row as any).naam || id);
+    formatById.set(id, {
+      packLabel,
+      packType: text((row as any).uom || (row as any).eenheid || inferPackType(packLabel)),
+      litersPerUnit: toNumber((row as any).content_liter, 0),
+    });
+  });
 
   const versionById = new Map<string, GenericRecord>();
   params.kostprijsversies.forEach((row) => {
@@ -72,20 +110,30 @@ export function buildProductFacts(params: BuildProductFactsParams) {
   params.kostprijsproductactiveringen
     .filter((row) => toNumber((row as any).jaar, 0) === params.year)
     .forEach((activation) => {
-      const bierId = text((activation as any).bier_id);
-      const productId = text((activation as any).product_id);
+      const skuId = text((activation as any).sku_id);
+      const skuRow = skuId ? skuById.get(skuId) ?? null : null;
+      const skuKind = text((skuRow as any)?.kind).toLowerCase();
+      const bierId = text((activation as any).bier_id) || text((skuRow as any)?.beer_id);
+      const productId =
+        text((activation as any).product_id) ||
+        text((skuRow as any)?.format_article_id) ||
+        text((skuRow as any)?.article_id);
       const kostprijsversieId = text((activation as any).kostprijsversie_id);
-      if (!bierId || !productId || !kostprijsversieId) return;
+      if (!productId || !kostprijsversieId) return;
+      const effectiveBierId =
+        bierId || (skuId && skuKind === "article" ? `sku:${skuId}` : "");
+      if (!effectiveBierId) return;
 
-      const ref = `beer:${bierId}:product:${productId}`;
+      const ref = skuId ? `sku:${skuId}` : `beer:${bierId}:product:${productId}`;
       if (seen.has(ref)) return;
       seen.add(ref);
 
       const version = versionById.get(kostprijsversieId);
-      const snapshotRow = getSnapshotProductRow(version, productId);
-      const master = productMasterById.get(productId);
+      const snapshotRow = getSnapshotProductRow(version, { skuId, productId });
+      const master = formatById.get(productId) ?? productMasterById.get(productId);
       const packLabel =
-        master?.packLabel || text((snapshotRow as any).verpakking || productId);
+        master?.packLabel ||
+        text((snapshotRow as any).verpakking_label || (snapshotRow as any).verpakking || productId);
       const litersPerUnit =
         master?.litersPerUnit ||
         toNumber(
@@ -94,7 +142,13 @@ export function buildProductFacts(params: BuildProductFactsParams) {
             (snapshotRow as any).inhoud_per_eenheid_liter,
           0
         );
-      const costPriceEx = toNumber((snapshotRow as any).kostprijs, 0);
+      const fallbackArticleLiters =
+        skuKind === "article" ? toNumber((articleById.get(productId) as any)?.content_liter, 0) : 0;
+      const fallbackArticleCost =
+        skuKind === "article" ? toNumber((version as any)?.kostprijs, 0) : 0;
+      const baseLitersPerUnit = litersPerUnit > 0 ? litersPerUnit : fallbackArticleLiters;
+      const costPriceEx =
+        toNumber((snapshotRow as any).kostprijs, 0) || fallbackArticleCost;
       const fixedCostAllocationEx = toNumber(
         (snapshotRow as any).vaste_kosten ?? (snapshotRow as any).vaste_directe_kosten,
         0
@@ -103,23 +157,25 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       const vatRatePct = readVatRatePct(version);
       const warningsForFact: string[] = [];
 
-      if (litersPerUnit <= 0) warningsForFact.push("Literinhoud ontbreekt.");
+      const isArticleSku = skuId && skuKind === "article";
+      if (baseLitersPerUnit <= 0 && !isArticleSku) warningsForFact.push("Literinhoud ontbreekt.");
       if (costPriceEx <= 0) warningsForFact.push("Kostprijs ontbreekt.");
       if (fixedCostAllocationEx <= 0)
         warningsForFact.push("Vaste kostentoerekening ontbreekt.");
 
-      const overrideLitersPerUnit = params.litersPerUnitOverrides?.get(productId) ?? null;
+      const overrideLitersPerUnit =
+        params.litersPerUnitOverrides?.get(skuId || productId) ?? null;
       const hasOverride =
         Number.isFinite(overrideLitersPerUnit as number) &&
         (overrideLitersPerUnit as number) > 0;
-      const baselineLitersPerUnit = litersPerUnit > 0 ? litersPerUnit : 0.001;
+      const baselineLitersPerUnit = baseLitersPerUnit > 0 ? baseLitersPerUnit : 0.001;
       const costPerLiter = costPriceEx / baselineLitersPerUnit;
       const fixedPerLiter = fixedCostAllocationEx / baselineLitersPerUnit;
       const variablePerLiter = variableCostEx / baselineLitersPerUnit;
 
       const effectiveLitersPerUnit = hasOverride
         ? (overrideLitersPerUnit as number)
-        : litersPerUnit;
+        : baseLitersPerUnit;
       const effectiveCostPriceEx = hasOverride
         ? costPerLiter * effectiveLitersPerUnit
         : costPriceEx;
@@ -146,10 +202,24 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         if (sellInEx <= 0) warningsForFact.push("Sell-in prijs ontbreekt.");
       }
 
-      const bierName = bierNameById.get(bierId) || bierId;
+      // SKU-aanpak: niet elk verkoopbaar artikel heeft liters (merch/dienst/bundles zonder inhoud).
+      // Voor bier/formats blijven liters wel verplicht.
+      const litersOk = isArticleSku ? true : effectiveLitersPerUnit > 0;
+      const isReady =
+        litersOk &&
+        effectiveCostPriceEx > 0 &&
+        (!params.channelCode || sellInEx > 0);
+      if (onlyReady && !isReady) {
+        skippedNotReady += 1;
+        return;
+      }
+
+      const bierName = isArticleSku
+        ? articleNameById.get(text((skuRow as any)?.article_id) || productId) || packLabel
+        : bierNameById.get(bierId) || bierId;
       facts.push({
         ref,
-        bierId,
+        bierId: effectiveBierId,
         productId,
         kostprijsversieId,
         bierName,
@@ -169,6 +239,11 @@ export function buildProductFacts(params: BuildProductFactsParams) {
   if (facts.length === 0) {
     warnings.push(
       `Geen actieve kostprijsproductactiveringen gevonden voor jaar ${params.year}.`
+    );
+  }
+  if (onlyReady && skippedNotReady > 0) {
+    warnings.push(
+      `${skippedNotReady} product(en) verborgen omdat kostprijs/literinhoud (of sell-in) ontbreekt.`
     );
   }
 
@@ -218,7 +293,10 @@ function buildProductMasterById(
   return map;
 }
 
-function getSnapshotProductRow(version: GenericRecord | undefined, productId: string) {
+function getSnapshotProductRow(
+  version: GenericRecord | undefined,
+  ids: { skuId: string; productId: string }
+) {
   const snapshotProducts = ((version as any)?.resultaat_snapshot?.producten ?? {}) as Record<
     string,
     unknown
@@ -230,9 +308,17 @@ function getSnapshotProductRow(version: GenericRecord | undefined, productId: st
       : []),
   ] as GenericRecord[];
 
-  return (
-    productRows.find((row) => text((row as any).product_id) === productId) ?? {}
-  );
+  const skuId = text(ids.skuId);
+  if (skuId) {
+    const bySku = productRows.find((row) => text((row as any).sku_id) === skuId);
+    if (bySku) return bySku;
+  }
+
+  const productId = text(ids.productId);
+  if (productId) {
+    return productRows.find((row) => text((row as any).product_id) === productId) ?? {};
+  }
+  return {};
 }
 
 function readVatRatePct(version: GenericRecord | undefined) {

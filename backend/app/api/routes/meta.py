@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -366,12 +367,37 @@ def post_dev_reset(
         if normalized_mode == "all":
             kostprijs_activation_storage.reset_defaults()
             if normalized_profile:
-                # Import does its own reset + maintenance inside this transaction.
+                # SKU-aanpak: use the canonical SKU seeders instead of legacy seed bundles.
                 try:
-                    report["seed"] = seed_bundle_service.import_seed_bundle(normalized_profile)  # type: ignore[arg-type]
-                except FileNotFoundError as exc:
-                    raise HTTPException(status_code=400, detail=f"Seed bestand ontbreekt voor {normalized_profile}.") from exc
-                except ValueError as exc:
+                    if normalized_profile == "demo_foundation":
+                        report["seed"] = post_dev_seed_sku_foundation(year=2025, with_demo=False, _={})
+                    else:
+                        # "Golden" includes demo costing + activations.
+                        report["seed"] = post_dev_seed_sku_foundation(year=2025, with_demo=True, _={})
+
+                        # Mixed smoke-test set: keep 2 active cost prices, leave the rest inactive.
+                        try:
+                            seeded_year = int((report["seed"] or {}).get("year", 2025) or 2025)
+                        except Exception:
+                            seeded_year = 2025
+                        # Keep 2 actives, leave IPA 33cl definitief maar niet actief (smoke-test scenario).
+                        keep_active = {"sku-blond-33cl", "sku-bundle-giftpack-4"}
+                        existing = dataset_store.load_dataset("kostprijsproductactiveringen")
+                        filtered: list[dict[str, Any]] = []
+                        if isinstance(existing, list):
+                            for row in existing:
+                                if not isinstance(row, dict):
+                                    continue
+                                if int(row.get("jaar", 0) or 0) != seeded_year:
+                                    filtered.append(row)
+                                    continue
+                                sku_id = str(row.get("sku_id", "") or "").strip()
+                                if sku_id in keep_active:
+                                    filtered.append(row)
+                        dataset_store.save_dataset("kostprijsproductactiveringen", filtered)
+                except HTTPException:
+                    raise
+                except Exception as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
                 report["reset"] = report["seed"].get("reset", {}) if isinstance(report["seed"], dict) else {}
                 dashboard_service.invalidate_dashboard_summary_cache()
@@ -383,6 +409,470 @@ def post_dev_reset(
 
     dashboard_service.invalidate_dashboard_summary_cache()
     return report
+
+
+@router.post("/dev/hard-reset")
+def post_dev_hard_reset(
+    include_users: bool = Query(False, description="Wanneer true: reset ook app_users (kan je buitensluiten)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: drop all domain tables and start from a clean schema.
+
+    This is intentionally destructive and intended for development only.
+
+    Notes:
+    - Drops tables (not just rows), including Douano sync tables.
+    - Keeps auth by default (`app_users`) unless `include_users=true`.
+    - After this, the backend should be restarted so in-memory `_SCHEMA_READY` flags don't lie.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Hard reset is alleen toegestaan in local/dev.")
+
+    # Explicit allow-list: only tables we own (avoids nuking extensions/etc).
+    tables = [
+        # Generic dataset store
+        "app_datasets",
+        # SKU core
+        "articles",
+        "skus",
+        "bom_lines",
+        # Core year setup
+        "production_years",
+        "fixed_cost_lines",
+        "tarieven_heffingen_years",
+        # Costing
+        "cost_version_sku_rows",
+        "cost_version_product_rows",
+        "cost_versions",
+        "kostprijs_sku_activations",
+        "kostprijs_sku_activation_events",
+        "kostprijs_product_activations",
+        "kostprijs_activation_events",
+        "kostprijs_scenario_inkoop_rows",
+        "kostprijs_activatie_drafts",
+        "new_year_drafts",
+        # Sales/pricing
+        "sales_pricing_records",
+        "advice_channel_pricing",
+        # Offers/quotes
+        "quote_drafts",
+        # Catalog/bundles
+        "catalog_product_bom_lines",
+        "catalog_products",
+        # Douano sync + analytics
+        "douano_sales_line_cost_snapshot",
+        "douano_product_mapping",
+        "douano_product_ignore",
+        "douano_oauth_tokens",
+        "douano_sales_invoice_lines",
+        "douano_sales_invoices",
+        "douano_sales_order_lines",
+        "douano_sales_orders",
+        "douano_products",
+        "douano_companies",
+        "douano_sync_state",
+        "douano_raw_objects",
+    ]
+    if include_users:
+        tables.append("app_users")
+
+    dropped: list[str] = []
+    with postgres_storage.transaction():
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                for table in tables:
+                    name = str(table or "").strip()
+                    if not name:
+                        continue
+                    cur.execute(f"DROP TABLE IF EXISTS {name} CASCADE")
+                    dropped.append(name)
+
+    # Best-effort: reset module-level schema flags (still recommend restart).
+    # Important: don't import a long list in one statement; a single import error would skip resetting
+    # everything and leave stale `_SCHEMA_READY` flags behind (causing "relation does not exist").
+    try:
+        # postgres_storage caches base schema readiness + legacy purge state; hard-reset drops `app_datasets`,
+        # so we must force it to recreate the table on next use.
+        try:
+            if hasattr(postgres_storage, "_schema_ready"):
+                setattr(postgres_storage, "_schema_ready", False)
+            if hasattr(postgres_storage, "_legacy_purged"):
+                getattr(postgres_storage, "_legacy_purged").clear()  # type: ignore[union-attr]
+        except Exception:
+            pass
+
+        import importlib
+
+        module_names = [
+            "app.domain.adviesprijzen_storage",
+            "app.domain.articles_storage",
+            "app.domain.bom_storage",
+            "app.domain.cost_versions_storage",
+            "app.domain.douano_margin_snapshot_storage",
+            "app.domain.douano_oauth_storage",
+            "app.domain.douano_product_ignore_storage",
+            "app.domain.douano_product_mapping_storage",
+            "app.domain.douano_sync_storage",
+            "app.domain.fixed_costs_storage",
+            "app.domain.kostprijs_activatie_drafts_storage",
+            "app.domain.kostprijs_activation_storage",
+            "app.domain.kostprijs_scenario_inkoop_storage",
+            "app.domain.new_year_drafts_storage",
+            "app.domain.production_storage",
+            "app.domain.product_registry_storage",
+            "app.domain.quote_drafts_storage",
+            "app.domain.sales_pricing_storage",
+            "app.domain.skus_storage",
+            "app.domain.tarieven_heffingen_storage",
+            "app.domain.traceability_storage",
+        ]
+
+        for module_name in module_names:
+            try:
+                module = importlib.import_module(module_name)
+            except Exception:
+                continue
+            for flag_name in ("_SCHEMA_READY", "_schema_ready"):
+                if hasattr(module, flag_name):
+                    try:
+                        setattr(module, flag_name, False)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return {
+        "ok": True,
+        "dropped_tables": dropped,
+        "include_users": bool(include_users),
+        "restart_backend": True,
+    }
+
+
+@router.post("/dev/seed-sku-foundation")
+def post_dev_seed_sku_foundation(
+    year: int = Query(2025, description="Jaar voor seed (prijzen/jaarsetup)."),
+    with_demo: bool = Query(
+        False,
+        description="Voegt demo kostprijsversie + activaties + verkoopstrategie toe zodat Offerte/Break-even direct werkt.",
+    ),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Seed a minimal foundation dataset for the SKU/Article model.
+
+    Dev-only helper; safe to run on an empty DB after /dev/hard-reset.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Seed is alleen toegestaan in local/dev.")
+
+    year_value = int(year)
+    if year_value <= 0:
+        raise HTTPException(status_code=400, detail="Ongeldig jaar.")
+
+    # Minimal packaging components as articles (inventory-ready building blocks).
+    packaging_components = [
+        {"id": "pkg-bottle-33cl", "code": "BOTTLE33", "name": "Fles 33cl", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+        {"id": "pkg-cap", "code": "CAP", "name": "Dop", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+        {"id": "pkg-label", "code": "LABEL", "name": "Label", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+        {"id": "pkg-box-24", "code": "BOX24", "name": "Doos 24", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+        {"id": "pkg-giftbox-4", "code": "GIFTBOX4", "name": "Giftbox 4 flessen", "kind": "packaging_component", "uom": "stuk", "content_liter": 0.0, "active": True},
+    ]
+
+    # Formats (sellable/purchasable forms). These are the "ArticleFormat" layer.
+    formats = [
+        {"id": "fmt-bottle-33cl", "code": "FMT33", "name": "Fles 33cl", "kind": "format", "uom": "stuk", "content_liter": 0.33, "active": True},
+        {"id": "fmt-box-24x33cl", "code": "FMT24X33", "name": "Doos 24×33cl", "kind": "format", "uom": "doos", "content_liter": 24 * 0.33, "active": True},
+        {"id": "fmt-keg-20l", "code": "FMTKEG20", "name": "Fust 20L", "kind": "format", "uom": "fust", "content_liter": 20.0, "active": True},
+    ]
+
+    # BOM for formats (composition of packaging components and nested formats).
+    bom_lines = [
+        # Doos 24×33cl consists of 24 bottles + 24 caps + 24 labels + 1 box.
+        {"id": "bom-24x33-bottle", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "fmt-bottle-33cl", "quantity": 24, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-24x33-cap", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "pkg-cap", "quantity": 24, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-24x33-label", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "pkg-label", "quantity": 24, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-24x33-box", "parent_article_id": "fmt-box-24x33cl", "component_article_id": "pkg-box-24", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+        # Fles 33cl packaging structure (cap+label+bottle). In reality bottle is the container too; we keep it explicit.
+        {"id": "bom-33cl-bottle", "parent_article_id": "fmt-bottle-33cl", "component_article_id": "pkg-bottle-33cl", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-33cl-cap", "parent_article_id": "fmt-bottle-33cl", "component_article_id": "pkg-cap", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+        {"id": "bom-33cl-label", "parent_article_id": "fmt-bottle-33cl", "component_article_id": "pkg-label", "quantity": 1, "uom": "stuk", "scrap_pct": 0},
+    ]
+
+    # Minimal beer identity (not a SKU; SKU is beer × format).
+    beers = [
+        {
+            "id": "beer-blond",
+            "biernaam": "Berlewalde Blond",
+            "stijl": "Blond",
+            "alcoholpercentage": 6.0,
+            "belastingsoort": "Accijns",
+            "tarief_accijns": "Hoog",
+            "btw_tarief": "21%",
+        },
+        {
+            "id": "beer-ipa",
+            "biernaam": "Berlewalde IPA",
+            "stijl": "IPA",
+            "alcoholpercentage": 6.6,
+            "belastingsoort": "Accijns",
+            "tarief_accijns": "Hoog",
+            "btw_tarief": "21%",
+        },
+        {
+            "id": "beer-triple",
+            "biernaam": "Berlewalde Triple",
+            "stijl": "Triple",
+            "alcoholpercentage": 9.0,
+            "belastingsoort": "Accijns",
+            "tarief_accijns": "Hoog",
+            "btw_tarief": "21%",
+        },
+    ]
+
+    # SKUs (beer × format) + example non-beer SKU (hoodie) can be added later.
+    skus = [
+        {"id": "sku-blond-33cl", "kind": "beer_format", "beer_id": "beer-blond", "format_article_id": "fmt-bottle-33cl", "article_id": "", "code": "BLOND-33", "name": "Berlewalde Blond - Fles 33cl", "active": True},
+        {"id": "sku-blond-24x33", "kind": "beer_format", "beer_id": "beer-blond", "format_article_id": "fmt-box-24x33cl", "article_id": "", "code": "BLOND-24X33", "name": "Berlewalde Blond - Doos 24×33cl", "active": True},
+        {"id": "sku-blond-keg20", "kind": "beer_format", "beer_id": "beer-blond", "format_article_id": "fmt-keg-20l", "article_id": "", "code": "BLOND-KEG20", "name": "Berlewalde Blond - Fust 20L", "active": True},
+        {"id": "sku-ipa-33cl", "kind": "beer_format", "beer_id": "beer-ipa", "format_article_id": "fmt-bottle-33cl", "article_id": "", "code": "IPA-33", "name": "Berlewalde IPA - Fles 33cl", "active": True},
+        {"id": "sku-ipa-24x33", "kind": "beer_format", "beer_id": "beer-ipa", "format_article_id": "fmt-box-24x33cl", "article_id": "", "code": "IPA-24X33", "name": "Berlewalde IPA - Doos 24Ã—33cl", "active": True},
+        {"id": "sku-triple-33cl", "kind": "beer_format", "beer_id": "beer-triple", "format_article_id": "fmt-bottle-33cl", "article_id": "", "code": "TRIPLE-33", "name": "Berlewalde Triple - Fles 33cl", "active": True},
+        {"id": "sku-triple-24x33", "kind": "beer_format", "beer_id": "beer-triple", "format_article_id": "fmt-box-24x33cl", "article_id": "", "code": "TRIPLE-24X33", "name": "Berlewalde Triple - Doos 24Ã—33cl", "active": True},
+    ]
+
+    # Demo bundle: model catalog/giftpacks as Article(kind=bundle) + SKU(kind=article) + BOM (can mix SKUs + articles).
+    bundle_articles = [
+        {"id": "bundle-giftpack-4", "code": "GIFT4", "name": "Giftpack 4x33cl (2x Blond, 2x IPA)", "kind": "bundle", "uom": "pakket", "content_liter": 4 * 0.33, "active": True},
+    ]
+    bundle_skus = [
+        {"id": "sku-bundle-giftpack-4", "kind": "article", "beer_id": "", "format_article_id": "", "article_id": "bundle-giftpack-4", "code": "GIFT4", "name": "Giftpack 4x33cl (2x Blond, 2x IPA)", "active": True},
+    ]
+    bundle_bom_lines = [
+        {"id": "bom-gift4-blond-33cl", "parent_article_id": "bundle-giftpack-4", "component_article_id": "", "component_sku_id": "sku-blond-33cl", "quantity": 2, "uom": "stuk", "scrap_pct": 0, "line_kind": "beer", "bier_id": "beer-blond", "product_id": "fmt-bottle-33cl", "product_type": "basis"},
+        {"id": "bom-gift4-ipa-33cl", "parent_article_id": "bundle-giftpack-4", "component_article_id": "", "component_sku_id": "sku-ipa-33cl", "quantity": 2, "uom": "stuk", "scrap_pct": 0, "line_kind": "beer", "bier_id": "beer-ipa", "product_id": "fmt-bottle-33cl", "product_type": "basis"},
+        {"id": "bom-gift4-box", "parent_article_id": "bundle-giftpack-4", "component_article_id": "pkg-giftbox-4", "component_sku_id": "", "quantity": 1, "uom": "stuk", "scrap_pct": 0, "line_kind": "packaging_component", "packaging_component_id": "pkg-giftbox-4"},
+    ]
+
+    # Minimal packaging component prices (per year) using the existing dataset name the UI expects.
+    packaging_component_prices = [
+        {"id": "price-bottle-33cl", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-bottle-33cl", "prijs_per_stuk": 0.22},
+        {"id": "price-cap", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-cap", "prijs_per_stuk": 0.03},
+        {"id": "price-label", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-label", "prijs_per_stuk": 0.05},
+        {"id": "price-box-24", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-box-24", "prijs_per_stuk": 1.10},
+        {"id": "price-giftbox-4", "jaar": year_value, "verpakkingsonderdeel_id": "pkg-giftbox-4", "prijs_per_stuk": 1.30},
+    ]
+
+    # Provide a basic production year so cost allocation screens have a year anchor.
+    productie = {str(year_value): {"hoeveelheid_inkoop_l": 0, "hoeveelheid_productie_l": 0, "batchgrootte_eigen_productie_l": 0}}
+
+    with postgres_storage.transaction():
+        # SKU/Article core
+        postgres_storage.save_dataset("articles", [*packaging_components, *formats, *bundle_articles], overwrite=True)
+        postgres_storage.save_dataset("bom-lines", [*bom_lines, *bundle_bom_lines], overwrite=True)
+        postgres_storage.save_dataset("skus", [*skus, *bundle_skus], overwrite=True)
+
+        # Legacy UI datasets (kept in sync for now)
+        dataset_store.save_dataset(
+            "packaging-components",
+            [
+                {"id": row["id"], "omschrijving": row["name"], "beschikbaar_voor_samengesteld": True}
+                for row in packaging_components
+            ],
+        )
+        dataset_store.save_dataset("packaging-component-prices", packaging_component_prices)
+        dataset_store.save_dataset("bieren", beers)
+        dataset_store.save_dataset("productie", productie)
+
+        if with_demo:
+            # Rich demo: year setup + pricing scaffolding similar to the old golden seed.
+            channels = [
+                {"id": "horeca", "code": "horeca", "naam": "Horeca", "actief": True, "volgorde": 10, "default_marge_pct": 25, "default_factor": 2.5},
+                {"id": "retail", "code": "retail", "naam": "Supermarkt", "actief": True, "volgorde": 20, "default_marge_pct": 20, "default_factor": 2.4},
+                {"id": "slijterij", "code": "slijterij", "naam": "Slijterij", "actief": True, "volgorde": 30, "default_marge_pct": 20, "default_factor": 3.0},
+                {"id": "zakelijk", "code": "zakelijk", "naam": "Speciaalzaak", "actief": True, "volgorde": 40, "default_marge_pct": 20, "default_factor": 3.2},
+            ]
+            dataset_store.save_dataset("channels", channels)
+
+            adviesprijzen = [
+                # ID must be a UUID (table is UUID PK); omit to let storage generate stable ids.
+                {"jaar": year_value, "channel_code": "horeca", "opslag_pct": 25.0},
+                {"jaar": year_value, "channel_code": "retail", "opslag_pct": 25.0},
+                {"jaar": year_value, "channel_code": "slijterij", "opslag_pct": 40.0},
+                {"jaar": year_value, "channel_code": "zakelijk", "opslag_pct": 45.0},
+            ]
+            dataset_store.save_dataset("adviesprijzen", adviesprijzen)
+
+            dataset_store.save_dataset(
+                "tarieven-heffingen",
+                [{"jaar": year_value, "tarief_hoog": 0.0, "tarief_laag": 0.0, "verbruikersbelasting": 0.0}],
+            )
+
+            dataset_store.save_dataset(
+                "vaste-kosten",
+                {
+                    str(year_value): [
+                        {"id": f"fc-{year_value}-indirect", "omschrijving": "Indirecte vaste kosten", "kostensoort": "Indirecte kosten", "bedrag_per_jaar": 100000.0, "herverdeel_pct": 0.0},
+                        {"id": f"fc-{year_value}-direct", "omschrijving": "Directe vaste kosten", "kostensoort": "Directe kosten", "bedrag_per_jaar": 50000.0, "herverdeel_pct": 0.0},
+                    ]
+                },
+            )
+
+            # Traceability-ready demo: one packaging lot + one production batch consuming it.
+            now_iso = datetime.now(UTC).isoformat()
+            dataset_store.save_dataset(
+                "trace-lots",
+                [
+                    {
+                        "id": f"lot-box-{year_value}",
+                        "kind": "purchase",
+                        "article_id": "pkg-box-24",
+                        "sku_id": "",
+                        "quantity": 100,
+                        "uom": "stuk",
+                        "received_at": now_iso,
+                        "supplier": "Demo leverancier",
+                        "external_ref": f"PO-DEMO-{year_value}",
+                    }
+                ],
+            )
+            dataset_store.save_dataset(
+                "trace-batches",
+                [
+                    {
+                        "id": f"batch-blond-33cl-{year_value}",
+                        "kind": "production",
+                        "sku_id": "sku-blond-33cl",
+                        "quantity": 1000,
+                        "uom": "stuk",
+                        "produced_at": now_iso,
+                        "external_ref": f"BREW-{year_value}-001",
+                    }
+                ],
+            )
+            dataset_store.save_dataset(
+                "trace-batch-consumptions",
+                [
+                    {
+                        "id": f"cons-box-{year_value}",
+                        "batch_id": f"batch-blond-33cl-{year_value}",
+                        "component_lot_id": f"lot-box-{year_value}",
+                        "component_article_id": "pkg-box-24",
+                        "component_sku_id": "",
+                        "quantity": 1,
+                        "uom": "stuk",
+                    }
+                ],
+            )
+
+            # Minimal year strategy for sell-in (opslag %) so prices are non-zero.
+            verkoopstrategie = [
+                {
+                    "id": f"verkoopstrategie-{year_value}",
+                    "record_type": "jaarstrategie",
+                    "jaar": year_value,
+                    "sell_in_margins": {"horeca": 25, "retail": 20, "slijterij": 20, "zakelijk": 20},
+                }
+            ]
+
+            # Definitive cost versions for each beer + the giftpack (2 active, IPA 33cl NOT active).
+            def _snapshot_for_beer(beer_id: str, base_cost_per_liter: float) -> list[dict[str, Any]]:
+                rows: list[dict[str, Any]] = []
+                for sku in skus:
+                    if str(sku.get("beer_id", "") or "") != beer_id:
+                        continue
+                    fmt_id = str(sku.get("format_article_id", "") or "")
+                    fmt_row = next((f for f in formats if str(f.get("id", "")) == fmt_id), None)
+                    liters_per_unit = float((fmt_row or {}).get("content_liter", 0.0) or 0.0)
+                    pack_label = str((fmt_row or {}).get("name", "") or fmt_id)
+                    kostprijs = round(base_cost_per_liter * max(liters_per_unit, 0.0), 4)
+                    vaste_kosten_row = round(kostprijs * 0.2, 4) if kostprijs > 0 else 0.0
+                    rows.append(
+                        {
+                            "sku_id": str(sku.get("id", "") or ""),
+                            "product_type": "sku",
+                            "product_id": fmt_id,
+                            "verpakking": pack_label,
+                            "verpakking_label": pack_label,
+                            "liters_per_product": liters_per_unit,
+                            "kostprijs": kostprijs,
+                            "vaste_kosten": vaste_kosten_row,
+                        }
+                    )
+                return rows
+
+            kostprijsversies = [
+                {
+                    "id": f"kostprijs-blond-{year_value}",
+                    "jaar": year_value,
+                    "status": "definitief",
+                    "bier_id": "beer-blond",
+                    "type": "productie",
+                    "is_actief": True,
+                    "kostprijs": 2.0,
+                    "basisgegevens": {"jaar": year_value, "biernaam": "Berlewalde Blond", "stijl": "Blond", "alcoholpercentage": 6.0, "belastingsoort": "Accijns", "tarief_accijns": "Hoog", "btw_tarief": "21%"},
+                    "resultaat_snapshot": {"producten": {"basisproducten": _snapshot_for_beer("beer-blond", 2.0), "samengestelde_producten": []}},
+                },
+                {
+                    "id": f"kostprijs-ipa-{year_value}",
+                    "jaar": year_value,
+                    "status": "definitief",
+                    "bier_id": "beer-ipa",
+                    "type": "productie",
+                    "is_actief": True,
+                    "kostprijs": 2.2,
+                    "basisgegevens": {"jaar": year_value, "biernaam": "Berlewalde IPA", "stijl": "IPA", "alcoholpercentage": 6.6, "belastingsoort": "Accijns", "tarief_accijns": "Hoog", "btw_tarief": "21%"},
+                    "resultaat_snapshot": {"producten": {"basisproducten": _snapshot_for_beer("beer-ipa", 2.2), "samengestelde_producten": []}},
+                },
+                {
+                    "id": f"kostprijs-triple-{year_value}",
+                    "jaar": year_value,
+                    "status": "definitief",
+                    "bier_id": "beer-triple",
+                    "type": "inkoop",
+                    "is_actief": True,
+                    "kostprijs": 3.0,
+                    "basisgegevens": {"jaar": year_value, "biernaam": "Berlewalde Triple", "stijl": "Triple", "alcoholpercentage": 9.0, "belastingsoort": "Accijns", "tarief_accijns": "Hoog", "btw_tarief": "21%"},
+                    "resultaat_snapshot": {"producten": {"basisproducten": _snapshot_for_beer("beer-triple", 3.0), "samengestelde_producten": []}},
+                },
+                {
+                    "id": f"kostprijs-giftpack-{year_value}",
+                    "jaar": year_value,
+                    "status": "definitief",
+                    "bier_id": "",
+                    "type": "bundle",
+                    "is_actief": True,
+                    "kostprijs": 10.0,
+                    "basisgegevens": {"jaar": year_value, "biernaam": "Giftpack 4x33cl (2x Blond, 2x IPA)", "btw_tarief": "21%", "article_id": "bundle-giftpack-4", "sku_id": "sku-bundle-giftpack-4"},
+                    "resultaat_snapshot": {"producten": {"basisproducten": [], "samengestelde_producten": []}},
+                },
+            ]
+            postgres_storage.save_dataset("kostprijsversies", kostprijsversies, overwrite=True)
+
+            dataset_store.save_dataset(
+                "kostprijsproductactiveringen",
+                [
+                    {"sku_id": "sku-blond-33cl", "jaar": year_value, "kostprijsversie_id": f"kostprijs-blond-{year_value}"},
+                    {"sku_id": "sku-bundle-giftpack-4", "jaar": year_value, "kostprijsversie_id": f"kostprijs-giftpack-{year_value}"},
+                ],
+            )
+
+            # Pricing (verkoopprijzen): year strategy only; product prices derive from cost * opslag%.
+            dataset_store.save_dataset("verkoopprijzen", verkoopstrategie)
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return {
+        "ok": True,
+        "year": year_value,
+        "seeded": {
+            "articles": len(packaging_components) + len(formats) + len(bundle_articles),
+            "bom_lines": len(bom_lines) + len(bundle_bom_lines),
+            "skus": len(skus) + len(bundle_skus),
+            "bieren": len(beers),
+            "packaging_component_prices": len(packaging_component_prices),
+            "with_demo": bool(with_demo),
+        },
+    }
 
 
 @router.get("/dev/seed/audit")

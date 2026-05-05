@@ -9,22 +9,7 @@ import type {
   ScenarioId,
 } from "@/components/offerte-samenstellen/types";
 
-export function euro(value: number) {
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-  }).format(Number.isFinite(value) ? value : 0);
-}
-
-export function clampNumber(value: unknown, fallback: number) {
-  const num = typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
-  return Number.isFinite(num) ? num : fallback;
-}
-
-export function normalizeText(value: unknown) {
-  return String(value ?? "").trim();
-}
+export { euro, clampNumber, normalizeText } from "./offerteSamenstellenUi";
 
 export function inferUnitFromPack(pack: string): QuoteProductUnit {
   const text = pack.toLowerCase();
@@ -131,6 +116,9 @@ export function createInitialQuoteFormState(): QuoteFormState {
 }
 
 export function getProductRef(product: QuoteProduct) {
+  if (product.source?.sku_id) {
+    return `sku:${String(product.source.sku_id)}`;
+  }
   if (product.source?.bier_id && product.source?.product_id) {
     return `beer:${String(product.source.bier_id)}:product:${String(product.source.product_id)}`;
   }

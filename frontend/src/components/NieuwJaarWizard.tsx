@@ -7,16 +7,74 @@ import { usePageShellHeader } from "@/components/PageShell";
 import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
 import { WizardSteps } from "@/components/WizardSteps";
 import { API_BASE_URL } from "@/lib/api";
-import { computeVasteKostenTotals } from "@/lib/kostprijsEngine";
 import {
-  createPackagingResolvers,
-  computeAccijnsForLiters as computeAccijnsForLitersEngine,
-  computeFixedCostPerLiter as computeFixedCostPerLiterEngine
-} from "@/lib/kostprijsSnapshotEngine";
+  clampInt,
+  clampNumber,
+  formatEur,
+  normalizePackagingComponent,
+  normalizePackagingPriceRow,
+  normalizeTariefRow,
+  type PackagingComponent,
+  type PackagingPriceRow,
+  type TariefRow,
+} from "@/components/nieuw-jaar/nieuwJaarWizardUtils";
+import { buildPreviewRows, type PreviewRow } from "@/components/nieuw-jaar/nieuwJaarWizardPreview";
+import { PreviewStep } from "@/components/nieuw-jaar/steps/PreviewStep";
+import { AfrondenStep } from "@/components/nieuw-jaar/steps/AfrondenStep";
+import { SelectYearsStep } from "@/components/nieuw-jaar/steps/SelectYearsStep";
+import { InitializeConceptStep } from "@/components/nieuw-jaar/steps/InitializeConceptStep";
+import { ProductieTargetsStep } from "@/components/nieuw-jaar/steps/ProductieTargetsStep";
+import { TarievenTargetsStep } from "@/components/nieuw-jaar/steps/TarievenTargetsStep";
+import { VasteKostenTargetsStep } from "@/components/nieuw-jaar/steps/VasteKostenTargetsStep";
+import { PackagingPricesTargetsStep } from "@/components/nieuw-jaar/steps/PackagingPricesTargetsStep";
+import { InkoopScenarioStep } from "@/components/nieuw-jaar/steps/InkoopScenarioStep";
+import { EigenProductieReceptenStep } from "@/components/nieuw-jaar/steps/EigenProductieReceptenStep";
+import { KostprijsReadOnlyStep } from "@/components/nieuw-jaar/steps/KostprijsReadOnlyStep";
+import { VerkoopstrategieDraftStep } from "@/components/nieuw-jaar/steps/VerkoopstrategieDraftStep";
+import { AdviesprijzenTargetsStep } from "@/components/nieuw-jaar/steps/AdviesprijzenTargetsStep";
+import {
+  buildKostprijsTargetRows,
+  type KostprijsPreviewRow,
+} from "@/components/nieuw-jaar/nieuwJaarWizardKostprijsTarget";
+import {
+  commitNewYear,
+  deleteNewYearDraft,
+  fetchBootstrap,
+  getNewYearDraft,
+  putNewYearDraft,
+} from "@/components/nieuw-jaar/nieuwJaarWizardIo";
+import { QuickCell as NieuwJaarQuickCell, TrashIcon as NieuwJaarTrashIcon } from "@/components/nieuw-jaar/NieuwJaarWizardParts";
+import { createUiId, sanitizeVasteKostenTarget, vasteKostenKey } from "@/components/nieuw-jaar/nieuwJaarWizardDerivations";
+import {
+  calcSellInPrice as calcSellInPriceFromMargin,
+  computeAccijnsForLiters as computeAccijnsForLitersDerived,
+  computeDirectFixedCostPerProductieLiter as computeDirectFixedCostPerProductieLiterForYear,
+  computeFixedCostPerLiter,
+  computeHerverdelingTotals,
+  computeIndirectFixedCostPerInkoopLiter as computeIndirectFixedCostPerInkoopLiterForYear,
+} from "@/components/nieuw-jaar/nieuwJaarWizardPricing";
+import {
+  buildBasisParentForStrategy,
+  effectiveSourceMargin as effectiveSourceMarginDerived,
+  explicitSourceSellInPrice as explicitSourceSellInPriceDerived,
+  followProductIdForStrategy as followProductIdForStrategyDerived,
+  getStrategyRowsForYear as getStrategyRowsForYearDerived,
+  readMarginFromStrategyRow,
+  readSellInPriceFromStrategyRow,
+} from "@/components/nieuw-jaar/nieuwJaarWizardStrategy";
+import {
+  calculateEigenProductieKostenRecept as calculateEigenProductieKostenReceptDerived,
+  calculateEigenProductiePrijsPerEenheid as calculateEigenProductiePrijsPerEenheidDerived,
+  computeEigenProductieReceptTotals as computeEigenProductieReceptTotalsDerived,
+  computeMarginFromSellIn as computeMarginFromSellInDerived,
+  computeSellInPrice as computeSellInPriceDerived,
+} from "@/components/nieuw-jaar/nieuwJaarWizardScenarioMath";
 
 type GenericRecord = Record<string, unknown>;
 type ProductieMap = Record<string, GenericRecord>;
 type VasteKostenMap = Record<string, GenericRecord[]>;
+
+const calcSellInPrice = calcSellInPriceFromMargin;
 
 type VasteKostenUiRow = {
   uiId: string;
@@ -25,26 +83,6 @@ type VasteKostenUiRow = {
   bedrag_per_jaar: number;
   herverdeel_pct: number;
   isNew: boolean;
-};
-
-type PackagingComponent = {
-  id: string;
-  omschrijving: string;
-};
-
-type PackagingPriceRow = {
-  id: string;
-  verpakkingsonderdeel_id: string;
-  jaar: number;
-  prijs_per_stuk: number;
-};
-
-type TariefRow = {
-  id: string;
-  jaar: number;
-  tarief_hoog: number;
-  tarief_laag: number;
-  verbruikersbelasting: number;
 };
 
 type ProductieYear = {
@@ -59,32 +97,6 @@ type WizardStep = {
   description: string;
   panelTitle: string;
   panelDescription: string;
-};
-
-type PreviewRow = {
-  bierId: string;
-  biernaam: string;
-  productId: string;
-  productType: "basis" | "samengesteld" | "";
-  calcType: "inkoop" | "eigen_productie";
-  productLabel: string;
-  sourcePrimaryCost: number;
-  sourceCost: number;
-  estimatedTargetCost: number;
-  delta: number;
-  sellIn: Record<string, number>;
-};
-
-type KostprijsPreviewRow = {
-  biernaam: string;
-  soort: string;
-  product_type: "basis" | "samengesteld";
-  verpakkingseenheid: string;
-  primaire_kosten: number;
-  verpakkingskosten: number;
-  vaste_kosten: number;
-  accijns: number;
-  kostprijs: number;
 };
 
 type PricingMode = "keep_price" | "scale_cost_ratio" | "keep_margin" | "free";
@@ -130,64 +142,6 @@ type AdviesprijsRow = {
   channel_code: string;
   opslag_pct: number;
 };
-
-function normalizeTariefRow(raw: GenericRecord): TariefRow {
-  return {
-    id: String(raw.id ?? ""),
-    jaar: Number(raw.jaar ?? 0),
-    tarief_hoog: Number(raw.tarief_hoog ?? 0),
-    tarief_laag: Number(raw.tarief_laag ?? 0),
-    verbruikersbelasting: Number(raw.verbruikersbelasting ?? 0)
-  };
-}
-
-function normalizePackagingComponent(raw: GenericRecord): PackagingComponent {
-  return {
-    id: String(raw.id ?? ""),
-    omschrijving: String(raw.omschrijving ?? "")
-  };
-}
-
-function normalizePackagingPriceRow(raw: GenericRecord): PackagingPriceRow {
-  return {
-    id: String(raw.id ?? ""),
-    verpakkingsonderdeel_id: String(raw.verpakkingsonderdeel_id ?? ""),
-    jaar: Number(raw.jaar ?? 0),
-    prijs_per_stuk: Number(raw.prijs_per_stuk ?? 0)
-  };
-}
-
-function clampInt(value: unknown, fallback: number) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.trunc(parsed);
-}
-
-function clampNumber(value: unknown, fallback: number) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return parsed;
-}
-
-function formatEur(value: number) {
-  return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(value);
-}
-
-function snapshotProductCostFromRecord(record: any, productId: string) {
-  const producten = record?.resultaat_snapshot?.producten;
-  const rows = [
-    ...(Array.isArray(producten?.basisproducten) ? producten.basisproducten : []),
-    ...(Array.isArray(producten?.samengestelde_producten) ? producten.samengestelde_producten : [])
-  ];
-  const found = rows.find((row: any) => String(row.product_id ?? "") === productId) ?? null;
-  if (!found) return null;
-  return {
-    kostprijs: Number(found.kostprijs ?? 0),
-    primaireKosten: Number(found.primaire_kosten ?? found.primaireKosten ?? 0),
-    productType: String(found.product_type ?? ""),
-    productLabel: String(found.verpakking ?? found.verpakkingseenheid ?? found.omschrijving ?? productId)
-  };
-}
 
 export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const router = useRouter();
@@ -344,19 +298,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     return [...passthrough, ...otherStrategy, ...draft];
   }, [STRATEGY_RECORD_TYPES, currentVerkoopprijzen, draftVerkoopstrategieTarget, targetYear]);
 
-  function createUiId() {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-      return crypto.randomUUID();
-    }
-    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-
-  function vasteKostenKey(row: { omschrijving?: unknown; kostensoort?: unknown }) {
-    return `${String(row.omschrijving ?? "").trim().toLowerCase()}||${String(row.kostensoort ?? "")
-      .trim()
-      .toLowerCase()}`;
-  }
-
   const sourceVasteKostenRows = useMemo(() => {
     const rawRows = ((currentVasteKosten as any)?.[String(sourceYear)] ?? []) as any[];
     if (!Array.isArray(rawRows)) return [] as Array<{ idx: number; key: string; omschrijving: string; kostensoort: string; bedrag_per_jaar: number; herverdeel_pct: number }>;
@@ -440,18 +381,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     ]);
   }
 
-  function sanitizeVasteKostenTarget(rows: VasteKostenUiRow[]): GenericRecord[] {
-    return (Array.isArray(rows) ? rows : [])
-      .filter((row) => row && typeof row === "object")
-      .map((row) => ({
-        id: "",
-        omschrijving: String(row.omschrijving ?? ""),
-        kostensoort: String(row.kostensoort ?? ""),
-        bedrag_per_jaar: Number(row.bedrag_per_jaar ?? 0),
-        herverdeel_pct: Number(row.herverdeel_pct ?? 0)
-      }));
-  }
-
   function ensureEigenOverride(bierId: string): EigenProductieOverride {
     const existing = eigenProductieOverrides[bierId];
     if (existing) return existing;
@@ -526,7 +455,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
         tarief_laag: Number(draftTariefTarget.tarief_laag ?? 0),
         verbruikersbelasting: Number(draftTariefTarget.verbruikersbelasting ?? 0)
       },
-      vaste_kosten_target: copyVasteKosten ? sanitizeVasteKostenTarget(draftVasteKostenTarget) : undefined,
+      vaste_kosten_target: copyVasteKosten ? sanitizeVasteKostenTarget(draftVasteKostenTarget as any) : undefined,
       packaging_prices_target: copyVerpakkingsonderdelen ? packagingRows : undefined,
       verkoopstrategie_target: copyVerkoopstrategie ? draftVerkoopstrategieTarget : undefined,
       adviesprijzen_target: copyVerkoopstrategie ? draftAdviesprijzenTarget : undefined,
@@ -572,19 +501,13 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     setIsRunning(true);
     setStatus("");
     try {
-      const response = await fetch(`${API_BASE_URL}/meta/new-year-draft`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source_year: sourceYear,
-          target_year: targetYear,
-          payload: buildDraftPayload()
-        })
+      const result = await putNewYearDraft({
+        apiBaseUrl: API_BASE_URL,
+        sourceYear,
+        targetYear,
+        payload: buildDraftPayload(),
       });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Concept opslaan mislukt.");
-      }
+      if (!result.ok) throw new Error(result.text || "Concept opslaan mislukt.");
       setStatus(message ?? "Concept opgeslagen.");
       return true;
     } catch (error) {
@@ -636,11 +559,9 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   async function loadDraftFromServer() {
     setDraftStatus("loading");
     try {
-      const response = await fetch(`${API_BASE_URL}/meta/new-year-draft?target_year=${encodeURIComponent(String(targetYear))}`, {
-        cache: "no-store"
-      });
-      if (!response.ok) return;
-      const json = (await response.json()) as any;
+      const result = await getNewYearDraft({ apiBaseUrl: API_BASE_URL, targetYear });
+      if (!result.ok) return;
+      const json = result.json as any;
       const draft = json?.draft ?? null;
       if (!draft) return;
       const payload = draft?.payload ?? {};
@@ -803,23 +724,22 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   }
 
   async function refreshFromServer() {
-    const bootstrap = await fetch(
-      `${API_BASE_URL}/meta/bootstrap?datasets=${encodeURIComponent(
-        [
-          "productie",
-          "vaste-kosten",
-          "tarieven-heffingen",
-          "packaging-component-prices",
-          "verkoopprijzen",
-          "adviesprijzen",
-          "berekeningen",
-          "kostprijsproductactiveringen"
-        ].join(",")
-      )}&navigation=false`,
-      { cache: "no-store" }
-    );
-    if (!bootstrap.ok) return;
-    const data = (await bootstrap.json()) as any;
+    const result = await fetchBootstrap({
+      apiBaseUrl: API_BASE_URL,
+      datasets: [
+        "productie",
+        "vaste-kosten",
+        "tarieven-heffingen",
+        "packaging-component-prices",
+        "verkoopprijzen",
+        "adviesprijzen",
+        "berekeningen",
+        "kostprijsproductactiveringen"
+      ],
+      navigation: false,
+    });
+    if (!result.ok) return;
+    const data = result.json as any;
     const datasets = (data?.datasets ?? {}) as Record<string, unknown>;
 
     setCurrentProductie((datasets["productie"] as any) ?? {});
@@ -923,9 +843,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     setIsRunning(true);
     setStatus("");
     try {
-      await fetch(`${API_BASE_URL}/meta/new-year-draft?target_year=${encodeURIComponent(String(targetYear))}`, {
-        method: "DELETE"
-      });
+      const result = await deleteNewYearDraft({ apiBaseUrl: API_BASE_URL, targetYear });
+      if (!result.ok) throw new Error(result.text || "Concept verwijderen mislukt.");
       setCompletedStepIds([]);
       setScenarioPrimaryCosts({});
       setDraftPackagingPrices({});
@@ -966,31 +885,24 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     setStatus("");
     setCommitConflict("");
     try {
-      const response = await fetch(`${API_BASE_URL}/meta/commit-new-year`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source_year: sourceYear,
-          target_year: targetYear,
-          copy_productie: copyProductie,
-          copy_vaste_kosten: copyVasteKosten,
-          copy_tarieven: copyTarieven,
-          copy_verpakkingsonderdelen: copyVerpakkingsonderdelen,
-          copy_verkoopstrategie: copyVerkoopstrategie,
-          copy_berekeningen: false,
-          force: false,
-          payload: buildDraftPayload()
-        })
+      const result = await commitNewYear({
+        apiBaseUrl: API_BASE_URL,
+        sourceYear,
+        targetYear,
+        copyProductie,
+        copyVasteKosten,
+        copyTarieven,
+        copyVerpakkingsonderdelen,
+        copyVerkoopstrategie,
+        copyBerekeningen: false,
+        force: false,
+        payload: buildDraftPayload(),
       });
-      if (response.status === 409) {
-        const text = await response.text();
-        setCommitConflict(text || "Bronjaar is gewijzigd sinds dit concept is gestart.");
+      if (!result.ok && result.status === 409) {
+        setCommitConflict(result.text || "Bronjaar is gewijzigd sinds dit concept is gestart.");
         throw new Error("Conflict bij afronden. Zie melding hieronder.");
       }
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Afronden mislukt.");
-      }
+      if (!result.ok) throw new Error(result.text || "Afronden mislukt.");
       await refreshFromServer();
       setStatus(`Definitief opgeslagen: jaar ${targetYear} is aangemaakt.`);
       // Next step in the workflow: activate cost prices for the new year.
@@ -1015,26 +927,20 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     setIsRunning(true);
     setStatus("");
     try {
-      const response = await fetch(`${API_BASE_URL}/meta/commit-new-year`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source_year: sourceYear,
-          target_year: targetYear,
-          copy_productie: copyProductie,
-          copy_vaste_kosten: copyVasteKosten,
-          copy_tarieven: copyTarieven,
-          copy_verpakkingsonderdelen: copyVerpakkingsonderdelen,
-          copy_verkoopstrategie: copyVerkoopstrategie,
-          copy_berekeningen: false,
-          force: true,
-          payload: buildDraftPayload()
-        })
+      const result = await commitNewYear({
+        apiBaseUrl: API_BASE_URL,
+        sourceYear,
+        targetYear,
+        copyProductie,
+        copyVasteKosten,
+        copyTarieven,
+        copyVerpakkingsonderdelen,
+        copyVerkoopstrategie,
+        copyBerekeningen: false,
+        force: true,
+        payload: buildDraftPayload(),
       });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Afronden mislukt.");
-      }
+      if (!result.ok) throw new Error(result.text || "Afronden mislukt.");
       await refreshFromServer();
       setCommitConflict("");
       setStatus(`Definitief opgeslagen: jaar ${targetYear} is aangemaakt.`);
@@ -1165,17 +1071,6 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     }
   }
 
-  function calcSellInPrice(cost: number, marginPct: number) {
-    const margin = Number(marginPct ?? 0);
-    if (!Number.isFinite(margin)) return cost;
-    if (margin >= 100) return cost;
-    return cost / Math.max(0.0001, 1 - margin / 100);
-  }
-
-  function computeHerverdelingTotals(rows: Array<Record<string, unknown>>) {
-    return computeVasteKostenTotals(rows as any);
-  }
-
   function fixedCostRowsForYear(year: number): Array<Record<string, unknown>> {
     const rows =
       year === targetYear
@@ -1185,176 +1080,89 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   }
 
   function computeIndirectFixedCostPerInkoopLiter(year: number) {
-    return computeFixedCostPerLiterEngine({
-      calcType: "inkoop",
+    return computeIndirectFixedCostPerInkoopLiterForYear({
       year,
-      productieYear: getProductieForYear(year) as any,
-      vasteKostenRows: fixedCostRowsForYear(year) as any
+      productieYear: getProductieForYear(year),
+      vasteKostenRows: fixedCostRowsForYear(year)
     });
   }
 
   function computeDirectFixedCostPerProductieLiter(year: number) {
-    return computeFixedCostPerLiterEngine({
-      calcType: "eigen_productie",
+    return computeDirectFixedCostPerProductieLiterForYear({
       year,
-      productieYear: getProductieForYear(year) as any,
-      vasteKostenRows: fixedCostRowsForYear(year) as any
+      productieYear: getProductieForYear(year),
+      vasteKostenRows: fixedCostRowsForYear(year)
     });
   }
 
   function computeAccijnsForLiters(year: number, record: any, liters: number) {
-    const basis = typeof record?.basisgegevens === "object" && record?.basisgegevens ? record.basisgegevens : {};
-    const bierSnap = typeof record?.bier_snapshot === "object" && record?.bier_snapshot ? record.bier_snapshot : {};
-    if (!Number.isFinite(liters) || liters <= 0) return 0;
-
-    const tariefRow =
-      year === targetYear
-        ? draftTariefTarget
-        : getTariefForYear(year);
-    if (!tariefRow) return 0;
-
-    return computeAccijnsForLitersEngine({
-      year,
-      liters,
-      basisgegevens: basis,
-      bierSnapshot: bierSnap,
-      tarievenHeffingenRow: tariefRow
-    });
+    const tariefRow = year === targetYear ? draftTariefTarget : getTariefForYear(year);
+    return computeAccijnsForLitersDerived({ year, record, liters, tarievenHeffingenRow: tariefRow });
   }
 
   function calculateEigenProductiePrijsPerEenheid(regel: Partial<IngredientRule>) {
-    const prijs = Number(regel.prijs ?? 0);
-    const hoeveelheid = Number(regel.hoeveelheid ?? 0);
-    if (!Number.isFinite(prijs) || !Number.isFinite(hoeveelheid) || hoeveelheid <= 0) return 0;
-    return prijs / hoeveelheid;
+    return calculateEigenProductiePrijsPerEenheidDerived(regel as any);
   }
 
   function calculateEigenProductieKostenRecept(regel: Partial<IngredientRule>) {
-    return calculateEigenProductiePrijsPerEenheid(regel) * Number(regel.benodigd_in_recept ?? 0);
+    return calculateEigenProductieKostenReceptDerived(regel as any);
   }
 
   function computeEigenProductieReceptTotals(override: EigenProductieOverride | null, batchGrootteLiters: number) {
-    const regels = override?.ingredienten ?? [];
-    const leveranciersTotaal = regels.reduce((sum, regel) => sum + Number(regel.prijs ?? 0), 0);
-    const receptTotaal = regels.reduce((sum, regel) => sum + calculateEigenProductieKostenRecept(regel), 0);
-    const literPrijs = batchGrootteLiters > 0 ? receptTotaal / batchGrootteLiters : 0;
-    return {
-      leveranciersTotaal,
-      receptTotaal,
-      literPrijs
-    };
+    return computeEigenProductieReceptTotalsDerived(override as any, batchGrootteLiters);
   }
 
   // NOTE: In verkoopstrategie we persist opslag% as the source of truth (legacy field name `sell_in_margins`).
   function computeSellInPrice(cost: number, opslagPct: number) {
-    const c = clampNumber(cost, 0);
-    const o = clampNumber(opslagPct, 0);
-    return c * (1 + o / 100);
+    return computeSellInPriceDerived(cost, opslagPct);
   }
 
   function computeMarginFromSellIn(cost: number, sellIn: number) {
     // Backwards-compatible name; this now returns opslag% derived from sell-in price.
-    const c = clampNumber(cost, 0);
-    const p = clampNumber(sellIn, 0);
-    if (!Number.isFinite(c) || !Number.isFinite(p) || c <= 0) return 0;
-    const opslag = (p / c - 1) * 100;
-    if (!Number.isFinite(opslag)) return 0;
-    return Math.max(0, opslag);
+    return computeMarginFromSellInDerived(cost, sellIn);
   }
 
   const basisParentForStrategy = useMemo(() => {
-    const compositeDefs = (Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : [])
-      .filter((row) => typeof row === "object" && row !== null)
-      .map((row) => row as any);
-
-    const basisParentMap = new Map<string, { productId: string; label: string; score: number }[]>();
-    compositeDefs.forEach((row) => {
-      const compositeId = String(row.id ?? "");
-      const compositeLabel = String(row.omschrijving ?? "");
-      const basisRows = Array.isArray(row.basisproducten) ? row.basisproducten : [];
-      basisRows.forEach((basisRow: any) => {
-        const basisId = String(basisRow.basisproduct_id ?? "");
-        if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) return;
-        const current = basisParentMap.get(basisId) ?? [];
-        const scoreRaw = Number(basisRow.aantal ?? 0);
-        const score = Number.isFinite(scoreRaw) ? scoreRaw : 0;
-        current.push({ productId: compositeId, label: compositeLabel, score });
-        basisParentMap.set(basisId, current);
-      });
-    });
-
-    const resolved = new Map<string, { productId: string; label: string }>();
-    for (const [basisId, items] of basisParentMap.entries()) {
-      if (!items || items.length === 0) continue;
-      const sorted = [...items].sort((left, right) => {
-        const scoreDiff = Number(right.score ?? 0) - Number(left.score ?? 0);
-        if (scoreDiff !== 0) return scoreDiff;
-        const labelDiff = String(left.label ?? "").localeCompare(String(right.label ?? ""), "nl-NL");
-        if (labelDiff !== 0) return labelDiff;
-        return String(left.productId ?? "").localeCompare(String(right.productId ?? ""));
-      });
-      resolved.set(basisId, { productId: sorted[0].productId, label: sorted[0].label });
-    }
-    return resolved;
+    return buildBasisParentForStrategy(Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : []);
   }, [initialSamengesteldeProducten]);
 
   function followProductIdForStrategy(productId: string, productType: string) {
-    if (productType !== "basis") return "";
-    return basisParentForStrategy.get(productId)?.productId ?? "";
+    return followProductIdForStrategyDerived({ productId, productType, basisParentForStrategy });
   }
 
   function getStrategyRowsForYear(year: number) {
-    const rows = Array.isArray(currentVerkoopprijzen) ? currentVerkoopprijzen : [];
-    return rows.filter((row) => STRATEGY_RECORD_TYPES.has(String((row as any)?.record_type ?? "")) && Number((row as any)?.jaar ?? 0) === year) as any[];
-  }
-
-  function readMarginFromStrategyRow(row: any, channel: string): number | null {
-    const margins = row?.sell_in_margins ?? row?.kanaalmarges ?? {};
-    if (!margins || typeof margins !== "object") return null;
-    const raw = (margins as any)[channel];
-    if (raw === "" || raw === null || raw === undefined) return null;
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return null;
-    return parsed;
-  }
-
-  function readSellInPriceFromStrategyRow(row: any, channel: string): number | null {
-    const prices = row?.sell_in_prices ?? row?.kanaalprijzen ?? {};
-    if (!prices || typeof prices !== "object") return null;
-    const raw = (prices as any)[channel];
-    if (raw === "" || raw === null || raw === undefined) return null;
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return null;
-    return parsed;
+    return getStrategyRowsForYearDerived({
+      rows: Array.isArray(currentVerkoopprijzen) ? currentVerkoopprijzen : [],
+      year,
+      strategyRecordTypes: STRATEGY_RECORD_TYPES,
+    });
   }
 
   function effectiveSourceMargin(bierId: string, productId: string, productType: string, channel: string, defaultMargin: number) {
-    const followId = followProductIdForStrategy(productId, productType);
-    const keyProductId = followId || productId;
-    const rows = getStrategyRowsForYear(sourceYear);
-    const beerRow =
-      rows.find((row) => String(row.record_type ?? "") === "verkoopstrategie_product" && String(row.bier_id ?? "") === bierId && String(row.product_id ?? "") === keyProductId) ??
-      null;
-    const beerMargin = readMarginFromStrategyRow(beerRow, channel);
-    if (beerMargin !== null) return beerMargin;
-    const packRow =
-      rows.find((row) => String(row.record_type ?? "") === "verkoopstrategie_verpakking" && String(row.product_id ?? "") === keyProductId) ?? null;
-    const packMargin = readMarginFromStrategyRow(packRow, channel);
-    if (packMargin !== null) return packMargin;
-    const yearRow = rows.find((row) => String(row.record_type ?? "") === "jaarstrategie") ?? null;
-    const yearMargin = readMarginFromStrategyRow(yearRow, channel);
-    if (yearMargin !== null) return yearMargin;
-    return defaultMargin;
+    return effectiveSourceMarginDerived({
+      bierId,
+      productId,
+      productType,
+      channel,
+      defaultMargin,
+      sourceYear,
+      verkoopprijzen: Array.isArray(currentVerkoopprijzen) ? currentVerkoopprijzen : [],
+      strategyRecordTypes: STRATEGY_RECORD_TYPES,
+      basisParentForStrategy,
+    });
   }
 
   function explicitSourceSellInPrice(bierId: string, productId: string, productType: string, channel: string): number | null {
-    const followId = followProductIdForStrategy(productId, productType);
-    const keyProductId = followId || productId;
-    const rows = getStrategyRowsForYear(sourceYear);
-    const beerRow =
-      rows.find((row) => String(row.record_type ?? "") === "verkoopstrategie_product" && String(row.bier_id ?? "") === bierId && String(row.product_id ?? "") === keyProductId) ??
-      null;
-    return readSellInPriceFromStrategyRow(beerRow, channel);
+    return explicitSourceSellInPriceDerived({
+      bierId,
+      productId,
+      productType,
+      channel,
+      sourceYear,
+      verkoopprijzen: Array.isArray(currentVerkoopprijzen) ? currentVerkoopprijzen : [],
+      strategyRecordTypes: STRATEGY_RECORD_TYPES,
+      basisParentForStrategy,
+    });
   }
 
   async function applyPricingScenario() {
@@ -1457,252 +1265,33 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   }
 
   const previewRows = useMemo<PreviewRow[]>(() => {
-    // Preview is intentionally "indicative": we adjust source-year cost by deltas we can derive
-    // from the yearset (fixed costs per liter + packaging component prices).
-
-    const baseDefs = (Array.isArray(initialBasisproducten) ? initialBasisproducten : [])
-      .filter((row) => typeof row === "object" && row !== null)
-      .map((row) => row as any);
-    const compositeDefs = (Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : [])
-      .filter((row) => typeof row === "object" && row !== null)
-      .map((row) => row as any);
-
-    const { packagingCost, litersPerUnit } = createPackagingResolvers({
-      baseDefs,
-      compositeDefs,
-      packagingPrices: currentPackagingPrices as any,
+    return buildPreviewRows({
+      initialBasisproducten,
+      initialSamengesteldeProducten,
+      initialBieren,
+      currentPackagingPrices,
       draftPackagingPrices,
-      draftYear: targetYear
+      sourceYear,
+      targetYear,
+      currentBerekeningen,
+      currentActivations,
+      currentVerkoopprijzen,
+      draftVerkoopstrategieTarget,
+      currentTarieven,
+      currentProductie,
+      currentVasteKosten,
+      draftProductieTarget,
+      draftTariefTarget,
+      draftVasteKostenTarget,
+      eigenProductieOverrides,
+      scenarioPrimaryCosts,
+      getProductieForYear,
+      computeIndirectFixedCostPerInkoopLiter,
+      computeDirectFixedCostPerProductieLiter,
+      computeAccijnsForLiters,
+      computeEigenProductieReceptTotals,
+      calcSellInPrice,
     });
-
-    const versionById = new Map<string, any>();
-    (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((record: any) => {
-      const basis = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? record.basisgegevens : {};
-      const jaar = Number(record.jaar ?? basis.jaar ?? 0);
-      const statusVal = String(record.status ?? "").toLowerCase();
-      if (jaar !== sourceYear || statusVal !== "definitief") return;
-      const id = String(record.id ?? "");
-      if (id) versionById.set(id, record);
-    });
-
-    const latestActivationByKey = new Map<string, any>();
-    (Array.isArray(currentActivations) ? currentActivations : []).forEach((row: any) => {
-      if (Number(row.jaar ?? 0) !== sourceYear) return;
-      const bierId = String(row.bier_id ?? "");
-      const productId = String(row.product_id ?? "");
-      if (!bierId || !productId) return;
-      const key = `${bierId}::${productId}`;
-      const current = latestActivationByKey.get(key);
-      const ts = String(row.effectief_vanaf ?? row.updated_at ?? "");
-      const curTs = String(current?.effectief_vanaf ?? current?.updated_at ?? "");
-      if (!current || ts.localeCompare(curTs) > 0) {
-        latestActivationByKey.set(key, row);
-      }
-    });
-
-    const bierNameById = new Map<string, string>();
-    (Array.isArray(initialBieren) ? initialBieren : []).forEach((row: any) => {
-      const id = String(row.id ?? "");
-      const naam = String(row.naam ?? row.biernaam ?? "");
-      if (id && naam) bierNameById.set(id, naam);
-    });
-
-    const channels = [
-      { code: "horeca", naam: "Horeca", defaultMargin: 50 },
-      { code: "retail", naam: "Supermarkt", defaultMargin: 30 },
-      { code: "slijterij", naam: "Slijterij", defaultMargin: 40 },
-      { code: "zakelijk", naam: "Speciaalzaak", defaultMargin: 45 }
-    ] as const;
-
-    // Map basisproducten -> "primary" composed product so basis rows can follow their composite strategy defaults.
-    const compositeById = new Map<string, any>();
-    compositeDefs.forEach((row) => {
-      const id = String(row.id ?? "");
-      if (id) compositeById.set(id, row);
-    });
-    const basisParentMap = new Map<string, { productId: string; label: string; score: number }[]>();
-    compositeDefs.forEach((row) => {
-      const compositeId = String(row.id ?? "");
-      const compositeLabel = String(row.omschrijving ?? "");
-      const basisRows = Array.isArray(row.basisproducten) ? row.basisproducten : [];
-      basisRows.forEach((basisRow: any) => {
-        const basisId = String(basisRow.basisproduct_id ?? "");
-        if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) return;
-        const current = basisParentMap.get(basisId) ?? [];
-        const scoreRaw = Number(basisRow.aantal ?? 0);
-        const score = Number.isFinite(scoreRaw) ? scoreRaw : 0;
-        current.push({ productId: compositeId, label: compositeLabel, score });
-        basisParentMap.set(basisId, current);
-      });
-    });
-    const resolvedBasisParent = new Map<string, { productId: string; label: string }>();
-    for (const [basisId, items] of basisParentMap.entries()) {
-      if (!items || items.length === 0) continue;
-      const sorted = [...items].sort((left, right) => {
-        const scoreDiff = Number(right.score ?? 0) - Number(left.score ?? 0);
-        if (scoreDiff !== 0) return scoreDiff;
-        const labelDiff = String(left.label ?? "").localeCompare(String(right.label ?? ""), "nl-NL");
-        if (labelDiff !== 0) return labelDiff;
-        return String(left.productId ?? "").localeCompare(String(right.productId ?? ""));
-      });
-      resolvedBasisParent.set(basisId, { productId: sorted[0].productId, label: sorted[0].label });
-    }
-
-    const STRATEGY_TYPES = new Set(["jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"]);
-    const verkoopStrategyRows = (Array.isArray(draftVerkoopstrategieTarget) && draftVerkoopstrategieTarget.length > 0
-      ? draftVerkoopstrategieTarget
-      : currentVerkoopprijzen
-    )
-      .filter((row) => row && typeof row === "object" && STRATEGY_TYPES.has(String((row as any).record_type ?? "")))
-      .map((row) => row as any);
-
-    function followProductIdFor(productId: string, productType: string) {
-      if (productType !== "basis") return "";
-      return resolvedBasisParent.get(productId)?.productId ?? "";
-    }
-
-    function getYearStrategyRow(year: number) {
-      return verkoopStrategyRows.find((row) => String(row.record_type ?? "") === "jaarstrategie" && Number(row.jaar ?? 0) === year) ?? null;
-    }
-
-    function getPackagingStrategyRow(year: number, productId: string) {
-      return verkoopStrategyRows.find(
-        (row) =>
-          String(row.record_type ?? "") === "verkoopstrategie_verpakking" &&
-          Number(row.jaar ?? 0) === year &&
-          String(row.product_id ?? "") === productId
-      ) ?? null;
-    }
-
-    function getBeerStrategyRow(year: number, bierId: string, productId: string) {
-      return verkoopStrategyRows.find(
-        (row) =>
-          String(row.record_type ?? "") === "verkoopstrategie_product" &&
-          Number(row.jaar ?? 0) === year &&
-          String(row.bier_id ?? "") === bierId &&
-          String(row.product_id ?? "") === productId
-      ) ?? null;
-    }
-
-    function marginFromStrategy(row: any, code: string): number | null {
-      const margins = row?.sell_in_margins ?? row?.kanaalmarges ?? {};
-      if (!margins || typeof margins !== "object") return null;
-      const raw = (margins as any)[code];
-      if (raw === "" || raw === null || raw === undefined) return null;
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed)) return null;
-      return parsed;
-    }
-
-    function effectiveMargin(year: number, bierId: string, productId: string, productType: string, code: string, defaultMargin: number) {
-      const followId = followProductIdFor(productId, productType);
-      const keyProductId = followId || productId;
-      const beerRow = getBeerStrategyRow(year, bierId, keyProductId);
-      const beerMargin = marginFromStrategy(beerRow, code);
-      if (beerMargin !== null) return beerMargin;
-      const packRow = getPackagingStrategyRow(year, keyProductId);
-      const packMargin = marginFromStrategy(packRow, code);
-      if (packMargin !== null) return packMargin;
-      const yearRow = getYearStrategyRow(year);
-      const yearMargin = marginFromStrategy(yearRow, code);
-      if (yearMargin !== null) return yearMargin;
-      return defaultMargin;
-    }
-
-    const out: PreviewRow[] = [];
-
-    latestActivationByKey.forEach((activation) => {
-      const bierId = String(activation.bier_id ?? "");
-      const productId = String(activation.product_id ?? "");
-      const versionId = String(activation.kostprijsversie_id ?? "");
-      const record = versionById.get(versionId);
-      if (!record) return;
-      const snap = snapshotProductCostFromRecord(record, productId);
-      if (!snap) return;
-
-      const sourceCost = Number(snap.kostprijs ?? 0);
-      const sourcePrimary = Number(snap.primaireKosten ?? 0);
-      const otherCost = sourceCost - sourcePrimary;
-      const scenarioKey = `${bierId}::${productId}`;
-      const scenarioPrimaryRaw = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
-        ? Number(scenarioPrimaryCosts[scenarioKey] ?? sourcePrimary)
-        : sourcePrimary;
-      const scenarioPrimary = Number.isFinite(scenarioPrimaryRaw) ? scenarioPrimaryRaw : sourcePrimary;
-      const productType = String(snap.productType ?? "");
-      const basePackaging = packagingCost(productId, productType as any, sourceYear);
-      const targetPackaging = packagingCost(productId, productType as any, targetYear);
-      const packagingDelta = targetPackaging - basePackaging;
-      const liters = litersPerUnit(productId, productType as any, targetYear);
-      const calcTypeRaw = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
-      const calcType = calcTypeRaw === "inkoop" ? "inkoop" : "eigen_productie";
-      const fixedPerLiterSource =
-        calcType === "inkoop"
-          ? computeIndirectFixedCostPerInkoopLiter(sourceYear)
-          : computeDirectFixedCostPerProductieLiter(sourceYear);
-      const fixedPerLiterTarget =
-        calcType === "inkoop"
-          ? computeIndirectFixedCostPerInkoopLiter(targetYear)
-          : computeDirectFixedCostPerProductieLiter(targetYear);
-      const fixedDelta = (fixedPerLiterTarget - fixedPerLiterSource) * Number(liters ?? 0);
-
-      const litersValue = Number(liters ?? 0);
-      const override = eigenProductieOverrides[bierId] ?? null;
-      const recordTarget =
-        calcType === "eigen_productie" && override
-          ? {
-              ...record,
-              basisgegevens: {
-                ...(typeof record?.basisgegevens === "object" && record?.basisgegevens ? record.basisgegevens : {}),
-                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
-                tarief_accijns: override.tarief_accijns
-              },
-              bier_snapshot: {
-                ...(typeof record?.bier_snapshot === "object" && record?.bier_snapshot ? record.bier_snapshot : {}),
-                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
-                tarief_accijns: override.tarief_accijns
-              }
-            }
-          : record;
-
-      const accijnsSource = computeAccijnsForLiters(sourceYear, record, litersValue);
-      const accijnsTarget = computeAccijnsForLiters(targetYear, recordTarget, litersValue);
-
-      let estimatedTargetCost = 0;
-      if (calcType === "inkoop") {
-        const scenarioBaseCost = scenarioPrimary + otherCost;
-        const accijnsDelta = accijnsTarget - accijnsSource;
-        estimatedTargetCost = scenarioBaseCost + packagingDelta + fixedDelta + accijnsDelta;
-      } else {
-        const batchGrootte = Number(getProductieForYear(targetYear)?.batchgrootte_eigen_productie_l ?? 0);
-        const totals = override ? computeEigenProductieReceptTotals(override, batchGrootte) : null;
-        const primaireTarget = totals ? totals.literPrijs * litersValue : sourcePrimary;
-        const vasteTarget = fixedPerLiterTarget * litersValue;
-        estimatedTargetCost = primaireTarget + targetPackaging + vasteTarget + accijnsTarget;
-      }
-      const sellIn = Object.fromEntries(
-        channels.map((channel) => {
-          const margin = effectiveMargin(targetYear, bierId, productId, productType, channel.code, channel.defaultMargin);
-          return [channel.code, calcSellInPrice(estimatedTargetCost, margin)];
-        })
-      ) as Record<string, number>;
-
-      out.push({
-        bierId,
-        biernaam: bierNameById.get(bierId) ?? String(((record.basisgegevens ?? {}) as any)?.biernaam ?? bierId),
-        productId,
-        productType: productType === "basis" || productType === "samengesteld" ? (productType as any) : "",
-        calcType,
-        productLabel: snap.productLabel,
-        sourcePrimaryCost: sourcePrimary,
-        sourceCost,
-        estimatedTargetCost,
-        delta: estimatedTargetCost - sourceCost,
-        sellIn
-      });
-    });
-
-    out.sort((a, b) => (a.biernaam + a.productLabel).localeCompare(b.biernaam + b.productLabel, "nl-NL"));
-    return out;
   }, [
     currentActivations,
     currentBerekeningen,
@@ -1811,141 +1400,24 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   ]);
 
   const kostprijsTargetRows = useMemo(() => {
-    const baseDefs = (Array.isArray(initialBasisproducten) ? initialBasisproducten : [])
-      .filter((row) => typeof row === "object" && row !== null)
-      .map((row) => row as any);
-    const compositeDefs = (Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : [])
-      .filter((row) => typeof row === "object" && row !== null)
-      .map((row) => row as any);
-
-    const { packagingCost, litersPerUnit } = createPackagingResolvers({
-      baseDefs,
-      compositeDefs,
-      packagingPrices: currentPackagingPrices as any,
+    return buildKostprijsTargetRows({
+      initialBasisproducten,
+      initialSamengesteldeProducten,
+      initialBieren,
+      currentPackagingPrices,
       draftPackagingPrices,
-      draftYear: targetYear
+      sourceYear,
+      targetYear,
+      currentBerekeningen,
+      currentActivations,
+      eigenProductieOverrides,
+      scenarioPrimaryCosts,
+      getProductieForYear,
+      fixedCostRowsForYear,
+      computeFixedCostPerLiter,
+      computeAccijnsForLiters,
+      computeEigenProductieReceptTotals,
     });
-
-    const versionById = new Map<string, any>();
-    (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((record: any) => {
-      const basis = typeof record.basisgegevens === "object" && record.basisgegevens !== null ? record.basisgegevens : {};
-      const jaar = Number(record.jaar ?? basis.jaar ?? 0);
-      const statusVal = String(record.status ?? "").toLowerCase();
-      if (jaar !== sourceYear || statusVal !== "definitief") return;
-      const id = String(record.id ?? "");
-      if (id) versionById.set(id, record);
-    });
-
-    const latestActivationByKey = new Map<string, any>();
-    (Array.isArray(currentActivations) ? currentActivations : []).forEach((row: any) => {
-      if (Number(row.jaar ?? 0) !== sourceYear) return;
-      const bierId = String(row.bier_id ?? "");
-      const productId = String(row.product_id ?? "");
-      if (!bierId || !productId) return;
-      const key = `${bierId}::${productId}`;
-      const current = latestActivationByKey.get(key);
-      const ts = String(row.effectief_vanaf ?? row.updated_at ?? "");
-      const curTs = String(current?.effectief_vanaf ?? current?.updated_at ?? "");
-      if (!current || ts.localeCompare(curTs) > 0) {
-        latestActivationByKey.set(key, row);
-      }
-    });
-
-    const bierNameById = new Map<string, string>();
-    (Array.isArray(initialBieren) ? initialBieren : []).forEach((row: any) => {
-      const id = String(row.id ?? "");
-      const naam = String(row.naam ?? row.biernaam ?? "");
-      if (id && naam) bierNameById.set(id, naam);
-    });
-
-    const basisRows: KostprijsPreviewRow[] = [];
-    const samengRows: KostprijsPreviewRow[] = [];
-
-    latestActivationByKey.forEach((activation) => {
-      const bierId = String(activation.bier_id ?? "");
-      const productId = String(activation.product_id ?? "");
-      const versionId = String(activation.kostprijsversie_id ?? "");
-      const record = versionById.get(versionId);
-      if (!record) return;
-      const snap = snapshotProductCostFromRecord(record, productId);
-      if (!snap) return;
-
-      const productType = String(snap.productType ?? "");
-      if (productType !== "basis" && productType !== "samengesteld") return;
-
-      const calcType = String(record?.type ?? record?.soort_berekening?.type ?? "").trim().toLowerCase();
-      const soortLabel = calcType === "inkoop" ? "Inkoop" : "Eigen productie";
-
-      const liters = Number(litersPerUnit(productId, productType as any, targetYear) ?? 0) || 0;
-      const sourcePrimary = Number(snap.primaireKosten ?? 0);
-      const scenarioKey = `${bierId}::${productId}`;
-      const scenarioPrimary = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
-        ? Number(scenarioPrimaryCosts[scenarioKey] ?? sourcePrimary)
-        : sourcePrimary;
-      let primaireKosten = Number.isFinite(scenarioPrimary) ? scenarioPrimary : sourcePrimary;
-      const override = eigenProductieOverrides[bierId] ?? null;
-      const recordTarget =
-        calcType !== "inkoop" && override
-          ? {
-              ...record,
-              basisgegevens: {
-                ...(typeof record?.basisgegevens === "object" && record?.basisgegevens ? record.basisgegevens : {}),
-                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
-                tarief_accijns: override.tarief_accijns
-              },
-              bier_snapshot: {
-                ...(typeof record?.bier_snapshot === "object" && record?.bier_snapshot ? record.bier_snapshot : {}),
-                alcoholpercentage: Number(override.alcoholpercentage ?? 0),
-                tarief_accijns: override.tarief_accijns
-              }
-            }
-          : record;
-      if (calcType !== "inkoop" && override) {
-        const batchGrootte = Number(getProductieForYear(targetYear)?.batchgrootte_eigen_productie_l ?? 0);
-        const totals = computeEigenProductieReceptTotals(override, batchGrootte);
-        primaireKosten = totals.literPrijs * liters;
-      }
-
-      const verpakkingskosten = calcType === "inkoop" ? 0 : packagingCost(productId, productType as any, targetYear);
-      const vastePerLiter = computeFixedCostPerLiterEngine({
-        calcType: calcType === "inkoop" ? "inkoop" : "eigen_productie",
-        year: targetYear,
-        productieYear: getProductieForYear(targetYear) as any,
-        vasteKostenRows: fixedCostRowsForYear(targetYear) as any
-      });
-      const vasteKosten = vastePerLiter * liters;
-      const accijns = computeAccijnsForLiters(targetYear, recordTarget, liters);
-      const kostprijs = primaireKosten + verpakkingskosten + vasteKosten + accijns;
-
-      const row: KostprijsPreviewRow = {
-        biernaam:
-          bierNameById.get(bierId) ??
-          String(((record.basisgegevens ?? {}) as any)?.biernaam ?? bierId),
-        soort: soortLabel,
-        product_type: productType as any,
-        verpakkingseenheid: String(snap.productLabel ?? productId),
-        primaire_kosten: primaireKosten,
-        verpakkingskosten,
-        vaste_kosten: vasteKosten,
-        accijns,
-        kostprijs
-      };
-
-      if (productType === "samengesteld") {
-        samengRows.push(row);
-      } else {
-        basisRows.push(row);
-      }
-    });
-
-    function sortKey(row: KostprijsPreviewRow) {
-      return `${row.biernaam}::${row.verpakkingseenheid}`;
-    }
-
-    basisRows.sort((a, b) => sortKey(a).localeCompare(sortKey(b), "nl-NL"));
-    samengRows.sort((a, b) => sortKey(a).localeCompare(sortKey(b), "nl-NL"));
-
-    return { basisRows, samengRows };
   }, [
     currentActivations,
     currentBerekeningen,
@@ -2356,7 +1828,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 aria-label="Verwijder concept"
                 title="Verwijder concept"
               >
-                <TrashIcon />
+                <NieuwJaarTrashIcon />
               </button>
             ) : null}
             <span className="pill">
@@ -2382,10 +1854,10 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
             <div className="cpq-quick">
               <div className="cpq-quick-title">Quick view</div>
               <div className="cpq-quick-grid">
-                <QuickCell label="Bronjaar" value={String(sourceYear)} />
-                <QuickCell label="Doeljaar" value={String(targetYear)} />
-                <QuickCell label="Concept" value={conceptStarted ? "Ja" : "Nee"} />
-                <QuickCell label="Actieve stap" value={`Stap ${activeStep + 1}`} />
+                <NieuwJaarQuickCell label="Bronjaar" value={String(sourceYear)} />
+                <NieuwJaarQuickCell label="Doeljaar" value={String(targetYear)} />
+                <NieuwJaarQuickCell label="Concept" value={conceptStarted ? "Ja" : "Nee"} />
+                <NieuwJaarQuickCell label="Actieve stap" value={`Stap ${activeStep + 1}`} />
               </div>
             </div>
           </aside>
@@ -2404,1455 +1876,239 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
 
           {status ? <div className="wizard-step-status">{status}</div> : null}
 
-          <div className="wizard-step-body">
-            {activeStep === 0 ? (
-              <div className="wizard-form-grid">
-              <label className="nested-field">
-                <span>Bronjaar</span>
-                <select
-                  className="dataset-input"
-                  value={String(sourceYear)}
-                  onChange={(event) => {
-                    const nextSource = clampInt(event.target.value, defaultSource);
-                    setSourceYear(nextSource);
-                    setTargetYearWithDraft(nextSource + 1);
-                  }}
-                >
-                  {yearOptions.map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="nested-field">
-                <span>Doeljaar</span>
-                <input
-                  className="dataset-input dataset-input-readonly"
-                  type="number"
-                  value={targetYear}
-                  readOnly
-                />
-              </label>
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group" />
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(1)}>
-                    Volgende
-                  </button>
-                </div>
-              </div>
-              </div>
+            <div className="wizard-step-body">
+              {activeStep === 0 ? (
+              <SelectYearsStep
+                sourceYear={sourceYear}
+                targetYear={targetYear}
+                yearOptions={yearOptions}
+                defaultSource={defaultSource}
+                clampInt={clampInt}
+                setSourceYear={setSourceYear}
+                setTargetYearWithDraft={setTargetYearWithDraft}
+                saveAndCloseButton={saveAndCloseButton}
+                navigateToStep={navigateToStep}
+              />
             ) : null}
 
             {activeStep === 1 ? (
-              <div>
-              <div className="editor-status" style={{ marginBottom: 14 }}>
-                Selecteer de stamdata die klaargezet moet worden voor <strong>{targetYear}</strong> op basis van bronjaar{" "}
-                <strong>{sourceYear}</strong>. Daarna vul je per onderdeel de nieuwe parameters voor {targetYear} in. Pas bij{" "}
-                <strong>Afronden</strong> wordt de data definitief opgeslagen en zichtbaar in de applicatie.
-                <div className="muted" style={{ marginTop: 8 }}>
-                  Niet aangevinkt: dat onderdeel wordt niet voorbereid in dit concept en de bijbehorende stap blijft uitgeschakeld.
-                </div>
-              </div>
-              <div className="record-card-grid">
-                {[
-                  ["Productie", copyProductie, setCopyProductie],
-                  ["Vaste kosten (nieuw invullen)", copyVasteKosten, setCopyVasteKosten],
-                  ["Tarieven en heffingen", copyTarieven, setCopyTarieven],
-                  ["Verpakkingsonderdelen (jaarprijzen)", copyVerpakkingsonderdelen, setCopyVerpakkingsonderdelen],
-                  ["Verkoopstrategie", copyVerkoopstrategie, setCopyVerkoopstrategie]
-                ].map(([label, value, setter]) => (
-                  <label key={String(label)} className="wizard-toggle-card">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(value)}
-                      onChange={(event) => (setter as any)(event.target.checked)}
-                    />
-                    <span>{String(label)}</span>
-                  </label>
-                ))}
-              </div>
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(0)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button primary"
-                    onClick={initializeYear}
-                    disabled={isRunning || !canInitialize || conceptStarted}
-                  >
-                    Start concept {targetYear}
-                  </button>
-                </div>
-              </div>
-              </div>
+              <InitializeConceptStep
+                sourceYear={sourceYear}
+                targetYear={targetYear}
+                copyProductie={copyProductie}
+                setCopyProductie={setCopyProductie}
+                copyVasteKosten={copyVasteKosten}
+                setCopyVasteKosten={setCopyVasteKosten}
+                copyTarieven={copyTarieven}
+                setCopyTarieven={setCopyTarieven}
+                copyVerpakkingsonderdelen={copyVerpakkingsonderdelen}
+                setCopyVerpakkingsonderdelen={setCopyVerpakkingsonderdelen}
+                copyVerkoopstrategie={copyVerkoopstrategie}
+                setCopyVerkoopstrategie={setCopyVerkoopstrategie}
+                saveAndCloseButton={saveAndCloseButton}
+                navigateToStep={navigateToStep}
+                initializeYear={initializeYear}
+                isRunning={isRunning}
+                canInitialize={canInitialize}
+                conceptStarted={conceptStarted}
+              />
             ) : null}
 
           {activeStep === 2 ? (
-            <div>
-              <div className="dataset-editor-scroll">
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "260px" }}></th>
-                      <th style={{ width: "260px" }}>Bronjaar {sourceYear}</th>
-                      <th style={{ width: "260px" }}>Doeljaar {targetYear}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      ["Hoeveelheid inkoop (L)", "hoeveelheid_inkoop_l"],
-                      ["Hoeveelheid productie (L)", "hoeveelheid_productie_l"],
-                      ["Batchgrootte eigen productie (L)", "batchgrootte_eigen_productie_l"]
-                    ].map(([label, key]) => (
-                      <tr key={String(key)}>
-                        <td>
-                          <strong>{String(label)}</strong>
-                        </td>
-                        <td>
-                          <input
-                            className="dataset-input dataset-input-readonly"
-                            type="number"
-                            value={String(Number((sourceProductie as any)?.[key] ?? 0))}
-                            readOnly
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            value={String(Number((draftProductieTarget as any)?.[key] ?? 0))}
-                            onChange={(event) =>
-                              setDraftProductieTarget((current) => ({
-                                ...current,
-                                [key]: Number(event.target.value)
-                              }))
-                            }
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(1)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={copyProductieFromSource}
-                    disabled={!sourceProductie}
-                  >
-                    Kopieer bronjaar
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={saveProductieTarget}
-                    disabled={isRunning}
-                  >
-                    Opslaan
-                  </button>
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(3)} disabled={isRunning}>
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <ProductieTargetsStep
+              sourceYear={sourceYear}
+              targetYear={targetYear}
+              sourceProductie={sourceProductie}
+              draftProductieTarget={draftProductieTarget}
+              setDraftProductieTarget={setDraftProductieTarget}
+              copyProductieFromSource={copyProductieFromSource}
+              saveProductieTarget={saveProductieTarget}
+              navigateToStep={navigateToStep}
+              saveAndCloseButton={saveAndCloseButton}
+              isRunning={isRunning}
+            />
           ) : null}
 
           {activeStep === 3 ? (
-            <div>
-              <div className="dataset-editor-scroll">
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "260px" }}></th>
-                      <th style={{ width: "260px" }}>Bronjaar {sourceYear}</th>
-                      <th style={{ width: "260px" }}>Doeljaar {targetYear}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      ["Tarief hoog", "tarief_hoog"],
-                      ["Tarief laag", "tarief_laag"],
-                      ["Verbruikersbelasting", "verbruikersbelasting"]
-                    ].map(([label, key]) => (
-                      <tr key={String(key)}>
-                        <td>
-                          <strong>{String(label)}</strong>
-                        </td>
-                        <td>
-                          <input
-                            className="dataset-input dataset-input-readonly"
-                            type="number"
-                            value={String(Number((sourceTarief as any)?.[key] ?? 0))}
-                            readOnly
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            value={String(Number((draftTariefTarget as any)?.[key] ?? 0))}
-                            onChange={(event) =>
-                              setDraftTariefTarget((current) => ({
-                                ...current,
-                                [key]: Number(event.target.value)
-                              }))
-                            }
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(2)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={copyTariefFromSource}
-                    disabled={!sourceTarief}
-                  >
-                    Kopieer bronjaar
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={saveTariefTarget}
-                    disabled={isRunning}
-                  >
-                    Opslaan
-                  </button>
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(4)} disabled={isRunning}>
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <TarievenTargetsStep
+              sourceYear={sourceYear}
+              targetYear={targetYear}
+              sourceTarief={sourceTarief}
+              draftTariefTarget={draftTariefTarget}
+              setDraftTariefTarget={setDraftTariefTarget}
+              copyTariefFromSource={copyTariefFromSource}
+              saveTariefTarget={saveTariefTarget}
+              navigateToStep={navigateToStep}
+              saveAndCloseButton={saveAndCloseButton}
+              isRunning={isRunning}
+            />
           ) : null}
 
           {activeStep === 4 ? (
-            <div>
-              <div className="editor-status" style={{ marginBottom: 14 }}>
-                Links zie je de vaste kosten van bronjaar {sourceYear} (read-only). Rechts vul je de vaste kosten voor doeljaar{" "}
-                {targetYear} in.
-              </div>
-
-              <div className="dataset-editor-scroll" style={{ marginBottom: 14 }}>
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "120px" }}>Jaar</th>
-                      <th style={{ width: "220px" }}>Directe kosten</th>
-                      <th style={{ width: "220px" }}>Indirecte kosten</th>
-                      <th style={{ width: "220px" }}>Totale kosten</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const sourceTotals = computeHerverdelingTotals(fixedCostRowsForYear(sourceYear));
-                      const targetTotals = computeHerverdelingTotals(fixedCostRowsForYear(targetYear));
-                      return [
-                        { year: targetYear, totals: targetTotals },
-                        { year: sourceYear, totals: sourceTotals },
-                      ].map(({ year, totals }) => (
-                        <tr key={String(year)}>
-                          <td>
-                            <strong>{year}</strong>
-                          </td>
-                          <td>
-                            {formatEur(totals.directAfter)}{" "}
-                            <span className="muted">(herverdeeld uit direct: {formatEur(totals.directOut)})</span>
-                          </td>
-                          <td>
-                            {formatEur(totals.indirectAfter)}{" "}
-                            <span className="muted">(herverdeeld uit indirect: {formatEur(totals.indirectOut)})</span>
-                          </td>
-                          <td>
-                            {formatEur(totals.directAfter + totals.indirectAfter)}{" "}
-                            <span className="muted">(totaal herverdeeld: {formatEur(totals.redistributedTotal)})</span>
-                          </td>
-                        </tr>
-                      ));
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="dataset-editor-scroll" style={{ marginBottom: 14 }}>
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "320px" }}>Omschrijving</th>
-                      <th style={{ width: "180px" }}>Kostensoort</th>
-                      <th style={{ width: "170px" }}>Kosten {sourceYear}</th>
-                      <th style={{ width: "150px" }}>Herverdelen %</th>
-                      <th style={{ width: "170px" }}>Kosten {targetYear}</th>
-                      <th style={{ width: "170px" }}>Herverdelen % {targetYear}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      // Match each source row to exactly one target-draft row.
-                      // We use a normalized key + queue to make it stable even with duplicates
-                      // and to avoid "no input rendered" due to spacing/casing differences.
-                      const queues = new Map<string, VasteKostenUiRow[]>();
-                      draftVasteKostenTarget
-                        .filter((row) => !row.isNew)
-                        .forEach((row) => {
-                          const key = vasteKostenKey(row);
-                          const current = queues.get(key) ?? [];
-                          current.push(row);
-                          queues.set(key, current);
-                        });
-
-                      return sourceVasteKostenRows.map((srcRow, idx) => {
-                        const queue = queues.get(srcRow.key) ?? [];
-                        const draftRow = queue.shift();
-                        queues.set(srcRow.key, queue);
-
-                        if (!draftRow) {
-                          return (
-                            <tr key={`${srcRow.key}-${idx}`}>
-                              <td>{srcRow.omschrijving}</td>
-                              <td>{srcRow.kostensoort}</td>
-                              <td>{formatEur(srcRow.bedrag_per_jaar)}</td>
-                              <td>{String(Number(srcRow.herverdeel_pct ?? 0))}</td>
-                              <td className="muted">-</td>
-                              <td className="muted">-</td>
-                            </tr>
-                          );
-                        }
-
-                        return (
-                          <tr key={draftRow.uiId}>
-                            <td>{srcRow.omschrijving}</td>
-                            <td>{srcRow.kostensoort}</td>
-                            <td>{formatEur(srcRow.bedrag_per_jaar)}</td>
-                            <td>{String(Number(srcRow.herverdeel_pct ?? 0))}</td>
-                            <td>
-                              <input
-                                className="dataset-input"
-                                type="number"
-                                value={String(Number(draftRow.bedrag_per_jaar ?? 0))}
-                                onChange={(event) =>
-                                  updateVasteKostenRow(draftRow.uiId, { bedrag_per_jaar: Number(event.target.value) })
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                className="dataset-input"
-                                type="number"
-                                value={String(Number(draftRow.herverdeel_pct ?? 0))}
-                                onChange={(event) =>
-                                  updateVasteKostenRow(draftRow.uiId, { herverdeel_pct: Number(event.target.value) })
-                                }
-                              />
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
-
-                    {draftVasteKostenTarget.filter((row) => row.isNew).map((row) => (
-                      <tr key={row.uiId}>
-                        <td>
-                          <input
-                            className="dataset-input"
-                            value={row.omschrijving}
-                            onChange={(event) => updateVasteKostenRow(row.uiId, { omschrijving: event.target.value })}
-                          />
-                        </td>
-                        <td>
-                          <select
-                            className="dataset-input"
-                            value={row.kostensoort}
-                            onChange={(event) => updateVasteKostenRow(row.uiId, { kostensoort: event.target.value })}
-                          >
-                            <option value="">(kies)</option>
-                            <option value="Directe kosten">Directe kosten</option>
-                            <option value="Indirecte kosten">Indirecte kosten</option>
-                          </select>
-                        </td>
-                        <td className="muted">0</td>
-                        <td className="muted">0</td>
-                        <td>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            value={String(Number(row.bedrag_per_jaar ?? 0))}
-                            onChange={(event) =>
-                              updateVasteKostenRow(row.uiId, { bedrag_per_jaar: Number(event.target.value) })
-                            }
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            value={String(Number(row.herverdeel_pct ?? 0))}
-                            onChange={(event) =>
-                              updateVasteKostenRow(row.uiId, { herverdeel_pct: Number(event.target.value) })
-                            }
-                          />
-                        </td>
-                      </tr>
-                    ))}
-
-                    {sourceVasteKostenRows.length === 0 && draftVasteKostenTarget.filter((row) => row.isNew).length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="muted">
-                          Geen vaste kosten gevonden voor bronjaar {sourceYear}. Voeg een rij toe voor {targetYear}.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="editor-actions" style={{ marginTop: 0 }}>
-                <div className="editor-actions-group">
-                  <button type="button" className="editor-button editor-button-secondary" onClick={addVasteKostenRow}>
-                    Rij toevoegen
-                  </button>
-                </div>
-                <div className="editor-actions-group" />
-              </div>
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(3)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void saveDraftToServer(`Vaste kosten (concept) voor ${targetYear} opgeslagen.`)}
-                    disabled={isRunning}
-                  >
-                    Opslaan
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button"
-                    onClick={() => void navigateToStep(5)}
-                    disabled={isRunning}
-                  >
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <VasteKostenTargetsStep
+              sourceYear={sourceYear}
+              targetYear={targetYear}
+              isRunning={isRunning}
+              saveAndCloseButton={saveAndCloseButton}
+              navigateToStep={navigateToStep}
+              sourceVasteKostenRows={sourceVasteKostenRows}
+              draftVasteKostenTarget={draftVasteKostenTarget}
+              vasteKostenKey={vasteKostenKey}
+              updateVasteKostenRow={updateVasteKostenRow}
+              addVasteKostenRow={addVasteKostenRow}
+              fixedCostRowsForYear={fixedCostRowsForYear}
+              computeHerverdelingTotals={computeHerverdelingTotals}
+              formatEur={formatEur}
+              saveDraftToServer={saveDraftToServer}
+            />
           ) : null}
 
           {activeStep === 5 ? (
-            <div>
-              <div className="editor-toolbar">
-                <div className="editor-toolbar-meta">
-                  <span className="editor-pill">{packagingComponents.length} onderdelen</span>
-                  <span className="muted">Links bronjaar, rechts doeljaar</span>
-                </div>
-              </div>
-
-              <div className="editor-status" style={{ marginBottom: 14 }}>
-                Vul de jaarprijzen voor {targetYear} in. Je kunt optioneel starten vanuit bronjaar {sourceYear} via de knop
-                hieronder. Basis- en samengestelde producten blijven hetzelfde; alleen de jaarprijzen van verpakkingsonderdelen
-                sturen de kostprijs door.
-              </div>
-
-              <div className="dataset-editor-scroll">
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "320px" }}>Onderdeel</th>
-                      <th style={{ width: "180px" }}>Bronjaar {sourceYear}</th>
-                      <th style={{ width: "180px" }}>Doeljaar {targetYear}</th>
-                      <th style={{ width: "160px" }}>Delta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {packagingRowsForTarget.map((row) => {
-                      const sourcePrice =
-                        currentPackagingPrices.find(
-                          (priceRow) =>
-                            priceRow.jaar === sourceYear && priceRow.verpakkingsonderdeel_id === row.componentId
-                        )?.prijs_per_stuk ?? 0;
-                      const targetPrice = Number(draftPackagingPrices[row.componentId] ?? 0);
-                      const delta = targetPrice - Number(sourcePrice ?? 0);
-                      return (
-                        <tr key={row.componentId}>
-                          <td>{row.omschrijving}</td>
-                          <td>
-                            <input
-                              className="dataset-input dataset-input-readonly"
-                              type="number"
-                              value={String(Number(sourcePrice ?? 0))}
-                              readOnly
-                            />
-                          </td>
-                          <td>
-                            <input
-                              className="dataset-input"
-                              type="number"
-                              value={String(targetPrice)}
-                              onChange={(event) =>
-                                setDraftPackagingPrices((current) => ({
-                                  ...current,
-                                  [row.componentId]: Number(event.target.value)
-                                }))
-                              }
-                            />
-                          </td>
-                          <td>{formatEur(delta)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(4)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={copyPackagingPricesFromSource}
-                    disabled={isRunning}
-                  >
-                    Kopieer bronjaar {sourceYear} naar {targetYear}
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={savePackagingPricesTarget}
-                    disabled={isRunning || packagingComponents.length === 0}
-                  >
-                    Opslaan
-                  </button>
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(6)} disabled={isRunning}>
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <PackagingPricesTargetsStep
+              sourceYear={sourceYear}
+              targetYear={targetYear}
+              isRunning={isRunning}
+              saveAndCloseButton={saveAndCloseButton}
+              navigateToStep={navigateToStep}
+              formatEur={formatEur}
+              packagingComponentsCount={packagingComponents.length}
+              packagingRowsForTarget={packagingRowsForTarget}
+              currentPackagingPrices={currentPackagingPrices}
+              draftPackagingPrices={draftPackagingPrices}
+              setDraftPackagingPrices={setDraftPackagingPrices}
+              copyPackagingPricesFromSource={copyPackagingPricesFromSource}
+              savePackagingPricesTarget={savePackagingPricesTarget}
+            />
           ) : null}
 
           {activeStep === 6 ? (
-            <div>
-              <div className="editor-status" style={{ marginBottom: 14 }}>
-                <strong>Scenario</strong>: deze inkoopprijzen zijn alleen voor de preview in deze wizard en worden niet
-                opgeslagen. De echte inkoopprijzen komen later via inkoopfacturen.
-              </div>
-
-              <div className="dataset-editor-scroll">
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "260px" }}>Bier</th>
-                      <th style={{ width: "280px" }}>Product</th>
-                      <th style={{ width: "160px" }}>Bron kostprijs</th>
-                      <th style={{ width: "160px" }}>Bron inkoop</th>
-                      <th style={{ width: "160px" }}>Scenario inkoop</th>
-                      <th style={{ width: "160px" }}>Scenario kostprijs</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inkoopScenarioRows.map((row) => {
-                      const scenarioKey = `${row.bierId}::${row.productId}`;
-                      const scenarioValue = Object.prototype.hasOwnProperty.call(scenarioPrimaryCosts, scenarioKey)
-                        ? Number(scenarioPrimaryCosts[scenarioKey] ?? 0)
-                        : row.sourcePrimaryCost;
-
-                      return (
-                        <tr key={scenarioKey}>
-                          <td>{row.biernaam}</td>
-                          <td>{row.productLabel}</td>
-                          <td>{formatEur(row.sourceCost)}</td>
-                          <td>{formatEur(row.sourcePrimaryCost)}</td>
-                          <td>
-                            <input
-                              className="dataset-input"
-                              type="number"
-                              value={String(scenarioValue)}
-                              placeholder="(bron)"
-                              onChange={(event) => {
-                                const raw = event.target.value;
-                                if (raw.trim() === "") {
-                                  setScenarioPrimaryCosts((current) => {
-                                    const next = { ...current };
-                                    delete next[scenarioKey];
-                                    return next;
-                                  });
-                                  return;
-                                }
-                                const parsed = Number(raw);
-                                setScenarioPrimaryCosts((current) => ({ ...current, [scenarioKey]: parsed }));
-                              }}
-                            />
-                          </td>
-                          <td>{formatEur(row.estimatedTargetCost)}</td>
-                        </tr>
-                      );
-                    })}
-                    {inkoopScenarioRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="muted">
-                          Geen inkoop-bieren gevonden (controleer of er actieve inkoop-kostprijzen zijn voor {sourceYear}).
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(5)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => setScenarioPrimaryCosts({})}
-                    disabled={isRunning}
-                  >
-                    Reset scenario
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button"
-                    onClick={() => void navigateToStep(7)}
-                    disabled={isRunning}
-                  >
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <InkoopScenarioStep
+              sourceYear={sourceYear}
+              isRunning={isRunning}
+              saveAndCloseButton={saveAndCloseButton}
+              navigateToStep={navigateToStep}
+              formatEur={formatEur}
+              inkoopScenarioRows={inkoopScenarioRows}
+              scenarioPrimaryCosts={scenarioPrimaryCosts}
+              setScenarioPrimaryCosts={setScenarioPrimaryCosts}
+            />
           ) : null}
 
           {activeStep === 7 ? (
-            <div>
-              <div className="module-card compact-card" style={{ marginBottom: 14 }}>
-                <div className="module-card-title">Recepten {targetYear}</div>
-                <div className="module-card-text">
-                  Pas hier voor bieren met <strong>eigen productie</strong> de doeljaar-gegevens aan. Bij afronden en daarna
-                  activeren worden deze instellingen de nieuwe waarheid voor {targetYear} (oude activaties voor {targetYear}
-                  worden dan gedeactiveerd).
-                </div>
-              </div>
-
-              {eigenProductieBieren.length === 0 ? (
-                <div className="editor-status" style={{ marginBottom: 14 }}>
-                  Geen bieren met eigen productie gevonden in bronjaar {sourceYear}.
-                </div>
-              ) : null}
-
-              {eigenProductieBieren.map((bier) => {
-                const bierId = bier.bierId;
-                const sourceVersion = sourceEigenProductieVersionByBierId.get(bierId);
-                const sourceBasis =
-                  typeof sourceVersion?.basisgegevens === "object" && sourceVersion?.basisgegevens
-                    ? sourceVersion.basisgegevens
-                    : {};
-                const sourceAlcohol = Number(sourceBasis?.alcoholpercentage ?? bier.alcoholpercentage ?? 0) || 0;
-                const sourceTarief = String(sourceBasis?.tarief_accijns ?? "Hoog") === "Laag" ? "Laag" : "Hoog";
-
-                const override = ensureEigenOverride(bierId);
-                const batchGrootte = Number(getProductieForYear(targetYear)?.batchgrootte_eigen_productie_l ?? 0);
-                const totals = computeEigenProductieReceptTotals(override, batchGrootte);
-
-                return (
-                  <div key={bierId} className="module-card compact-card" style={{ marginBottom: 14 }}>
-                    <div className="module-card-title">{bier.biernaam}</div>
-                    <div className="module-card-text">
-                      {bier.stijl ? `${bier.stijl} · ` : ""}
-                      bronjaar {sourceYear} (read-only) links, doeljaar {targetYear} rechts.
-                    </div>
-
-                    <div className="data-table" style={{ marginTop: 12 }}>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th style={{ width: "280px" }}>Veld</th>
-                            <th style={{ width: "220px" }}>Bronjaar {sourceYear}</th>
-                            <th style={{ width: "220px" }}>Doeljaar {targetYear}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            <td>Alcoholpercentage</td>
-                            <td>
-                              <input className="dataset-input dataset-input-readonly" type="number" value={String(sourceAlcohol)} readOnly />
-                            </td>
-                            <td>
-                              <input
-                                className="dataset-input"
-                                type="number"
-                                value={String(Number(override.alcoholpercentage ?? 0))}
-                                onChange={(event) => updateEigenOverride(bierId, { alcoholpercentage: Number(event.target.value) })}
-                              />
-                            </td>
-                          </tr>
-                          <tr>
-                            <td>Accijnstarief</td>
-                            <td>
-                              <input className="dataset-input dataset-input-readonly" type="text" value={sourceTarief} readOnly />
-                            </td>
-                            <td>
-                              <select
-                                className="dataset-input"
-                                value={override.tarief_accijns}
-                                onChange={(event) =>
-                                  updateEigenOverride(bierId, { tarief_accijns: event.target.value === "Laag" ? "Laag" : "Hoog" })
-                                }
-                              >
-                                <option value="Hoog">Hoog</option>
-                                <option value="Laag">Laag</option>
-                              </select>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="stats-grid wizard-stats-grid" style={{ marginTop: 14, marginBottom: 14 }}>
-                      <div className="stat-card">
-                        <div className="stat-label">Leveranciersprijzen</div>
-                        <div className="stat-value small">{formatEur(totals.leveranciersTotaal)}</div>
-                      </div>
-                      <div className="stat-card">
-                        <div className="stat-label">Receptkosten</div>
-                        <div className="stat-value small">{formatEur(totals.receptTotaal)}</div>
-                      </div>
-                      <div className="stat-card">
-                        <div className="stat-label">Batchgrootte (L)</div>
-                        <div className="stat-value small">{batchGrootte > 0 ? String(batchGrootte) : "-"}</div>
-                      </div>
-                      <div className="stat-card">
-                        <div className="stat-label">Literprijs</div>
-                        <div className="stat-value small">{batchGrootte > 0 ? formatEur(totals.literPrijs) : "-"}</div>
-                      </div>
-                      <div className="stat-card">
-                        <div className="stat-label">Ingredienten</div>
-                        <div className="stat-value small">{String((override.ingredienten ?? []).length)}</div>
-                      </div>
-                    </div>
-
-                    <div className="dataset-editor-scroll">
-                      <table className="dataset-editor-table wizard-table-compact">
-                        <thead>
-                          <tr>
-                            <th>Ingredient</th>
-                            <th>Omschrijving</th>
-                            <th>Inhoud verpakking</th>
-                            <th>Eenheid</th>
-                            <th>Leveranciersprijs</th>
-                            <th>Hoeveel in recept</th>
-                            <th>Kosten recept</th>
-                            <th />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(override.ingredienten ?? []).length === 0 ? (
-                            <tr>
-                              <td className="dataset-empty" colSpan={8}>
-                                Nog geen ingredienten. Voeg een regel toe.
-                              </td>
-                            </tr>
-                          ) : null}
-                          {(override.ingredienten ?? []).map((regel) => (
-                            <tr key={regel.id}>
-                              <td>
-                                <input
-                                  className="dataset-input"
-                                  value={regel.ingredient ?? ""}
-                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { ingredient: event.target.value })}
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className="dataset-input"
-                                  value={regel.omschrijving ?? ""}
-                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { omschrijving: event.target.value })}
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className="dataset-input"
-                                  type="number"
-                                  value={String(Number(regel.hoeveelheid ?? 0))}
-                                  onChange={(event) =>
-                                    updateEigenIngredient(bierId, regel.id, { hoeveelheid: Number(event.target.value) })
-                                  }
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className="dataset-input"
-                                  value={regel.eenheid ?? ""}
-                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { eenheid: event.target.value })}
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className="dataset-input"
-                                  type="number"
-                                  value={String(Number(regel.prijs ?? 0))}
-                                  onChange={(event) => updateEigenIngredient(bierId, regel.id, { prijs: Number(event.target.value) })}
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className="dataset-input"
-                                  type="number"
-                                  value={String(Number(regel.benodigd_in_recept ?? 0))}
-                                  onChange={(event) =>
-                                    updateEigenIngredient(bierId, regel.id, { benodigd_in_recept: Number(event.target.value) })
-                                  }
-                                />
-                              </td>
-                              <td>{formatEur(calculateEigenProductieKostenRecept(regel))}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="editor-button editor-button-secondary"
-                                  onClick={() => deleteEigenIngredient(bierId, regel.id)}
-                                  disabled={isRunning}
-                                >
-                                  Verwijderen
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="editor-actions" style={{ marginTop: 10 }}>
-                      <div className="editor-actions-group">
-                        <button
-                          type="button"
-                          className="editor-button editor-button-secondary"
-                          onClick={() => addEigenIngredient(bierId)}
-                          disabled={isRunning}
-                        >
-                          Ingrediënt toevoegen
-                        </button>
-                      </div>
-                      <div className="editor-actions-group" />
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(6)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(8)} disabled={isRunning}>
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <>
+              <EigenProductieReceptenStep
+                sourceYear={sourceYear}
+                targetYear={targetYear}
+                isRunning={isRunning}
+                saveAndCloseButton={saveAndCloseButton}
+                navigateToStep={navigateToStep}
+                formatEur={formatEur}
+                eigenProductieBieren={eigenProductieBieren}
+                sourceEigenProductieVersionByBierId={sourceEigenProductieVersionByBierId}
+                ensureEigenOverride={ensureEigenOverride}
+                updateEigenOverride={updateEigenOverride}
+                updateEigenIngredient={updateEigenIngredient}
+                deleteEigenIngredient={deleteEigenIngredient}
+                addEigenIngredient={addEigenIngredient}
+                getProductieForYear={getProductieForYear}
+                computeEigenProductieReceptTotals={computeEigenProductieReceptTotals}
+                calculateEigenProductieKostenRecept={calculateEigenProductieKostenRecept}
+              />
+              
+            </>
           ) : null}
 
           {activeStep === 8 ? (
-            <div>
-              <div className="module-card compact-card" style={{ marginBottom: 14 }}>
-                <div className="module-card-title">Kostprijs {targetYear}</div>
-                <div className="module-card-text">
-                  Read-only opbouw per bier en verpakkingseenheid op basis van jouw doeljaar-invoer en inkoopscenario.
-                </div>
-              </div>
-
-              {(
-                [
-                  ["Basisproducten", kostprijsTargetRows.basisRows],
-                  ["Samengestelde producten", kostprijsTargetRows.samengRows]
-                ] as [string, KostprijsPreviewRow[]][]
-              ).map(([label, records]) => (
-                <div key={label} className="module-card compact-card" style={{ marginBottom: 14 }}>
-                  <div className="module-card-title">{label}</div>
-                  <div className="data-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Biernaam</th>
-                          <th>Soort</th>
-                          <th>Verpakkingseenheid</th>
-                          <th>Inkoop/Ingrediënten</th>
-                          <th>Verpakkingskosten</th>
-                          <th>Indirecte/Directe kosten</th>
-                          <th>Accijns</th>
-                          <th>Kostprijs</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {records.length === 0 ? (
-                          <tr>
-                            <td className="dataset-empty" colSpan={8}>
-                              Geen regels beschikbaar (controleer of er actieve kostprijzen zijn voor {sourceYear}).
-                            </td>
-                          </tr>
-                        ) : null}
-                        {records.map((row, index) => (
-                          <tr key={`${row.biernaam}::${row.verpakkingseenheid}::${index}`}>
-                            <td>{row.biernaam}</td>
-                            <td>{row.soort}</td>
-                            <td>{row.verpakkingseenheid}</td>
-                            <td>{formatEur(row.primaire_kosten)}</td>
-                            <td>{formatEur(row.verpakkingskosten)}</td>
-                            <td>{formatEur(row.vaste_kosten)}</td>
-                            <td>{formatEur(row.accijns)}</td>
-                            <td>{formatEur(row.kostprijs)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(7)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button"
-                    onClick={() => void navigateToStep(9)}
-                    disabled={isRunning}
-                  >
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <>
+              <KostprijsReadOnlyStep
+                sourceYear={sourceYear}
+                targetYear={targetYear}
+                isRunning={isRunning}
+                saveAndCloseButton={saveAndCloseButton}
+                navigateToStep={navigateToStep}
+                formatEur={formatEur}
+                kostprijsTargetRows={kostprijsTargetRows}
+              />
+              
+            </>
           ) : null}
 
           {activeStep === 9 ? (
-            <div>
-              <div className="placeholder-block" style={{ marginBottom: 14 }}>
-                <strong>Prijsstrategie (wizard)</strong>
-                <div className="muted" style={{ marginTop: 8 }}>
-                  Kies hoe we van bronjaar {sourceYear} naar doeljaar {targetYear} bewegen. Dit zet concept-overrides
-                  klaar in verkoopstrategie op bier+product niveau. Je kunt daarna nog vrij bijstellen.
-                </div>
-                <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <input
-                      type="radio"
-                      name="pricingMode"
-                      checked={pricingMode === "keep_price"}
-                      onChange={() => setPricingMode("keep_price")}
-                      disabled={isRunning}
-                    />
-                    <span>1. Verkoopprijs blijft gelijk (marge past aan)</span>
-                  </label>
-                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <input
-                      type="radio"
-                      name="pricingMode"
-                      checked={pricingMode === "scale_cost_ratio"}
-                      onChange={() => setPricingMode("scale_cost_ratio")}
-                      disabled={isRunning}
-                    />
-                    <span>2B. Verkoopprijs stijgt mee met kostprijs (default)</span>
-                  </label>
-                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <input
-                      type="radio"
-                      name="pricingMode"
-                      checked={pricingMode === "keep_margin"}
-                      onChange={() => setPricingMode("keep_margin")}
-                      disabled={isRunning}
-                    />
-                    <span>2A. Marge% blijft gelijk</span>
-                  </label>
-                  <label className="nested-field" style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <input
-                      type="radio"
-                      name="pricingMode"
-                      checked={pricingMode === "free"}
-                      onChange={() => setPricingMode("free")}
-                      disabled={isRunning}
-                    />
-                    <span>3. Vrij invullen</span>
-                  </label>
-                </div>
-                <div className="editor-actions" style={{ marginTop: 12 }}>
-                  <div className="editor-actions-group" />
-                  <div className="editor-actions-group">
-                    <button
-                      type="button"
-                      className="editor-button editor-button-secondary"
-                      onClick={() => void applyPricingScenario()}
-                      disabled={isRunning || !conceptStarted}
-                    >
-                      Toepassen
-                    </button>
-                  </div>
-                </div>
-                {pricingMode === "scale_cost_ratio" || pricingMode === "keep_margin" ? (
-                  <div className="muted" style={{ marginTop: 10 }}>
-                    Let op: als je geen expliciete sell-in prijzen hebt opgeslagen (alleen marges), dan zijn 2A en 2B
-                    in deze tool wiskundig vrijwel gelijk. 2B wordt pas onderscheidend als er echte bronprijzen bestaan.
-                  </div>
-                ) : null}
-              </div>
-              <VerkoopstrategieWorkspace
-                endpoint="/data/verkoopprijzen"
-                verkoopprijzen={wizardVerkoopprijzen}
-                productie={currentProductie}
-                basisproducten={Array.isArray(initialBasisproducten) ? initialBasisproducten : []}
-                samengesteldeProducten={Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : []}
-                bieren={Array.isArray(initialBieren) ? initialBieren : []}
-                berekeningen={Array.isArray(currentBerekeningen) ? currentBerekeningen : []}
-                channels={[]}
-                kostprijsproductactiveringen={Array.isArray(currentActivations) ? currentActivations : []}
-                draftKostprijsPreviewRows={previewRows.map((row) => ({
-                  bierId: row.bierId,
-                  biernaam: row.biernaam,
-                  productId: row.productId,
-                  productType: row.productType,
-                  productLabel: row.productLabel,
-                  kostprijs: row.estimatedTargetCost
-                }))}
-                initialYear={targetYear}
-                lockYear
-                exposeSave={setVerkoopstrategieSave}
-                mode="draft"
-                onDraftSave={async (rows) => {
-                  const strategyTypes = new Set(["jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"]);
-                  const filtered = (Array.isArray(rows) ? rows : []).filter(
-                    (row) =>
-                      row &&
-                      typeof row === "object" &&
-                      strategyTypes.has(String((row as any).record_type ?? "")) &&
-                      Number((row as any).jaar ?? 0) === targetYear
-                  ) as any[];
-                  setDraftVerkoopstrategieTarget(filtered);
-                  setCompletedStepIds((current) => (current.includes("verkoopstrategie") ? current : [...current, "verkoopstrategie"]));
-                  await saveDraftToServer(`Verkoopstrategie (concept) voor ${targetYear} opgeslagen.`);
-                }}
+            <>
+              <VerkoopstrategieDraftStep
+                sourceYear={sourceYear}
+                targetYear={targetYear}
+                isRunning={isRunning}
+                conceptStarted={conceptStarted}
+                saveAndCloseButton={saveAndCloseButton}
+                navigateToStep={navigateToStep}
+                pricingMode={pricingMode}
+                setPricingMode={setPricingMode}
+                applyPricingScenario={applyPricingScenario}
+                wizardVerkoopprijzen={wizardVerkoopprijzen}
+                currentProductie={currentProductie}
+                initialBasisproducten={Array.isArray(initialBasisproducten) ? initialBasisproducten : []}
+                initialSamengesteldeProducten={Array.isArray(initialSamengesteldeProducten) ? initialSamengesteldeProducten : []}
+                initialBieren={Array.isArray(initialBieren) ? initialBieren : []}
+                currentBerekeningen={Array.isArray(currentBerekeningen) ? currentBerekeningen : []}
+                currentActivations={Array.isArray(currentActivations) ? currentActivations : []}
+                previewRows={previewRows}
+                verkoopstrategieSave={verkoopstrategieSave}
+                setVerkoopstrategieSave={setVerkoopstrategieSave}
+                setDraftVerkoopstrategieTarget={setDraftVerkoopstrategieTarget}
+                setCompletedStepIds={setCompletedStepIds}
+                saveDraftToServer={saveDraftToServer}
               />
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(8)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => {
-                      void verkoopstrategieSave?.();
-                    }}
-                    disabled={isRunning || !verkoopstrategieSave}
-                  >
-                    Opslaan
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button"
-                    onClick={() => void navigateToStep(10)}
-                    disabled={isRunning}
-                  >
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+              
+            </>
           ) : null}
 
           {activeStep === 10 ? (
-            <div>
-              <div className="editor-status" style={{ marginBottom: 14 }}>
-                Vul per kanaal een opslag in voor adviesprijzen (sell-out). We leiden hiermee een adviesverkoopprijs af uit onze
-                verkoopprijs. Bronjaar {sourceYear} is read-only; doeljaar {targetYear} kun je aanpassen.
-              </div>
-
-              <div className="dataset-editor-scroll">
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "220px" }}>Kanaal</th>
-                      <th style={{ width: "180px" }}>Opslag {sourceYear} (%)</th>
-                      <th style={{ width: "180px" }}>Opslag {targetYear} (%)</th>
-                      <th style={{ width: "260px" }}>Advies Doos 24*33cl</th>
-                      <th style={{ width: "260px" }}>Advies Fust 20L</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(
-                      [
-                        { code: "horeca", label: "Horeca" },
-                        { code: "retail", label: "Supermarkt" },
-                        { code: "slijterij", label: "Slijterij" },
-                        { code: "zakelijk", label: "Speciaalzaak" }
-                      ] as const
-                    ).map((channel) => {
-                      const sourceRow = currentAdviesprijzen.find(
-                        (row) => Number(row.jaar ?? 0) === sourceYear && row.channel_code === channel.code
-                      );
-                      const sourceOpslag = Number(sourceRow?.opslag_pct ?? 0);
-                      const draftValue = String(adviesprijzenDraftInputs[channel.code] ?? "");
-                      const parsed = Number(String(draftValue).replace(",", "."));
-                      const opslagPct = draftValue.trim() === "" || !Number.isFinite(parsed) ? sourceOpslag : parsed;
-
-                      const avgSellInDoos = previewRows
-                        .filter((row) => String(row.productLabel ?? "").includes("Doos 24*33cl"))
-                        .map((row) => Number((row.sellIn as any)?.[channel.code] ?? 0))
-                        .filter((n) => Number.isFinite(n) && n > 0);
-                      const avgSellInFust = previewRows
-                        .filter((row) => String(row.productLabel ?? "").includes("Fust 20L"))
-                        .map((row) => Number((row.sellIn as any)?.[channel.code] ?? 0))
-                        .filter((n) => Number.isFinite(n) && n > 0);
-                      const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
-                      const sellInDoos = mean(avgSellInDoos);
-                      const sellInFust = mean(avgSellInFust);
-
-                      const advicePrice = (sellIn: number) => {
-                        const base = Number.isFinite(sellIn) ? sellIn : 0;
-                        return base * (1 + opslagPct / 100);
-                      };
-                      const rangeLabel = (base: number) => {
-                        if (!Number.isFinite(base) || base <= 0) return "-";
-                        const low = Math.max(0, base - 0.05);
-                        const high = base + 0.05;
-                        return `${formatEur(low)} - ${formatEur(high)}`;
-                      };
-
-                      const doosAdvice = advicePrice(sellInDoos);
-                      const fustAdvice = advicePrice(sellInFust);
-
-                      return (
-                        <tr key={channel.code}>
-                          <td>
-                            <strong>{channel.label}</strong>
-                          </td>
-                          <td>
-                            <input className="dataset-input dataset-input-readonly" value={String(sourceOpslag)} readOnly />
-                          </td>
-                          <td>
-                            <input
-                              className="dataset-input"
-                              type="number"
-                              value={draftValue}
-                              onChange={(event) => {
-                                const nextValue = event.target.value;
-                                setAdviesprijzenDraftInputs((current) => ({ ...current, [channel.code]: nextValue }));
-                                const nextParsed = Number(String(nextValue).replace(",", "."));
-                                if (!Number.isFinite(nextParsed)) return;
-                                setDraftAdviesprijzenTarget((current) => {
-                                  const rows = Array.isArray(current) ? [...current] : [];
-                                  const idx = rows.findIndex((row) => row.channel_code === channel.code && Number(row.jaar ?? 0) === targetYear);
-                                  const nextRow: AdviesprijsRow = {
-                                    id: idx >= 0 ? String(rows[idx].id ?? "") : "",
-                                    jaar: targetYear,
-                                    channel_code: channel.code,
-                                    opslag_pct: nextParsed
-                                  };
-                                  if (idx >= 0) rows[idx] = nextRow;
-                                  else rows.push(nextRow);
-                                  return rows;
-                                });
-                              }}
-                              onBlur={() => {
-                                if (draftValue.trim() !== "") return;
-                                setAdviesprijzenDraftInputs((current) => ({ ...current, [channel.code]: String(sourceOpslag) }));
-                                setDraftAdviesprijzenTarget((current) => {
-                                  const rows = Array.isArray(current) ? [...current] : [];
-                                  const idx = rows.findIndex((row) => row.channel_code === channel.code && Number(row.jaar ?? 0) === targetYear);
-                                  const nextRow: AdviesprijsRow = {
-                                    id: idx >= 0 ? String(rows[idx].id ?? "") : "",
-                                    jaar: targetYear,
-                                    channel_code: channel.code,
-                                    opslag_pct: sourceOpslag
-                                  };
-                                  if (idx >= 0) rows[idx] = nextRow;
-                                  else rows.push(nextRow);
-                                  return rows;
-                                });
-                              }}
-                              disabled={isRunning}
-                            />
-                          </td>
-                          <td>{rangeLabel(doosAdvice)}</td>
-                          <td>{rangeLabel(fustAdvice)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(11)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(11)} disabled={isRunning}>
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <>
+              <AdviesprijzenTargetsStep
+                sourceYear={sourceYear}
+                targetYear={targetYear}
+                isRunning={isRunning}
+                saveAndCloseButton={saveAndCloseButton}
+                navigateToStep={navigateToStep}
+                formatEur={formatEur}
+                currentAdviesprijzen={currentAdviesprijzen}
+                previewRows={previewRows}
+                adviesprijzenDraftInputs={adviesprijzenDraftInputs}
+                setAdviesprijzenDraftInputs={setAdviesprijzenDraftInputs}
+                setDraftAdviesprijzenTarget={setDraftAdviesprijzenTarget}
+              />
+              
+            </>
           ) : null}
 
           {activeStep === 11 ? (
-            <div>
-              <div className="editor-status" style={{ marginBottom: 14 }}>
-                Hieronder zie je de indicatieve kostprijzen voor het doeljaar {targetYear}. Pas als recepten of
-                inkoopfacturen aan producten worden gekoppeld en geactiveerd, is een kostprijs definitief. We rekenen hier
-                met de gegevens die je in deze wizard hebt ingevuld; de inkoopprijzen zijn een scenario totdat ze later via
-                inkoopfacturen definitief worden.
-              </div>
-
-              <div className="dataset-editor-scroll">
-                <table className="dataset-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "240px" }}>Bier</th>
-                      <th style={{ width: "260px" }}>Product</th>
-                      <th style={{ width: "160px" }}>Kostprijs {sourceYear}</th>
-                      <th style={{ width: "160px" }}>Kostprijs {targetYear} (indicatief)</th>
-                      <th style={{ width: "160px" }}>Delta</th>
-                      <th style={{ width: "180px" }}>Sell-in Horeca</th>
-                      <th style={{ width: "180px" }}>Sell-in Retail</th>
-                      <th style={{ width: "180px" }}>Sell-in Slijterij</th>
-                      <th style={{ width: "180px" }}>Sell-in Speciaalzaak</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewRows.map((row) => (
-                      <tr key={`${row.bierId}::${row.productId}`}>
-                        <td>{row.biernaam}</td>
-                        <td>{row.productLabel}</td>
-                        <td>{formatEur(row.sourceCost)}</td>
-                        <td>{formatEur(row.estimatedTargetCost)}</td>
-                        <td>{formatEur(row.delta)}</td>
-                        <td>{formatEur(row.sellIn.horeca ?? 0)}</td>
-                        <td>{formatEur(row.sellIn.retail ?? 0)}</td>
-                        <td>{formatEur(row.sellIn.slijterij ?? 0)}</td>
-                        <td>{formatEur(row.sellIn.zakelijk ?? 0)}</td>
-                      </tr>
-                    ))}
-                    {previewRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="muted">
-                          Geen preview-rijen beschikbaar.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(9)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void saveDraftToServer("Concept opgeslagen.")}
-                    disabled={isRunning || !conceptStarted}
-                  >
-                    Opslaan
-                  </button>
-                  <button type="button" className="editor-button" onClick={() => void navigateToStep(12)} disabled={isRunning}>
-                    Volgende
-                  </button>
-                </div>
-              </div>
-            </div>
+            <PreviewStep
+              previewRows={previewRows}
+              sourceYear={sourceYear}
+              targetYear={targetYear}
+              formatEur={formatEur}
+              isRunning={isRunning}
+              conceptStarted={conceptStarted}
+              saveAndCloseButton={saveAndCloseButton}
+              navigateToStep={navigateToStep}
+              saveDraftToServer={saveDraftToServer}
+            />
           ) : null}
 
           {activeStep === 12 ? (
-            <div>
-              <div className="editor-status" style={{ marginBottom: 14 }}>
-                Klik op <strong>Afronden</strong> om het doeljaar {targetYear} definitief weg te schrijven. Totdat je afrondt,
-                blijft alles een concept en worden de echte jaar-tabellen niet aangepast.
-              </div>
-
-              {commitConflict ? (
-                <div className="editor-status" style={{ marginBottom: 14 }}>
-                  <strong>Conflict:</strong> {commitConflict}
-                  <div className="muted" style={{ marginTop: 8 }}>
-                    Kies of je het concept opnieuw wilt baseren op het bronjaar, of force wilt afronden.
-                  </div>
-                  <div className="editor-actions" style={{ marginTop: 10 }}>
-                    <div className="editor-actions-group">
-                      <button
-                        type="button"
-                        className="editor-button editor-button-secondary"
-                        onClick={async () => {
-                          await fetch(
-                            `${API_BASE_URL}/meta/new-year-draft?target_year=${encodeURIComponent(String(targetYear))}`,
-                            { method: "DELETE" }
-                          );
-                          setCommitConflict("");
-                          await initializeYear();
-                        }}
-                        disabled={isRunning}
-                      >
-                        Concept opnieuw baseren
-                      </button>
-                    </div>
-                    <div className="editor-actions-group">
-                      <button type="button" className="editor-button" onClick={commitTargetYearForce} disabled={isRunning}>
-                        Toch afronden (force)
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void navigateToStep(10)}
-                    disabled={isRunning}
-                  >
-                    Vorige
-                  </button>
-                </div>
-                <div className="editor-actions-group">
-                  {saveAndCloseButton}
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => void saveDraftToServer("Concept opgeslagen.")}
-                    disabled={isRunning}
-                  >
-                    Opslaan
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button"
-                    onClick={commitTargetYear}
-                    disabled={isRunning}
-                  >
-                    Afronden
-                  </button>
-                </div>
-              </div>
-            </div>
+            <AfrondenStep
+              targetYear={targetYear}
+              isRunning={isRunning}
+              commitConflict={commitConflict}
+              setCommitConflict={setCommitConflict}
+              initializeYear={initializeYear}
+              commitTargetYearForce={commitTargetYearForce}
+              saveAndCloseButton={saveAndCloseButton}
+              navigateToStep={navigateToStep}
+              saveDraftToServer={saveDraftToServer}
+              commitTargetYear={commitTargetYear}
+            />
           ) : null}
           </div>
               </div>
@@ -3864,23 +2120,3 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   );
 }
 
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="M4 7h16" />
-      <path d="M9 4h6" />
-      <path d="M7 7l1 12h8l1-12" />
-      <path d="M10 11v5" />
-      <path d="M14 11v5" />
-    </svg>
-  );
-}
-
-function QuickCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="cpq-quick-label">{label}</div>
-      <div className="cpq-quick-value">{value || "—"}</div>
-    </div>
-  );
-}

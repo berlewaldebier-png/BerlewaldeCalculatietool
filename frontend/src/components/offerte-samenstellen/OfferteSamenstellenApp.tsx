@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { buildBlockFromForm } from "@/components/offerte-samenstellen/blockFactories";
 import { hydrateFormFromBlock } from "@/components/offerte-samenstellen/blockHydrators";
-import { calculateScenarioMetrics as calculateScenarioMetricsForScenario } from "@/components/offerte-samenstellen/calculations";
+import { buildScenarioMetricsMap } from "@/components/offerte-samenstellen/offerteSamenstellenDerivations";
 import {
   buildScenarioConflictHints,
   evaluateOptionAvailability,
@@ -30,6 +30,13 @@ import {
   updateQuoteDraft,
 } from "@/components/offerte-samenstellen/quoteApi";
 import { ToolbarOptionDialog } from "@/components/offerte-samenstellen/ToolbarOptionDialog";
+import { buildBreakEvenSnapshot } from "@/components/offerte-samenstellen/breakEvenSnapshot";
+import {
+  closeOptionDialog as closeOptionDialogAction,
+  openEditOption as openEditOptionAction,
+  openNewOption as openNewOptionAction,
+} from "@/components/offerte-samenstellen/offerteOptionDialogActions";
+import { buildOptionAvailabilityMap } from "@/components/offerte-samenstellen/offerteOptionAvailability";
 import {
   buildBreakEvenProductLines,
   calculateBreakEvenResult,
@@ -50,30 +57,26 @@ import type {
   QuoteProduct,
   QuoteScenario,
   ScenarioMetrics,
+  StepKey,
   ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
 import { WizardSteps } from "@/components/WizardSteps";
 import { buildLitersPerUnitOverrideMap, getScenario as getLocalScenario, getScenarioLabel } from "@/lib/scenarios";
+import { Field, LiveSummaryMetric, Metric, QuickCell } from "@/components/offerte-samenstellen/OfferteSamenstellenParts";
+import { clampNumber, euro, normalizeText } from "@/components/offerte-samenstellen/offerteSamenstellenUi";
+import { IconTrash, icons, tones } from "@/components/offerte-samenstellen/offerteSamenstellenConfig";
+import { offerteToolbarGroups, offerteWizardSteps } from "@/components/offerte-samenstellen/offerteSamenstellenConstants";
+import { BasisStep } from "@/components/offerte-samenstellen/steps/BasisStep";
+import { FinalizeStep } from "@/components/offerte-samenstellen/steps/FinalizeStep";
+import { CompareStep } from "@/components/offerte-samenstellen/steps/CompareStep";
+import { BuilderBlockCard } from "@/components/offerte-samenstellen/steps/BuilderBlockCard";
+import { BuilderStep } from "@/components/offerte-samenstellen/steps/BuilderStep";
 
 type GenericRecord = Record<string, unknown>;
 
-type StepKey = "basis" | "builder" | "vergelijk" | "afronden";
 type UnitMode = "producten" | "liters";
 type VatMode = "incl" | "excl";
 type ScenarioId = "A" | "B" | "C";
-
-function isPricingActionBlock(block: BuilderBlock) {
-  return (
-    block.type === "Staffel" ||
-    block.type === "Korting" ||
-    block.type === "Mix" ||
-    block.type === "Groothandel"
-  );
-}
-
-function usesBaseOfferProducts(block: BuilderBlock | undefined) {
-  return Boolean(block?.payload?.useBaseOfferProducts ?? true);
-}
 
 type Scenario = QuoteScenario;
 
@@ -81,12 +84,13 @@ type Props = {
   year: number;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
-  catalogusproducten: GenericRecord[];
   verpakkingsonderdelen: GenericRecord[];
   verpakkingsonderdeelPrijzen: GenericRecord[];
   breakEvenConfiguraties: unknown;
@@ -96,98 +100,15 @@ type Props = {
   scenarioId?: string | null;
 };
 
-const tones: Record<OptionType, string> = {
-  Intro: "cpq-tone-intro",
-  Staffel: "cpq-tone-staffel",
-  Mix: "cpq-tone-mix",
-  Korting: "cpq-tone-korting",
-  Groothandel: "cpq-tone-korting",
-  Transport: "cpq-tone-transport",
-  Retour: "cpq-tone-retour",
-  Proeverij: "cpq-tone-proeverij",
-  Tapverhuur: "cpq-tone-tap",
-};
+const toolbarGroups: ToolbarGroup[] = offerteToolbarGroups;
 
-const icons: Record<OptionType, React.ReactNode> = {
-  Intro: <IconClock />,
-  Staffel: <IconChart />,
-  Mix: <IconShuffle />,
-  Korting: <IconTag />,
-  Groothandel: <IconStorefront />,
-  Transport: <IconTruck />,
-  Retour: <IconReturn />,
-  Proeverij: <IconBeer />,
-  Tapverhuur: <IconTent />,
-};
-
-const toolbarGroups: ToolbarGroup[] = [
-  {
-    title: "Pricing",
-    items: [
-      { icon: icons.Intro, label: "Intro" },
-      { icon: icons.Staffel, label: "Staffel" },
-      { icon: icons.Mix, label: "Mix" },
-      { icon: icons.Korting, label: "Korting" },
-      { icon: icons.Groothandel, label: "Groothandel" },
-    ],
-  },
-  {
-    title: "Logistiek",
-    items: [
-      { icon: icons.Transport, label: "Transport" },
-      { icon: icons.Retour, label: "Retour" },
-    ],
-  },
-  {
-    title: "Extra's",
-    items: [
-      { icon: icons.Proeverij, label: "Proeverij" },
-      { icon: icons.Tapverhuur, label: "Tapverhuur" },
-    ],
-  },
-];
-
-function euro(value: number) {
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-  }).format(Number.isFinite(value) ? value : 0);
-}
-
-function clampNumber(value: unknown, fallback: number) {
-  const num = typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
-  return Number.isFinite(num) ? num : fallback;
-}
-
-function normalizeText(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function buildBreakEvenSnapshot(
-  config: BreakEvenConfig | null,
-  result: BreakEvenResult | null
-): QuoteBreakEvenSnapshot | null {
-  if (!config || !result) return null;
-  return {
-    configId: config.id,
-    configName: config.naam,
-    year: config.jaar,
-    breakEvenRevenue: result.breakEvenRevenue,
-    breakEvenLiters: result.breakEvenLiters,
-    weightedSellInPerLiter: result.weightedSellInPerLiter,
-    weightedVariableCostPerLiter: result.weightedVariableCostPerLiter,
-    weightedContributionPerLiter: result.weightedContributionPerLiter,
-    contributionMarginPct: result.contributionMarginPct,
-    mixTotalPct: result.mixTotalPct,
-    calculatedAt: new Date().toISOString(),
-  };
-}
 
 export function OfferteSamenstellenApp({
   year,
   channels,
   bieren,
+  skus,
+  articles,
   kostprijsversies,
   kostprijsproductactiveringen,
   verkoopprijzen,
@@ -232,6 +153,8 @@ export function OfferteSamenstellenApp({
       channel: basis.kanaal,
       channels,
       bieren,
+      skus,
+      articles,
       kostprijsversies,
       kostprijsproductactiveringen,
       verkoopprijzen,
@@ -245,6 +168,8 @@ export function OfferteSamenstellenApp({
     basis.kanaal,
     channels,
     bieren,
+    skus,
+    articles,
     kostprijsversies,
     kostprijsproductactiveringen,
     verkoopprijzen,
@@ -269,6 +194,8 @@ export function OfferteSamenstellenApp({
         year: currentYear,
         channels,
         bieren,
+        skus,
+        articles,
         kostprijsversies,
         kostprijsproductactiveringen,
         verkoopprijzen,
@@ -279,6 +206,8 @@ export function OfferteSamenstellenApp({
       currentYear,
       channels,
       bieren,
+      skus,
+      articles,
       kostprijsversies,
       kostprijsproductactiveringen,
       verkoopprijzen,
@@ -314,53 +243,40 @@ export function OfferteSamenstellenApp({
   );
 
   function openNewOption(type: OptionType) {
-    const availability = evaluateOptionAvailability({
-      scenario,
+    openNewOptionAction({
       type,
+      scenario,
+      setEditingBlockId,
+      setForm,
+      setSelectedOption,
+      evaluateOptionAvailability,
+      createInitialQuoteFormState,
     });
-    if (!availability.allowed) return;
-    setEditingBlockId(null);
-    setForm(createInitialQuoteFormState());
-    setSelectedOption(type);
   }
 
   function openEditOption(block: BuilderBlock) {
-    setEditingBlockId(block.id);
-    setForm(hydrateFormFromBlock(block));
-    setSelectedOption(block.type);
+    openEditOptionAction({
+      block,
+      setEditingBlockId,
+      setForm,
+      setSelectedOption,
+      hydrateFormFromBlock,
+    });
   }
 
   function closeOptionDialog() {
-    setSelectedOption(null);
-    setEditingBlockId(null);
-    setForm(createInitialQuoteFormState());
+    closeOptionDialogAction({
+      setSelectedOption,
+      setEditingBlockId,
+      setForm,
+      createInitialQuoteFormState,
+    });
   }
 
-  const scenarioMetrics = useMemo(() => {
-    const ids: ScenarioId[] = ["A", "B", "C"];
-    return Object.fromEntries(
-      ids.map((id) => {
-        const sc = scenarios[id];
-        return [
-          id,
-          {
-            standard: calculateScenarioMetricsForScenario(
-              sc,
-              "standard",
-              effectiveBreakEvenSnapshot
-            ),
-            intro: sc.intro
-              ? calculateScenarioMetricsForScenario(
-                  sc,
-                  "intro",
-                  effectiveBreakEvenSnapshot
-                )
-              : null,
-          },
-        ];
-      })
-    ) as Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }>;
-  }, [effectiveBreakEvenSnapshot, scenarios]);
+  const scenarioMetrics = useMemo(
+    () => buildScenarioMetricsMap({ scenarios, effectiveBreakEvenSnapshot }),
+    [effectiveBreakEvenSnapshot, scenarios]
+  );
 
   function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
     setScenarios((prev) => ({
@@ -498,6 +414,7 @@ export function OfferteSamenstellenApp({
       costPriceEx: option.costPriceEx,
       vatRatePct: option.vatRatePct,
       source: {
+        sku_id: optionId.startsWith("sku:") ? optionId.slice("sku:".length) : undefined,
         bier_id: option.bierId,
         product_id: option.productId,
         kostprijsversie_id: option.kostprijsversieId,
@@ -639,12 +556,7 @@ export function OfferteSamenstellenApp({
     URL.revokeObjectURL(url);
   }
 
-  const steps: { id: StepKey; title: string; desc: string }[] = [
-    { id: "basis", title: "Basisgegevens", desc: "Klant, kanaal en naam" },
-    { id: "builder", title: "Offerte maken", desc: "Producten, opties en voorstellen" },
-    { id: "vergelijk", title: "Vergelijken", desc: "Voorstellen naast elkaar" },
-    { id: "afronden", title: "Afronden", desc: "Export en notities" },
-  ];
+  const steps = offerteWizardSteps;
 
   const activeMetrics = scenarioMetrics[activeScenario];
   const rightMetrics = activeMetrics.standard;
@@ -654,28 +566,10 @@ export function OfferteSamenstellenApp({
   }, [scenario.blocks, hasIntro]);
 
   const optionAvailability = useMemo(() => {
-    const entries = ([
-      "Intro",
-      "Staffel",
-      "Mix",
-      "Korting",
-      "Groothandel",
-      "Transport",
-      "Retour",
-      "Proeverij",
-      "Tapverhuur",
-    ] as OptionType[]).map((type) => [
-      type,
-      evaluateOptionAvailability({
-        scenario,
-        type,
-      }),
-    ]);
-
-    return Object.fromEntries(entries) as Record<
-      OptionType,
-      ReturnType<typeof evaluateOptionAvailability>
-    >;
+    return buildOptionAvailabilityMap({
+      scenario,
+      evaluateOptionAvailability,
+    });
   }, [scenario]);
 
   const selectedOptionAvailability = selectedOption
@@ -850,816 +744,4 @@ export function OfferteSamenstellenApp({
     </div>
   );
 }
-
-function BasisStep({
-  basis,
-  setBasis,
-  onNext,
-  onSave,
-  isSaving,
-}: {
-  basis: BasisData;
-  setBasis: React.Dispatch<React.SetStateAction<BasisData>>;
-  onNext: () => void;
-  onSave: () => void;
-  isSaving: boolean;
-}) {
-  return (
-    <section className="cpq-card">
-      <div className="cpq-card-header">
-        <div>
-          <h2 className="cpq-card-title">Basisgegevens</h2>
-          <p className="cpq-card-subtitle">Vul klant, kanaal en context van de offerte in.</p>
-        </div>
-      </div>
-
-      <div className="cpq-form-grid">
-        <Field label="Klantnaam" value={basis.klantNaam} onChange={(v) => setBasis((prev) => ({ ...prev, klantNaam: v }))} />
-        <Field label="Contactpersoon" value={basis.contactpersoon} onChange={(v) => setBasis((prev) => ({ ...prev, contactpersoon: v }))} />
-        <Field label="Offertenaam" value={basis.offerteNaam} onChange={(v) => setBasis((prev) => ({ ...prev, offerteNaam: v }))} />
-        <Field label="Geldig tot" value={basis.geldigTot} onChange={(v) => setBasis((prev) => ({ ...prev, geldigTot: v }))} />
-      </div>
-
-      <div className="cpq-form-row">
-        <div className="cpq-label">Kanaal</div>
-        <div className="cpq-toggle-strip" role="group" aria-label="Kanaal">
-          {(["Horeca", "Retail", "Events"] as QuoteChannel[]).map((kanaal) => (
-            <button
-              key={kanaal}
-              type="button"
-              onClick={() => setBasis((prev) => ({ ...prev, kanaal }))}
-              className={`cpq-toggle${basis.kanaal === kanaal ? " active" : ""}`}
-            >
-              {kanaal}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="cpq-form-row">
-        <label className="cpq-field">
-          <div className="cpq-label">Opmerking</div>
-          <textarea
-            value={basis.opmerking}
-            onChange={(e) => setBasis((prev) => ({ ...prev, opmerking: e.target.value }))}
-            className="cpq-textarea"
-          />
-        </label>
-      </div>
-
-      <div className="cpq-actions cpq-actions-split">
-        <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
-          {isSaving ? "Opslaan..." : "Opslaan"}
-        </button>
-        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
-          Verder naar offerte maken
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function BuilderStep({
-  unitMode,
-  vatMode,
-  hasIntro,
-  scenario,
-  metrics,
-  activeScenario,
-  setActiveScenario,
-  updateProduct,
-  addProductRow,
-  removeProductRow,
-  removeBlock,
-  toolbarGroups,
-  openOption,
-  editOption,
-  optionAvailability,
-  onNext,
-  productOptions,
-  onSelectRowOption,
-  warnings,
-  incompatibilityHints,
-  onSave,
-  isSaving,
-}: {
-  unitMode: UnitMode;
-  vatMode: VatMode;
-  hasIntro: boolean;
-  scenario: Scenario;
-  metrics: ScenarioMetrics;
-  activeScenario: ScenarioId;
-  setActiveScenario: (id: ScenarioId) => void;
-  updateProduct: (productId: string, patch: Partial<QuoteProduct>) => void;
-  addProductRow: () => void;
-  removeProductRow: (productId: string) => void;
-  removeBlock: (blockId: string) => void;
-  toolbarGroups: ToolbarGroup[];
-  openOption: (type: OptionType) => void;
-  editOption: (block: BuilderBlock) => void;
-  optionAvailability: Record<OptionType, { allowed: boolean; reasons: string[] }>;
-  onNext: () => void;
-  productOptions: ProductOption[];
-  onSelectRowOption: (rowId: string, optionId: string) => void;
-  warnings: string[];
-  incompatibilityHints: string[];
-  onSave: () => void;
-  isSaving: boolean;
-}) {
-  const introBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "intro");
-  const standardBlocks = scenario.blocks.filter(
-    (block) => (block.appliesTo ?? "standard") === "standard"
-  );
-  const globalBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "global");
-  const standardPricingBlock = standardBlocks.find((block) => isPricingActionBlock(block));
-  const basisOfferteActive = !standardPricingBlock || usesBaseOfferProducts(standardPricingBlock);
-
-  return (
-    <div className="cpq-stack">
-      <div className="cpq-builder-header">
-        <div>
-          <h2 className="cpq-card-title">Offerte maken</h2>
-          <p className="cpq-card-subtitle">
-            Start simpel met producten en breid uit met blokken via de toolbar.
-          </p>
-        </div>
-        <div className="cpq-toggle-strip" role="group" aria-label="Voorstel">
-          {(["A", "B", "C"] as ScenarioId[]).map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveScenario(id)}
-              className={`cpq-toggle${activeScenario === id ? " active" : ""}`}
-            >
-              Voorstel {id}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {warnings.length > 0 ? (
-        <div className="cpq-alert">
-          {warnings.map((warning) => (
-            <div key={warning}>{warning}</div>
-          ))}
-        </div>
-      ) : null}
-
-      {incompatibilityHints.length > 0 ? (
-        <div className="cpq-alert cpq-alert-warn">
-          {incompatibilityHints.map((warning) => (
-            <div key={warning}>{warning}</div>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="cpq-toolbar">
-        <div className="cpq-toolbar-inner">
-          {toolbarGroups.map((group) => (
-            <div key={group.title} className="cpq-toolbar-group">
-              <div className="cpq-toolbar-title">{group.title}</div>
-              {group.items.map((item) => {
-                const availability = optionAvailability[item.label];
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => openOption(item.label)}
-                    className="cpq-tool"
-                    title={
-                      availability.allowed
-                        ? item.label
-                        : `${item.label} — ${availability.reasons.join(" ")}`
-                    }
-                    disabled={!availability.allowed}
-                  >
-                    <span className="cpq-tool-icon">{item.icon}</span>
-                    <span className="cpq-tool-tooltip">{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {basisOfferteActive ? (
-        <section className="cpq-card">
-          <div className="cpq-card-header cpq-card-header-row">
-            <div>
-              <h3 className="cpq-card-title">Basisofferte</h3>
-              <p className="cpq-card-subtitle">
-                Basisprijs komt uit verkoopstrategie (sell-in, ex). BTW-toggle is alleen
-                weergave.
-              </p>
-            </div>
-            <button onClick={addProductRow} className="cpq-button cpq-button-secondary" type="button">
-              + Product toevoegen
-            </button>
-          </div>
-
-          <div className="cpq-table-wrap">
-            <table className="cpq-table">
-              <thead>
-                <tr>
-                  <th>Bier</th>
-                  <th>Aantal</th>
-                  <th>Weergave</th>
-                  <th>Kostprijs</th>
-                  <th>Verkoopprijs</th>
-                  <th>Verkoopprijs actie</th>
-                  <th>Totaal</th>
-                  <th className="cpq-table-action-cell" aria-label="Acties" />
-                </tr>
-              </thead>
-              <tbody>
-                {scenario.products.map((product) => {
-                  const productRef = getProductRef(product);
-                  const pricing = metrics.pricingByRef[productRef];
-                  const display =
-                    unitMode === "liters"
-                      ? `${(product.qty * product.litersPerUnit).toFixed(1)} L`
-                      : `${product.qty} ${product.unit}`;
-                  const vatFactor =
-                    vatMode === "incl" ? 1 + Math.max(0, clampNumber(product.vatRatePct, 0)) / 100 : 1;
-                  const baseUnitPriceEx = pricing?.baseUnitPriceEx ?? product.standardPriceEx;
-                  const offerUnitPriceEx = pricing?.offerUnitPriceEx ?? product.standardPriceEx;
-                  const costUnitPrice = product.costPriceEx * vatFactor;
-                  const baseUnitPrice = baseUnitPriceEx * vatFactor;
-                  const offerUnitPrice = offerUnitPriceEx * vatFactor;
-                  const totalPrice = product.qty * offerUnitPriceEx * vatFactor;
-                  const qtyInputValue =
-                    unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
-
-                  return (
-                    <tr key={product.id}>
-                      <td>
-                        <select
-                          className="cpq-select"
-                          value={
-                            product.source?.bier_id && product.source?.product_id
-                              ? `beer:${product.source.bier_id}:product:${product.source.product_id}`
-                              : ""
-                          }
-                          onChange={(e) => onSelectRowOption(product.id, e.target.value)}
-                        >
-                          <option value="">Kies product…</option>
-                          {productOptions.map((opt) => (
-                            <option key={opt.optionId} value={opt.optionId}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min={0}
-                          value={Number.isFinite(qtyInputValue) ? qtyInputValue : 0}
-                          onChange={(e) => {
-                            const raw = Math.max(0, clampNumber(e.target.value, 0));
-                            if (unitMode === "liters") {
-                              const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
-                              const nextQty = litersPerUnit > 0 ? raw / litersPerUnit : 0;
-                              updateProduct(product.id, { qty: nextQty });
-                              return;
-                            }
-                            updateProduct(product.id, { qty: raw });
-                          }}
-                          className="cpq-input cpq-input-small"
-                        />
-                      </td>
-                      <td className="cpq-muted">{display}</td>
-                      <td>{euro(costUnitPrice)}</td>
-                      <td>{euro(baseUnitPrice)}</td>
-                      <td>{euro(offerUnitPrice)}</td>
-                      <td className="cpq-strong">{euro(totalPrice)}</td>
-                      <td className="cpq-table-action-cell">
-                        <button
-                          type="button"
-                          className="cpq-icon-action"
-                          onClick={() => removeProductRow(product.id)}
-                          aria-label={`Verwijder ${product.name || "productregel"}`}
-                          title="Verwijderen"
-                        >
-                          <IconTrash />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {scenario.products.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="cpq-empty">
-                      Nog geen producten toegevoegd.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : (
-        <section className="cpq-card">
-          <div className="cpq-card-header">
-            <div>
-              <h3 className="cpq-card-title">Basisofferte</h3>
-              <p className="cpq-card-subtitle">
-                Dit voorstel gebruikt de productscope uit {standardPricingBlock?.type?.toLowerCase() ?? "de pricingactie"} in plaats van de basisofferte.
-              </p>
-            </div>
-          </div>
-          <div className="cpq-alert">
-            De producten in de basisofferte zijn in dit voorstel niet leidend voor de actieve pricingactie.
-            Pas de productscope aan in de {standardPricingBlock?.type?.toLowerCase() ?? "pricingactie"}-kaart.
-          </div>
-        </section>
-      )}
-
-      <div className="cpq-stack">
-        {hasIntro ? (
-          <section className="cpq-card">
-            <div className="cpq-card-header">
-              <div>
-                <h3 className="cpq-card-title">Introductie</h3>
-                <p className="cpq-card-subtitle">
-                  Deze periode staat boven de standaardperiode en loopt tijdelijk mee.
-                </p>
-              </div>
-            </div>
-            <div className="cpq-stack">
-              {introBlocks.map((block) => (
-                <BuilderBlockCard key={block.id} block={block} onEdit={editOption} onRemove={removeBlock} />
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="cpq-card">
-          <div className="cpq-card-header">
-            <div>
-              <h3 className="cpq-card-title">Standaardperiode</h3>
-              <p className="cpq-card-subtitle">
-                {hasIntro
-                  ? "Na de introductie gelden automatisch de standaardprijzen en voorwaarden. Extra afspraken kun je hieronder toevoegen."
-                  : "Hier gelden de standaardprijzen en voorwaarden van de offerte."}
-              </p>
-            </div>
-          </div>
-
-          <div className="cpq-stack">
-            <section className="cpq-block tone-neutral">
-              <div className="cpq-block-row">
-                <div className="cpq-block-body">
-                  <div className="cpq-block-title">Standaardafspraken</div>
-                  <div className="cpq-block-subtitle">{hasIntro ? "Na de introductie" : "Direct actief"}</div>
-                  <ul className="cpq-block-list">
-                    <li>Standaardprijzen uit verkoopstrategie blijven van toepassing.</li>
-                    <li>Standaardvoorwaarden blijven gelden totdat extra afspraken worden toegevoegd.</li>
-                  </ul>
-                </div>
-              </div>
-            </section>
-
-            {standardBlocks.map((block) => (
-              <BuilderBlockCard key={block.id} block={block} onEdit={editOption} onRemove={removeBlock} />
-            ))}
-
-            {standardBlocks.length === 0 && globalBlocks.length === 0 ? (
-              <div className="cpq-empty">Nog geen extra afspraken toegevoegd.</div>
-            ) : null}
-          </div>
-        </section>
-
-        {globalBlocks.length > 0 ? (
-          <section className="cpq-card">
-            <div className="cpq-card-header">
-              <div>
-                <h3 className="cpq-card-title">Quotebrede afspraken</h3>
-                <p className="cpq-card-subtitle">
-                  Deze afspraken gelden bovenop de standaardperiode.
-                </p>
-              </div>
-            </div>
-            <div className="cpq-stack">
-              {globalBlocks.map((block) => (
-                <BuilderBlockCard key={block.id} block={block} onEdit={editOption} onRemove={removeBlock} />
-              ))}
-            </div>
-          </section>
-        ) : null}
-      </div>
-
-      <div className="cpq-actions cpq-actions-split">
-        <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
-          {isSaving ? "Opslaan..." : "Opslaan"}
-        </button>
-        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
-          Verder naar vergelijken
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function BuilderBlockCard({
-  block,
-  onEdit,
-  onRemove,
-}: {
-  block: BuilderBlock;
-  onEdit: (block: BuilderBlock) => void;
-  onRemove: (blockId: string) => void;
-}) {
-  return (
-    <section className={`cpq-block ${block.tone}`}>
-      <div className="cpq-block-row">
-        <div className="cpq-block-icon">{block.icon}</div>
-        <div className="cpq-block-body">
-          <div className="cpq-block-title">{block.title}</div>
-          <div className="cpq-block-subtitle">{block.subtitle}</div>
-          <ul className="cpq-block-list">
-            {block.lines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          {block.impact ? <div className="cpq-block-impact">{block.impact}</div> : null}
-        </div>
-        <div className="cpq-block-actions">
-          <button type="button" className="cpq-button cpq-button-secondary" onClick={() => onEdit(block)}>
-            Bewerken
-          </button>
-          <button type="button" className="cpq-button cpq-button-secondary" onClick={() => onRemove(block.id)}>
-            Verwijderen
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}
-function CompareStep({
-  scenarios,
-  metrics,
-  activeScenario,
-  setActiveScenario,
-  onNext,
-  onBack,
-  onSave,
-  isSaving,
-}: {
-  scenarios: Record<ScenarioId, Scenario>;
-  metrics: Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }>;
-  activeScenario: ScenarioId;
-  setActiveScenario: (id: ScenarioId) => void;
-  onNext: () => void;
-  onBack: () => void;
-  onSave: () => void;
-  isSaving: boolean;
-}) {
-  return (
-    <section className="cpq-card">
-      <div className="cpq-card-header">
-        <div>
-          <h2 className="cpq-card-title">Vergelijken</h2>
-          <p className="cpq-card-subtitle">Vergelijk voorstellen zonder verborgen aannames: we tonen standaard en (optioneel) introductie apart.</p>
-        </div>
-      </div>
-
-      <div className="cpq-compare-grid">
-        {(["A", "B", "C"] as ScenarioId[]).map((id) => {
-          const active = activeScenario === id;
-          const m = metrics[id];
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveScenario(id)}
-              className={`cpq-compare-card${active ? " active" : ""}`}
-            >
-              <div className="cpq-compare-title">
-                <span>{scenarios[id].name}</span>
-                {active ? <span className="cpq-badge">Actief</span> : null}
-              </div>
-
-              <div className="cpq-compare-section">
-                <div className="cpq-compare-section-title">Standaard</div>
-                <Metric label="Omzet" value={euro(m.standard.revenueEx)} />
-                <Metric label="Kosten" value={euro(m.standard.costEx)} />
-                <Metric label="Marge" value={`${Math.round(m.standard.marginPct)}%`} />
-                <Metric
-                  label="Break-even omzet"
-                  value={m.standard.breakEvenCurrent === null ? "Niet ingesteld" : euro(m.standard.breakEvenCurrent)}
-                />
-                <Metric
-                  label="Boven / onder BE"
-                  value={m.standard.breakEvenProjected === null ? "-" : euro(m.standard.breakEvenProjected)}
-                />
-                <Metric
-                  label="BE-dekking"
-                  value={
-                    m.standard.breakEvenCoveragePct === null
-                      ? "Niet beschikbaar"
-                      : `${Math.round(m.standard.breakEvenCoveragePct)}%`
-                  }
-                />
-              </div>
-
-              {m.intro ? (
-                <div className="cpq-compare-section">
-                  <div className="cpq-compare-section-title">Introductie</div>
-                  <Metric label="Omzet" value={euro(m.intro.revenueEx)} />
-                  <Metric label="Kosten" value={euro(m.intro.costEx)} />
-                  <Metric label="Marge" value={`${Math.round(m.intro.marginPct)}%`} />
-                  <Metric
-                    label="Boven / onder BE"
-                    value={m.intro.breakEvenProjected === null ? "-" : euro(m.intro.breakEvenProjected)}
-                  />
-                  <Metric
-                    label="BE-dekking"
-                    value={
-                      m.intro.breakEvenCoveragePct === null
-                        ? "Niet beschikbaar"
-                        : `${Math.round(m.intro.breakEvenCoveragePct)}%`
-                    }
-                  />
-                </div>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="cpq-actions cpq-actions-split">
-        <button onClick={onBack} className="cpq-button cpq-button-secondary" type="button">
-          Terug
-        </button>
-        <div className="cpq-actions-inline">
-          <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
-            {isSaving ? "Opslaan..." : "Opslaan"}
-          </button>
-          <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
-            Verder naar afronden
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function FinalizeStep({
-  basis,
-  scenario,
-  metrics,
-  draftStatus,
-  onBack,
-  onDownload,
-  onSave,
-  onFinalize,
-  isSaving,
-}: {
-  basis: BasisData;
-  scenario: Scenario;
-  metrics: ScenarioMetrics;
-  draftStatus: QuoteDraft["meta"]["status"];
-  onBack: () => void;
-  onDownload: () => void;
-  onSave: () => void;
-  onFinalize: () => void;
-  isSaving: boolean;
-}) {
-  return (
-    <section className="cpq-card">
-      <div className="cpq-card-header">
-        <div>
-          <h2 className="cpq-card-title">Afronden</h2>
-          <p className="cpq-card-subtitle">Export/document is nog niet geïmplementeerd. Dit is een technische stub voor toekomstige output.</p>
-        </div>
-      </div>
-
-      <div className="cpq-final-grid">
-        <div className="cpq-final-card">
-          <h3 className="cpq-panel-title">Samenvatting</h3>
-          <Metric label="Klant" value={basis.klantNaam || "—"} />
-          <Metric label="Kanaal" value={basis.kanaal} />
-          <Metric label="Voorstel" value={scenario.name} />
-          <Metric label="Omzet (ex)" value={euro(metrics.revenueEx)} />
-          <Metric label="Marge" value={`${Math.round(metrics.marginPct)}%`} />
-          <Metric
-            label="Break-even omzet"
-            value={metrics.breakEvenCurrent === null ? "Niet ingesteld" : euro(metrics.breakEvenCurrent)}
-          />
-          <Metric
-            label="Boven / onder BE"
-            value={metrics.breakEvenProjected === null ? "-" : euro(metrics.breakEvenProjected)}
-          />
-          <Metric
-            label="BE-dekking"
-            value={
-              metrics.breakEvenCoveragePct === null
-                ? "Niet beschikbaar"
-                : `${Math.round(metrics.breakEvenCoveragePct)}%`
-            }
-          />
-        </div>
-        <div className="cpq-final-card">
-          <h3 className="cpq-panel-title">Opmerking</h3>
-          <div className="cpq-panel-text">{basis.opmerking || "Geen opmerking."}</div>
-          <div className="cpq-panel-text">
-            Status: {draftStatus === "definitief" ? "Definitief" : "Concept"}
-          </div>
-        </div>
-      </div>
-
-      <div className="cpq-actions cpq-actions-split">
-        <button onClick={onBack} className="cpq-button cpq-button-secondary" type="button">
-          Terug
-        </button>
-        <div className="cpq-actions-inline">
-          <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
-            {isSaving ? "Opslaan..." : "Opslaan"}
-          </button>
-          <button
-            onClick={onFinalize}
-            className="cpq-button cpq-button-secondary"
-            type="button"
-            disabled={isSaving || draftStatus === "definitief"}
-          >
-            {draftStatus === "definitief" ? "Al definitief" : "Definitief opslaan"}
-          </button>
-          <button onClick={onDownload} className="cpq-button cpq-button-primary" type="button">
-            Concept downloaden (JSON stub)
-          </button>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="cpq-field">
-      <div className="cpq-label">{label}</div>
-      <input value={value} onChange={(e) => onChange(e.target.value)} className="cpq-input" />
-    </label>
-  );
-}
-
-function QuickCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="cpq-quick-label">{label}</div>
-      <div className="cpq-quick-value">{value}</div>
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="cpq-metric">
-      <span className="cpq-muted">{label}</span>
-      <span className="cpq-strong">{value}</span>
-    </div>
-  );
-}
-
-function LiveSummaryMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="cpq-live-summary-metric">
-      <div className="cpq-live-summary-metric-label">{label}</div>
-      <div className="cpq-live-summary-metric-value">{value}</div>
-    </div>
-  );
-}
-
-function BaseIcon({
-  children,
-  title,
-}: {
-  children: React.ReactNode;
-  title: string;
-}) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="cpq-icon"
-      role="img"
-      aria-label={title}
-      focusable="false"
-    >
-      {children}
-    </svg>
-  );
-}
-
-function IconClock() {
-  return (
-    <BaseIcon title="Introductie">
-      <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M12 7.5v5.0l3.2 2.0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </BaseIcon>
-  );
-}
-
-function IconChart() {
-  return (
-    <BaseIcon title="Staffel">
-      <path d="M6 18V10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M12 18V6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M18 18v-7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M5 18.5h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </BaseIcon>
-  );
-}
-
-function IconShuffle() {
-  return (
-    <BaseIcon title="Mix deal">
-      <path d="M6 7h4l2.2 3.2L14.5 7H18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M18 7l-2 2m2-2l-2-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M6 17h4l2.2-3.2 2.3 3.2H18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M18 17l-2 2m2-2l-2-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </BaseIcon>
-  );
-}
-
-function IconTag() {
-  return (
-    <BaseIcon title="Korting">
-      <path d="M4.8 12.0l7.2 7.2c.4.4 1 .4 1.4 0l5.8-5.8c.4-.4.4-1 0-1.4L12 4.8H7.3c-.5 0-1 .2-1.3.6L4.3 7.1c-.3.3-.5.8-.5 1.3V12z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <circle cx="8.3" cy="8.3" r="1.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    </BaseIcon>
-  );
-}
-
-function IconStorefront() {
-  return (
-    <BaseIcon title="Groothandel">
-      <path
-        d="M5.2 10.2h13.6v8.3H5.2zm1-4.5h11.6l1 3.3H5.2zm3.1 8.1v4.7m5.4-4.7v4.7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </BaseIcon>
-  );
-}
-
-function IconTrash() {
-  return (
-    <BaseIcon title="Verwijderen">
-      <path
-        d="M8 7h8m-7 0V5.8c0-.44.36-.8.8-.8h4.4c.44 0 .8.36.8.8V7m-8.4 0-.6 10.2c-.03.46.34.84.8.84h8.8c.46 0 .83-.38.8-.84L16.4 7M10 10.2v4.8M14 10.2v4.8"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </BaseIcon>
-  );
-}
-
-function IconTruck() {
-  return (
-    <BaseIcon title="Transport">
-      <path d="M3.8 15.5V7.5h9.5v8.0H3.8z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M13.3 10.0h3.7l2.2 2.6v2.9h-5.9V10z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <circle cx="7.1" cy="16.8" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      <circle cx="16.8" cy="16.8" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    </BaseIcon>
-  );
-}
-
-function IconReturn() {
-  return (
-    <BaseIcon title="Retour">
-      <path d="M9.5 8.2L6 11.8l3.5 3.6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6 11.8h8.4c2.7 0 4.6 1.9 4.6 4.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </BaseIcon>
-  );
-}
-
-function IconBeer() {
-  return (
-    <BaseIcon title="Proeverij">
-      <path d="M7.2 7.5h6.6v8.8c0 1.2-1 2.2-2.2 2.2H9.4c-1.2 0-2.2-1-2.2-2.2V7.5z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M13.8 9.2h1.6c1.3 0 2.4 1.1 2.4 2.4s-1.1 2.4-2.4 2.4h-1.6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M7.2 7.5c0-1.2 1-2.2 2.2-2.2h2.2c1.2 0 2.2 1 2.2 2.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </BaseIcon>
-  );
-}
-
-function IconTent() {
-  return (
-    <BaseIcon title="Tapverhuur">
-      <path d="M4.5 18.5L12 5.8l7.5 12.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M9.2 18.5V14.2c0-.6.5-1.1 1.1-1.1h3.4c.6 0 1.1.5 1.1 1.1v4.3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-    </BaseIcon>
-  );
-}
-
-
 

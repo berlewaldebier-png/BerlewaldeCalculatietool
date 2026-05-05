@@ -2,17 +2,29 @@ import { PageShell } from "@/components/PageShell";
 import { ProductenVerpakkingWorkspace } from "@/components/ProductenVerpakkingWorkspace";
 import { getBootstrap } from "@/lib/apiServer";
 
+type GenericRecord = Record<string, unknown>;
+
+function unwrapList(value: unknown): GenericRecord[] {
+  if (Array.isArray(value)) return value as GenericRecord[];
+  if (value && typeof value === "object") {
+    const data = (value as any).data;
+    if (Array.isArray(data)) return data as GenericRecord[];
+  }
+  return [];
+}
+
 export default async function ProductenVerpakkingPage() {
   const bootstrap = await getBootstrap(
     [
+      "productie",
+      "channels",
+      "verkoopprijzen",
       "packaging-components",
-      "base-product-masters",
-      "composite-product-masters",
-      "catalog-products",
       "glasmaten",
       "packaging-component-prices",
-      "bieren",
-      "productie",
+      "articles",
+      "skus",
+      "bom-lines",
       "kostprijsversies",
       "kostprijsproductactiveringen"
     ],
@@ -21,33 +33,35 @@ export default async function ProductenVerpakkingPage() {
   );
 
   const navigation = bootstrap.navigation ?? [];
-  const verpakkingsonderdelen = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
-  const basisproducten = (bootstrap.datasets["base-product-masters"] as any[]) ?? [];
-  const samengestelde = (bootstrap.datasets["composite-product-masters"] as any[]) ?? [];
-  const catalogusproducten = (bootstrap.datasets["catalog-products"] as any[]) ?? [];
-  const glasmaten = (bootstrap.datasets["glasmaten"] as any[]) ?? [];
-  const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
-  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
-  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
-  const kostprijsversies = (bootstrap.datasets["kostprijsversies"] as any[]) ?? [];
-  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] ?? {}) as Record<string, unknown>;
+  const channels = unwrapList(bootstrap.datasets["channels"]);
+  const verkoopprijzen = unwrapList(bootstrap.datasets["verkoopprijzen"]);
+  const verpakkingsonderdelen = unwrapList(bootstrap.datasets["packaging-components"]);
+  const glasmaten = unwrapList(bootstrap.datasets["glasmaten"]);
+  const verpakkingsonderdeelPrijzen = unwrapList(bootstrap.datasets["packaging-component-prices"]);
+  const articles = unwrapList(bootstrap.datasets["articles"]);
+  const skus = unwrapList(bootstrap.datasets["skus"]);
+  const bomLines = unwrapList(bootstrap.datasets["bom-lines"]);
+  const kostprijsversies = unwrapList(bootstrap.datasets["kostprijsversies"]);
+  const kostprijsproductactiveringen = unwrapList(bootstrap.datasets["kostprijsproductactiveringen"]);
 
   return (
     <PageShell
       title="Producten & verpakking"
-      subtitle="Beheer verpakkingsonderdelen, basisproducten en samengestelde producten als stamdata in een overzichtelijke workspace."
+      subtitle="Beheer verpakkingsonderdelen, glasmaten en verkoopbare artikelen op basis van de centrale SKU-lijst."
       activePath="/producten-verpakking"
       navigation={navigation}
     >
       <ProductenVerpakkingWorkspace
+        productie={productie}
+        channels={channels}
+        verkoopprijzen={verkoopprijzen}
         verpakkingsonderdelen={verpakkingsonderdelen}
-        basisproducten={basisproducten}
-        samengesteldeProducten={samengestelde}
-        catalogusproducten={catalogusproducten}
         glasmaten={glasmaten}
         verpakkingsonderdeelPrijzen={verpakkingsonderdeelPrijzen}
-        bieren={bieren}
-        productie={productie}
+        articles={articles}
+        skus={skus}
+        bomLines={bomLines}
         kostprijsversies={kostprijsversies}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
       />

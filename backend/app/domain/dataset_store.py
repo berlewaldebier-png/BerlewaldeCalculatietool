@@ -28,7 +28,6 @@ from app.utils.storage import (
     load_packaging_component_prices,
     load_packaging_component_price_versions,
     load_samengestelde_producten,
-    load_catalog_products,
     load_verpakkingsonderdelen,
     load_all_verkoop_records,
     normalize_any_verkoop_record,
@@ -49,7 +48,6 @@ from app.utils.storage import (
     save_packaging_component_price_versions,
     save_verpakkingsonderdelen,
     save_samengestelde_producten,
-    save_catalog_products,
 )
 
 from datetime import UTC, datetime
@@ -73,8 +71,6 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "packaging-components": [],
     "packaging-component-prices": [],
     "packaging-component-price-versions": [],
-    "base-product-masters": [],
-    "composite-product-masters": [],
     "bieren": [],
     "kostprijsversies": [],
     "kostprijsproductactiveringen": [],
@@ -82,7 +78,9 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "verkoopprijzen": [],
     "adviesprijzen": [],
     "break-even-configuraties": [],
-    "catalog-products": [],
+    "trace-lots": [],
+    "trace-batches": [],
+    "trace-batch-consumptions": [],
     "glasmaten": [
         {"id": "glas-20cl", "label": "20 cl", "volume_ml": 200, "sort_order": 10, "active": True, "is_default": False},
         {"id": "glas-25cl", "label": "25 cl", "volume_ml": 250, "sort_order": 20, "active": True, "is_default": True},
@@ -91,6 +89,10 @@ DATASET_DEFAULTS: dict[str, Any] = {
         {"id": "glas-50cl", "label": "50 cl", "volume_ml": 500, "sort_order": 50, "active": True, "is_default": False},
     ],
     "variabele-kosten": {},
+    # Phase SKU: single source of truth for everything you can buy/sell/consume/compose.
+    "articles": [],
+    "skus": [],
+    "bom-lines": [],
     "products": [],
     "product-years": [],
     "product-year-components": [],
@@ -259,7 +261,9 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "bieren",
         "adviesprijzen",
         "break-even-configuraties",
-        "catalog-products",
+        "trace-lots",
+        "trace-batches",
+        "trace-batch-consumptions",
         "kostprijs-scenario-inkoop",
         "kostprijs-activatie-drafts",
         "berekeningen",
@@ -270,8 +274,6 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "packaging-components",
         "packaging-component-prices",
         "packaging-component-price-versions",
-        "base-product-masters",
-        "composite-product-masters",
         "products",
         "product-years",
         "product-year-components",
@@ -283,6 +285,9 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "cost-calc-results",
         "cost-calc-lines",
         "quotes",
+        "articles",
+        "skus",
+        "bom-lines",
         *MODEL_A_DATASET_NAMES,
     }
 
@@ -342,12 +347,18 @@ def load_dataset(name: str) -> Any:
         return load_packaging_component_prices()
     if name == "packaging-component-price-versions":
         return load_packaging_component_price_versions()
-    if name == "base-product-masters":
-        return load_basisproducten()
-    if name == "composite-product-masters":
-        return load_samengestelde_producten()
-    if name == "catalog-products":
-        return load_catalog_products()
+    if name == "trace-lots":
+        from app.domain import traceability_storage
+
+        return traceability_storage.load_lots(deepcopy(DATASET_DEFAULTS[name]))
+    if name == "trace-batches":
+        from app.domain import traceability_storage
+
+        return traceability_storage.load_batches(deepcopy(DATASET_DEFAULTS[name]))
+    if name == "trace-batch-consumptions":
+        from app.domain import traceability_storage
+
+        return traceability_storage.load_consumptions(deepcopy(DATASET_DEFAULTS[name]))
     if name == "verpakkingsonderdelen":
         # Legacy projection expanded prices for every year; too heavy for interactive UIs.
         return load_verpakkingsonderdelen()
@@ -397,18 +408,21 @@ def save_dataset(name: str, data: Any) -> bool:
     if name == "verpakkingsonderdelen" and isinstance(data, list):
         payload = [row for row in data if isinstance(row, dict)]
         return save_verpakkingsonderdelen(payload)
-    if name == "base-product-masters" and isinstance(data, list):
+    if name == "trace-lots" and isinstance(data, list):
+        from app.domain import traceability_storage
+
         payload = [row for row in data if isinstance(row, dict)]
-        return save_basisproducten(payload)
-    if name == "composite-product-masters" and isinstance(data, list):
+        return bool(traceability_storage.save_lots(payload, overwrite=True))
+    if name == "trace-batches" and isinstance(data, list):
+        from app.domain import traceability_storage
+
         payload = [row for row in data if isinstance(row, dict)]
-        return save_samengestelde_producten(payload)
-    if name == "catalog-products" and isinstance(data, list):
+        return bool(traceability_storage.save_batches(payload, overwrite=True))
+    if name == "trace-batch-consumptions" and isinstance(data, list):
+        from app.domain import traceability_storage
+
         payload = [row for row in data if isinstance(row, dict)]
-        saved = save_catalog_products(payload)
-        if saved:
-            dashboard_service.invalidate_dashboard_summary_cache()
-        return bool(saved)
+        return bool(traceability_storage.save_consumptions(payload, overwrite=True))
     if name == "basisproducten" and isinstance(data, list):
         payload = [row for row in data if isinstance(row, dict)]
         return save_basisproducten(payload)
@@ -431,7 +445,7 @@ def save_dataset(name: str, data: Any) -> bool:
         return saved
     if name == "kostprijsproductactiveringen" and isinstance(data, list):
         payload = [record for record in data if isinstance(record, dict)]
-        saved = save_kostprijsproductactiveringen(payload)
+        saved = postgres_storage.save_dataset(name, payload, overwrite=True)
         if saved:
             dashboard_service.invalidate_dashboard_summary_cache()
         return saved
@@ -477,17 +491,13 @@ def bootstrap_postgres_from_json(overwrite: bool = False) -> dict[str, bool]:
             payload = load_packaging_component_prices()
         elif dataset_name == "packaging-component-price-versions":
             payload = load_packaging_component_price_versions()
-        elif dataset_name == "base-product-masters":
-            payload = json_seed.load_dataset("basisproducten")
-            results[dataset_name] = save_basisproducten(payload if isinstance(payload, list) else [])
-            continue
-        elif dataset_name == "composite-product-masters":
-            payload = json_seed.load_dataset("samengestelde-producten")
-            results[dataset_name] = save_samengestelde_producten(payload if isinstance(payload, list) else [])
-            continue
         elif dataset_name == "kostprijsproductactiveringen":
             payload = json_seed.load_dataset("kostprijsproductactiveringen")
-            results[dataset_name] = save_kostprijsproductactiveringen(payload if isinstance(payload, list) else [])
+            results[dataset_name] = postgres_storage.save_dataset(
+                dataset_name,
+                payload if isinstance(payload, list) else [],
+                overwrite=overwrite,
+            )
             continue
         elif dataset_name in {"kostprijsversies", "berekeningen"}:
             payload = json_seed.load_dataset("kostprijsversies") if dataset_name == "kostprijsversies" else json_seed.load_dataset("berekeningen")
@@ -2197,40 +2207,21 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
     require_postgres()
 
     from app.domain import (
-        product_registry_storage,
         cost_versions_storage,
-        kostprijs_scenario_inkoop_storage,
         kostprijs_activation_storage,
+        kostprijs_scenario_inkoop_storage,
+        skus_storage,
     )
 
-    product_registry_storage.ensure_schema()
     cost_versions_storage.ensure_schema()
     kostprijs_scenario_inkoop_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
+    skus_storage.ensure_schema()
 
-    # NOTE: Do not rebuild the products registry here.
-    # Rebuilding (`DELETE FROM products_master`) is destructive and can fail once FK-dependent
-    # rows exist (even with NOT VALID constraints). Validation should be non-destructive.
     report: dict[str, Any] = {"ok": True, "validated": [], "already_valid": [], "missing": [], "failed": []}
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM products_master")
-            count_row = cur.fetchone()
-            report["products_master_count"] = int((count_row[0] if count_row else 0) or 0)
-    if int(report.get("products_master_count", 0) or 0) <= 0:
-        report["ok"] = False
-        report["failed"].append(
-            {
-                "constraint": "products_master",
-                "table": "products_master",
-                "error": "products_master is leeg; rebuild registry via seed import of admin tooling.",
-            }
-        )
 
     targets: list[dict[str, str]] = [
-        {"constraint": "fk_cost_version_rows_product", "table": "cost_version_product_rows"},
-        {"constraint": "fk_kostprijs_scenario_product", "table": "kostprijs_scenario_inkoop_rows"},
-        {"constraint": "fk_kostprijs_activations_product", "table": "kostprijs_product_activations"},
+        {"constraint": "fk_cost_version_sku_rows_sku", "table": "cost_version_sku_rows"},
     ]
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:

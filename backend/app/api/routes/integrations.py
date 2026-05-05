@@ -943,10 +943,23 @@ def get_douano_product_mappings(limit: int = Query(2000, ge=1, le=10000)) -> dic
 @router.put("/douano/product-mappings/{douano_product_id}")
 def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     try:
+        sku_id = str(payload.get("sku_id", "") or "").strip()
+        if not sku_id:
+            # Backwards compatible: allow (bier_id, product_id) and resolve to SKU.
+            beer_id = str(payload.get("bier_id", "") or "").strip()
+            product_id = str(payload.get("product_id", "") or "").strip()
+            if beer_id and product_id:
+                skus = dataset_store.load_dataset("skus")
+                if isinstance(skus, list):
+                    for row in skus:
+                        if not isinstance(row, dict):
+                            continue
+                        if str(row.get("beer_id", "") or "").strip() == beer_id and str(row.get("format_article_id", "") or "").strip() == product_id:
+                            sku_id = str(row.get("id", "") or "").strip()
+                            break
         record = douano_product_mapping_storage.upsert_mapping(
             douano_product_id=int(douano_product_id or 0),
-            bier_id=str(payload.get("bier_id", "") or ""),
-            product_id=str(payload.get("product_id", "") or ""),
+            sku_id=sku_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -986,7 +999,7 @@ def delete_douano_product_ignored(douano_product_id: int) -> dict[str, Any]:
 def get_douano_cost_combos(
     year: int = Query(0, ge=0, le=2100, description="Optioneel: filter op jaar (0 = alle jaren)."),
 ) -> dict[str, Any]:
-    """Return unique (bier_id, product_id) combos with human labels.
+    """Return unique SKU combos with human labels.
 
     This endpoint is used for manual mapping: Douano product -> (bier_id, product_id).
 
@@ -997,62 +1010,42 @@ def get_douano_cost_combos(
     """
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
     versions = dataset_store.load_dataset("kostprijsversies")
-    bieren = dataset_store.load_dataset("bieren")
-    basisproducten = dataset_store.load_dataset("basisproducten")
-    samengestelde = dataset_store.load_dataset("samengestelde-producten")
-
-    bieren_by_id: dict[str, str] = {}
-    if isinstance(bieren, list):
-        for row in bieren:
+    skus = dataset_store.load_dataset("skus")
+    sku_by_id: dict[str, dict[str, str]] = {}
+    if isinstance(skus, list):
+        for row in skus:
             if not isinstance(row, dict):
                 continue
-            bid = str(row.get("id", "") or "")
-            naam = str(row.get("naam", row.get("biernaam", "")) or "")
-            if bid:
-                bieren_by_id[bid] = naam or bid
-
-    product_by_ref: dict[tuple[str, str], str] = {}
-    for source, kind in ((basisproducten, "basis"), (samengestelde, "samengesteld")):
-        if not isinstance(source, list):
-            continue
-        for row in source:
-            if not isinstance(row, dict):
+            sid = str(row.get("id", "") or "").strip()
+            if not sid:
                 continue
-            pid = str(row.get("id", "") or "")
-            oms = str(row.get("omschrijving", "") or "").strip()
-            naam = str(row.get("naam", "") or "").strip()
-            label = oms or naam or pid
-            if pid:
-                product_by_ref[(kind, pid)] = label
+            sku_by_id[sid] = {
+                "name": str(row.get("name", row.get("naam", "")) or "").strip() or sid,
+                "beer_id": str(row.get("beer_id", "") or "").strip(),
+                "format_article_id": str(row.get("format_article_id", "") or "").strip(),
+            }
 
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _append_combo(*, bier_id: str, product_id: str, product_type: str) -> None:
-        if not bier_id or not product_id:
+    def _append_combo(*, sku_id: str) -> None:
+        sku_text = str(sku_id or "").strip()
+        if not sku_text:
             return
-        key = f"{bier_id}::{product_id}"
+        key = sku_text
         if key in seen:
             return
         seen.add(key)
-        bier_naam = bieren_by_id.get(bier_id, bier_id)
-        normalized_type = str(product_type or "").strip().lower()
-        if normalized_type not in {"basis", "samengesteld"}:
-            normalized_type = "onbekend"
-        product_naam = (
-            product_by_ref.get((normalized_type, product_id))
-            or product_by_ref.get(("basis", product_id))
-            or product_by_ref.get(("samengesteld", product_id))
-            or f"[{normalized_type}] {product_id}"
-        )
+        meta = sku_by_id.get(key, {})
+        bier_naam = meta.get("name", key)
+        product_naam = bier_naam
         items.append(
             {
-                "bier_id": bier_id,
-                "product_id": product_id,
-                "product_type": normalized_type,
+                "sku_id": key,
+                "beer_id": meta.get("beer_id", ""),
+                "format_article_id": meta.get("format_article_id", ""),
                 "label": f"{bier_naam} — {product_naam}",
-                "bier_naam": bier_naam,
-                "product_naam": product_naam,
+                "naam": bier_naam,
             }
         )
 
@@ -1063,11 +1056,7 @@ def get_douano_cost_combos(
             activation_year = int(row.get("jaar", 0) or 0)
             if int(year) and activation_year != int(year):
                 continue
-            _append_combo(
-                bier_id=str(row.get("bier_id", "") or ""),
-                product_id=str(row.get("product_id", "") or ""),
-                product_type=str(row.get("product_type", "") or ""),
-            )
+            _append_combo(sku_id=str(row.get("sku_id", "") or ""))
 
     if isinstance(versions, list):
         for version in versions:
@@ -1085,11 +1074,11 @@ def get_douano_cost_combos(
             for row in producten.get("basisproducten", []) if isinstance(producten.get("basisproducten", []), list) else []:
                 if not isinstance(row, dict):
                     continue
-                _append_combo(bier_id=bier_id, product_id=str(row.get("product_id", "") or ""), product_type="basis")
+                _append_combo(sku_id=str(row.get("sku_id", "") or ""))
             for row in producten.get("samengestelde_producten", []) if isinstance(producten.get("samengestelde_producten", []), list) else []:
                 if not isinstance(row, dict):
                     continue
-                _append_combo(bier_id=bier_id, product_id=str(row.get("product_id", "") or ""), product_type="samengesteld")
+                _append_combo(sku_id=str(row.get("sku_id", "") or ""))
 
     items.sort(key=lambda item: str(item.get("label", "") or "").lower())
     return {"items": items}

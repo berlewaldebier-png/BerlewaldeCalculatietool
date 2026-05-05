@@ -24,48 +24,45 @@ def ensure_schema() -> None:
                     """
                     CREATE TABLE IF NOT EXISTS douano_product_mapping (
                         douano_product_id BIGINT PRIMARY KEY,
-                        bier_id TEXT NOT NULL,
-                        product_id TEXT NOT NULL,
+                        sku_id TEXT NOT NULL,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                     """
                 )
                 cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_douano_product_mapping_bier_product ON douano_product_mapping(bier_id, product_id)"
+                    "CREATE INDEX IF NOT EXISTS idx_douano_product_mapping_sku ON douano_product_mapping(sku_id)"
                 )
             if not postgres_storage.in_transaction():
                 conn.commit()
         _SCHEMA_READY = True
 
 
-def upsert_mapping(*, douano_product_id: int, bier_id: str, product_id: str) -> dict[str, Any]:
+def upsert_mapping(*, douano_product_id: int, sku_id: str) -> dict[str, Any]:
     ensure_schema()
     pid = int(douano_product_id or 0)
     if pid <= 0:
         raise ValueError("douano_product_id ontbreekt")
-    b = str(bier_id or "").strip()
-    p = str(product_id or "").strip()
-    if not b or not p:
-        raise ValueError("bier_id en product_id zijn verplicht")
+    sku = str(sku_id or "").strip()
+    if not sku:
+        raise ValueError("sku_id is verplicht")
     now = datetime.now(UTC)
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO douano_product_mapping(douano_product_id, bier_id, product_id, updated_at)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO douano_product_mapping(douano_product_id, sku_id, updated_at)
+                VALUES (%s, %s, %s)
                 ON CONFLICT (douano_product_id)
                 DO UPDATE SET
-                    bier_id = EXCLUDED.bier_id,
-                    product_id = EXCLUDED.product_id,
+                    sku_id = EXCLUDED.sku_id,
                     updated_at = EXCLUDED.updated_at
                 """,
-                (pid, b, p, now),
+                (pid, sku, now),
             )
         if not postgres_storage.in_transaction():
             conn.commit()
-    return {"douano_product_id": pid, "bier_id": b, "product_id": p, "updated_at": now.isoformat()}
+    return {"douano_product_id": pid, "sku_id": sku, "updated_at": now.isoformat()}
 
 
 def delete_mapping(*, douano_product_id: int) -> bool:
@@ -89,7 +86,7 @@ def list_mappings(*, limit: int = 2000) -> list[dict[str, Any]]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT douano_product_id, bier_id, product_id, created_at, updated_at
+                SELECT douano_product_id, sku_id, created_at, updated_at
                 FROM douano_product_mapping
                 ORDER BY updated_at DESC
                 LIMIT %s
@@ -98,12 +95,11 @@ def list_mappings(*, limit: int = 2000) -> list[dict[str, Any]]:
             )
             rows = cur.fetchall() or []
     out: list[dict[str, Any]] = []
-    for douano_product_id, bier_id, product_id, created_at, updated_at in rows:
+    for douano_product_id, sku_id, created_at, updated_at in rows:
         out.append(
             {
                 "douano_product_id": int(douano_product_id or 0),
-                "bier_id": str(bier_id or ""),
-                "product_id": str(product_id or ""),
+                "sku_id": str(sku_id or ""),
                 "created_at": created_at.isoformat() if created_at else "",
                 "updated_at": updated_at.isoformat() if updated_at else "",
             }

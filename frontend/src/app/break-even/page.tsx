@@ -9,6 +9,8 @@ export default async function BreakEvenPage() {
       "vaste-kosten",
       "channels",
       "bieren",
+      "skus",
+      "articles",
       "kostprijsversies",
       "kostprijsproductactiveringen",
       "verkoopprijzen",
@@ -33,6 +35,8 @@ export default async function BreakEvenPage() {
         vasteKosten={(datasets["vaste-kosten"] as Record<string, unknown>) ?? {}}
         channels={(datasets.channels as Record<string, unknown>[]) ?? []}
         bieren={(datasets.bieren as Record<string, unknown>[]) ?? []}
+        skus={(datasets.skus as Record<string, unknown>[]) ?? []}
+        articles={(datasets.articles as Record<string, unknown>[]) ?? []}
         kostprijsversies={(datasets.kostprijsversies as Record<string, unknown>[]) ?? []}
         kostprijsproductactiveringen={(datasets.kostprijsproductactiveringen as Record<string, unknown>[]) ?? []}
         verkoopprijzen={(datasets.verkoopprijzen as Record<string, unknown>[]) ?? []}

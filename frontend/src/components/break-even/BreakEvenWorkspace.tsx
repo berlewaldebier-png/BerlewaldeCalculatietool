@@ -20,6 +20,36 @@ import {
   type BreakEvenScenarioAdjustmentType,
   type BreakEvenScenarioType,
 } from "@/components/break-even/breakEvenUtils";
+import {
+  buildProductLineWarnings,
+  computeBreakEvenYears,
+  groupBreakEvenConfigs,
+  resolveActiveBaseConfig,
+  withTimestamp,
+} from "@/components/break-even/breakEvenDerivations";
+import {
+  formatAdjustmentTitle,
+  formatAdjustmentValue,
+  formatScenarioTypeLabel,
+  parseSignedNumberInput,
+} from "@/components/break-even/breakEvenFormatting";
+import {
+  BreakEvenAdjustmentModal,
+  MetricCard,
+  ScenarioSummary,
+  formatDelta,
+  formatMoneyOrMissing,
+  formatStandaloneLiters,
+  normalizePromotedBaseName,
+} from "@/components/break-even/BreakEvenWorkspaceParts";
+import {
+  BreakEvenConfigList,
+  BreakEvenConfigEditorSection,
+  BreakEvenEmptyState,
+  BreakEvenHeroSection,
+  BreakEvenMixTableSection,
+  BreakEvenStatusAlert,
+} from "@/components/break-even/BreakEvenWorkspaceSections";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -28,6 +58,8 @@ type BreakEvenWorkspaceProps = {
   vasteKosten: Record<string, unknown>;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
@@ -52,6 +84,8 @@ export function BreakEvenWorkspace({
   vasteKosten,
   channels,
   bieren,
+  skus,
+  articles,
   kostprijsversies,
   kostprijsproductactiveringen,
   verkoopprijzen,
@@ -59,16 +93,7 @@ export function BreakEvenWorkspace({
   samengesteldeProducten,
 }: BreakEvenWorkspaceProps) {
   const years = useMemo(() => {
-    const set = new Set<number>();
-    Object.keys(vasteKosten ?? {}).forEach((key) => {
-      const year = Number(key);
-      if (Number.isFinite(year) && year > 0) set.add(year);
-    });
-    kostprijsproductactiveringen.forEach((row) => {
-      const year = Number((row as any).jaar ?? 0);
-      if (Number.isFinite(year) && year > 0) set.add(year);
-    });
-    return Array.from(set).sort((a, b) => b - a);
+    return computeBreakEvenYears({ vasteKosten, kostprijsproductactiveringen });
   }, [vasteKosten, kostprijsproductactiveringen]);
 
   const fallbackYear = years[0] ?? new Date().getFullYear();
@@ -85,9 +110,7 @@ export function BreakEvenWorkspace({
 
   const activeConfig = configs.find((config) => config.id === activeConfigId) ?? null;
   const activeBaseConfig = useMemo(() => {
-    if (!activeConfig) return null;
-    if (activeConfig.kind === "basis") return activeConfig;
-    return configs.find((config) => config.id === activeConfig.parent_config_id) ?? null;
+    return resolveActiveBaseConfig({ activeConfig, configs });
   }, [activeConfig, configs]);
 
   const selectedYear = activeConfig?.jaar ?? fallbackYear;
@@ -97,6 +120,8 @@ export function BreakEvenWorkspace({
         year: selectedYear,
         channels,
         bieren,
+        skus,
+        articles,
         kostprijsversies,
         kostprijsproductactiveringen,
         verkoopprijzen,
@@ -107,6 +132,8 @@ export function BreakEvenWorkspace({
       selectedYear,
       channels,
       bieren,
+      skus,
+      articles,
       kostprijsversies,
       kostprijsproductactiveringen,
       verkoopprijzen,
@@ -143,43 +170,13 @@ export function BreakEvenWorkspace({
     [result]
   );
   const productLineWarnings = useMemo(
-    () =>
-      productLines.flatMap((line) =>
-        line.warnings.map((warning) => `${line.label}: ${warning}`)
-      ),
+    () => buildProductLineWarnings(productLines),
     [productLines]
   );
 
   const groupedConfigs = useMemo(() => {
-    const bases = configs
-      .filter((config) => config.kind === "basis")
-      .sort((a, b) => {
-        if (b.jaar !== a.jaar) return b.jaar - a.jaar;
-        return a.naam.localeCompare(b.naam);
-      });
-
-    return bases.map((base) => ({
-      base,
-      scenarios: configs
-        .filter((config) => config.kind === "scenario" && config.parent_config_id === base.id)
-        .sort((a, b) => a.naam.localeCompare(b.naam)),
-    }));
+    return groupBreakEvenConfigs(configs);
   }, [configs]);
-
-  function withTimestamp<T extends BreakEvenConfig>(config: T, patch: Partial<BreakEvenConfig>) {
-    const nextConfig = {
-      ...config,
-      ...patch,
-      updated_at: new Date().toISOString(),
-    };
-    if (nextConfig.kind === "scenario") {
-      return {
-        ...nextConfig,
-        scenario_type: deriveScenarioTypeFromAdjustments(nextConfig.adjustments),
-      };
-    }
-    return nextConfig;
-  }
 
   function updateConfig(patch: Partial<BreakEvenConfig>) {
     if (!activeConfig) return;
@@ -385,7 +382,7 @@ export function BreakEvenWorkspace({
     setIsSaving(true);
     setStatus("");
     try {
-      const response = await fetch(`${API_BASE_URL}/data/dataset/break-even-configuraties`, {
+      const response = await fetch(`${API_BASE_URL}/data/break-even-configuraties`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(configs),
@@ -401,195 +398,39 @@ export function BreakEvenWorkspace({
 
   return (
     <div className="break-even-page">
-      <section className="module-card break-even-hero">
-        <div>
-          <div className="module-card-title">Break-even basis en scenario&apos;s</div>
-          <div className="module-card-text">
-            Leg eerst je verwachte basis voor het jaar vast. Maak daarna scenario&apos;s om koerswijzigingen
-            te testen. De actieve versie van een jaar voedt conceptoffertes en nieuwe offertes.
-          </div>
-        </div>
-        <div className="break-even-actions">
-          {configs.length === 0 ? (
-            <button className="cpq-button cpq-button-secondary" type="button" onClick={addBaseConfig}>
-              Nieuwe basis
-            </button>
-          ) : null}
-          <button
-            className="cpq-button cpq-button-secondary"
-            type="button"
-            onClick={addScenarioConfig}
-            disabled={!activeConfig}
-          >
-            Scenario maken
-          </button>
-          <button
-            className="cpq-button cpq-button-primary"
-            type="button"
-            onClick={() => void saveConfigs()}
-            disabled={isSaving}
-          >
-            {isSaving ? "Opslaan..." : "Opslaan"}
-          </button>
-        </div>
-      </section>
+      <BreakEvenHeroSection
+        hasConfigs={configs.length > 0}
+        canAddScenario={Boolean(activeConfig)}
+        isSaving={isSaving}
+        onAddBase={addBaseConfig}
+        onAddScenario={addScenarioConfig}
+        onSave={() => void saveConfigs()}
+      />
 
-      {status ? <div className="cpq-alert">{status}</div> : null}
+      <BreakEvenStatusAlert status={status} />
 
       {configs.length === 0 ? (
-        <section className="module-card">
-          <div className="placeholder-block">
-            <strong>Nog geen break-even basis</strong>
-            Maak eerst een basis om de verwachte mix, prijs en vaste kosten voor een jaar vast te leggen.
-          </div>
-        </section>
+        <BreakEvenEmptyState onAddBase={addBaseConfig} />
       ) : (
         <div className="break-even-layout">
-          <aside className="module-card break-even-config-list">
-            <div className="module-card-title">Jaarbasis en scenario&apos;s</div>
-            {groupedConfigs.map(({ base, scenarios }) => (
-              <div key={base.id} className="break-even-config-group">
-                <div className="break-even-config-base-row">
-                  <button
-                    type="button"
-                    className={`break-even-config-button${base.id === activeConfigId ? " active" : ""}`}
-                    onClick={() => setActiveConfigId(base.id)}
-                  >
-                    <span>{base.naam}</span>
-                    <small>
-                      {base.jaar}
-                      {base.is_active_for_quotes ? " - actief voor offertes" : " - basis"}
-                    </small>
-                  </button>
-                  <button
-                    type="button"
-                    className="cpq-icon-action break-even-config-add"
-                    aria-label={`Voeg scenario toe aan ${base.naam}`}
-                    title="Scenario toevoegen"
-                    onClick={() => addScenarioForBase(base)}
-                  >
-                    +
-                  </button>
-                </div>
-                <div className="break-even-scenario-list">
-                  {scenarios.map((scenario, index) => (
-                    <div key={scenario.id} className="break-even-config-base-row">
-                      <button
-                        type="button"
-                        className={`break-even-config-button break-even-config-button-child${scenario.id === activeConfigId ? " active" : ""}`}
-                        onClick={() => setActiveConfigId(scenario.id)}
-                      >
-                        <span>{`Scenario ${String.fromCharCode(65 + index)}`}</span>
-                        <small>
-                          {formatScenarioTypeLabel(
-                            deriveScenarioTypeFromAdjustments(scenario.adjustments)
-                          )}
-                          {scenario.is_active_for_quotes ? " - actief voor offertes" : ""}
-                        </small>
-                      </button>
-                      <button
-                        type="button"
-                        className="cpq-icon-action break-even-config-add"
-                        aria-label={`Verwijder ${scenario.naam}`}
-                        title="Scenario verwijderen"
-                        onClick={() => removeScenarioConfig(scenario.id)}
-                      >
-                        x
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </aside>
+          <BreakEvenConfigList
+            groupedConfigs={groupedConfigs}
+            activeConfigId={activeConfigId}
+            onSelectConfig={(id) => setActiveConfigId(id)}
+            onAddScenarioForBase={(base) => addScenarioForBase(base)}
+            onRemoveScenario={(id) => removeScenarioConfig(id)}
+          />
 
           {activeConfig && result ? (
             <main className="break-even-main">
-              <section className="module-card">
-                <div className="module-card-header break-even-header">
-                  <div>
-                    <div className="module-card-title">
-                      {activeConfig.kind === "basis" ? "Basis-instellingen" : "Scenario-instellingen"}
-                    </div>
-                    <div className="module-card-text">
-                      {activeConfig.kind === "basis"
-                        ? "Dit is je verwachte break-even basis voor het gekozen jaar."
-                        : `Dit scenario vergelijkt een koersvariant met ${activeBaseConfig?.naam ?? "de basis"}.`}
-                    </div>
-                  </div>
-                  {activeConfig.kind === "basis" ? (
-                    <button className="cpq-button cpq-button-secondary" type="button" onClick={useForQuotes}>
-                      Gebruik voor offertes
-                    </button>
-                  ) : (
-                    <button
-                      className="cpq-button cpq-button-primary"
-                      type="button"
-                      onClick={promoteScenarioToBase}
-                    >
-                      Promoveer naar basis
-                    </button>
-                  )}
-                </div>
-                <div className="cpq-form-grid">
-                  <label className="cpq-field">
-                    <span className="cpq-label">Naam</span>
-                    <input
-                      className="cpq-input"
-                      value={activeConfig.naam}
-                      onChange={(event) => updateConfig({ naam: event.target.value })}
-                    />
-                  </label>
-                  <label className="cpq-field">
-                    <span className="cpq-label">Jaar</span>
-                    <select
-                      className="cpq-select"
-                      value={activeConfig.jaar}
-                      onChange={(event) => updateConfig({ jaar: Number(event.target.value) })}
-                    >
-                      {years.map((year) => (
-                        <option key={year} value={year}>
-                          {year}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="cpq-field">
-                    <span className="cpq-label">Mixmodus</span>
-                    <select
-                      className="cpq-select"
-                      value={activeConfig.mix_mode}
-                      onChange={(event) =>
-                        updateConfig({
-                          mix_mode: event.target.value === "packaging" ? "packaging" : "product",
-                        })
-                      }
-                    >
-                      <option value="product">Productniveau</option>
-                      <option value="packaging">Verpakkingstype</option>
-                    </select>
-                  </label>
-                  {activeConfig.kind === "basis" ? (
-                    <label className="cpq-field">
-                      <span className="cpq-label">Vaste kosten correctie</span>
-                      <input
-                        className="cpq-input"
-                        type="number"
-                        value={activeConfig.fixed_cost_adjustment}
-                        onChange={(event) =>
-                          updateConfig({ fixed_cost_adjustment: Number(event.target.value) || 0 })
-                        }
-                      />
-                    </label>
-                  ) : null}
-                </div>
-                {activeConfig.kind === "scenario" && activeBaseConfig ? (
-                  <div className="cpq-alert">
-                    Scenario gebaseerd op <strong>{activeBaseConfig.naam}</strong>. Als deze koers klopt,
-                    promoveer je hem naar een nieuwe basis voor offertes.
-                  </div>
-                ) : null}
-              </section>
+              <BreakEvenConfigEditorSection
+                activeConfig={activeConfig}
+                activeBaseConfig={activeBaseConfig}
+                years={years}
+                onUpdateConfig={updateConfig}
+                onUseForQuotes={useForQuotes}
+                onPromoteScenarioToBase={promoteScenarioToBase}
+              />
 
               {activeConfig.kind === "scenario" ? (
                 <section className="module-card">
@@ -763,117 +604,15 @@ export function BreakEvenWorkspace({
                 </div>
               </section>
 
-              <section className="module-card">
-                <div className="module-card-title">
-                  {activeConfig.mix_mode === "packaging"
-                    ? "Verwachte mix per verpakkingstype"
-                    : "Verwachte mix per product"}
-                </div>
-                <div className="module-card-text" style={{ marginBottom: 12 }}>
-                  Deze mix vormt {activeConfig.kind === "basis" ? "de basisverwachting" : "de scenario-variant"} voor {activeConfig.jaar}.
-                </div>
-                <div className="data-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>{activeConfig.mix_mode === "packaging" ? "Verpakking" : "Product"}</th>
-                        <th>Mix %</th>
-                        {activeConfig.mix_mode === "product" ? <th>Prijs override</th> : null}
-                        <th>Sell-in / L</th>
-                        <th>Variabel / L</th>
-                        <th>Contributie / L</th>
-                        {activeConfig.mix_mode === "product" ? <th>Solo BE liters</th> : null}
-                        {activeConfig.mix_mode === "product" ? <th>Solo BE omzet</th> : null}
-                        <th>Gewogen bijdrage / L</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(activeConfig.mix_mode === "packaging"
-                        ? packTypes.map((pack) => pack.key)
-                        : productLines.map((line) => line.ref)
-                      ).map((key) => {
-                        const line = productLines.find((candidate) => candidate.ref === key);
-                        const packSummary = packTypes.find((pack) => pack.key === key);
-                        const resultLine = resultLineByKey.get(key);
-                        const displayLabel =
-                          activeConfig.mix_mode === "packaging"
-                            ? packSummary?.label ?? key
-                            : line?.label ?? key;
-                        const mixValue =
-                          activeConfig.mix_mode === "packaging"
-                            ? activeConfig.packaging_mix[key] ?? 0
-                            : activeConfig.product_mix[key] ?? 0;
-                        const sellInPerLiter =
-                          resultLine?.sellInPerLiter ??
-                          line?.sellInPerLiter ??
-                          packSummary?.sellInPerLiter ??
-                          0;
-                        const variableCostPerLiter =
-                          resultLine?.variableCostPerLiter ??
-                          line?.variableCostPerLiter ??
-                          packSummary?.variableCostPerLiter ??
-                          0;
-                        const contributionPerLiter =
-                          resultLine?.contributionPerLiter ??
-                          line?.contributionPerLiter ??
-                          packSummary?.contributionPerLiter ??
-                          0;
-                        const standalone = line ? standaloneResultByRef.get(line.ref) : null;
-
-                        return (
-                          <tr key={key}>
-                            <td>{displayLabel}</td>
-                            <td>
-                              {activeConfig.kind === "basis" ? (
-                                <input
-                                  className="dataset-input"
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  value={mixValue}
-                                  onChange={(event) => updateMix(key, event.target.value)}
-                                />
-                              ) : (
-                                <span>{formatNumber(resultLine?.mixPct ?? mixValue, 1)}%</span>
-                              )}
-                            </td>
-                            {activeConfig.mix_mode === "product" ? (
-                              <td>
-                                {activeConfig.kind === "basis" ? (
-                                  <input
-                                    className="dataset-input"
-                                    type="number"
-                                    min={0}
-                                    placeholder={line ? formatNumber(line.sellInEx, 2) : ""}
-                                    value={activeConfig.price_overrides[key] ?? ""}
-                                    onChange={(event) => updatePriceOverride(key, event.target.value)}
-                                  />
-                                ) : (
-                                  <span>
-                                    {activeConfig.price_overrides[key]
-                                      ? formatMoney(activeConfig.price_overrides[key])
-                                      : "Basisprijs"}
-                                  </span>
-                                )}
-                              </td>
-                            ) : null}
-                            <td>{formatMoneyOrMissing(sellInPerLiter)}</td>
-                            <td>{formatMoneyOrMissing(variableCostPerLiter)}</td>
-                            <td>{formatMoneyOrMissing(contributionPerLiter)}</td>
-                            {activeConfig.mix_mode === "product" ? (
-                              <td>{formatStandaloneLiters(standalone?.breakEvenLiters ?? 0)}</td>
-                            ) : null}
-                            {activeConfig.mix_mode === "product" ? (
-                              <td>{formatMoneyOrMissing(standalone?.breakEvenRevenue ?? 0)}</td>
-                            ) : null}
-                            <td>{formatMoney(resultLine?.weightedContributionPerLiter ?? 0)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
+              <BreakEvenMixTableSection
+                activeConfig={activeConfig}
+                packTypes={packTypes}
+                productLines={productLines}
+                resultLineByKey={resultLineByKey}
+                standaloneResultByRef={standaloneResultByRef}
+                onMixChange={updateMix}
+                onPriceOverrideChange={updatePriceOverride}
+              />
             </main>
           ) : null}
         </div>
@@ -900,263 +639,3 @@ export function BreakEvenWorkspace({
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="cpq-live-summary-metric">
-      <div className="cpq-live-summary-metric-label">{label}</div>
-      <div className="cpq-live-summary-metric-value">{value}</div>
-    </div>
-  );
-}
-
-function formatMoneyOrMissing(value: number) {
-  return value > 0 ? formatMoney(value) : "Niet bekend";
-}
-
-function formatStandaloneLiters(value: number) {
-  return value > 0 ? `${formatNumber(value, 0)} L` : "Niet bekend";
-}
-
-function formatDelta(value: number, suffix = "") {
-  const prefix = value > 0 ? "+" : "";
-  if (!Number.isFinite(value)) return "-";
-  if (suffix) return `${prefix}${formatNumber(value, 0)}${suffix}`;
-  return `${prefix}${formatMoney(value)}`;
-}
-
-function normalizePromotedBaseName(name: string, year: number) {
-  const trimmed = String(name ?? "").trim();
-  if (!trimmed) return `Break-even basis ${year}`;
-  return trimmed.replace(/\s+scenario$/i, "").trim() || `Break-even basis ${year}`;
-}
-
-function ScenarioSummary({
-  adjustments,
-  mixMode,
-  onEdit,
-  onRemove,
-}: {
-  adjustments: BreakEvenScenarioAdjustment[];
-  mixMode: "product" | "packaging";
-  onEdit: (adjustment: BreakEvenScenarioAdjustment) => void;
-  onRemove: (adjustment: BreakEvenScenarioAdjustment) => void;
-}) {
-  if (adjustments.length === 0) {
-    return <div className="cpq-empty">Nog geen wijzigingen toegepast.</div>;
-  }
-
-  return (
-    <div className="cpq-stack">
-      {adjustments.map((adjustment) => (
-        <div key={adjustment.id} className="cpq-block tone-neutral">
-          <div className="cpq-block-row">
-            <div className="cpq-block-body">
-              <div className="cpq-block-title">{formatAdjustmentTitle(adjustment, mixMode)}</div>
-              <div className="cpq-block-subtitle">{formatAdjustmentValue(adjustment)}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                className="cpq-icon-action"
-                onClick={() => onEdit(adjustment)}
-                aria-label="Bewerk wijziging"
-                title="Bewerken"
-              >
-                ✎
-              </button>
-              <button
-                type="button"
-                className="cpq-icon-action"
-                onClick={() => onRemove(adjustment)}
-                aria-label="Verwijder wijziging"
-                title="Verwijderen"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function BreakEvenAdjustmentModal({
-  modal,
-  mixMode,
-  productOptions,
-  packagingOptions,
-  onChange,
-  onClose,
-  onSave,
-}: {
-  modal: AdjustmentModalState;
-  mixMode: "product" | "packaging";
-  productOptions: Array<{ key: string; label: string }>;
-  packagingOptions: Array<{ key: string; label: string }>;
-  onChange: (next: AdjustmentModalState | null) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const targetOptions = mixMode === "packaging" ? packagingOptions : productOptions;
-  const needsTarget = modal.draftType === "volume_mix_pct";
-  const title =
-    modal.kind === "price"
-      ? "Prijsaanpassing"
-      : modal.kind === "fixed"
-        ? "Vaste kosten aanpassen"
-        : modal.kind === "variable"
-          ? "Variabele kosten aanpassen"
-          : modal.kind === "mix"
-            ? "Mixverschuiving"
-            : "Volumeverschuiving";
-  const subtitle =
-    modal.kind === "price"
-      ? "Pas de verkoopprijs procentueel aan. Negatieve waarden zijn toegestaan."
-      : modal.kind === "fixed"
-        ? "Kies een euro- of procentcorrectie op de vaste kosten."
-        : modal.kind === "variable"
-          ? "Pas de variabele kosten procentueel aan. Negatieve waarden zijn toegestaan."
-          : modal.kind === "mix"
-            ? "Verplaats de mix richting een specifiek product of verpakking."
-            : "Laat een product of verpakking harder of zachter meegroeien binnen de mix.";
-
-  return (
-    <div className="cpq-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="cpq-modal">
-        <div className="cpq-modal-header">
-          <div>
-            <h3 className="cpq-modal-title">{title}</h3>
-            <div className="cpq-modal-subtitle">{subtitle}</div>
-          </div>
-          <button
-            type="button"
-            className="cpq-icon-action"
-            onClick={onClose}
-            aria-label="Sluiten"
-            title="Sluiten"
-          >
-            ×
-          </button>
-        </div>
-        <div className="cpq-modal-body">
-          {modal.kind === "fixed" ? (
-            <label className="cpq-field">
-              <span className="cpq-label">Eenheid</span>
-              <select
-                className="cpq-select"
-                value={modal.draftType}
-                onChange={(event) =>
-                  onChange({
-                    ...modal,
-                    draftType: event.target.value as BreakEvenScenarioAdjustmentType,
-                  })
-                }
-              >
-                <option value="fixed_cost_eur">EUR</option>
-                <option value="fixed_cost_pct">%</option>
-              </select>
-            </label>
-          ) : null}
-
-          {needsTarget ? (
-            <label className="cpq-field">
-              <span className="cpq-label">
-                {mixMode === "packaging" ? "Verpakking" : "Product"}
-              </span>
-              <select
-                className="cpq-select"
-                value={modal.targetKey}
-                onChange={(event) => {
-                  const option = targetOptions.find((item) => item.key === event.target.value);
-                  onChange({
-                    ...modal,
-                    targetKey: event.target.value,
-                    targetLabel: option?.label ?? "",
-                  });
-                }}
-              >
-                <option value="">Selecteer...</option>
-                {targetOptions.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
-          <label className="cpq-field">
-            <span className="cpq-label">
-              Waarde {modal.draftType === "fixed_cost_eur" ? "(EUR)" : "(%)"}
-            </span>
-            <input
-              className="cpq-input"
-              type="text"
-              inputMode="decimal"
-              value={modal.valueInput}
-              onChange={(event) => {
-                const nextInput = event.target.value;
-                const parsedValue = parseSignedNumberInput(nextInput);
-                onChange({
-                  ...modal,
-                  valueInput: nextInput,
-                  value: parsedValue ?? modal.value,
-                });
-              }}
-            />
-          </label>
-
-          <div className="cpq-alert">
-            Voorbeelden: <strong>-5</strong> verlaagt, <strong>+5</strong> verhoogt.
-          </div>
-        </div>
-        <div className="cpq-modal-footer">
-          <button type="button" className="cpq-button cpq-button-secondary" onClick={onClose}>
-            Annuleren
-          </button>
-          <button type="button" className="cpq-button cpq-button-primary" onClick={onSave}>
-            Opslaan
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatAdjustmentTitle(
-  adjustment: BreakEvenScenarioAdjustment,
-  mixMode: "product" | "packaging"
-) {
-  if (adjustment.type === "price_pct") return "Verkoopprijs";
-  if (adjustment.type === "fixed_cost_eur") return "Vaste kosten (EUR)";
-  if (adjustment.type === "fixed_cost_pct") return "Vaste kosten (%)";
-  if (adjustment.type === "variable_cost_pct") return "Variabele kosten (%)";
-  return `${mixMode === "packaging" ? "Mix / volume verpakking" : "Mix / volume product"}${
-    adjustment.target_label ? `: ${adjustment.target_label}` : ""
-  }`;
-}
-
-function formatAdjustmentValue(adjustment: BreakEvenScenarioAdjustment) {
-  if (adjustment.type === "fixed_cost_eur") {
-    return `${adjustment.value >= 0 ? "+" : ""}${formatMoney(adjustment.value)}`;
-  }
-  return `${adjustment.value >= 0 ? "+" : ""}${formatNumber(adjustment.value, 1)}%`;
-}
-
-function formatScenarioTypeLabel(type: BreakEvenScenarioType | null) {
-  if (type === "pricing") return "Scenario prijs";
-  if (type === "costs") return "Scenario kosten";
-  if (type === "volume") return "Scenario volume";
-  if (type === "combined") return "Scenario combinatie";
-  return "Scenario vrij";
-}
-
-function parseSignedNumberInput(value: string) {
-  const normalized = String(value ?? "").trim().replace(",", ".");
-  if (!normalized || normalized === "-" || normalized === "+" || normalized === "." || normalized === "-.") {
-    return null;
-  }
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}

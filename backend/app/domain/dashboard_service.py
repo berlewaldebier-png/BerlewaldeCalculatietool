@@ -168,7 +168,7 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM kostprijs_product_activations WHERE effectief_tot IS NULL")
+            cur.execute("SELECT COUNT(*) FROM kostprijs_sku_activations WHERE effectief_tot IS NULL")
             count_row = cur.fetchone()
             activation_count = int((count_row[0] if count_row else 0) or 0)
             if activation_count == 0:
@@ -177,8 +177,8 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
             cur.execute(
                 """
                 WITH activations AS (
-                    SELECT bier_id, jaar, product_id, kostprijsversie_id
-                    FROM kostprijs_product_activations
+                    SELECT sku_id, jaar, kostprijsversie_id
+                    FROM kostprijs_sku_activations
                     WHERE effectief_tot IS NULL
                 ),
                 versions AS (
@@ -196,45 +196,41 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
                     FROM cost_versions
                     WHERE status = 'definitief'
                 ),
-                product_costs AS (
+                sku_costs AS (
                     SELECT
                         v.version_id,
-                        v.bier_id,
                         v.jaar,
-                        r.product_id,
+                        r.sku_id,
                         COALESCE(r.kostprijs, 0) AS kostprijs,
                         v.version_ts,
                         v.versie_nummer
                     FROM versions v
-                    JOIN cost_version_product_rows r
+                    JOIN cost_version_sku_rows r
                       ON r.version_id = v.version_id
-                    WHERE COALESCE(r.product_id,'') <> ''
+                    WHERE COALESCE(r.sku_id,'') <> ''
                 ),
                 active_cost AS (
                     SELECT
-                        a.bier_id,
+                        a.sku_id,
                         a.jaar,
-                        a.product_id,
                         a.kostprijsversie_id AS active_version_id,
-                        COALESCE(pc.kostprijs, 0) AS active_kostprijs
+                        COALESCE(sc.kostprijs, 0) AS active_kostprijs
                     FROM activations a
-                    LEFT JOIN product_costs pc
-                      ON pc.version_id = a.kostprijsversie_id
-                     AND pc.bier_id = a.bier_id
-                     AND pc.jaar = a.jaar
-                     AND pc.product_id = a.product_id
+                    LEFT JOIN sku_costs sc
+                      ON sc.version_id = a.kostprijsversie_id
+                     AND sc.jaar = a.jaar
+                     AND sc.sku_id = a.sku_id
                 ),
                 latest_per_scope AS (
-                    SELECT DISTINCT ON (bier_id, jaar, product_id)
-                        bier_id,
+                    SELECT DISTINCT ON (sku_id, jaar)
+                        sku_id,
                         jaar,
-                        product_id,
                         version_id AS latest_version_id,
                         kostprijs AS latest_kostprijs,
                         version_ts,
                         versie_nummer
-                    FROM product_costs
-                    ORDER BY bier_id, jaar, product_id, version_ts DESC, versie_nummer DESC, version_id DESC
+                    FROM sku_costs
+                    ORDER BY sku_id, jaar, version_ts DESC, versie_nummer DESC, version_id DESC
                 ),
                 diffs AS (
                     SELECT
@@ -249,9 +245,8 @@ def _ready_to_activate_counts(*, warning_threshold_pct: float = 10.0) -> tuple[i
                         END AS delta_pct
                     FROM active_cost a
                     JOIN latest_per_scope l
-                      ON l.bier_id = a.bier_id
+                      ON l.sku_id = a.sku_id
                      AND l.jaar = a.jaar
-                     AND l.product_id = a.product_id
                     WHERE l.latest_version_id <> a.active_version_id
                 )
                 SELECT

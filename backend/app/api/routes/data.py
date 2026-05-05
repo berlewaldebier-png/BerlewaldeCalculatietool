@@ -29,8 +29,22 @@ _STANDARD_DATASETS = [
     "bieren",
     "berekeningen",
     "kostprijsversies",
+    "kostprijsproductactiveringen",
     "verkoopprijzen",
+    "break-even-configuraties",
+    "adviesprijzen",
+    "channels",
+    "packaging-components",
+    "packaging-component-prices",
+    "packaging-component-price-versions",
+    "trace-lots",
+    "trace-batches",
+    "trace-batch-consumptions",
     "variabele-kosten",
+    # SKU-aanpak canonical datasets
+    "articles",
+    "skus",
+    "bom-lines",
 ]
 
 # Create generic CRUD router for standard datasets
@@ -56,7 +70,9 @@ def post_activate_kostprijsversie(
         raise
     except Exception as exc:
         logger.exception(f"Error activating cost version {version_id}")
-        raise HTTPException(status_code=500, detail="Internal server error") from exc
+        # In local/dev this endpoint is frequently used to diagnose data-model issues.
+        # Include the exception message so the UI/Swagger can surface the real root cause.
+        raise HTTPException(status_code=500, detail=str(exc) or "Internal server error") from exc
 
 
 @router.post("/kostprijsversies/{version_id}/activate-products")

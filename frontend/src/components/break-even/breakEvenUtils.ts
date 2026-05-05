@@ -220,6 +220,8 @@ export function buildBreakEvenProductLines(params: {
   year: number;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   verkoopprijzen: GenericRecord[];
@@ -229,6 +231,7 @@ export function buildBreakEvenProductLines(params: {
   const factsIndex = buildProductFacts({
     ...params,
     channelCode: "horeca",
+    onlyReady: true,
   });
 
   return factsIndex.facts.map((fact) => ({

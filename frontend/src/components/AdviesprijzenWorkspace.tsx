@@ -1,19 +1,31 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatMoneyEUR } from "@/lib/formatters";
 import {
   calcAdviesprijsInclBtwRange,
   fromInclBtw,
   round2,
-  toFiniteNumber,
   toInclBtw
 } from "@/lib/pricingEngine";
+import { clampNumber, money, parseBtwPct } from "@/components/adviesprijzen/adviesprijzenUtils";
 import { VatDisplayToggle, type VatDisplayMode } from "@/components/ui/VatDisplayToggle";
 import {
   buildSellInLookup,
   resolveSellInPriceEx,
 } from "@/components/offerte-samenstellen/sellInResolver";
+import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
+import { apiRequestTextClient } from "@/lib/apiClient";
+import {
+  buildAdviesOpslagByChannel,
+  buildChannelDefaultOpslag,
+  buildProductCostRows,
+  buildProductionYears,
+  buildYears,
+  buildYearRows,
+  normalizeAdviesprijsRows,
+  normalizeChannels,
+  buildAdviesprijzenSavePayload,
+} from "@/components/adviesprijzen/adviesprijzenDerivations";
 
 const API_BASE_URL = "/api";
 
@@ -38,11 +50,13 @@ type VerkoopprijzenRow = Record<string, unknown>;
 type KostprijsversieRow = Record<string, unknown>;
 type KostprijsActivationRow = Record<string, unknown>;
 type BierRow = Record<string, unknown>;
-type CatalogProductRow = Record<string, unknown>;
+type SkuRow = Record<string, unknown>;
+type ArticleRow = Record<string, unknown>;
 type PackagingComponentRow = Record<string, unknown>;
 type PackagingComponentPriceVersionRow = Record<string, unknown>;
 
 type ProductCostRow = {
+  skuId: string;
   bierId: string;
   biernaam: string;
   btwPct: number;
@@ -53,77 +67,34 @@ type ProductCostRow = {
   kostprijsEx: number;
 };
 
-function clampNumber(value: unknown, fallback: number) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return parsed;
-}
-
-function parseBtwPct(value: unknown) {
-  const text = String(value ?? "").trim();
-  if (!text) return 0;
-  const match = text.match(/(\d+(?:[.,]\d+)?)\s*%/);
-  if (!match) return 0;
-  const parsed = Number(String(match[1]).replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function money(value: number) {
-  return formatMoneyEUR(toFiniteNumber(value, 0));
-}
-
 export function AdviesprijzenWorkspace(props: {
   initialChannels: any[];
   initialAdviesprijzen: any[];
   initialProductie: ProductieMap;
   initialVerkoopprijzen: VerkoopprijzenRow[];
   initialBieren: BierRow[];
+  initialSkus: SkuRow[];
+  initialArticles: ArticleRow[];
   initialKostprijsversies: KostprijsversieRow[];
   initialKostprijsproductactiveringen: KostprijsActivationRow[];
-  initialCatalogusproducten: CatalogProductRow[];
   initialPackagingComponents: PackagingComponentRow[];
   initialPackagingComponentPriceVersions: PackagingComponentPriceVersionRow[];
 }) {
   const [vatDisplay, setVatDisplay] = useState<VatDisplayMode>("excl");
   const channels = useMemo<Channel[]>(() => {
-    return (Array.isArray(props.initialChannels) ? props.initialChannels : [])
-      .filter((row) => row && typeof row === "object")
-      .map((row: any) => ({
-        code: String(row.code ?? row.id ?? "").toLowerCase(),
-        naam: String(row.naam ?? row.label ?? row.code ?? ""),
-        actief: Boolean(row.actief ?? true),
-        volgorde: Number(row.volgorde ?? 0),
-        default_marge_pct: Number(row.default_marge_pct ?? row.default_marge ?? 0) || 0
-      }))
-      .filter((row) => row.code)
-      .sort((a, b) => (a.volgorde || 0) - (b.volgorde || 0));
+    return normalizeChannels(props.initialChannels);
   }, [props.initialChannels]);
 
   const [rows, setRows] = useState<AdviesprijsRow[]>(() => {
-    return (Array.isArray(props.initialAdviesprijzen) ? props.initialAdviesprijzen : [])
-      .filter((row) => row && typeof row === "object")
-      .map((row: any) => ({
-        id: String(row.id ?? ""),
-        jaar: Number(row.jaar ?? 0),
-        channel_code: String(row.channel_code ?? row.code ?? "").toLowerCase(),
-        opslag_pct: Number(row.opslag_pct ?? row.opslag ?? 0)
-      }))
-      .filter((row) => row.jaar > 0 && row.channel_code);
+    return normalizeAdviesprijsRows(props.initialAdviesprijzen);
   });
 
   const productionYears = useMemo(() => {
-    const years = Object.keys(props.initialProductie ?? {})
-      .filter((key) => /^\d+$/.test(key))
-      .map((key) => Number(key))
-      .filter((y) => y > 0)
-      .sort((a, b) => a - b);
-    return years;
+    return buildProductionYears(props.initialProductie ?? {});
   }, [props.initialProductie]);
 
   const years = useMemo(() => {
-    const yearSet = new Set<number>(productionYears);
-    rows.forEach((row) => yearSet.add(Number(row.jaar ?? 0)));
-    return Array.from(yearSet).filter((y) => y > 0).sort((a, b) => a - b);
+    return buildYears(productionYears, rows);
   }, [productionYears, rows]);
 
   const [selectedYear, setSelectedYear] = useState<number>(() => years[years.length - 1] ?? new Date().getFullYear());
@@ -135,21 +106,15 @@ export function AdviesprijzenWorkspace(props: {
   const [openChannelCodes, setOpenChannelCodes] = useState<string[]>(() => activeChannels.map((c) => c.code));
 
   const adviesOpslagByChannel = useMemo(() => {
-    const map = new Map<string, number>();
-    rows
-      .filter((row) => Number(row.jaar ?? 0) === selectedYear)
-      .forEach((row) => map.set(row.channel_code, Number(row.opslag_pct ?? 0) || 0));
-    return map;
+    return buildAdviesOpslagByChannel(rows, selectedYear);
   }, [rows, selectedYear]);
 
   const verkoopprijzenRows = useMemo(() => (Array.isArray(props.initialVerkoopprijzen) ? props.initialVerkoopprijzen : []), [props.initialVerkoopprijzen]);
   const kostprijsversies = useMemo(() => (Array.isArray(props.initialKostprijsversies) ? props.initialKostprijsversies : []), [props.initialKostprijsversies]);
   const activations = useMemo(() => (Array.isArray(props.initialKostprijsproductactiveringen) ? props.initialKostprijsproductactiveringen : []), [props.initialKostprijsproductactiveringen]);
   const bieren = useMemo(() => (Array.isArray(props.initialBieren) ? props.initialBieren : []), [props.initialBieren]);
-  const catalogusproducten = useMemo(
-    () => (Array.isArray(props.initialCatalogusproducten) ? props.initialCatalogusproducten : []),
-    [props.initialCatalogusproducten]
-  );
+  const skus = useMemo(() => (Array.isArray(props.initialSkus) ? props.initialSkus : []), [props.initialSkus]);
+  const articles = useMemo(() => (Array.isArray(props.initialArticles) ? props.initialArticles : []), [props.initialArticles]);
   const packagingComponents = useMemo(
     () => (Array.isArray(props.initialPackagingComponents) ? props.initialPackagingComponents : []),
     [props.initialPackagingComponents]
@@ -174,6 +139,28 @@ export function AdviesprijzenWorkspace(props: {
     });
     return map;
   }, [bieren]);
+
+  const skuById = useMemo(() => {
+    const map = new Map<string, SkuRow>();
+    skus.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      const id = String((row as any).id ?? "").trim();
+      if (!id) return;
+      map.set(id, row);
+    });
+    return map;
+  }, [skus]);
+
+  const articleNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    articles.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      const id = String((row as any).id ?? "").trim();
+      if (!id) return;
+      map.set(id, String((row as any).name ?? (row as any).naam ?? id).trim() || id);
+    });
+    return map;
+  }, [articles]);
 
   const packagingComponentNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -229,136 +216,54 @@ export function AdviesprijzenWorkspace(props: {
     return Number.isNaN(t) ? 0 : t;
   }
 
-  function findProductRowInSnapshot(version: KostprijsversieRow, productType: "basis" | "samengesteld", productId: string) {
+  function findProductRowInSnapshot(
+    version: KostprijsversieRow,
+    ids: { skuId: string; productId: string }
+  ) {
     const products = ((version as any).resultaat_snapshot ?? (version as any).resultaatSnapshot ?? {}).producten ?? {};
-    const list =
-      productType === "basis"
-        ? Array.isArray(products.basisproducten)
-          ? products.basisproducten
-          : []
-        : Array.isArray(products.samengestelde_producten)
-          ? products.samengestelde_producten
-          : [];
-    return (list as any[]).find((r) => String(r?.product_id ?? "") === productId) ?? null;
+    const productRows = [
+      ...(Array.isArray(products.basisproducten) ? products.basisproducten : []),
+      ...(Array.isArray(products.samengestelde_producten) ? products.samengestelde_producten : []),
+    ] as any[];
+
+    const skuId = String(ids.skuId ?? "").trim();
+    if (skuId) {
+      const bySku = productRows.find((r) => String(r?.sku_id ?? "") === skuId);
+      if (bySku) return bySku ?? null;
+    }
+    const productId = String(ids.productId ?? "").trim();
+    if (!productId) return null;
+    return productRows.find((r) => String(r?.product_id ?? "") === productId) ?? null;
   }
 
+  const centralSkuIndex = useCentralSkuIndex({
+    year: selectedYear,
+    channels: Array.isArray(props.initialChannels) ? props.initialChannels : [],
+    verkoopprijzen: verkoopprijzenRows,
+    skus,
+    articles,
+    kostprijsversies,
+    kostprijsproductactiveringen: activations,
+  });
+
   const productCostRows = useMemo<ProductCostRow[]>(() => {
-    const bestActivationByScope = new Map<
-      string,
-      { bierId: string; productId: string; productType: "basis" | "samengesteld"; kostprijsversieId: string; score: number }
-    >();
-
-    for (const act of activeActivationsForYear) {
-      if (!act || typeof act !== "object") continue;
-      const bierId = String((act as any).bier_id ?? "");
-      const productId = String((act as any).product_id ?? "");
-      const rawType = String((act as any).product_type ?? "").toLowerCase();
-      const productType = rawType === "basis" ? ("basis" as const) : rawType === "samengesteld" ? ("samengesteld" as const) : null;
-      const kostprijsversieId = String((act as any).kostprijsversie_id ?? "");
-      if (!bierId || !productId || !productType || !kostprijsversieId) continue;
-
-      const score = scoreActivation(act as any);
-      const key = `${bierId}:${productType}:${productId}`;
-      const existing = bestActivationByScope.get(key);
-      if (!existing || score >= existing.score) {
-        bestActivationByScope.set(key, { bierId, productId, productType, kostprijsversieId, score });
-      }
-    }
-
-    const out: ProductCostRow[] = [];
-    for (const picked of bestActivationByScope.values()) {
-      const version = kostprijsversieById.get(picked.kostprijsversieId);
-      if (!version) continue;
-
-      const bierSnapshot = beerById.get(picked.bierId);
-      const biernaam = bierSnapshot?.biernaam || picked.bierId;
-      const btwPct = parseBtwPct(((version as any).basisgegevens ?? {}).btw_tarief ?? bierSnapshot?.btwPct ?? "");
-
-      const row = findProductRowInSnapshot(version, picked.productType, picked.productId);
-      const verpakking = String((row as any)?.verpakking ?? (row as any)?.verpakkingseenheid ?? picked.productId);
-      const kostprijsEx = Number((row as any)?.kostprijs ?? 0) || 0;
-
-      out.push({
-        bierId: picked.bierId,
-        biernaam,
-        btwPct,
-        kostprijsversieId: picked.kostprijsversieId,
-        productId: picked.productId,
-        productType: picked.productType,
-        verpakking,
-        kostprijsEx
-      });
-    }
-
-    const costByBeerProductKey = new Map<string, { cost: number; btwPct: number }>();
-    out.forEach((row) => {
-      if (!row.bierId) return;
-      costByBeerProductKey.set(`${row.bierId}:${row.productType}:${row.productId}`, {
-        cost: row.kostprijsEx,
-        btwPct: row.btwPct,
-      });
-    });
-
-    catalogusproducten.forEach((cp) => {
-      if (!cp || typeof cp !== "object") return;
-      const id = String((cp as any).id ?? "");
-      const naam = String((cp as any).naam ?? (cp as any).name ?? "");
-      if (!id || !naam) return;
-      const bom = Array.isArray((cp as any).bom_lines) ? ((cp as any).bom_lines as any[]) : [];
-
-      let costEx = 0;
-      let btwPct = parseBtwPct((cp as any).btw_tarief ?? (cp as any).btw ?? "21%");
-      for (const line of bom) {
-        if (!line || typeof line !== "object") continue;
-        const kind = String((line as any).line_kind ?? "").toLowerCase();
-        const qty = Number((line as any).quantity ?? 0) || 0;
-        if (qty <= 0) continue;
-        if (kind === "beer" || kind === "beer_product") {
-          const bierId = String((line as any).bier_id ?? "");
-          const productId = String((line as any).product_id ?? "");
-          const productType = String((line as any).product_type ?? "basis").toLowerCase();
-          const key = `${bierId}:${productType}:${productId}`;
-          const found = costByBeerProductKey.get(key);
-          if (found) {
-            costEx += qty * found.cost;
-            if (!btwPct) btwPct = found.btwPct;
-          }
-          continue;
-        }
-        if (kind === "packaging_component") {
-          const componentId = String((line as any).packaging_component_id ?? "");
-          if (!componentId) continue;
-          const price = activePackagingComponentPriceById.get(componentId) ?? 0;
-          costEx += qty * price;
-          continue;
-        }
-        if (kind === "labor" || kind === "other") {
-          const unitCost = Number((line as any).unit_cost_ex ?? (line as any).kostprijs_ex ?? 0) || 0;
-          costEx += qty * unitCost;
-        }
-      }
-
-      out.push({
-        bierId: "",
-        biernaam: naam,
-        btwPct,
-        kostprijsversieId: "",
-        productId: id,
-        productType: "catalog",
-        verpakking: naam,
-        kostprijsEx: costEx,
-      });
-    });
-
-    // Stable ordering: beer -> productType -> verpakking
-    return out.sort((a, b) => {
-      const bn = a.biernaam.localeCompare(b.biernaam);
-      if (bn !== 0) return bn;
-      const pt = a.productType.localeCompare(b.productType);
-      if (pt !== 0) return pt;
-      return a.verpakking.localeCompare(b.verpakking);
-    });
-  }, [activeActivationsForYear, beerById, kostprijsversieById, catalogusproducten, activePackagingComponentPriceById]);
+    // Phase 6.2: adviesprijzen volgt dezelfde centrale verkoopbare lijst als offertes/verkoopstrategie.
+    // We tonen alleen `cost_plus` items met actieve kostprijs; diensten (manual_rate) horen niet in adviesopslag.
+    return buildProductCostRows({
+      centralRows: centralSkuIndex.rows as any,
+      skuById: skuById as any,
+      beerById: beerById as any,
+      articleNameById: articleNameById as any,
+    }) as any;
+  }, [
+    props.initialChannels,
+    centralSkuIndex.rows,
+    beerById,
+    skuById,
+    articleNameById,
+    selectedYear,
+    verkoopprijzenRows,
+  ]);
 
   const sellInLookup = useMemo(
     () => buildSellInLookup(verkoopprijzenRows, selectedYear),
@@ -366,9 +271,7 @@ export function AdviesprijzenWorkspace(props: {
   );
 
   const channelDefaultOpslag = useMemo(() => {
-    const map = new Map<string, number>();
-    activeChannels.forEach((c) => map.set(c.code, Number((c as any).default_marge_pct ?? 0) || 0));
-    return map;
+    return buildChannelDefaultOpslag(activeChannels);
   }, [activeChannels]);
 
   function getSellInPriceEx(row: ProductCostRow, channelCode: string) {
@@ -383,43 +286,20 @@ export function AdviesprijzenWorkspace(props: {
   }
 
   const yearRows = useMemo(() => {
-    const byCode = new Map<string, AdviesprijsRow>();
-    rows
-      .filter((row) => Number(row.jaar ?? 0) === selectedYear)
-      .forEach((row) => byCode.set(row.channel_code, row));
-    return activeChannels.map((channel) => {
-      const existing = byCode.get(channel.code);
-      return {
-        channel,
-        row: existing ?? { id: "", jaar: selectedYear, channel_code: channel.code, opslag_pct: 0 }
-      };
-    });
+    return buildYearRows({ rows, selectedYear, activeChannels });
   }, [rows, selectedYear, activeChannels]);
 
   async function save() {
     setIsSaving(true);
     setStatus("");
     try {
-      const kept = rows.filter((row) => Number(row.jaar ?? 0) !== selectedYear);
-      const next = [
-        ...kept,
-        ...yearRows.map(({ row }) => ({
-          id: row.id,
-          jaar: selectedYear,
-          channel_code: row.channel_code,
-          opslag_pct: clampNumber(row.opslag_pct, 0)
-        }))
-      ];
+      const next = buildAdviesprijzenSavePayload({ rows, selectedYear, yearRows });
 
-      const response = await fetch(`${API_BASE_URL}/data/dataset/adviesprijzen`, {
+      await apiRequestTextClient("/data/adviesprijzen", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next)
+        body: JSON.stringify(next),
       });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Opslaan mislukt.");
-      }
       setRows(next);
       setStatus("Opgeslagen.");
     } catch (error) {

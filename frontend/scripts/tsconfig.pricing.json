@@ -23,8 +23,19 @@
     "./pricingEngine.contracttest.ts",
     "./quoteBuilderGuards.contracttest.ts",
     "./quoteScenarioCalculations.contracttest.ts",
+    "./centralSkuIndex.contracttest.ts",
+    "./quoteOptionBuilding.contracttest.ts",
+    "./activationUniqueness.contracttest.ts",
+    "./quoteOptionOrdering.contracttest.ts",
     "../src/lib/pricingEngine.ts",
     "../src/lib/quoteBuilderGuards.ts",
     "../src/lib/quoteScenarioPricing.ts"
+    ,
+    "../src/features/sku/centralSkuIndex.ts",
+    "../src/components/offerte-samenstellen/dataSources.ts",
+    "../src/components/offerte-samenstellen/sellInResolver.ts",
+    "../src/components/offerte-samenstellen/quoteUtils.ts",
+    "../src/components/offerte-samenstellen/types.ts",
+    "../src/lib/productFacts.ts"
   ]
 }
