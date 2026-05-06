@@ -249,11 +249,6 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
             description: "Bevestig dat deze flow op inkoop is gebaseerd"
           },
           {
-            id: "classificeren",
-            label: "Classificeren",
-            description: "Kies productgroep, alcoholcategorie en verpakkingstype"
-          },
-          {
             id: "input",
             label: "Inkoopfactuur",
             description: "Selecteer producten, aantallen en bronkosten"
@@ -271,11 +266,6 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
             description: "Bevestig dat deze flow op eigen productie draait"
           },
           {
-            id: "classificeren",
-            label: "Classificeren",
-            description: "Kies productgroep, alcoholcategorie en verpakkingstype"
-          },
-          {
             id: "input",
             label: "Recept",
             description: "Werk recept, ingredienten en opbrengst uit"
@@ -289,6 +279,12 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
       description: "Verdeel extra kosten over facturen en regels"
     });
   }
+
+  steps.push({
+    id: "classificeren",
+    label: "Classificeren",
+    description: "Koppel productgroep, alcoholcategorie en verpakkingstype"
+  });
 
   steps.push({
     id: "summary",

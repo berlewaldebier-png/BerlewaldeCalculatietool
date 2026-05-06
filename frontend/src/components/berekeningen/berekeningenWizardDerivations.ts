@@ -164,20 +164,6 @@ export function validateCurrentBeforePersistFromWizard(params: {
   const { current, basisproducten, samengesteldeProducten, getProductUnitOptions, isFustOption } = params;
 
   const basis = (current.basisgegevens as GenericRecord) ?? {};
-  const productGroup = String((basis as any).product_group ?? "").trim();
-  const packagingType = String((basis as any).packaging_type ?? "").trim();
-  const packagingOptIn = Boolean((basis as any).packaging_type_opt_in ?? false);
-  const packagingRequired = productGroup === "drank" || productGroup === "giftset";
-  if (!productGroup) {
-    return "Productgroep is verplicht.";
-  }
-  if (packagingRequired && !packagingType) {
-    return "Verpakkingstype is verplicht voor Drank/Giftset.";
-  }
-  if (!packagingRequired && !packagingOptIn && packagingType) {
-    return "Zet eerst '+ verpakkingstype' aan om dit veld te gebruiken.";
-  }
-
   const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
   if (soort !== "Inkoop") {
     return "";

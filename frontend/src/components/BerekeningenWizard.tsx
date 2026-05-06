@@ -417,13 +417,50 @@ export function BerekeningenWizard({
       });
 
       // Persist classification to the SKU read-model so other selectors (dashboard, strategy) stay consistent.
-      const skuId = String((basis as any).sku_id ?? "").trim();
-      if (skuId) {
-        await saveSkuClassification(skuId, {
-          product_group: String((basis as any).product_group ?? "").trim(),
-          alcohol_category: String((basis as any).alcohol_category ?? "").trim(),
-          packaging_type: String((basis as any).packaging_type ?? "").trim(),
-        });
+      const skuType = String((basis as any).sku_type ?? "bier").trim().toLowerCase();
+      const overrides = (((current as any).classification_overrides ?? {}) as Record<string, any>) || {};
+      const entries = Object.entries(overrides).filter(([skuId]) => String(skuId || "").trim());
+      if (entries.length > 0) {
+        for (const [skuId, payload] of entries) {
+          const productGroup = String((payload as any)?.product_group ?? "").trim();
+          const packagingType = String((payload as any)?.packaging_type ?? "").trim();
+          if (!productGroup) {
+            setStatus("Productgroep is verplicht (Classificeren).");
+            setStatusTone("error");
+            return false;
+          }
+          if ((productGroup === "drank" || productGroup === "giftset") && !packagingType) {
+            setStatus("Verpakkingstype is verplicht voor Drank/Giftset (Classificeren).");
+            setStatusTone("error");
+            return false;
+          }
+          await saveSkuClassification(String(skuId), {
+            product_group: productGroup,
+            alcohol_category: String((payload as any)?.alcohol_category ?? "").trim(),
+            packaging_type: packagingType,
+          });
+        }
+      } else if (skuType !== "bier") {
+        const skuId = String((basis as any).sku_id ?? "").trim();
+        if (skuId) {
+          const productGroup = String((basis as any).product_group ?? "").trim();
+          const packagingType = String((basis as any).packaging_type ?? "").trim();
+          if (!productGroup) {
+            setStatus("Productgroep is verplicht (Classificeren).");
+            setStatusTone("error");
+            return false;
+          }
+          if ((productGroup === "drank" || productGroup === "giftset") && !packagingType) {
+            setStatus("Verpakkingstype is verplicht voor Drank/Giftset (Classificeren).");
+            setStatusTone("error");
+            return false;
+          }
+          await saveSkuClassification(skuId, {
+            product_group: productGroup,
+            alcohol_category: String((basis as any).alcohol_category ?? "").trim(),
+            packaging_type: packagingType,
+          });
+        }
       }
       // Auto-activate after finalize: a definitive version should be immediately quoteable.
       const updatedCurrent =
@@ -532,12 +569,71 @@ export function BerekeningenWizard({
   }
 
   function renderClassificatieStep() {
+    const skuType = String(((current.basisgegevens as GenericRecord) as any)?.sku_type ?? "bier").toLowerCase();
+    const beerId = String((current as any)?.bier_id ?? "").trim();
+    const skuByBeerFormat = new Map<string, any>();
+    (Array.isArray(skus) ? skus : []).forEach((row: any) => {
+      const sid = String(row?.id ?? "").trim();
+      const bid = String(row?.beer_id ?? "").trim();
+      const fid = String(row?.format_article_id ?? "").trim();
+      if (sid && bid && fid) {
+        skuByBeerFormat.set(`${bid}|${fid}`, row);
+      }
+    });
+
+    const snapshot = ((current as any)?.resultaat_snapshot ?? {}) as any;
+    const productRows = [
+      ...(((snapshot?.producten?.basisproducten ?? []) as any[]) || []),
+      ...(((snapshot?.producten?.samengestelde_producten ?? []) as any[]) || []),
+    ];
+    const productIds = Array.from(
+      new Set(
+        productRows
+          .map((row) => String(row?.product_id ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const targets =
+      skuType !== "bier"
+        ? (() => {
+            const skuId = String(((current.basisgegevens as any)?.sku_id ?? "")).trim();
+            if (!skuId) return [];
+            const skuRow = (Array.isArray(skus) ? skus : []).find((row: any) => String(row?.id ?? "").trim() === skuId) as any;
+            const label = skuRow ? String(skuRow?.label ?? skuRow?.name ?? skuId) : skuId;
+            return [
+              {
+                sku_id: skuId,
+                label,
+                current_product_group: String(skuRow?.product_group ?? "").trim(),
+                current_alcohol_category: String(skuRow?.alcohol_category ?? "").trim(),
+                current_packaging_type: String(skuRow?.packaging_type ?? "").trim(),
+              },
+            ];
+          })()
+        : productIds
+            .map((productId) => {
+              if (!beerId) return null;
+              const skuRow = skuByBeerFormat.get(`${beerId}|${productId}`) as any;
+              if (!skuRow) return null;
+              const label = String(skuRow?.label ?? skuRow?.name ?? skuRow?.id ?? "").trim() || String(skuRow?.id ?? productId);
+              return {
+                sku_id: String(skuRow?.id ?? "").trim(),
+                label,
+                current_product_group: String(skuRow?.product_group ?? "").trim(),
+                current_alcohol_category: String(skuRow?.alcohol_category ?? "").trim(),
+                current_packaging_type: String(skuRow?.packaging_type ?? "").trim(),
+              };
+            })
+            .filter(Boolean) as any[];
+
     return (
       <ClassificatieStep
         current={current}
         productgroepen={productgroepen}
         alcoholcategorieen={alcoholcategorieen}
         verpakkingstypen={verpakkingstypen}
+        targets={targets}
         updateCurrent={updateCurrent}
       />
     );
