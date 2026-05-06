@@ -5,6 +5,7 @@
   syncPrimaryInkoopFactuur
 } from "@/components/berekeningen/berekeningenWizardUtils";
 import { roundValue } from "@/components/berekeningen/berekeningenWizardFormatting";
+import { API_BASE_URL } from "@/lib/api";
 type GenericRecord = Record<string, unknown>;
 
 type StepDefinition = {
@@ -96,6 +97,7 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
     normalizedUomRaw ||
     (normalizedSkuType === "dienst" ? "uur" : normalizedSkuType === "artikel" ? "stuk" : "");
   row.basisgegevens = {
+    ...basisgegevens,
     jaar: Number(basisgegevens.jaar ?? new Date().getFullYear()),
     sku_type: normalizedSkuType,
     uom: normalizedUom,
@@ -104,7 +106,7 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
     alcoholpercentage: parseOptionalNumber(basisgegevens.alcoholpercentage) ?? 0,
     belastingsoort: String(basisgegevens.belastingsoort ?? "Accijns"),
     tarief_accijns: String(basisgegevens.tarief_accijns ?? "Hoog"),
-    btw_tarief: String(basisgegevens.btw_tarief ?? "21%")
+    btw_tarief: String(basisgegevens.btw_tarief ?? "21%"),
   };
 
   const soort =
@@ -247,6 +249,11 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
             description: "Bevestig dat deze flow op inkoop is gebaseerd"
           },
           {
+            id: "classificeren",
+            label: "Classificeren",
+            description: "Kies productgroep, alcoholcategorie en verpakkingstype"
+          },
+          {
             id: "input",
             label: "Inkoopfactuur",
             description: "Selecteer producten, aantallen en bronkosten"
@@ -262,6 +269,11 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
             id: "type",
             label: "Soort berekening",
             description: "Bevestig dat deze flow op eigen productie draait"
+          },
+          {
+            id: "classificeren",
+            label: "Classificeren",
+            description: "Kies productgroep, alcoholcategorie en verpakkingstype"
           },
           {
             id: "input",

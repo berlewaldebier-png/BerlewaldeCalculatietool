@@ -1,7 +1,5 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
-
 import { parseOptionalNumberFromInput } from "@/components/berekeningen/berekeningenWizardUtils";
 
 type GenericRecord = Record<string, unknown>;
@@ -38,10 +36,8 @@ export function BasisStep({
                 if (!String(((draft.basisgegevens as GenericRecord) as any).uom ?? "").trim() || prevType === "bier") {
                   (draft.basisgegevens as GenericRecord).uom = nextUom;
                 }
-                // Ensure existing factuurregels remain consistent for artikel/dienst.
                 const regels =
-                  ((((draft.invoer as GenericRecord).inkoop as GenericRecord).factuurregels as GenericRecord[]) ??
-                    []);
+                  ((((draft.invoer as GenericRecord).inkoop as GenericRecord).factuurregels as GenericRecord[]) ?? []);
                 regels.forEach((regel) => {
                   (regel as any).eenheid = String(((draft.basisgegevens as GenericRecord) as any).uom ?? nextUom);
                   (regel as any).liters = 0;

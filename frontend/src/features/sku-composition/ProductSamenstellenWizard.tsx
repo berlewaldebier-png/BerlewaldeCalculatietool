@@ -32,6 +32,9 @@ type Props = {
   kostprijsproductactiveringen: GenericRecord[];
   packagingComponents: GenericRecord[];
   packagingComponentPrices: GenericRecord[];
+  productgroepen: GenericRecord[];
+  alcoholcategorieen: GenericRecord[];
+  verpakkingstypen: GenericRecord[];
 };
 
 export function ProductSamenstellenWizard(props: Props) {
@@ -53,6 +56,11 @@ export function ProductSamenstellenWizard(props: Props) {
   const [createdSkuId, setCreatedSkuId] = useState<string>("");
   const [createdArticleId, setCreatedArticleId] = useState<string>("");
   const [didLoadEditFormat, setDidLoadEditFormat] = useState(false);
+
+  const [productGroup, setProductGroup] = useState<string>("giftset");
+  const [alcoholCategory, setAlcoholCategory] = useState<string>("normaal");
+  const [packagingType, setPackagingType] = useState<string>("");
+  const [packagingTypeOptIn, setPackagingTypeOptIn] = useState<boolean>(false);
 
   const steps = useMemo(
     () => [
@@ -99,6 +107,42 @@ export function ProductSamenstellenWizard(props: Props) {
       .filter((row) => row.value && row.label)
       .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
   }, [props.packagingComponents]);
+
+  const productgroepOptions = useMemo(() => {
+    return (Array.isArray(props.productgroepen) ? props.productgroepen : [])
+      .filter((row) => (row as any)?.active !== false)
+      .map((row) => ({ value: text((row as any).id), label: text((row as any).label) }))
+      .filter((row) => row.value && row.label)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [props.productgroepen]);
+
+  const alcoholOptions = useMemo(() => {
+    return (Array.isArray(props.alcoholcategorieen) ? props.alcoholcategorieen : [])
+      .filter((row) => (row as any)?.active !== false)
+      .map((row) => ({ value: text((row as any).id), label: text((row as any).label) }))
+      .filter((row) => row.value && row.label)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [props.alcoholcategorieen]);
+
+  const verpakkingstypeOptions = useMemo(() => {
+    return (Array.isArray(props.verpakkingstypen) ? props.verpakkingstypen : [])
+      .filter((row) => (row as any)?.active !== false)
+      .map((row) => ({
+        value: text((row as any).id),
+        label: text((row as any).label),
+        allowed: Array.isArray((row as any).allowed_product_groups)
+          ? ((row as any).allowed_product_groups as any[]).map((v) => text(v)).filter(Boolean)
+          : [],
+      }))
+      .filter((row) => row.value && row.label)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [props.verpakkingstypen]);
+
+  const packagingRequired = mode === "verkoopbaar" && (productGroup === "drank" || productGroup === "giftset");
+  const packagingAllowedOptions = useMemo(() => {
+    if (!packagingRequired) return verpakkingstypeOptions;
+    return verpakkingstypeOptions.filter((row) => row.allowed.length === 0 || row.allowed.includes(productGroup));
+  }, [packagingRequired, productGroup, verpakkingstypeOptions]);
 
   const formatOptions = useMemo(() => {
     return (Array.isArray(props.articles) ? props.articles : [])
@@ -273,8 +317,22 @@ export function ProductSamenstellenWizard(props: Props) {
     if (mode === "verkoopbaar" && sellableKind === "dienst") {
       if (toNumber(manualRateEx, 0) <= 0) warnings.push("Tarief per uur is verplicht.");
     }
+    if (mode === "verkoopbaar") {
+      if (!productGroup.trim()) warnings.push("Productgroep is verplicht.");
+      if (packagingRequired && !packagingType.trim()) warnings.push("Verpakkingstype is verplicht voor Drank/Giftset.");
+    }
     return warnings;
-  }, [composition.length, mode, name, sellableKind, afvulParts.length, manualRateEx]);
+  }, [
+    composition.length,
+    mode,
+    name,
+    sellableKind,
+    afvulParts.length,
+    manualRateEx,
+    packagingRequired,
+    packagingType,
+    productGroup,
+  ]);
 
   async function createSellableAndRouteToKostprijs() {
     setIsSaving(true);
@@ -287,6 +345,9 @@ export function ProductSamenstellenWizard(props: Props) {
         totalsLiters: totals.liters,
         sellableKind,
         manualRateEx,
+        productGroup,
+        alcoholCategory,
+        packagingType: packagingRequired || packagingTypeOptIn ? packagingType : "",
         composition,
         packaging,
         existingArticles: Array.isArray(props.articles) ? props.articles : [],
@@ -379,21 +440,107 @@ export function ProductSamenstellenWizard(props: Props) {
                     </label>
 
                     {mode === "verkoopbaar" ? (
-                      <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                        <span>Soort</span>
-                        <select
-                          className="dataset-input"
-                          value={sellableKind}
-                          onChange={(e) => {
-                            const next = e.target.value as SellableKind;
-                            setSellableKind(next);
-                            setUom(next === "dienst" ? "uur" : "pakket");
-                          }}
-                        >
-                          <option value="product">Product</option>
-                          <option value="dienst">Dienstverlening</option>
-                        </select>
-                      </label>
+                      <>
+                        <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
+                          <span>Soort</span>
+                          <select
+                            className="dataset-input"
+                            value={sellableKind}
+                            onChange={(e) => {
+                              const next = e.target.value as SellableKind;
+                              setSellableKind(next);
+                              setUom(next === "dienst" ? "uur" : "pakket");
+                              if (next === "dienst") {
+                                setProductGroup("dienst");
+                                setPackagingTypeOptIn(false);
+                                setPackagingType("");
+                              }
+                            }}
+                          >
+                            <option value="product">Product</option>
+                            <option value="dienst">Dienstverlening</option>
+                          </select>
+                        </label>
+
+                        <label className="nested-field">
+                          <span>Productgroep</span>
+                          <select
+                            className="dataset-input"
+                            value={productGroup}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setProductGroup(next);
+                              const required = next === "drank" || next === "giftset";
+                              if (!required) {
+                                setPackagingTypeOptIn(false);
+                                setPackagingType("");
+                              }
+                            }}
+                          >
+                            <option value="">Selecteer…</option>
+                            {productgroepOptions.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="nested-field">
+                          <span>Alcoholcategorie</span>
+                          <select
+                            className="dataset-input"
+                            value={alcoholCategory}
+                            onChange={(e) => setAlcoholCategory(e.target.value)}
+                            disabled={productGroup !== "drank" && productGroup !== "giftset"}
+                            title={productGroup !== "drank" && productGroup !== "giftset" ? "Alleen relevant voor drank/giftset." : ""}
+                          >
+                            <option value="">—</option>
+                            {alcoholOptions.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <div className="nested-field" style={{ gridColumn: "1 / -1" }}>
+                          <span>Verpakkingstype</span>
+                          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                            {packagingRequired ? (
+                              <span style={{ fontWeight: 700, opacity: 0.75 }}>verplicht</span>
+                            ) : (
+                              <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={packagingTypeOptIn}
+                                  onChange={(e) => {
+                                    const next = e.target.checked;
+                                    setPackagingTypeOptIn(next);
+                                    if (!next) setPackagingType("");
+                                  }}
+                                />
+                                + verpakkingstype
+                              </label>
+                            )}
+                            <select
+                              className="dataset-input"
+                              style={{ flex: 1 }}
+                              value={packagingType}
+                              onChange={(e) => setPackagingType(e.target.value)}
+                              disabled={!packagingRequired && !packagingTypeOptIn}
+                              title={!packagingRequired && !packagingTypeOptIn ? "Optioneel. Zet ‘+ verpakkingstype’ aan om in te vullen." : ""}
+                            >
+                              <option value="">{packagingRequired || packagingTypeOptIn ? "Selecteer…" : "—"}</option>
+                              {packagingAllowedOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </>
                     ) : null}
                   </div>
                 ) : null}

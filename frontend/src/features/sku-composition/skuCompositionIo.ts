@@ -21,6 +21,9 @@ export async function saveSellableSkuBundle({
   totalsLiters,
   sellableKind,
   manualRateEx,
+  productGroup,
+  alcoholCategory,
+  packagingType,
   composition,
   packaging,
   existingArticles,
@@ -33,6 +36,9 @@ export async function saveSellableSkuBundle({
   totalsLiters: number;
   sellableKind: SellableKind;
   manualRateEx: number;
+  productGroup: string;
+  alcoholCategory: string;
+  packagingType: string;
   composition: CompositionLine[];
   packaging: PackagingLine[];
   existingArticles: GenericRecord[];
@@ -51,6 +57,9 @@ export async function saveSellableSkuBundle({
     sellable_subtype: sellableKind === "dienst" ? "dienst" : "product",
     pricing_method: sellableKind === "dienst" ? "manual_rate" : "cost_plus",
     manual_rate_ex: sellableKind === "dienst" ? toNumber(manualRateEx, 0) : 0,
+    product_group: text(productGroup),
+    alcohol_category: text(alcoholCategory),
+    packaging_type: text(packagingType),
   };
 
   const nextArticles = [...existingArticles, articlePayload];
@@ -63,6 +72,9 @@ export async function saveSellableSkuBundle({
       name,
       pricing_method: articlePayload.pricing_method,
       manual_rate_ex: articlePayload.manual_rate_ex,
+      product_group: text(productGroup),
+      alcohol_category: text(alcoholCategory),
+      packaging_type: text(packagingType),
     },
   ];
 

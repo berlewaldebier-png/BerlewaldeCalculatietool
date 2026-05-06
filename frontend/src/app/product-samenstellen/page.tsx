@@ -20,6 +20,9 @@ export default async function ProductSamenstellenPage({
       "kostprijsproductactiveringen",
       "packaging-components",
       "packaging-component-prices",
+      "productgroepen",
+      "alcoholcategorieen",
+      "verpakkingstypen",
     ],
     true,
     "/product-samenstellen"
@@ -36,6 +39,9 @@ export default async function ProductSamenstellenPage({
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
   const packagingComponents = (bootstrap.datasets["packaging-components"] as any[]) ?? [];
   const packagingComponentPrices = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
+  const productgroepen = (bootstrap.datasets["productgroepen"] as any[]) ?? [];
+  const alcoholcategorieen = (bootstrap.datasets["alcoholcategorieen"] as any[]) ?? [];
+  const verpakkingstypen = (bootstrap.datasets["verpakkingstypen"] as any[]) ?? [];
 
   const yearOptions = Object.keys(productie)
     .map((year) => Number(year))
@@ -66,6 +72,9 @@ export default async function ProductSamenstellenPage({
         kostprijsproductactiveringen={kostprijsproductactiveringen}
         packagingComponents={packagingComponents}
         packagingComponentPrices={packagingComponentPrices}
+        productgroepen={productgroepen}
+        alcoholcategorieen={alcoholcategorieen}
+        verpakkingstypen={verpakkingstypen}
       />
     </PageShell>
   );
