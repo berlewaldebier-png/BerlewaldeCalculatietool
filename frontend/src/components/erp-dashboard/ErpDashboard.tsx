@@ -280,7 +280,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
     const palette = ["#2563eb", "#22c55e", "#8b5cf6", "#f97316", "#94a3b8"];
     return groups.slice(0, 5).map((row, idx) => ({
       name: row.group,
-      value: Number(row.margin_pct || 0),
+      value: Math.max(0, Number(row.margin_ex || 0)),
       fill: palette[idx % palette.length],
     }));
   }, [payload.tables?.product_groups]);
@@ -565,12 +565,30 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                 <h2 className="module-card-title">
                   Productgroepen <span className="erp-muted-inline">op marge %</span>
                 </h2>
-                <EmptyState
-                  title="Nog geen productgroepen"
-                  body="Productgroepen volgen zodra SKU's een productgroep hebben (Product samenstellen → stap 1)."
-                  href="/product-samenstellen"
-                  hrefLabel="Naar product samenstellen"
-                />
+                {(payload.tables?.product_groups ?? []).length ? (
+                  <>
+                    <div className="erp-stack">
+                      {(payload.tables?.product_groups ?? []).map((row, index) => (
+                        <div key={`${row.group}-${index}`} className="erp-row-grid">
+                          <span className="erp-rank">{index + 1}</span>
+                          <span className="erp-strong">{row.group}</span>
+                          <span>{pct(Number(row.margin_pct || 0), 1)}</span>
+                          <span className="erp-strong">{euro(Number(row.margin_ex || 0))}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <Link href={"/beheer/productkoppeling" as Route} className="erp-link">
+                      Beheer productgroepen <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </>
+                ) : (
+                  <EmptyState
+                    title="Nog geen productgroepen"
+                    body="Vul productgroep in Beheer → Productkoppeling (Douano). Dit is leidend voor het dashboard."
+                    href="/beheer/productkoppeling"
+                    hrefLabel="Naar productkoppeling"
+                  />
+                )}
               </Card>
 
               <Card className="erp-pad">
@@ -706,7 +724,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
               </Card>
 
               <Card className="erp-pad">
-                <h2 className="module-card-title">Omzet per productgroep</h2>
+                <h2 className="module-card-title">Marge per productgroep</h2>
                 {pieData.length ? (
                   <>
                     <div className="h-64">
@@ -717,7 +735,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                               <Cell key={`cell-${entry.name}`} fill={entry.fill} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={(v) => `${v}%`} />
+                          <Tooltip formatter={(v) => euro(Number(v))} />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -725,7 +743,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                       {pieData.map((item) => (
                         <div key={item.name} className="erp-row-space-between">
                           <span>{item.name}</span>
-                          <span className="erp-strong">{pct(item.value, 0)}</span>
+                          <span className="erp-strong">{euro(item.value)}</span>
                         </div>
                       ))}
                     </div>

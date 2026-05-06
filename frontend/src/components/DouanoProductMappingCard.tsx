@@ -22,6 +22,7 @@ type ActiveCombo = {
 type Mapping = {
   douano_product_id: number;
   sku_id: string;
+  product_group?: string;
   updated_at: string;
 };
 
@@ -101,6 +102,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [ignored, setIgnored] = useState<Array<{ douano_product_id: number; reason: string }>>([]);
   const [draft, setDraft] = useState<Record<number, string>>({});
+  const [groupDraft, setGroupDraft] = useState<Record<number, string>>({});
 
   const mappingsById = useMemo(() => {
     const map = new Map<number, Mapping>();
@@ -153,6 +155,14 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
       setCombos(Array.isArray(c?.items) ? c.items : []);
       setMappings(Array.isArray(m?.items) ? m.items : []);
       setIgnored(Array.isArray(ig?.items) ? ig.items : []);
+      setGroupDraft(() => {
+        const next: Record<number, string> = {};
+        (Array.isArray(m?.items) ? m.items : []).forEach((row: any) => {
+          const id = Number(row?.douano_product_id ?? 0);
+          if (id > 0) next[id] = String(row?.product_group ?? "").trim();
+        });
+        return next;
+      });
       setStatus("Gereed");
       setTone("success");
     } catch (error) {
@@ -180,7 +190,10 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
     setStatus("Opslaan…");
     setTone("");
     try {
-      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", { sku_id: selected });
+      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", {
+        sku_id: selected,
+        product_group: String(groupDraft[productId] ?? "").trim(),
+      });
       await refreshAll();
       setStatus("Opgeslagen");
       setTone("success");
@@ -262,6 +275,10 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
         </div>
       </div>
 
+      <div className="module-card-text" style={{ marginTop: 8 }}>
+        Productgroep is leidend voor het dashboard. Wijzigingen werken met terugwerkende kracht (ook voor eerdere jaren).
+      </div>
+
       {status ? (
         <div className={`editor-status${tone ? ` ${tone}` : ""}`} style={{ marginTop: 12 }}>
           {status}
@@ -277,6 +294,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
               <th style={{ width: 160 }}>SKU</th>
               <th style={{ width: 180 }}>GTIN</th>
               <th style={{ width: 420 }}>Koppeling</th>
+              <th style={{ width: 220 }}>Productgroep</th>
               <th style={{ width: 110 }} />
             </tr>
           </thead>
@@ -289,6 +307,9 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
               const isMapped = Boolean(mapping);
               const mappedLabel = mappedKey ? combosByKey.get(mappedKey)?.label ?? mappedKey : "";
               const isIgnored = ignoredById.has(id);
+              const groupValue = String(
+                groupDraft[id] ?? (mapping as any)?.product_group ?? ""
+              );
               return (
                 <tr key={id}>
                   <td>
@@ -319,6 +340,17 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
                         );
                       })}
                     </select>
+                  </td>
+                  <td>
+                    <input
+                      className="editor-input"
+                      style={{ width: "100%" }}
+                      placeholder="Bijv. Dranken / Merchandise / Diensten"
+                      value={groupValue}
+                      onChange={(e) =>
+                        setGroupDraft((prev) => ({ ...prev, [id]: e.target.value }))
+                      }
+                    />
                   </td>
                   <td style={{ textAlign: "right" }}>
                     {!isMapped ? (

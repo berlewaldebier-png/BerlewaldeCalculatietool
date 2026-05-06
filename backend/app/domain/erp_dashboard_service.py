@@ -82,9 +82,9 @@ def _iter_order_lines(
     *,
     since: date,
     until: date,
-) -> Iterable[tuple[int, date, int, str, str, str, float, float]]:
+) -> Iterable[tuple[int, date, int, str, str, str, float, float, str, str]]:
     """
-    Yield (line_id, order_date, company_id, company_name, order_number, status, quantity, net_revenue_ex, sku_id).
+    Yield (line_id, order_date, company_id, company_name, order_number, status, quantity, net_revenue_ex, sku_id, product_group).
     Ignores ignored lines. Unmapped lines have sku_id = '' and thus no cost.
     """
     douano_product_mapping_storage.ensure_schema()
@@ -105,7 +105,8 @@ def _iter_order_lines(
                     COALESCE(o.status, '') AS status,
                     COALESCE(l.quantity, 0) AS quantity,
                     COALESCE(l.net_revenue_ex, 0) AS net_revenue_ex,
-                    COALESCE(m.sku_id, '') AS sku_id
+                    COALESCE(m.sku_id, '') AS sku_id,
+                    COALESCE(m.product_group, '') AS product_group
                 FROM douano_sales_order_lines l
                 JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
@@ -119,7 +120,18 @@ def _iter_order_lines(
                 (since_iso, until_plus_one),
             )
             rows = cur.fetchall() or []
-    for line_id, order_date_raw, company_id, company_name, order_number, status, quantity, net_revenue_ex, sku_id in rows:
+    for (
+        line_id,
+        order_date_raw,
+        company_id,
+        company_name,
+        order_number,
+        status,
+        quantity,
+        net_revenue_ex,
+        sku_id,
+        product_group,
+    ) in rows:
         order_date = douano_margin_service._parse_date(order_date_raw)  # type: ignore[attr-defined]
         if order_date is None:
             continue
@@ -133,6 +145,7 @@ def _iter_order_lines(
             float(quantity or 0.0),
             float(net_revenue_ex or 0.0),
             str(sku_id or ""),
+            str(product_group or ""),
         )
 
 
@@ -223,6 +236,9 @@ def get_erp_dashboard(
     missing_cost_lines = 0
     mapped_lines = 0
 
+    # Product group aggregates (retroactive via mapping table).
+    groups: dict[str, dict[str, float]] = {}
+
     # Per-order totals for latest + under break-even.
     by_order: dict[str, dict[str, Any]] = {}
 
@@ -236,6 +252,7 @@ def get_erp_dashboard(
         quantity,
         net_revenue_ex,
         sku_id,
+        product_group,
     ) in _iter_order_lines(since=range_since, until=range_until):
         revenue_total += float(net_revenue_ex or 0.0)
         cost_unit = None
@@ -254,6 +271,14 @@ def get_erp_dashboard(
                 missing_cost_lines += 1
             else:
                 cost_total += line_cost_total
+
+            # Group aggregation only when cost is known (avoid inflated margins).
+            if cost_unit is not None:
+                group_key = str(product_group or "").strip() or "Onbekend"
+                bucket = groups.setdefault(group_key, {"revenue": 0.0, "cost": 0.0, "margin": 0.0})
+                bucket["revenue"] += float(net_revenue_ex or 0.0)
+                bucket["cost"] += float(line_cost_total or 0.0)
+                bucket["margin"] += float(net_revenue_ex or 0.0) - float(line_cost_total or 0.0)
 
         order_key = f"{order_date.isoformat()}::{order_number or line_id}"
         bucket = by_order.setdefault(
@@ -370,6 +395,19 @@ def get_erp_dashboard(
             }
         )
 
+    product_groups = []
+    for key, bucket in groups.items():
+        revenue = float(bucket.get("revenue", 0.0) or 0.0)
+        margin = float(bucket.get("margin", 0.0) or 0.0)
+        product_groups.append(
+            {
+                "group": str(key),
+                "margin_ex": margin,
+                "margin_pct": (margin / revenue * 100.0) if revenue > 0 else 0.0,
+            }
+        )
+    product_groups.sort(key=lambda r: float(r.get("margin_pct", 0.0) or 0.0), reverse=True)
+
     return {
         "range": {"basis": "order", "since": range_since.isoformat(), "until": range_until.isoformat()},
         "available_years": available_years,
@@ -388,7 +426,7 @@ def get_erp_dashboard(
             "top_customers": top_customers,
             "latest_orders": latest_orders,
             "under_break_even": under_break_even,
-            "product_groups": [],
+            "product_groups": product_groups[:5],
         },
         "break_even": _load_break_even_target(year=year),
         "alerts": alerts,

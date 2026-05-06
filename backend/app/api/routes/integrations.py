@@ -944,6 +944,7 @@ def get_douano_product_mappings(limit: int = Query(2000, ge=1, le=10000)) -> dic
 def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         sku_id = str(payload.get("sku_id", "") or "").strip()
+        product_group = str(payload.get("product_group", "") or "").strip()
         if not sku_id:
             # Backwards compatible: allow (bier_id, product_id) and resolve to SKU.
             beer_id = str(payload.get("bier_id", "") or "").strip()
@@ -960,6 +961,7 @@ def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) 
         record = douano_product_mapping_storage.upsert_mapping(
             douano_product_id=int(douano_product_id or 0),
             sku_id=sku_id,
+            product_group=product_group,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
