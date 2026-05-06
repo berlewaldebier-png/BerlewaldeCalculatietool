@@ -64,5 +64,12 @@ export default async function HomePage({
     samengesteldeProducten: bootstrap.datasets["samengestelde-producten"],
   };
 
-  return <ErpDashboard navigation={navigation} payload={payload} breakEvenContext={breakEvenContext} />;
+  return (
+    <ErpDashboard
+      navigation={navigation}
+      payload={payload}
+      breakEvenContext={breakEvenContext}
+      initialFilters={{ since: since ? String(since) : "", until: until ? String(until) : "", year: year ? String(year) : "" }}
+    />
+  );
 }

@@ -46,6 +46,7 @@ import {
 type Props = {
   navigation: NavigationItem[];
   payload: ErpDashboardPayload;
+  initialFilters?: { since: string; until: string; year: string };
   breakEvenContext?: {
     configs?: unknown;
     vasteKosten?: unknown;
@@ -122,12 +123,17 @@ function EmptyState({ title, body, href, hrefLabel }: { title: string; body: str
   );
 }
 
-export function ErpDashboard({ navigation, payload, breakEvenContext }: Props) {
+export function ErpDashboard({ navigation, payload, breakEvenContext, initialFilters }: Props) {
   const router = useRouter();
-  const [showFilters, setShowFilters] = useState(false);
-  const [sinceInput, setSinceInput] = useState(payload.range?.since || "");
-  const [untilInput, setUntilInput] = useState(payload.range?.until || "");
-  const [yearInput, setYearInput] = useState<string>("");
+  const hasInitialFilters = Boolean(
+    (initialFilters?.since || "").trim() ||
+      (initialFilters?.until || "").trim() ||
+      (initialFilters?.year || "").trim()
+  );
+  const [showFilters, setShowFilters] = useState(hasInitialFilters);
+  const [sinceInput, setSinceInput] = useState((initialFilters?.since || payload.range?.since || "").trim());
+  const [untilInput, setUntilInput] = useState((initialFilters?.until || payload.range?.until || "").trim());
+  const [yearInput, setYearInput] = useState<string>((initialFilters?.year || "").trim());
 
   const availableYears = (payload.available_years ?? []).filter((y) => Number.isFinite(y) && y > 0);
 
@@ -296,7 +302,8 @@ export function ErpDashboard({ navigation, payload, breakEvenContext }: Props) {
                 <button
                   type="button"
                   className="erp-dashboard-pill"
-                  title="Periode (read-only in deze versie)"
+                  title="Klik om filters te openen"
+                  onClick={() => setShowFilters((prev) => !prev)}
                 >
                   <CalendarDays className="h-4 w-4" /> {payload.range.since} - {payload.range.until}
                 </button>
@@ -375,9 +382,9 @@ export function ErpDashboard({ navigation, payload, breakEvenContext }: Props) {
                       type="button"
                       className="editor-button editor-button-secondary"
                       onClick={() => {
-                        setSinceInput(payload.range?.since || "");
-                        setUntilInput(payload.range?.until || "");
-                        setYearInput("");
+                        setSinceInput((initialFilters?.since || payload.range?.since || "").trim());
+                        setUntilInput((initialFilters?.until || payload.range?.until || "").trim());
+                        setYearInput((initialFilters?.year || "").trim());
                         setShowFilters(false);
                       }}
                     >
@@ -388,8 +395,8 @@ export function ErpDashboard({ navigation, payload, breakEvenContext }: Props) {
                       className="editor-button editor-button-secondary"
                       onClick={() => {
                         router.push("/");
-                        setSinceInput(payload.range?.since || "");
-                        setUntilInput(payload.range?.until || "");
+                        setSinceInput((payload.range?.since || "").trim());
+                        setUntilInput((payload.range?.until || "").trim());
                         setYearInput("");
                         setShowFilters(false);
                       }}
