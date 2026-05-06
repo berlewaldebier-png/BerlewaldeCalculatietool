@@ -17,6 +17,14 @@ export async function activateKostprijsversie(versionId: string) {
   });
 }
 
+export async function saveSkuClassification(skuId: string, payload: Record<string, unknown>) {
+  await apiRequestTextClient(`/data/skus/${encodeURIComponent(skuId)}/classification`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function tryReadApiDetail(error: unknown): string {
   if (!(error instanceof ApiRequestError)) return "";
   try {

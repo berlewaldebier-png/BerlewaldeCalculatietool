@@ -9,6 +9,7 @@ import { ApiRequestError } from "@/lib/apiClient";
 import {
   activateKostprijsversie,
   saveKostprijsversies,
+  saveSkuClassification,
   tryReadApiDetail,
 } from "@/components/berekeningen/berekeningenWizardIo";
 import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
@@ -39,6 +40,7 @@ import {
 } from "@/components/berekeningen/berekeningenWizardFormatting";
 import { BasisStep } from "@/components/berekeningen/steps/BasisStep";
 import { TypeStep } from "@/components/berekeningen/steps/TypeStep";
+import { ClassificatieStep } from "@/components/berekeningen/steps/ClassificatieStep";
 import { SummaryStep } from "@/components/berekeningen/steps/SummaryStep";
 import { InkoopInputStep } from "@/components/berekeningen/steps/InkoopInputStep";
 import { FacturenStep } from "@/components/berekeningen/steps/FacturenStep";
@@ -91,11 +93,15 @@ type BerekeningenWizardProps = {
   initialRows: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
+  skus?: GenericRecord[];
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
   packagingComponentPrices: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
+  productgroepen: GenericRecord[];
+  alcoholcategorieen: GenericRecord[];
+  verpakkingstypen: GenericRecord[];
   initialSelectedId?: string;
   startWithNew?: boolean;
   onBackToLanding?: () => void;
@@ -136,11 +142,15 @@ export function BerekeningenWizard({
   initialRows,
   basisproducten,
   samengesteldeProducten,
+  skus,
   productie,
   vasteKosten,
   tarievenHeffingen,
   packagingComponentPrices,
   kostprijsproductactiveringen,
+  productgroepen,
+  alcoholcategorieen,
+  verpakkingstypen,
   initialSelectedId,
   startWithNew = false,
   onBackToLanding,
@@ -159,7 +169,29 @@ export function BerekeningenWizard({
   const defaultProductieJaar = productieJaren[0] ?? new Date().getFullYear();
 
   const initialState = useMemo(() => {
-    const normalizedRows = initialRows.map((row) => normalizeBerekening(row));
+    const skusById = new Map(
+      (Array.isArray(skus) ? skus : [])
+        .map((row) => [String((row as any)?.id ?? ""), row] as const)
+        .filter(([id]) => Boolean(id))
+    );
+
+    const normalizedRows = initialRows.map((row) => {
+      const normalized = normalizeBerekening(row);
+      const basis = (normalized.basisgegevens as GenericRecord) ?? {};
+      const skuId = String((basis as any).sku_id ?? "").trim();
+      if (skuId) {
+        const sku = skusById.get(skuId) as any;
+        if (sku) {
+          (normalized.basisgegevens as GenericRecord) = {
+            ...(normalized.basisgegevens as GenericRecord),
+            product_group: String(sku.product_group ?? (basis as any).product_group ?? "").trim(),
+            alcohol_category: String(sku.alcohol_category ?? (basis as any).alcohol_category ?? "").trim(),
+            packaging_type: String(sku.packaging_type ?? (basis as any).packaging_type ?? "").trim(),
+          };
+        }
+      }
+      return normalized;
+    });
 
     if (startWithNew || normalizedRows.length === 0) {
       const next = createEmptyBerekening();
@@ -383,6 +415,16 @@ export function BerekeningenWizard({
         year: Number(((current.basisgegevens as GenericRecord)?.jaar ?? current.jaar ?? 0) || 0),
         status: "definitief"
       });
+
+      // Persist classification to the SKU read-model so other selectors (dashboard, strategy) stay consistent.
+      const skuId = String((basis as any).sku_id ?? "").trim();
+      if (skuId) {
+        await saveSkuClassification(skuId, {
+          product_group: String((basis as any).product_group ?? "").trim(),
+          alcohol_category: String((basis as any).alcohol_category ?? "").trim(),
+          packaging_type: String((basis as any).packaging_type ?? "").trim(),
+        });
+      }
       // Auto-activate after finalize: a definitive version should be immediately quoteable.
       const updatedCurrent =
         refreshedRows.find((row) => String((row as any).id ?? "") === String(current.id ?? "")) ?? current;
@@ -476,11 +518,29 @@ export function BerekeningenWizard({
   }
 
   function renderBasisStep() {
-    return <BasisStep current={current} productieJaren={productieJaren} updateCurrent={updateCurrent} />;
+    return (
+      <BasisStep
+        current={current}
+        productieJaren={productieJaren}
+        updateCurrent={updateCurrent}
+      />
+    );
   }
 
   function renderTypeStep() {
     return <TypeStep current={current} updateCurrent={updateCurrent} setActiveStepIndex={setActiveStepIndex} />;
+  }
+
+  function renderClassificatieStep() {
+    return (
+      <ClassificatieStep
+        current={current}
+        productgroepen={productgroepen}
+        alcoholcategorieen={alcoholcategorieen}
+        verpakkingstypen={verpakkingstypen}
+        updateCurrent={updateCurrent}
+      />
+    );
   }
 
   function renderLegacyEigenProductieInput() {
@@ -674,6 +734,7 @@ export function BerekeningenWizard({
   function renderStepContent() {
     if (currentStep.id === "basis") return renderBasisStep();
     if (currentStep.id === "type") return renderTypeStep();
+    if (currentStep.id === "classificeren") return renderClassificatieStep();
     if (currentStep.id === "input") {
       const type = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
       return type === "Inkoop" ? renderInkoopInput() : renderEigenProductieInputModern();

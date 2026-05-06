@@ -89,6 +89,27 @@ DATASET_DEFAULTS: dict[str, Any] = {
         {"id": "glas-50cl", "label": "50 cl", "volume_ml": 500, "sort_order": 50, "active": True, "is_default": False},
     ],
     "variabele-kosten": {},
+    # Beheerbare classificaties voor SKU's (SSOT).
+    "productgroepen": [
+        {"id": "drank", "label": "Drank", "sort_order": 10, "active": True},
+        {"id": "giftset", "label": "Giftset", "sort_order": 20, "active": True},
+        {"id": "merchandise", "label": "Merchandise", "sort_order": 30, "active": True},
+        {"id": "dienst", "label": "Dienstverlening", "sort_order": 40, "active": True},
+        {"id": "overig", "label": "Overig", "sort_order": 90, "active": True},
+    ],
+    "alcoholcategorieen": [
+        {"id": "normaal", "label": "Normaal", "sort_order": 10, "active": True},
+        {"id": "alcoholarm", "label": "Alcoholarm", "sort_order": 20, "active": True},
+        {"id": "alcoholvrij", "label": "Alcoholvrij", "sort_order": 30, "active": True},
+    ],
+    "verpakkingstypen": [
+        {"id": "fles-33cl", "label": "Fles 33cl", "sort_order": 10, "active": True, "allowed_product_groups": ["drank", "giftset"]},
+        {"id": "fles-75cl", "label": "Fles 75cl", "sort_order": 20, "active": True, "allowed_product_groups": ["drank", "giftset"]},
+        {"id": "doos-24x33cl", "label": "Doos 24×33cl", "sort_order": 30, "active": True, "allowed_product_groups": ["drank", "giftset"]},
+        {"id": "doos-12x33cl", "label": "Doos 12×33cl", "sort_order": 40, "active": True, "allowed_product_groups": ["drank", "giftset"]},
+        {"id": "doos-6x75cl", "label": "Doos 6×75cl", "sort_order": 50, "active": True, "allowed_product_groups": ["drank", "giftset"]},
+        {"id": "fust-20l", "label": "Fust 20L", "sort_order": 60, "active": True, "allowed_product_groups": ["drank", "giftset"]},
+    ],
     # Phase SKU: single source of truth for everything you can buy/sell/consume/compose.
     "articles": [],
     "skus": [],
@@ -289,6 +310,9 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "skus",
         "bom-lines",
         *MODEL_A_DATASET_NAMES,
+        "productgroepen",
+        "alcoholcategorieen",
+        "verpakkingstypen",
     }
 
     if name in dict_datasets:

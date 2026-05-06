@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.domain import dataset_store
 from app.domain import dashboard_service
+from app.domain import erp_dashboard_service
 from app.domain import auth_service
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
@@ -161,6 +162,10 @@ def get_dashboard_summary() -> DashboardSummary:
 def get_bootstrap(
     datasets: str = Query("", description="Comma-separated dataset names"),
     navigation: bool = Query(True, description="Include navigation items"),
+    since: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
+    until: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
+    basis: str = Query("order", description="Optioneel: basis voor ERP dashboard (order)"),
+    year: int = Query(0, ge=0, le=2100, description="Optioneel: jaarfilter voor ERP dashboard (0 = auto)"),
     session: dict = Depends(require_user),
 ) -> dict[str, Any]:
     names = [name.strip() for name in (datasets or "").split(",") if name.strip()]
@@ -183,6 +188,14 @@ def get_bootstrap(
                     "aflopende_offertes": summary.aflopende_offertes,
                     "aflopende_offertes_items": summary.aflopende_offertes_items,
                 }
+                continue
+            if name == "erp-dashboard":
+                payload["datasets"][name] = erp_dashboard_service.get_erp_dashboard(
+                    since=since,
+                    until=until,
+                    basis=basis,
+                    year=int(year or 0),
+                )
                 continue
             if name == "auth-status":
                 payload["datasets"][name] = auth_service.auth_status()

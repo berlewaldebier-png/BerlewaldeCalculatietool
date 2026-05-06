@@ -7084,6 +7084,14 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
             if pricing_method == "manual_rate":
                 basisgegevens["manual_rate_ex"] = manual_rate_ex
 
+            product_group = str(basisgegevens.get("product_group", "") or "").strip()
+            alcohol_category = str(basisgegevens.get("alcohol_category", "") or "").strip()
+            packaging_type = str(basisgegevens.get("packaging_type", "") or "").strip()
+            packaging_opt_in = bool(basisgegevens.get("packaging_type_opt_in", False))
+            # Avoid accidental data pollution: for artikel/dienst we only store packaging_type when explicitly opted-in.
+            if packaging_type and not packaging_opt_in and sku_type in {"artikel", "dienst"}:
+                packaging_type = ""
+
             if not isinstance(sku_row, dict):
                 sku_row = {
                     "id": sku_id,
@@ -7097,6 +7105,9 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
                     "sellable_subtype": subtype,
                     "pricing_method": pricing_method,
                     "manual_rate_ex": manual_rate_ex,
+                    "product_group": product_group,
+                    "alcohol_category": alcohol_category,
+                    "packaging_type": packaging_type,
                 }
                 skus_rows.append(sku_row)
                 skus_by_id[sku_id] = sku_row
@@ -7110,6 +7121,9 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
                     "sellable_subtype": subtype,
                     "pricing_method": pricing_method,
                     "manual_rate_ex": manual_rate_ex,
+                    "product_group": product_group,
+                    "alcohol_category": alcohol_category,
+                    "packaging_type": packaging_type,
                 }
                 if desired != sku_row:
                     for index, row in enumerate(skus_rows):

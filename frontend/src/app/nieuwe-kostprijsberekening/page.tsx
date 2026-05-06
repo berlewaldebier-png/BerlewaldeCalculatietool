@@ -23,7 +23,10 @@ export default async function NieuweKostprijsberekeningPage({
       "productie",
       "vaste-kosten",
       "tarieven-heffingen",
-      "packaging-component-prices"
+      "packaging-component-prices",
+      "productgroepen",
+      "alcoholcategorieen",
+      "verpakkingstypen"
     ],
     true,
     "/nieuwe-kostprijsberekening"
@@ -41,6 +44,9 @@ export default async function NieuweKostprijsberekeningPage({
   const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
   const tarievenHeffingen = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
   const packagingComponentPrices = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
+  const productgroepen = (bootstrap.datasets["productgroepen"] as any[]) ?? [];
+  const alcoholcategorieen = (bootstrap.datasets["alcoholcategorieen"] as any[]) ?? [];
+  const verpakkingstypen = (bootstrap.datasets["verpakkingstypen"] as any[]) ?? [];
 
   const mode = typeof resolvedSearchParams.mode === "string" ? resolvedSearchParams.mode : "";
   const focus = typeof resolvedSearchParams.focus === "string" ? resolvedSearchParams.focus : "";
@@ -67,6 +73,9 @@ export default async function NieuweKostprijsberekeningPage({
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
+        productgroepen={productgroepen}
+        alcoholcategorieen={alcoholcategorieen}
+        verpakkingstypen={verpakkingstypen}
         initialMode={mode}
         initialFocus={focus}
         initialWizardKind={kind}

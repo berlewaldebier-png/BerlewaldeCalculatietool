@@ -45,10 +45,52 @@ _STANDARD_DATASETS = [
     "articles",
     "skus",
     "bom-lines",
+    # SKU-classificatie vocabularies
+    "productgroepen",
+    "verpakkingstypen",
+    "alcoholcategorieen",
 ]
 
 # Create generic CRUD router for standard datasets
 router = create_dataset_crud_router(_STANDARD_DATASETS, protected=True)
+
+
+@router.put("/skus/{sku_id}/classification")
+def put_sku_classification(
+    sku_id: str,
+    data: dict[str, Any] = Body(default_factory=dict),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Update SKU classification fields in the SKU payload.
+
+    This is a narrow endpoint used by Productkoppeling and later wizards to persist
+    `product_group`, `alcohol_category` and `packaging_type` as the SSOT on `skus`.
+    """
+    try:
+        from app.domain import skus_storage
+
+        sku_value = str(sku_id or "").strip()
+        if not sku_value:
+            raise HTTPException(status_code=400, detail="sku_id ontbreekt.")
+
+        product_group = str(data.get("product_group", "") or "").strip()
+        alcohol_category = str(data.get("alcohol_category", "") or "").strip()
+        packaging_type = str(data.get("packaging_type", "") or "").strip()
+
+        updated = skus_storage.update_classification(
+            sku_value,
+            product_group=product_group,
+            alcohol_category=alcohol_category,
+            packaging_type=packaging_type,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="SKU niet gevonden.")
+        return {"ok": True, "sku": updated}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error updating sku classification")
+        raise HTTPException(status_code=500, detail=str(exc) or "Internal server error") from exc
 
 
 # Special handlers for complex operations

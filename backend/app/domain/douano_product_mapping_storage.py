@@ -25,10 +25,23 @@ def ensure_schema() -> None:
                     CREATE TABLE IF NOT EXISTS douano_product_mapping (
                         douano_product_id BIGINT PRIMARY KEY,
                         sku_id TEXT NOT NULL,
+                        product_group TEXT NOT NULL DEFAULT '',
+                        alcohol_category TEXT NOT NULL DEFAULT '',
+                        packaging_type TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                     """
+                )
+                # Existing installs may have an older schema; add column safely.
+                cur.execute(
+                    "ALTER TABLE douano_product_mapping ADD COLUMN IF NOT EXISTS product_group TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_product_mapping ADD COLUMN IF NOT EXISTS alcohol_category TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_product_mapping ADD COLUMN IF NOT EXISTS packaging_type TEXT NOT NULL DEFAULT ''"
                 )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_douano_product_mapping_sku ON douano_product_mapping(sku_id)"
@@ -38,7 +51,14 @@ def ensure_schema() -> None:
         _SCHEMA_READY = True
 
 
-def upsert_mapping(*, douano_product_id: int, sku_id: str) -> dict[str, Any]:
+def upsert_mapping(
+    *,
+    douano_product_id: int,
+    sku_id: str,
+    product_group: str = "",
+    alcohol_category: str = "",
+    packaging_type: str = "",
+) -> dict[str, Any]:
     ensure_schema()
     pid = int(douano_product_id or 0)
     if pid <= 0:
@@ -46,23 +66,36 @@ def upsert_mapping(*, douano_product_id: int, sku_id: str) -> dict[str, Any]:
     sku = str(sku_id or "").strip()
     if not sku:
         raise ValueError("sku_id is verplicht")
+    group = str(product_group or "").strip()
+    alcohol = str(alcohol_category or "").strip()
+    packaging = str(packaging_type or "").strip()
     now = datetime.now(UTC)
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO douano_product_mapping(douano_product_id, sku_id, updated_at)
-                VALUES (%s, %s, %s)
+                INSERT INTO douano_product_mapping(douano_product_id, sku_id, product_group, alcohol_category, packaging_type, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (douano_product_id)
                 DO UPDATE SET
                     sku_id = EXCLUDED.sku_id,
+                    product_group = EXCLUDED.product_group,
+                    alcohol_category = EXCLUDED.alcohol_category,
+                    packaging_type = EXCLUDED.packaging_type,
                     updated_at = EXCLUDED.updated_at
                 """,
-                (pid, sku, now),
+                (pid, sku, group, alcohol, packaging, now),
             )
         if not postgres_storage.in_transaction():
             conn.commit()
-    return {"douano_product_id": pid, "sku_id": sku, "updated_at": now.isoformat()}
+    return {
+        "douano_product_id": pid,
+        "sku_id": sku,
+        "product_group": group,
+        "alcohol_category": alcohol,
+        "packaging_type": packaging,
+        "updated_at": now.isoformat(),
+    }
 
 
 def delete_mapping(*, douano_product_id: int) -> bool:
@@ -86,7 +119,7 @@ def list_mappings(*, limit: int = 2000) -> list[dict[str, Any]]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT douano_product_id, sku_id, created_at, updated_at
+                SELECT douano_product_id, sku_id, product_group, alcohol_category, packaging_type, created_at, updated_at
                 FROM douano_product_mapping
                 ORDER BY updated_at DESC
                 LIMIT %s
@@ -95,11 +128,14 @@ def list_mappings(*, limit: int = 2000) -> list[dict[str, Any]]:
             )
             rows = cur.fetchall() or []
     out: list[dict[str, Any]] = []
-    for douano_product_id, sku_id, created_at, updated_at in rows:
+    for douano_product_id, sku_id, product_group, alcohol_category, packaging_type, created_at, updated_at in rows:
         out.append(
             {
                 "douano_product_id": int(douano_product_id or 0),
                 "sku_id": str(sku_id or ""),
+                "product_group": str(product_group or ""),
+                "alcohol_category": str(alcohol_category or ""),
+                "packaging_type": str(packaging_type or ""),
                 "created_at": created_at.isoformat() if created_at else "",
                 "updated_at": updated_at.isoformat() if updated_at else "",
             }

@@ -41,6 +41,9 @@ type KostprijsBeheerWorkspaceProps = {
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
   packagingComponentPrices: GenericRecord[];
+  productgroepen: GenericRecord[];
+  alcoholcategorieen: GenericRecord[];
+  verpakkingstypen: GenericRecord[];
   initialMode?: string;
   initialFocus?: string;
   initialWizardKind?: string;
@@ -64,6 +67,9 @@ export function KostprijsBeheerWorkspace({
   vasteKosten,
   tarievenHeffingen,
   packagingComponentPrices,
+  productgroepen,
+  alcoholcategorieen,
+  verpakkingstypen,
   initialMode,
   initialFocus,
   initialWizardKind,
@@ -333,11 +339,15 @@ export function KostprijsBeheerWorkspace({
         initialRows={currentBerekeningen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
+        skus={skus}
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
+        productgroepen={productgroepen}
+        alcoholcategorieen={alcoholcategorieen}
+        verpakkingstypen={verpakkingstypen}
         startWithNew
         onRowsChange={handleRowsChange}
         onPersisted={handlePersisted}
@@ -378,11 +388,15 @@ export function KostprijsBeheerWorkspace({
           initialRows={currentBerekeningen}
           basisproducten={basisproducten}
           samengesteldeProducten={samengesteldeProducten}
+          skus={skus}
           productie={productie}
           vasteKosten={vasteKosten}
           tarievenHeffingen={tarievenHeffingen}
           packagingComponentPrices={packagingComponentPrices}
           kostprijsproductactiveringen={kostprijsproductactiveringen}
+          productgroepen={productgroepen}
+          alcoholcategorieen={alcoholcategorieen}
+          verpakkingstypen={verpakkingstypen}
           initialSelectedId={selectedId}
           onRowsChange={handleRowsChange}
           onPersisted={handlePersisted}
@@ -397,11 +411,15 @@ export function KostprijsBeheerWorkspace({
         initialRows={currentBerekeningen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
+        skus={skus}
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
+        productgroepen={productgroepen}
+        alcoholcategorieen={alcoholcategorieen}
+        verpakkingstypen={verpakkingstypen}
         initialSelectedId={selectedId}
         onRowsChange={handleRowsChange}
         onPersisted={handlePersisted}

@@ -22,7 +22,20 @@ type ActiveCombo = {
 type Mapping = {
   douano_product_id: number;
   sku_id: string;
+  product_group?: string;
+  alcohol_category?: string;
+  packaging_type?: string;
   updated_at: string;
+};
+
+type Productgroep = { id: string; label: string; sort_order?: number; active?: boolean };
+type AlcoholCategorie = { id: string; label: string; sort_order?: number; active?: boolean };
+type Verpakkingstype = {
+  id: string;
+  label: string;
+  sort_order?: number;
+  active?: boolean;
+  allowed_product_groups?: string[];
 };
 
 async function readJson(path: string) {
@@ -101,6 +114,14 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [ignored, setIgnored] = useState<Array<{ douano_product_id: number; reason: string }>>([]);
   const [draft, setDraft] = useState<Record<number, string>>({});
+  const [groupDraft, setGroupDraft] = useState<Record<number, string>>({});
+  const [alcoholDraft, setAlcoholDraft] = useState<Record<number, string>>({});
+  const [packagingDraft, setPackagingDraft] = useState<Record<number, string>>({});
+  const [packagingOptIn, setPackagingOptIn] = useState<Record<number, boolean>>({});
+
+  const [productgroepen, setProductgroepen] = useState<Productgroep[]>([]);
+  const [alcoholcategorieen, setAlcoholcategorieen] = useState<AlcoholCategorie[]>([]);
+  const [verpakkingstypen, setVerpakkingstypen] = useState<Verpakkingstype[]>([]);
 
   const mappingsById = useMemo(() => {
     const map = new Map<number, Mapping>();
@@ -139,20 +160,77 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
     return map;
   }, [ignored]);
 
+  const activeProductgroepen = useMemo(() => {
+    return [...productgroepen]
+      .filter((row) => (row as any)?.active !== false)
+      .sort((a, b) => Number((a as any)?.sort_order ?? 0) - Number((b as any)?.sort_order ?? 0));
+  }, [productgroepen]);
+
+  const activeAlcohol = useMemo(() => {
+    return [...alcoholcategorieen]
+      .filter((row) => (row as any)?.active !== false)
+      .sort((a, b) => Number((a as any)?.sort_order ?? 0) - Number((b as any)?.sort_order ?? 0));
+  }, [alcoholcategorieen]);
+
+  const activePackaging = useMemo(() => {
+    return [...verpakkingstypen]
+      .filter((row) => (row as any)?.active !== false)
+      .sort((a, b) => Number((a as any)?.sort_order ?? 0) - Number((b as any)?.sort_order ?? 0));
+  }, [verpakkingstypen]);
+
   async function refreshAll() {
     setStatus("Laden…");
     setTone("");
     try {
-      const [p, c, m, ig] = await Promise.all([
+      const [p, c, m, ig, pg, ac, vt] = await Promise.all([
         readJson("/api/integrations/douano/products?limit=2000"),
         readJson("/api/integrations/douano/cost-combos"),
         readJson("/api/integrations/douano/product-mappings?limit=10000"),
-        readJson("/api/integrations/douano/product-ignored?limit=50000")
+        readJson("/api/integrations/douano/product-ignored?limit=50000"),
+        readJson("/api/data/productgroepen"),
+        readJson("/api/data/alcoholcategorieen"),
+        readJson("/api/data/verpakkingstypen")
       ]);
       setProducts(Array.isArray(p?.items) ? p.items : []);
       setCombos(Array.isArray(c?.items) ? c.items : []);
       setMappings(Array.isArray(m?.items) ? m.items : []);
       setIgnored(Array.isArray(ig?.items) ? ig.items : []);
+      setProductgroepen(Array.isArray(pg) ? pg : []);
+      setAlcoholcategorieen(Array.isArray(ac) ? ac : []);
+      setVerpakkingstypen(Array.isArray(vt) ? vt : []);
+      setGroupDraft(() => {
+        const next: Record<number, string> = {};
+        (Array.isArray(m?.items) ? m.items : []).forEach((row: any) => {
+          const id = Number(row?.douano_product_id ?? 0);
+          if (id > 0) next[id] = String(row?.product_group ?? "").trim();
+        });
+        return next;
+      });
+      setAlcoholDraft(() => {
+        const next: Record<number, string> = {};
+        (Array.isArray(m?.items) ? m.items : []).forEach((row: any) => {
+          const id = Number(row?.douano_product_id ?? 0);
+          if (id > 0) next[id] = String(row?.alcohol_category ?? "").trim();
+        });
+        return next;
+      });
+      setPackagingDraft(() => {
+        const next: Record<number, string> = {};
+        (Array.isArray(m?.items) ? m.items : []).forEach((row: any) => {
+          const id = Number(row?.douano_product_id ?? 0);
+          if (id > 0) next[id] = String(row?.packaging_type ?? "").trim();
+        });
+        return next;
+      });
+      setPackagingOptIn(() => {
+        const next: Record<number, boolean> = {};
+        (Array.isArray(m?.items) ? m.items : []).forEach((row: any) => {
+          const id = Number(row?.douano_product_id ?? 0);
+          if (id <= 0) return;
+          next[id] = Boolean(String(row?.packaging_type ?? "").trim());
+        });
+        return next;
+      });
       setStatus("Gereed");
       setTone("success");
     } catch (error) {
@@ -160,6 +238,9 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
       setCombos([]);
       setMappings([]);
       setIgnored([]);
+      setProductgroepen([]);
+      setAlcoholcategorieen([]);
+      setVerpakkingstypen([]);
       setStatus(error instanceof Error ? error.message : String(error));
       setTone("error");
     }
@@ -173,14 +254,47 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   async function save(productId: number) {
     const selected = String(draft[productId] ?? "").trim();
     if (!selected) {
-      setStatus("Selecteer eerst een bier — verpakking combinatie.");
+      setStatus("Selecteer eerst een SKU-kostprijscombinatie.");
       setTone("error");
       return;
     }
+    const productGroup = String(groupDraft[productId] ?? "").trim();
+    const alcoholCategory = String(alcoholDraft[productId] ?? "").trim();
+    const packagingType = String(packagingDraft[productId] ?? "").trim();
+    const wantsPackaging = Boolean(packagingOptIn[productId]);
+
+    if (!productGroup) {
+      setStatus("Kies eerst een productgroep.");
+      setTone("error");
+      return;
+    }
+
+    const requiresPackaging = productGroup === "drank" || productGroup === "giftset";
+    if (requiresPackaging && !packagingType) {
+      setStatus("Verpakkingstype is verplicht voor Drank/Giftset.");
+      setTone("error");
+      return;
+    }
+    if (!requiresPackaging && !wantsPackaging && packagingType) {
+      setStatus("Zet eerst ‘+ verpakkingstype’ aan om dit veld te gebruiken.");
+      setTone("error");
+      return;
+    }
+
     setStatus("Opslaan…");
     setTone("");
     try {
-      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", { sku_id: selected });
+      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", {
+        sku_id: selected,
+        product_group: productGroup,
+        alcohol_category: alcoholCategory,
+        packaging_type: packagingType
+      });
+      await writeJson(`/api/data/skus/${encodeURIComponent(selected)}/classification`, "PUT", {
+        product_group: productGroup,
+        alcohol_category: alcoholCategory,
+        packaging_type: packagingType
+      });
       await refreshAll();
       setStatus("Opgeslagen");
       setTone("success");
@@ -235,7 +349,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   return (
     <SectionCard
       title="Productkoppeling (Douano → Kostprijs)"
-      description="Koppel Douano producten aan een actieve (bier + verpakking) combinatie. Dit is nodig voor kostprijs + marge op omzetregels."
+      description="Koppel Douano producten aan een actieve SKU-kostprijscombinatie. Dit is nodig voor kostprijs + marge op omzetregels."
     >
       <div className="editor-actions" style={{ marginTop: 8 }}>
         <div className="editor-actions-group">
@@ -262,6 +376,10 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
         </div>
       </div>
 
+      <div className="module-card-text" style={{ marginTop: 8 }}>
+        Productgroep is leidend voor het dashboard. Wijzigingen werken met terugwerkende kracht (ook voor eerdere jaren).
+      </div>
+
       {status ? (
         <div className={`editor-status${tone ? ` ${tone}` : ""}`} style={{ marginTop: 12 }}>
           {status}
@@ -277,6 +395,9 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
               <th style={{ width: 160 }}>SKU</th>
               <th style={{ width: 180 }}>GTIN</th>
               <th style={{ width: 420 }}>Koppeling</th>
+              <th style={{ width: 220 }}>Productgroep</th>
+              <th style={{ width: 220 }}>Alcohol</th>
+              <th style={{ width: 260 }}>Verpakkingstype</th>
               <th style={{ width: 110 }} />
             </tr>
           </thead>
@@ -289,6 +410,21 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
               const isMapped = Boolean(mapping);
               const mappedLabel = mappedKey ? combosByKey.get(mappedKey)?.label ?? mappedKey : "";
               const isIgnored = ignoredById.has(id);
+              const groupValue = String(
+                groupDraft[id] ?? (mapping as any)?.product_group ?? ""
+              );
+              const alcoholValue = String(
+                alcoholDraft[id] ?? (mapping as any)?.alcohol_category ?? ""
+              );
+              const packagingValue = String(
+                packagingDraft[id] ?? (mapping as any)?.packaging_type ?? ""
+              );
+
+              const requiresPackaging = groupValue === "drank" || groupValue === "giftset";
+              const optIn = requiresPackaging ? true : Boolean(packagingOptIn[id]);
+              const allowedPackaging = requiresPackaging
+                ? activePackaging.filter((row) => (row.allowed_product_groups ?? []).includes(groupValue))
+                : activePackaging;
               return (
                 <tr key={id}>
                   <td>
@@ -308,7 +444,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
                       value={value}
                       onChange={(e) => setDraft((prev) => ({ ...prev, [id]: e.target.value }))}
                     >
-                      <option value="">{isMapped ? mappedLabel || "—" : "Selecteer bier — verpakking"}</option>
+                      <option value="">{isMapped ? mappedLabel || "—" : "Selecteer SKU-kostprijs"}</option>
                       {combos.map((c) => {
                         const key = String((c as any)?.sku_id ?? "").trim();
                         if (!key) return null;
@@ -320,59 +456,120 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
                       })}
                     </select>
                   </td>
+                  <td>
+                    <select
+                      className="editor-input"
+                      style={{ width: "100%" }}
+                      value={groupValue}
+                      onChange={(e) => setGroupDraft((prev) => ({ ...prev, [id]: e.target.value }))}
+                    >
+                      <option value="">Selecteer…</option>
+                      {activeProductgroepen.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      className="editor-input"
+                      style={{ width: "100%" }}
+                      value={alcoholValue}
+                      onChange={(e) => setAlcoholDraft((prev) => ({ ...prev, [id]: e.target.value }))}
+                      disabled={groupValue !== "drank" && groupValue !== "giftset"}
+                      title={groupValue !== "drank" && groupValue !== "giftset" ? "Alleen relevant voor drank/giftset." : ""}
+                    >
+                      <option value="">—</option>
+                      {activeAlcohol.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {!requiresPackaging ? (
+                        <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12, opacity: 0.85 }}>
+                          <input
+                            type="checkbox"
+                            checked={optIn}
+                            onChange={(e) => setPackagingOptIn((prev) => ({ ...prev, [id]: e.target.checked }))}
+                          />
+                          + verpakkingstype
+                        </label>
+                      ) : (
+                        <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.75 }}>verplicht</span>
+                      )}
+                      <select
+                        className="editor-input"
+                        style={{ width: "100%" }}
+                        value={packagingValue}
+                        onChange={(e) => setPackagingDraft((prev) => ({ ...prev, [id]: e.target.value }))}
+                        disabled={!optIn}
+                        title={!optIn ? "Optioneel. Zet ‘+ verpakkingstype’ aan om in te vullen." : ""}
+                      >
+                        <option value="">{optIn ? "Selecteer…" : "—"}</option>
+                        {allowedPackaging.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </td>
                   <td style={{ textAlign: "right" }}>
-                    {!isMapped ? (
-                      <div style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
-                        <button
-                          type="button"
-                          className="editor-button editor-button-icon"
-                          aria-label="Opslaan"
-                          title="Opslaan"
-                          onClick={() => void save(id)}
-                          disabled={isIgnored}
-                        >
-                          <SaveIcon />
-                        </button>
-                        {isIgnored ? (
-                          <button
-                            type="button"
-                            className="editor-button editor-button-secondary editor-button-icon"
-                            aria-label="Weer tonen"
-                            title="Weer tonen"
-                            onClick={() => void unignore(id)}
-                          >
-                            <EyeIcon />
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="editor-button editor-button-secondary editor-button-icon"
-                            aria-label="Negeren"
-                            title="Negeren"
-                            onClick={() => void ignore(id)}
-                          >
-                            <EyeOffIcon />
-                          </button>
-                        )}
-                      </div>
-                    ) : (
+                    <div style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
                       <button
                         type="button"
-                        className="editor-button editor-button-secondary editor-button-icon"
-                        aria-label="Verwijderen"
-                        title="Verwijderen"
-                        onClick={() => void remove(id)}
+                        className="editor-button editor-button-icon"
+                        aria-label="Opslaan"
+                        title="Opslaan"
+                        onClick={() => void save(id)}
+                        disabled={isIgnored}
                       >
-                        <TrashIcon />
+                        <SaveIcon />
                       </button>
-                    )}
+                      {isMapped ? (
+                        <button
+                          type="button"
+                          className="editor-button editor-button-secondary editor-button-icon"
+                          aria-label="Verwijderen"
+                          title="Verwijderen"
+                          onClick={() => void remove(id)}
+                        >
+                          <TrashIcon />
+                        </button>
+                      ) : isIgnored ? (
+                        <button
+                          type="button"
+                          className="editor-button editor-button-secondary editor-button-icon"
+                          aria-label="Weer tonen"
+                          title="Weer tonen"
+                          onClick={() => void unignore(id)}
+                        >
+                          <EyeIcon />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="editor-button editor-button-secondary editor-button-icon"
+                          aria-label="Negeren"
+                          title="Negeren"
+                          onClick={() => void ignore(id)}
+                        >
+                          <EyeOffIcon />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
             {products.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ opacity: 0.75 }}>
+                <td colSpan={9} style={{ opacity: 0.75 }}>
                   Geen Douano producten geladen. Gebruik “Ververs” (en zorg dat je eerder “Sync products” hebt gedaan).
                 </td>
               </tr>
