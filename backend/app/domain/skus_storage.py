@@ -85,6 +85,99 @@ def _validate_sku_classification(row: dict[str, Any]) -> None:
             )
 
 
+def update_classification(
+    sku_id: str,
+    *,
+    product_group: str = "",
+    alcohol_category: str = "",
+    packaging_type: str = "",
+) -> dict[str, Any] | None:
+    """Update classification fields for a single SKU.
+
+    Writes into the SKU `payload` JSON, leaving other fields untouched.
+    Empty strings remove the corresponding field.
+    """
+    ensure_schema()
+    rid = str(sku_id or "").strip()
+    if not rid:
+        return None
+
+    now = datetime.now(UTC)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, kind, beer_id, format_article_id, article_id, code, name, active, payload, updated_at
+                FROM skus
+                WHERE id = %s
+                """,
+                (rid,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            (
+                rid_db,
+                kind,
+                beer_id,
+                format_article_id,
+                article_id,
+                code,
+                name,
+                active,
+                payload,
+                updated_at,
+            ) = row
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            if not isinstance(payload, dict):
+                payload = {}
+
+            next_payload = dict(payload)
+
+            def upsert_field(key: str, value: str) -> None:
+                v = str(value or "").strip()
+                if v:
+                    next_payload[key] = v
+                else:
+                    next_payload.pop(key, None)
+
+            upsert_field("product_group", product_group)
+            upsert_field("alcohol_category", alcohol_category)
+            upsert_field("packaging_type", packaging_type)
+
+            # Validate the classification against controlled vocab datasets.
+            _validate_sku_classification({"id": rid, **next_payload})
+
+            cur.execute(
+                """
+                UPDATE skus
+                SET payload = %s::jsonb, updated_at = %s
+                WHERE id = %s
+                """,
+                (json.dumps(next_payload), now, rid),
+            )
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    # Return a normalized row shape (similar to load_dataset()).
+    out_payload = next_payload if isinstance(next_payload, dict) else {}
+    return {
+        **out_payload,
+        "id": str(rid_db),
+        "kind": str(kind or "beer_format"),
+        "beer_id": str(beer_id or ""),
+        "format_article_id": str(format_article_id or ""),
+        "article_id": str(article_id or ""),
+        "code": str(code or ""),
+        "name": str(name or ""),
+        "naam": str(name or ""),
+        "active": bool(active),
+        "actief": bool(active),
+        "updated_at": now.isoformat(),
+    }
+
+
 def ensure_schema() -> None:
     global _SCHEMA_READY
     if _SCHEMA_READY:
