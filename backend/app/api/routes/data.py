@@ -45,6 +45,10 @@ _STANDARD_DATASETS = [
     "articles",
     "skus",
     "bom-lines",
+    # SKU-classificatie vocabularies
+    "productgroepen",
+    "verpakkingstypen",
+    "alcoholcategorieen",
 ]
 
 # Create generic CRUD router for standard datasets

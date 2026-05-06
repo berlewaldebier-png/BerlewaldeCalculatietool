@@ -48,6 +48,11 @@ export default async function BeheerPage() {
           <div className="home-card-title">Productkoppeling</div>
           <div className="home-card-text">Koppel Douano producten aan actieve kostprijscombinaties (bier + verpakking).</div>
         </Link>
+        <Link href="/beheer/productclassificatie" className="home-card">
+          <div className="home-card-section">Beheer</div>
+          <div className="home-card-title">Productclassificatie</div>
+          <div className="home-card-text">Beheer dropdowns voor productgroep, alcoholcategorie en verpakkingstype.</div>
+        </Link>
         {showDevTools ? (
           <Link href="/beheer/devtools" className="home-card">
             <div className="home-card-section">Beheer</div>

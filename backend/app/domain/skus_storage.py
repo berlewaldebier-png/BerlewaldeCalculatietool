@@ -13,6 +13,78 @@ _SCHEMA_READY = False
 _SCHEMA_LOCK = Lock()
 
 
+def _load_active_ids(dataset_name: str) -> set[str]:
+    payload = postgres_storage.load_dataset(dataset_name, [])
+    if not isinstance(payload, list):
+        return set()
+    out: set[str] = set()
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        rid = str(row.get("id", "") or "").strip()
+        if not rid:
+            continue
+        active = bool(row.get("active", True))
+        if active:
+            out.add(rid)
+    return out
+
+
+def _load_packaging_type_rules() -> dict[str, set[str]]:
+    payload = postgres_storage.load_dataset("verpakkingstypen", [])
+    if not isinstance(payload, list):
+        return {}
+    out: dict[str, set[str]] = {}
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        rid = str(row.get("id", "") or "").strip()
+        if not rid or not bool(row.get("active", True)):
+            continue
+        allowed = row.get("allowed_product_groups", [])
+        allowed_set: set[str] = set()
+        if isinstance(allowed, list):
+            for item in allowed:
+                gid = str(item or "").strip()
+                if gid:
+                    allowed_set.add(gid)
+        out[rid] = allowed_set
+    return out
+
+
+def _validate_sku_classification(row: dict[str, Any]) -> None:
+    """Validate optional SKU classification fields.
+
+    Phase 1/2 introduces controlled vocab datasets for SKU metadata.
+    We validate values when present, but do not require classification yet
+    (other flows will be updated in subsequent phases).
+    """
+    sku_id = str(row.get("id", "") or "").strip()
+    product_group = str(row.get("product_group", row.get("productgroep", "")) or "").strip()
+    alcohol_category = str(row.get("alcohol_category", row.get("alcoholcategorie", "")) or "").strip()
+    packaging_type = str(row.get("packaging_type", row.get("verpakkingstype", "")) or "").strip()
+
+    if not (product_group or alcohol_category or packaging_type):
+        return
+
+    product_groups = _load_active_ids("productgroepen")
+    alcohol_categories = _load_active_ids("alcoholcategorieen")
+    packaging_rules = _load_packaging_type_rules()
+
+    if product_group and product_group not in product_groups:
+        raise ValueError(f"Ongeldige productgroep '{product_group}' voor SKU '{sku_id}'.")
+    if alcohol_category and alcohol_category not in alcohol_categories:
+        raise ValueError(f"Ongeldige alcoholcategorie '{alcohol_category}' voor SKU '{sku_id}'.")
+    if packaging_type and packaging_type not in packaging_rules:
+        raise ValueError(f"Ongeldig verpakkingstype '{packaging_type}' voor SKU '{sku_id}'.")
+    if product_group and packaging_type:
+        allowed_groups = packaging_rules.get(packaging_type, set())
+        if allowed_groups and product_group not in allowed_groups:
+            raise ValueError(
+                f"Verpakkingstype '{packaging_type}' is niet toegestaan voor productgroep '{product_group}' (SKU '{sku_id}')."
+            )
+
+
 def ensure_schema() -> None:
     global _SCHEMA_READY
     if _SCHEMA_READY:
@@ -99,6 +171,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     incoming_ids: list[str] = []
     params: list[tuple[Any, ...]] = []
     for row in rows:
+        _validate_sku_classification(row)
         rid = str(row.get("id", "") or "").strip() or str(uuid4())
         kind = str(row.get("kind", "") or "").strip().lower() or "beer_format"
         beer_id = str(row.get("beer_id", "") or "").strip()
