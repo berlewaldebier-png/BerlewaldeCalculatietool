@@ -95,6 +95,8 @@ type BerekeningenWizardProps = {
   samengesteldeProducten: GenericRecord[];
   skus?: GenericRecord[];
   bieren?: GenericRecord[];
+  articles?: GenericRecord[];
+  bomLines?: GenericRecord[];
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
@@ -145,6 +147,8 @@ export function BerekeningenWizard({
   samengesteldeProducten,
   skus,
   bieren,
+  articles,
+  bomLines,
   productie,
   vasteKosten,
   tarievenHeffingen,
@@ -610,9 +614,54 @@ export function BerekeningenWizard({
           Array.isArray(factuur?.factuurregels) ? (factuur.factuurregels as any[]) : []
         );
         const regels = factuurRegelsUitFacturen.length > 0 ? factuurRegelsUitFacturen : topLevelFactuurregels;
-        productIds = Array.from(
+        const purchased = Array.from(
           new Set(regels.map((regel: any) => String(regel?.eenheid ?? "").trim()).filter(Boolean))
         );
+
+        // Include derived formats from the purchased format BOM (same intent as backend activation logic).
+        try {
+          const articlesById = new Map<string, any>();
+          (Array.isArray(articles) ? articles : []).forEach((row: any) => {
+            const id = String(row?.id ?? "").trim();
+            if (!id) return;
+            articlesById.set(id, row);
+          });
+          const formatIds = new Set<string>();
+          articlesById.forEach((row, id) => {
+            if (String(row?.kind ?? "").trim().toLowerCase() === "format") {
+              formatIds.add(id);
+            }
+          });
+          const linesByParent = new Map<string, any[]>();
+          (Array.isArray(bomLines) ? bomLines : []).forEach((row: any) => {
+            const parent = String(row?.parent_article_id ?? "").trim();
+            if (!parent || !formatIds.has(parent)) return;
+            const list = linesByParent.get(parent) ?? [];
+            list.push(row);
+            linesByParent.set(parent, list);
+          });
+          const collectNestedFormats = (parentId: string, visiting = new Set<string>()) => {
+            if (visiting.has(parentId)) return new Set<string>();
+            visiting.add(parentId);
+            const out = new Set<string>();
+            for (const line of linesByParent.get(parentId) ?? []) {
+              const comp = String(line?.component_article_id ?? "").trim();
+              if (!comp || !formatIds.has(comp)) continue;
+              out.add(comp);
+              for (const nested of collectNestedFormats(comp, visiting)) out.add(nested);
+            }
+            return out;
+          };
+
+          const extra = new Set<string>();
+          for (const id of purchased) {
+            if (!formatIds.has(id)) continue;
+            for (const nested of collectNestedFormats(id)) extra.add(nested);
+          }
+          productIds = Array.from(new Set([...purchased, ...Array.from(extra)]));
+        } catch {
+          productIds = purchased;
+        }
       } else {
         // For recept/eigen productie: show all available afvuleenheden (basis + samengesteld) for the selected year.
         productIds = Array.from(
