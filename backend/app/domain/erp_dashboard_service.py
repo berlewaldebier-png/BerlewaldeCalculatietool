@@ -168,14 +168,31 @@ def get_erp_dashboard(
         # Keep the initial dashboard stable and aligned with the product decision.
         basis = "order"
 
-    default = _default_range_today_month()
+    since_text = str(since or "").strip()
+    until_text = str(until or "").strip()
     year_int = int(year or 0)
-    if year_int > 0 and not str(since or "").strip() and not str(until or "").strip():
+    has_explicit_filters = bool(year_int > 0 or since_text or until_text)
+
+    default = _default_range_today_month()
+    range_since = _parse_date(since, default.since)
+    range_until = _parse_date(until, default.until)
+
+    if year_int > 0 and not since_text and not until_text:
         range_since = date(year_int, 1, 1)
         range_until = date(year_int, 12, 31)
-    else:
-        range_since = _parse_date(since, default.since)
-        range_until = _parse_date(until, default.until)
+
+    # Better default: if the user didn't specify a range/year, show the most recent month with orders
+    # instead of the current calendar month (which is often empty in dev snapshots).
+    if not has_explicit_filters:
+        postgres_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(order_date)::date FROM douano_sales_orders WHERE order_date IS NOT NULL")
+                row = cur.fetchone()
+        latest_order_date = row[0] if row else None
+        if isinstance(latest_order_date, date):
+            range_since = date(latest_order_date.year, latest_order_date.month, 1)
+            range_until = latest_order_date
     if range_until < range_since:
         range_until = range_since
 
