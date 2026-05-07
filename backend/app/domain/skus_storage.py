@@ -13,8 +13,147 @@ _SCHEMA_READY = False
 _SCHEMA_LOCK = Lock()
 
 
+def cleanup_duplicate_skus(*, dry_run: bool = True) -> dict[str, Any]:
+    """Remove duplicate SKUs that represent the same logical scope.
+
+    Safety rules:
+    - Only deletes SKUs that have zero references in known datasets/tables.
+    - Never rewrites foreign references (no hidden fallback).
+
+    Logical scope keys:
+    - kind=beer_format: (beer_id, format_article_id)
+    - kind=article: (article_id)
+    """
+    ensure_schema()
+
+    skus = load_dataset(default_value=[])
+    if not isinstance(skus, list):
+        skus = []
+
+    # Collect referenced SKU ids from datasets + mapping table.
+    from app.domain import dataset_store
+
+    referenced: set[str] = set()
+
+    def _scan_for_sku_ids(value: Any) -> None:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if k in {"sku_id", "component_sku_id"}:
+                    sid = str(v or "").strip()
+                    if sid:
+                        referenced.add(sid)
+                _scan_for_sku_ids(v)
+        elif isinstance(value, list):
+            for item in value:
+                _scan_for_sku_ids(item)
+
+    try:
+        for name in dataset_store.get_dataset_names():
+            try:
+                payload = dataset_store.load_dataset(name)
+            except Exception:
+                continue
+            _scan_for_sku_ids(payload)
+    except Exception:
+        # Best-effort; we still include table-backed mappings below.
+        pass
+
+    # Include Douano product mapping table.
+    try:
+        from app.domain import douano_product_mapping_storage
+
+        douano_product_mapping_storage.ensure_schema()
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT DISTINCT sku_id FROM douano_product_mapping")
+                for (sid,) in cur.fetchall() or []:
+                    sku_id = str(sid or "").strip()
+                    if sku_id:
+                        referenced.add(sku_id)
+    except Exception:
+        pass
+
+    def _scope_key(row: dict[str, Any]) -> str:
+        kind = str(row.get("kind", "") or "").strip().lower()
+        if kind == "beer_format":
+            beer_id = str(row.get("beer_id", "") or "").strip()
+            fmt = str(row.get("format_article_id", "") or "").strip()
+            if beer_id and fmt:
+                return f"beer_format|{beer_id}|{fmt}"
+        if kind == "article":
+            aid = str(row.get("article_id", "") or "").strip()
+            if aid:
+                return f"article|{aid}"
+        rid = str(row.get("id", "") or "").strip()
+        return f"id|{rid}"
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in skus:
+        if not isinstance(row, dict):
+            continue
+        rid = str(row.get("id", "") or "").strip()
+        if not rid:
+            continue
+        groups.setdefault(_scope_key(row), []).append(row)
+
+    duplicates: list[dict[str, Any]] = []
+    to_delete: list[str] = []
+    kept: list[str] = []
+    skipped_referenced: list[str] = []
+
+    def _score(row: dict[str, Any]) -> tuple[int, str]:
+        rid = str(row.get("id", "") or "").strip()
+        active = bool(row.get("active", row.get("actief", True)))
+        name = str(row.get("name", row.get("naam", "")) or "").strip()
+        # Prefer referenced, then active, then shorter id, then name.
+        ref_score = 1 if rid in referenced else 0
+        act_score = 1 if active else 0
+        return (ref_score * 100 + act_score * 10, f"{len(rid):04d}:{name}:{rid}")
+
+    for scope, rows in groups.items():
+        if len(rows) <= 1:
+            continue
+        # Keep the "best" row, delete others only if unreferenced.
+        best = sorted(rows, key=_score, reverse=True)[0]
+        best_id = str(best.get("id", "") or "").strip()
+        kept.append(best_id)
+        other_ids = [str(r.get("id", "") or "").strip() for r in rows if str(r.get("id", "") or "").strip() and str(r.get("id", "") or "").strip() != best_id]
+        duplicates.append({"scope": scope, "keep": best_id, "candidates": other_ids})
+        for oid in other_ids:
+            if oid in referenced:
+                skipped_referenced.append(oid)
+                continue
+            to_delete.append(oid)
+
+    report: dict[str, Any] = {
+        "dry_run": bool(dry_run),
+        "duplicate_scopes": len(duplicates),
+        "delete_count": len(to_delete),
+        "skipped_referenced_count": len(skipped_referenced),
+        "examples": duplicates[:25],
+        "to_delete": to_delete[:200],
+    }
+
+    if dry_run or not to_delete:
+        return report
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM skus WHERE id = ANY(%s)", (to_delete,))
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    report["deleted"] = len(to_delete)
+    return report
+
+
 def _load_active_ids(dataset_name: str) -> set[str]:
-    payload = postgres_storage.load_dataset(dataset_name, [])
+    # Controlled vocab datasets (productgroepen/alcoholcategorieen/...) may not be explicitly
+    # persisted yet in dev flows. Use the same defaults as dataset_store so validation matches
+    # what the UI shows after bootstrap.
+    from app.domain.dataset_store import DATASET_DEFAULTS
+
+    payload = postgres_storage.load_dataset(dataset_name, DATASET_DEFAULTS.get(dataset_name, []))
     if not isinstance(payload, list):
         return set()
     out: set[str] = set()
@@ -31,7 +170,9 @@ def _load_active_ids(dataset_name: str) -> set[str]:
 
 
 def _load_packaging_type_rules() -> dict[str, set[str]]:
-    payload = postgres_storage.load_dataset("verpakkingstypen", [])
+    from app.domain.dataset_store import DATASET_DEFAULTS
+
+    payload = postgres_storage.load_dataset("verpakkingstypen", DATASET_DEFAULTS.get("verpakkingstypen", []))
     if not isinstance(payload, list):
         return {}
     out: dict[str, set[str]] = {}

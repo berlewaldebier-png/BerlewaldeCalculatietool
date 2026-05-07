@@ -8,11 +8,16 @@ export async function putKostprijsversies(payload: unknown) {
   });
 }
 
-export async function activateKostprijsversie(recordId: string) {
+export async function activateKostprijsversie(recordId: string, effectiveFrom?: string) {
+  const effective_from = String(effectiveFrom ?? "").trim();
   return apiRequestTextClient(`/data/kostprijsversies/${encodeURIComponent(recordId)}/activate`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    ...(effective_from
+      ? {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ effective_from }),
+        }
+      : {}),
   });
 }
 

@@ -103,7 +103,12 @@ def post_activate_kostprijsversie(
     """Activate a cost version."""
     try:
         run_id = str(data.get("run_id", "") or "")
-        activated = dataset_store.activate_cost_version(version_id, context={"run_id": run_id})
+        effective_from = str(data.get("effective_from", "") or "").strip()
+        activated = dataset_store.activate_cost_version(
+            version_id,
+            context={"run_id": run_id},
+            effective_from=effective_from,
+        )
         if activated is None:
             raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden of niet definitief")
         logger.info(f"Activated cost version: {version_id}")

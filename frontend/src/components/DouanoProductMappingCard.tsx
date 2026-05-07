@@ -48,6 +48,12 @@ async function readJson(path: string) {
   return payload;
 }
 
+async function readDataset<T>(name: string): Promise<T[]> {
+  const payload = await readJson(`/api/data/${encodeURIComponent(name)}`);
+  const data = (payload as any)?.data;
+  return Array.isArray(data) ? (data as T[]) : [];
+}
+
 async function writeJson(path: string, method: "PUT" | "DELETE", body?: any) {
   const response = await fetch(path, {
     method,
@@ -179,7 +185,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   }, [verpakkingstypen]);
 
   async function refreshAll() {
-    setStatus("Laden…");
+    setStatus("Laden...");
     setTone("");
     try {
       const [p, c, m, ig, pg, ac, vt] = await Promise.all([
@@ -187,17 +193,17 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
         readJson("/api/integrations/douano/cost-combos"),
         readJson("/api/integrations/douano/product-mappings?limit=10000"),
         readJson("/api/integrations/douano/product-ignored?limit=50000"),
-        readJson("/api/data/productgroepen"),
-        readJson("/api/data/alcoholcategorieen"),
-        readJson("/api/data/verpakkingstypen")
+        readDataset<Productgroep>("productgroepen"),
+        readDataset<AlcoholCategorie>("alcoholcategorieen"),
+        readDataset<Verpakkingstype>("verpakkingstypen")
       ]);
       setProducts(Array.isArray(p?.items) ? p.items : []);
       setCombos(Array.isArray(c?.items) ? c.items : []);
       setMappings(Array.isArray(m?.items) ? m.items : []);
       setIgnored(Array.isArray(ig?.items) ? ig.items : []);
-      setProductgroepen(Array.isArray(pg) ? pg : []);
-      setAlcoholcategorieen(Array.isArray(ac) ? ac : []);
-      setVerpakkingstypen(Array.isArray(vt) ? vt : []);
+      setProductgroepen(pg);
+      setAlcoholcategorieen(ac);
+      setVerpakkingstypen(vt);
       setGroupDraft(() => {
         const next: Record<number, string> = {};
         (Array.isArray(m?.items) ? m.items : []).forEach((row: any) => {
@@ -408,7 +414,9 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
               const mappedKey = mapping ? String((mapping as any).sku_id ?? "").trim() : "";
               const value = String(draft[id] ?? mappedKey ?? "");
               const isMapped = Boolean(mapping);
-              const mappedLabel = mappedKey ? combosByKey.get(mappedKey)?.label ?? mappedKey : "";
+              const mappedLabel = mappedKey
+                ? ((combosByKey.get(mappedKey) as any)?.naam ?? combosByKey.get(mappedKey)?.label ?? mappedKey)
+                : "";
               const isIgnored = ignoredById.has(id);
               const groupValue = String(
                 groupDraft[id] ?? (mapping as any)?.product_group ?? ""
@@ -444,13 +452,16 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
                       value={value}
                       onChange={(e) => setDraft((prev) => ({ ...prev, [id]: e.target.value }))}
                     >
-                      <option value="">{isMapped ? mappedLabel || "—" : "Selecteer SKU-kostprijs"}</option>
+                      <option value="">Selecteer SKU-kostprijs</option>
+                      {mappedKey && !combosByKey.has(mappedKey) ? (
+                        <option value={mappedKey}>{mappedLabel || mappedKey}</option>
+                      ) : null}
                       {combos.map((c) => {
                         const key = String((c as any)?.sku_id ?? "").trim();
                         if (!key) return null;
                         return (
                           <option key={key} value={key}>
-                            {c.label}
+                            {String((c as any)?.naam ?? "").trim() || c.label}
                           </option>
                         );
                       })}

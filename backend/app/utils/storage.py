@@ -2,7 +2,7 @@
 
 import json
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -1004,6 +1004,85 @@ def _known_sku_ids() -> set[str]:
     }
 
 
+def _known_bier_ids() -> set[str]:
+    """Return known beer identifiers.
+
+    Legacy flows still store references under `bier_id` / `selected_bier_ids`.
+    In the SKU-driven model those selectors may carry SKU ids as well, so we
+    treat both beer ids and SKU ids as "known" to avoid accidentally clearing
+    references during normalization/validation.
+    """
+
+    postgres_storage = _get_postgres_storage_module()
+    known: set[str] = set()
+    if postgres_storage is not None and postgres_storage.uses_postgres():
+        payload = postgres_storage.load_dataset("bieren", [])
+        if isinstance(payload, list):
+            known |= {
+                str(record.get("id", "") or "")
+                for record in payload
+                if isinstance(record, dict) and str(record.get("id", "") or "")
+            }
+    known |= _known_sku_ids()
+    return known
+
+
+def _known_product_refs() -> set[tuple[str, str]]:
+    """Return known (product_id, product_type) pairs.
+
+    Legacy verkoop/prijsvoorstel records reference internal packaging products
+    (basis/samengesteld) and, in the SKU-driven model, sometimes article-based
+    products. We keep this validator permissive in dev to avoid blocking unrelated
+    writes (e.g. deleting a concept kostprijs) when the referenced entity exists
+    under a different type label.
+    """
+
+    refs: set[tuple[str, str]] = set()
+
+    def _add(pid: str, ptype: str) -> None:
+        pid = str(pid or "").strip()
+        if not pid:
+            return
+        ptype = str(ptype or "").strip().lower()
+        refs.add((pid, ptype))
+
+    # Packaging products (internal building blocks).
+    for row in load_basisproducten():
+        if not isinstance(row, dict):
+            continue
+        pid = str(row.get("id", "") or "").strip()
+        _add(pid, "basis")
+        _add(pid, "")
+    for row in load_samengestelde_producten():
+        if not isinstance(row, dict):
+            continue
+        pid = str(row.get("id", "") or "").strip()
+        _add(pid, "samengesteld")
+        _add(pid, "")
+
+    # Canonical articles list (SKU-driven).
+    articles_payload = _load_postgres_dataset("articles")
+    if isinstance(articles_payload, list):
+        for row in articles_payload:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("id", "") or "").strip()
+            kind = str(row.get("kind", "") or "").strip().lower()
+            if not pid:
+                continue
+            _add(pid, "article")
+            if kind:
+                _add(pid, kind)
+            _add(pid, "")
+
+    # Central SKU ids can show up directly in newer flows.
+    for sku_id in _known_sku_ids():
+        _add(sku_id, "sku")
+        _add(sku_id, "")
+
+    return refs
+
+
 def _known_kostprijsversie_ids() -> set[str]:
     return {
         str(record.get("id", "") or "")
@@ -1404,6 +1483,8 @@ def _normalize_resultaat_snapshot_product_row(
     row: dict[str, Any] | None,
     *,
     product_type_hint: str = "",
+    beer_id: str = "",
+    sku_by_beer_format: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, Any]:
     source = row if isinstance(row, dict) else {}
     verpakking = str(
@@ -1434,9 +1515,16 @@ def _normalize_resultaat_snapshot_product_row(
         product_type = str(product_type_hint or "").strip().lower()
     product_id = explicit_product_id
 
+    explicit_sku_id = str(source.get("sku_id", "") or "").strip()
+    derived_sku_id = ""
+    if not explicit_sku_id and beer_id and product_id and sku_by_beer_format is not None:
+        derived_sku_id = str(sku_by_beer_format.get((beer_id, product_id), "") or "").strip()
+    sku_id = explicit_sku_id or derived_sku_id
+
     return {
         "biernaam": str(source.get("biernaam", "") or ""),
         "soort": str(source.get("soort", "") or ""),
+        "sku_id": sku_id,
         "product_id": product_id,
         "product_type": product_type,
         "verpakking": verpakking,
@@ -1454,6 +1542,9 @@ def _normalize_resultaat_snapshot_product_row(
 
 def _normalize_resultaat_snapshot_producten(
     producten: dict[str, Any] | None,
+    *,
+    beer_id: str = "",
+    sku_by_beer_format: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     source = producten if isinstance(producten, dict) else {}
     basisproducten = source.get("basisproducten", [])
@@ -1469,6 +1560,8 @@ def _normalize_resultaat_snapshot_producten(
             _normalize_resultaat_snapshot_product_row(
                 row,
                 product_type_hint="basis",
+                beer_id=beer_id,
+                sku_by_beer_format=sku_by_beer_format,
             )
             for row in basisproducten
             if isinstance(row, dict)
@@ -1477,6 +1570,8 @@ def _normalize_resultaat_snapshot_producten(
             _normalize_resultaat_snapshot_product_row(
                 row,
                 product_type_hint="samengesteld",
+                beer_id=beer_id,
+                sku_by_beer_format=sku_by_beer_format,
             )
             for row in samengestelde_producten
             if isinstance(row, dict)
@@ -1684,6 +1779,26 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(resultaat_snapshot, dict):
         resultaat_snapshot = {}
 
+    # Enrich snapshot rows with sku_id so downstream margin/ERP calculations can resolve costs
+    # without any fallback joins. For beer cost versions this maps (bier_id, format_article_id) -> sku_id.
+    bier_id = str(record.get("bier_id", "") or "").strip()
+    sku_by_beer_format: dict[tuple[str, str], str] = {}
+    try:
+        skus = load_skus()
+    except Exception:
+        skus = []
+    if isinstance(skus, list):
+        for sku in skus:
+            if not isinstance(sku, dict):
+                continue
+            if str(sku.get("kind", "") or "").strip().lower() != "beer_format":
+                continue
+            sid = str(sku.get("id", "") or "").strip()
+            bid = str(sku.get("beer_id", "") or "").strip()
+            fmt = str(sku.get("format_article_id", "") or "").strip()
+            if sid and bid and fmt:
+                sku_by_beer_format[(bid, fmt)] = sid
+
     # Phase D: no read-side legacy repairs for product ids.
     # If older stored records still contain non-canonical product ids, run the explicit
     # admin migration (`/api/meta/migrate-product-ids`) once and then keep runtime strict.
@@ -1699,7 +1814,9 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
             "directe_vaste_kosten_per_liter"
         ),
         "producten": _normalize_resultaat_snapshot_producten(
-            resultaat_snapshot.get("producten")
+            resultaat_snapshot.get("producten"),
+            beer_id=bier_id,
+            sku_by_beer_format=sku_by_beer_format,
         ),
     }
 
@@ -7766,6 +7883,7 @@ def activate_kostprijsversie(
     kostprijsversie_id: str,
     *,
     context: dict[str, Any] | None = None,
+    effective_from: str = "",
 ) -> dict[str, Any] | None:
     """Activeert de producten uit een definitieve kostprijsversie voor bier + product + jaar."""
     records = load_kostprijsversies()
@@ -7784,7 +7902,16 @@ def activate_kostprijsversie(
 
     bier_id = str(target.get("bier_id", "") or "")
     jaar = int(target.get("jaar", 0) or 0)
-    effective_from = _now_iso()
+    # Activation effective date determines from which order/invoice date this cost version applies.
+    # Use YYYY-MM-DD so reporting services can parse it deterministically.
+    effective_from_text = str(effective_from or "").strip()
+    if "T" in effective_from_text:
+        effective_from_text = effective_from_text.split("T", 1)[0].strip()
+    if len(effective_from_text) != 10 or effective_from_text.count("-") != 2:
+        effective_from_text = ""
+    if not effective_from_text:
+        effective_from_text = date.today().isoformat()
+    now_iso = _now_iso()
     # Map legacy product refs to SKU ids.
     postgres_storage = _get_postgres_storage_module()
     sku_rows = postgres_storage.load_dataset("skus", []) if postgres_storage is not None and postgres_storage.uses_postgres() else []
@@ -7818,9 +7945,9 @@ def activate_kostprijsversie(
             "sku_id": sku_id,
             "jaar": jaar,
             "kostprijsversie_id": str(kostprijsversie_id or ""),
-            "effectief_vanaf": effective_from,
-            "created_at": effective_from,
-            "updated_at": effective_from,
+            "effectief_vanaf": effective_from_text,
+            "created_at": now_iso,
+            "updated_at": now_iso,
             # Keep legacy fields for exports/debugging.
             "bier_id": bier_id,
             "product_id": article_id or str(sku_by_id.get(sku_id, {}).get("article_id", "") or ""),
@@ -8102,9 +8229,9 @@ def activate_kostprijsversie(
                 "sku_id": sku_id,
                 "jaar": jaar,
                 "kostprijsversie_id": str(kostprijsversie_id or ""),
-                "effectief_vanaf": effective_from,
-                "created_at": effective_from,
-                "updated_at": effective_from,
+                "effectief_vanaf": effective_from_text,
+                "created_at": now_iso,
+                "updated_at": now_iso,
                 # Keep legacy fields for debugging/exports.
                 "bier_id": bier_id,
                 "product_id": product_id,

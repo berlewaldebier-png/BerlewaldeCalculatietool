@@ -203,7 +203,13 @@ export function ArticleKostprijsWizard(props: Props) {
 
       if (nextStatus === "definitief" && opts.activate) {
         try {
-          await activateKostprijsversie(String(record.id ?? ""));
+          const fallback = `${selectedYear}-01-01`;
+          const input =
+            typeof window === "undefined"
+              ? fallback
+              : window.prompt("Per welke datum moet deze kostprijs ingaan? (YYYY-MM-DD)", fallback) ?? fallback;
+          const effectiveFrom = /^\d{4}-\d{2}-\d{2}$/.test(String(input).trim()) ? String(input).trim() : fallback;
+          await activateKostprijsversie(String(record.id ?? ""), effectiveFrom);
         } catch (error) {
           if (error instanceof ApiRequestError) {
             setStatus(`Activeren mislukt (${error.status}): ${error.bodyText || "Activeren mislukt."}`);

@@ -405,6 +405,51 @@ def upsert_products(items: Iterable[dict[str, Any]]) -> int:
     return count
 
 
+def delete_products_not_in(
+    keep_ids: set[int],
+    *,
+    keep_mapped: bool = True,
+) -> int:
+    """Delete products missing from the current sync result.
+
+    Intended for "sellable-only" syncs: when a product stops being sellable in Douano,
+    it won't appear in the filtered API response anymore. In that case we remove it from
+    our local product list to keep Productkoppeling strict.
+
+    When keep_mapped=True, we keep products that have an explicit product mapping because
+    they are used elsewhere (cost/margin mapping, dashboards).
+    """
+    ensure_schema()
+    keep_list = sorted({int(v) for v in keep_ids if int(v) > 0})
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            if keep_mapped:
+                # Keep anything that is mapped; those are referenced by cost logic elsewhere.
+                cur.execute(
+                    """
+                    DELETE FROM douano_products p
+                    WHERE NOT (p.product_id = ANY(%s))
+                      AND NOT EXISTS (
+                        SELECT 1 FROM douano_product_mapping m
+                        WHERE m.douano_product_id = p.product_id
+                      )
+                    """,
+                    (keep_list,),
+                )
+            else:
+                cur.execute(
+                    """
+                    DELETE FROM douano_products p
+                    WHERE NOT (p.product_id = ANY(%s))
+                    """,
+                    (keep_list,),
+                )
+            deleted = int(cur.rowcount or 0)
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    return deleted
+
+
 def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
     ensure_schema()
     orders = 0

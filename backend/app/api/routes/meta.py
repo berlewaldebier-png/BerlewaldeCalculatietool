@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -680,6 +681,15 @@ def post_dev_seed_sku_foundation(
     productie = {str(year_value): {"hoeveelheid_inkoop_l": 0, "hoeveelheid_productie_l": 0, "batchgrootte_eigen_productie_l": 0}}
 
     with postgres_storage.transaction():
+        # Seed controlled vocabularies so Beheer is the single source of truth.
+        # This ensures the same options appear in:
+        # - Beheer > Productclassificaties
+        # - Kostprijsbeheer > Classificeren
+        # - Product samenstellen
+        dataset_store.save_dataset("productgroepen", deepcopy(dataset_store.DATASET_DEFAULTS["productgroepen"]))
+        dataset_store.save_dataset("alcoholcategorieen", deepcopy(dataset_store.DATASET_DEFAULTS["alcoholcategorieen"]))
+        dataset_store.save_dataset("verpakkingstypen", deepcopy(dataset_store.DATASET_DEFAULTS["verpakkingstypen"]))
+
         # SKU/Article core
         postgres_storage.save_dataset("articles", [*packaging_components, *formats, *bundle_articles], overwrite=True)
         postgres_storage.save_dataset("bom-lines", [*bom_lines, *bundle_bom_lines], overwrite=True)
@@ -915,6 +925,25 @@ def post_dev_seed_export(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/dev/cleanup-duplicate-skus")
+def post_dev_cleanup_duplicate_skus(
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets verwijderen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: remove duplicate SKUs with the same logical scope.
+
+    Only deletes SKUs that have zero references in known datasets/tables.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Cleanup is alleen toegestaan in local/dev.")
+    try:
+        from app.domain import skus_storage
+
+        return {"result": skus_storage.cleanup_duplicate_skus(dry_run=bool(dry_run))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/new-year-draft")

@@ -11,9 +11,16 @@ export async function saveKostprijsversies(payload: GenericRecord[]) {
   });
 }
 
-export async function activateKostprijsversie(versionId: string) {
+export async function activateKostprijsversie(versionId: string, effectiveFrom?: string) {
+  const effective_from = String(effectiveFrom ?? "").trim();
   await apiRequestTextClient(`/data/kostprijsversies/${encodeURIComponent(versionId)}/activate`, {
     method: "POST",
+    ...(effective_from
+      ? {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ effective_from }),
+        }
+      : {}),
   });
 }
 

@@ -626,9 +626,10 @@ def activate_cost_version(
     version_id: str,
     *,
     context: dict[str, Any] | None = None,
+    effective_from: str = "",
 ) -> dict[str, Any] | None:
     require_postgres()
-    record = activate_kostprijsversie(version_id, context=context)
+    record = activate_kostprijsversie(version_id, context=context, effective_from=effective_from)
     if record is not None:
         dashboard_service.invalidate_dashboard_summary_cache()
     return record

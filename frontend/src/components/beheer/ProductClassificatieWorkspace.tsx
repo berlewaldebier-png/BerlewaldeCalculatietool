@@ -22,8 +22,20 @@ const TAB_LABELS: Record<TabKey, string> = {
   verpakkingstypen: "Verpakkingstypen"
 };
 
+const TAB_LABELS_UI: Record<TabKey, string> = {
+  productgroepen: "Productgroepen",
+  alcoholcategorieen: "Alcoholcategorieën",
+  verpakkingstypen: "Verpakkingstypen"
+};
+
 async function readDataset<T>(name: string): Promise<T[]> {
   const data = await apiGetClient<unknown>(`/data/${encodeURIComponent(name)}`);
+  return Array.isArray(data) ? (data as T[]) : [];
+}
+
+async function readDatasetV2<T>(name: string): Promise<T[]> {
+  const response = await apiGetClient<unknown>(`/data/${encodeURIComponent(name)}`);
+  const data = (response as any)?.data;
   return Array.isArray(data) ? (data as T[]) : [];
 }
 
@@ -58,14 +70,14 @@ function sortByOrder<T extends { sort_order?: number; label?: string; id?: strin
 function PillTabs({ active, onChange }: { active: TabKey; onChange: (tab: TabKey) => void }) {
   return (
     <div className="editor-pill-tabs" role="tablist" aria-label="Tabs">
-      {(Object.keys(TAB_LABELS) as TabKey[]).map((tab) => (
+      {(Object.keys(TAB_LABELS_UI) as TabKey[]).map((tab) => (
         <button
           key={tab}
           type="button"
           className={`editor-pill-tab ${tab === active ? "editor-pill-tab-active" : ""}`}
           onClick={() => onChange(tab)}
         >
-          {TAB_LABELS[tab]}
+          {TAB_LABELS_UI[tab]}
         </button>
       ))}
     </div>
@@ -148,7 +160,7 @@ function ProductgroepenTable({
       <table className="editor-table">
         <thead>
           <tr>
-            <th style={{ width: 220 }}>ID</th>
+            <th style={{ width: 220 }} />
             <th>Label</th>
             <th style={{ width: 120 }}>Volgorde</th>
             <th style={{ width: 110 }}>Actief</th>
@@ -231,7 +243,7 @@ function AlcoholTable({
       <table className="editor-table">
         <thead>
           <tr>
-            <th style={{ width: 220 }}>ID</th>
+            <th style={{ width: 220 }} />
             <th>Label</th>
             <th style={{ width: 120 }}>Volgorde</th>
             <th style={{ width: 110 }}>Actief</th>
@@ -329,7 +341,7 @@ function VerpakkingstypenTable({
       <table className="editor-table">
         <thead>
           <tr>
-            <th style={{ width: 220 }}>ID</th>
+            <th style={{ width: 220 }} />
             <th>Label</th>
             <th style={{ width: 120 }}>Volgorde</th>
             <th style={{ width: 110 }}>Actief</th>
@@ -429,9 +441,9 @@ export function ProductClassificatieWorkspace() {
     setMessage("");
     try {
       const [pg, ac, vt] = await Promise.all([
-        readDataset<Productgroep>("productgroepen"),
-        readDataset<AlcoholCategorie>("alcoholcategorieen"),
-        readDataset<Verpakkingstype>("verpakkingstypen")
+        readDatasetV2<Productgroep>("productgroepen"),
+        readDatasetV2<AlcoholCategorie>("alcoholcategorieen"),
+        readDatasetV2<Verpakkingstype>("verpakkingstypen")
       ]);
       const nextState = {
         productgroepen: sortByOrder(pg),

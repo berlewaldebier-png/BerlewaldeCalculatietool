@@ -84,6 +84,27 @@ def _build_snapshot_cost_index(
     versions_by_id: dict[str, dict[str, Any]],
     version_ids: Iterable[str],
 ) -> dict[tuple[str, str], float]:
+    # Some older kostprijs snapshots may lack `sku_id` on product rows. We can deterministically
+    # derive it from the canonical SKU table (bier_id × format_article_id) without any fallback
+    # joins. This keeps ERP/dashboard calculations stable while allowing a gradual rewrite of
+    # stored snapshots on the next save.
+    sku_by_beer_format: dict[tuple[str, str], str] = {}
+    try:
+        skus = dataset_store.load_dataset("skus")
+    except Exception:
+        skus = []
+    if isinstance(skus, list):
+        for sku in skus:
+            if not isinstance(sku, dict):
+                continue
+            if str(sku.get("kind", "") or "").strip().lower() != "beer_format":
+                continue
+            sid = str(sku.get("id", "") or "").strip()
+            bid = str(sku.get("beer_id", "") or "").strip()
+            fmt = str(sku.get("format_article_id", "") or "").strip()
+            if sid and bid and fmt:
+                sku_by_beer_format[(bid, fmt)] = sid
+
     out: dict[tuple[str, str], float] = {}
     for version_id in set([str(v or "").strip() for v in version_ids if str(v or "").strip()]):
         version = versions_by_id.get(version_id)
@@ -103,6 +124,11 @@ def _build_snapshot_cost_index(
                     continue
                 sku_id = str(row.get("sku_id", "") or "").strip()
                 if not sku_id:
+                    beer_id = str(version.get("bier_id", "") or "").strip()
+                    product_id = str(row.get("product_id", "") or "").strip()
+                    if beer_id and product_id:
+                        sku_id = str(sku_by_beer_format.get((beer_id, product_id), "") or "").strip()
+                if not sku_id:
                     continue
                 out[(version_id, sku_id)] = _snapshot_row_cost(row)
 
@@ -112,6 +138,11 @@ def _build_snapshot_cost_index(
                 if not isinstance(row, dict):
                     continue
                 sku_id = str(row.get("sku_id", "") or "").strip()
+                if not sku_id:
+                    beer_id = str(version.get("bier_id", "") or "").strip()
+                    product_id = str(row.get("product_id", "") or "").strip()
+                    if beer_id and product_id:
+                        sku_id = str(sku_by_beer_format.get((beer_id, product_id), "") or "").strip()
                 if not sku_id:
                     continue
                 out[(version_id, sku_id)] = _snapshot_row_cost(row)

@@ -10,7 +10,6 @@ import {
   activateKostprijsversie,
   saveKostprijsversies,
   loadSkus,
-  saveSkus,
   saveSkuClassification,
   tryReadApiDetail,
 } from "@/components/berekeningen/berekeningenWizardIo";
@@ -429,60 +428,112 @@ export function BerekeningenWizard({
         status: "definitief"
       });
 
-      // Persist classification to the SKU read-model so other selectors (dashboard, strategy) stay consistent.
-      const skuType = String((basis as any).sku_type ?? "bier").trim().toLowerCase();
-      const overrides = (((current as any).classification_overrides ?? {}) as Record<string, any>) || {};
-      const entries = Object.entries(overrides).filter(([skuId]) => String(skuId || "").trim());
-      if (entries.length > 0) {
-        for (const [skuId, payload] of entries) {
-          const productGroup = String((payload as any)?.product_group ?? "").trim();
-          const packagingType = String((payload as any)?.packaging_type ?? "").trim();
-          if (!productGroup) {
-            setStatus("Productgroep is verplicht (Classificeren).");
-            setStatusTone("error");
-            return false;
-          }
-          if ((productGroup === "drank" || productGroup === "giftset") && !packagingType) {
-            setStatus("Verpakkingstype is verplicht voor Drank/Giftset (Classificeren).");
-            setStatusTone("error");
-            return false;
-          }
-          await saveSkuClassification(String(skuId), {
-            product_group: productGroup,
-            alcohol_category: String((payload as any)?.alcohol_category ?? "").trim(),
-            packaging_type: packagingType,
-          });
-        }
-      } else if (skuType !== "bier") {
-        const skuId = String((basis as any).sku_id ?? "").trim();
-        if (skuId) {
-          const productGroup = String((basis as any).product_group ?? "").trim();
-          const packagingType = String((basis as any).packaging_type ?? "").trim();
-          if (!productGroup) {
-            setStatus("Productgroep is verplicht (Classificeren).");
-            setStatusTone("error");
-            return false;
-          }
-          if ((productGroup === "drank" || productGroup === "giftset") && !packagingType) {
-            setStatus("Verpakkingstype is verplicht voor Drank/Giftset (Classificeren).");
-            setStatusTone("error");
-            return false;
-          }
-          await saveSkuClassification(skuId, {
-            product_group: productGroup,
-            alcohol_category: String((basis as any).alcohol_category ?? "").trim(),
-            packaging_type: packagingType,
-          });
-        }
-      }
-      // Auto-activate after finalize: a definitive version should be immediately quoteable.
-      const updatedCurrent =
-        refreshedRows.find((row) => String((row as any).id ?? "") === String(current.id ?? "")) ?? current;
-      const isAlreadyActive = Boolean((updatedCurrent as any)?.is_actief);
-      if (!isAlreadyActive) {
-        try {
-          await activateKostprijsversie(String(current.id ?? ""));
-        } catch (error) {
+	      // Validate & stage classification. For bier: classify per format during concept, then persist to SKUs after activation.
+	      const skuType = String((basis as any).sku_type ?? "bier").trim().toLowerCase();
+	      const validateClassification = (productGroup: string, packagingType: string) => {
+	        if (!productGroup) {
+	          setStatus("Productgroep is verplicht (Classificeren).");
+	          setStatusTone("error");
+	          return false;
+	        }
+	        if ((productGroup === "drank" || productGroup === "giftset") && !packagingType) {
+	          setStatus("Verpakkingstype is verplicht voor Drank/Giftset (Classificeren).");
+	          setStatusTone("error");
+	          return false;
+	        }
+	        return true;
+	      };
+
+	      const pendingSkuClassifications: Array<{ skuId: string; payload: any }> = [];
+	      const pendingBeerFormatClassifications: Array<{
+	        formatId: string;
+	        productGroup: string;
+	        alcoholCategory: string;
+	        packagingType: string;
+	      }> = [];
+
+	      if (skuType !== "bier") {
+	        const skuId = String((basis as any).sku_id ?? "").trim();
+	        if (skuId) {
+	          const productGroup = String((basis as any).product_group ?? "").trim();
+	          const packagingType = String((basis as any).packaging_type ?? "").trim();
+	          if (!validateClassification(productGroup, packagingType)) return false;
+	          pendingSkuClassifications.push({
+	            skuId,
+	            payload: {
+	              product_group: productGroup,
+	              alcohol_category: String((basis as any).alcohol_category ?? "").trim(),
+	              packaging_type: packagingType,
+	            },
+	          });
+	        }
+	      } else {
+	        const overridesByFormat =
+	          (((current as any).classification_overrides_by_format ?? {}) as Record<string, any>) || {};
+	        const snapshot = buildResultaatSnapshot(current);
+	        const rows = [
+	          ...(((snapshot as any)?.producten?.basisproducten as any[]) ?? []),
+	          ...(((snapshot as any)?.producten?.samengestelde_producten as any[]) ?? []),
+	        ] as any[];
+	        const seen = new Set<string>();
+	        const formatIds: string[] = [];
+	        for (const row of rows) {
+	          const formatId = String(row?.product_id ?? "").trim();
+	          if (!formatId || seen.has(formatId)) continue;
+	          seen.add(formatId);
+	          formatIds.push(formatId);
+	        }
+
+	        if (formatIds.length > 0) {
+	          const biernaam = String((basis as any).biernaam ?? "").trim();
+	          const beerIdFromRow = String((current as any)?.bier_id ?? "").trim();
+	          const beerId =
+	            beerIdFromRow ||
+	            (() => {
+	              if (!biernaam) return "";
+	              const match = (Array.isArray(bieren) ? bieren : []).find((row: any) => {
+	                const name = String(row?.biernaam ?? row?.naam ?? "").trim();
+	                return name && name.toLowerCase() === biernaam.toLowerCase();
+	              }) as any;
+	              return match ? String(match.id ?? "").trim() : "";
+	            })();
+
+	          // We allow validation even if beerId is missing, but persisting to SKUs requires it after activation.
+	          const skuByBeerFormat = new Map<string, any>();
+	          (Array.isArray(localSkus) ? localSkus : []).forEach((row: any) => {
+	            const bid = String(row?.beer_id ?? "").trim();
+	            const fid = String(row?.format_article_id ?? "").trim();
+	            if (bid && fid) skuByBeerFormat.set(`${bid}|${fid}`, row);
+	          });
+
+	          for (const formatId of formatIds) {
+	            const override = overridesByFormat[formatId] ?? {};
+	            const skuRow = beerId ? (skuByBeerFormat.get(`${beerId}|${formatId}`) as any) : null;
+	            const productGroup = String(override?.product_group ?? skuRow?.product_group ?? "").trim();
+	            const packagingType = String(override?.packaging_type ?? skuRow?.packaging_type ?? "").trim();
+	            const alcoholCategory = String(override?.alcohol_category ?? skuRow?.alcohol_category ?? "").trim();
+	            if (!validateClassification(productGroup, packagingType)) return false;
+	            pendingBeerFormatClassifications.push({
+	              formatId,
+	              productGroup,
+	              alcoholCategory,
+	              packagingType,
+	            });
+	          }
+	        }
+	      }
+	      // Auto-activate after finalize: a definitive version should be immediately quoteable.
+	      const updatedCurrent =
+	        refreshedRows.find((row) => String((row as any).id ?? "") === String(current.id ?? "")) ?? current;
+	      const isAlreadyActive = Boolean((updatedCurrent as any)?.is_actief);
+	      if (!isAlreadyActive) {
+	        try {
+	          const year =
+	            Number((updatedCurrent as any)?.jaar ?? (updatedCurrent as any)?.basisgegevens?.jaar ?? 0) ||
+	            new Date().getFullYear();
+	          const effectiveFrom = promptEffectiveFromDate(year);
+	          await activateKostprijsversie(String(current.id ?? ""), effectiveFrom);
+	        } catch (error) {
           const detail = tryReadApiDetail(error);
           setStatus(detail ? `Afronden gelukt, activeren mislukt: ${detail}` : "Afronden gelukt, activeren mislukt.");
           setStatusTone("error");
@@ -492,14 +543,65 @@ export function BerekeningenWizard({
         const activatedRows = afterActivate.ok
           ? unwrapDatasetListPayload(await afterActivate.json()) ?? refreshedRows
           : refreshedRows;
-        rowsRef.current = activatedRows;
-        setRows(activatedRows);
-        onRowsChange?.(activatedRows);
-      }
+	        rowsRef.current = activatedRows;
+	        setRows(activatedRows);
+	        onRowsChange?.(activatedRows);
+	      }
 
-      setStatus("Kostprijsversie definitief + actief.");
-      setStatusTone("success");
-      return true;
+	      // Persist classification to the SKU read-model so selectors (dashboard, strategy, offertes) stay consistent.
+	      for (const entry of pendingSkuClassifications) {
+	        await saveSkuClassification(entry.skuId, entry.payload);
+	      }
+
+	      if (pendingBeerFormatClassifications.length > 0) {
+	        const basis = (current.basisgegevens as GenericRecord) ?? {};
+	        const biernaam = String((basis as any).biernaam ?? "").trim();
+	        const beerIdFromRow = String((current as any)?.bier_id ?? "").trim();
+	        const beerId =
+	          beerIdFromRow ||
+	          (() => {
+	            if (!biernaam) return "";
+	            const match = (Array.isArray(bieren) ? bieren : []).find((row: any) => {
+	              const name = String(row?.biernaam ?? row?.naam ?? "").trim();
+	              return name && name.toLowerCase() === biernaam.toLowerCase();
+	            }) as any;
+	            return match ? String(match.id ?? "").trim() : "";
+	          })();
+
+	        const latestSkus = await loadSkus();
+	        setLocalSkus(Array.isArray(latestSkus) ? (latestSkus as any) : []);
+	        const skuByBeerFormat = new Map<string, any>();
+	        (Array.isArray(latestSkus) ? latestSkus : []).forEach((row: any) => {
+	          const sid = String(row?.id ?? "").trim();
+	          const bid = String(row?.beer_id ?? "").trim();
+	          const fid = String(row?.format_article_id ?? "").trim();
+	          if (sid && bid && fid) skuByBeerFormat.set(`${bid}|${fid}`, row);
+	        });
+
+	        let missing = 0;
+	        for (const item of pendingBeerFormatClassifications) {
+	          const skuRow = beerId ? (skuByBeerFormat.get(`${beerId}|${item.formatId}`) as any) : null;
+	          const skuId = String(skuRow?.id ?? "").trim();
+	          if (!skuId) {
+	            missing += 1;
+	            continue;
+	          }
+	          await saveSkuClassification(skuId, {
+	            product_group: item.productGroup,
+	            alcohol_category: item.alcoholCategory,
+	            packaging_type: item.packagingType,
+	          });
+	        }
+	        if (missing > 0) {
+	          setStatus(`Kostprijsversie definitief + actief, maar classificatie kon niet worden opgeslagen voor ${missing} SKU(s).`);
+	          setStatusTone("error");
+	          return true;
+	        }
+	      }
+
+	      setStatus("Kostprijsversie definitief + actief.");
+	      setStatusTone("success");
+	      return true;
     } catch {
       setStatus("Afronden mislukt.");
       setStatusTone("error");
@@ -542,12 +644,23 @@ export function BerekeningenWizard({
     }
   }
 
+  function promptEffectiveFromDate(year: number): string {
+    const fallback = `${year}-01-01`;
+    if (typeof window === "undefined") return fallback;
+    const input = window.prompt("Per welke datum moet deze kostprijs ingaan? (YYYY-MM-DD)", fallback);
+    const value = String(input ?? fallback).trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : fallback;
+  }
+
   async function handleActivate() {
     setStatus("");
     setStatusTone(null);
     setIsSaving(true);
     try {
-      await activateKostprijsversie(String(current.id ?? ""));
+      const year =
+        Number((current as any)?.jaar ?? (current as any)?.basisgegevens?.jaar ?? 0) || new Date().getFullYear();
+      const effectiveFrom = promptEffectiveFromDate(year);
+      await activateKostprijsversie(String(current.id ?? ""), effectiveFrom);
       const refreshedResponse = await fetch(KOSTPRIJSVERSIES_API, { cache: "no-store" });
       const refreshedRows = refreshedResponse.ok
         ? unwrapDatasetListPayload(await refreshedResponse.json()) ?? rowsRef.current
@@ -596,252 +709,75 @@ export function BerekeningenWizard({
         }) as any;
         return match ? String(match.id ?? "").trim() : "";
       })();
-    const skuByBeerFormat = new Map<string, any>();
-    (Array.isArray(localSkus) ? localSkus : []).forEach((row: any) => {
-      const sid = String(row?.id ?? "").trim();
-      const bid = String(row?.beer_id ?? "").trim();
-      const fid = String(row?.format_article_id ?? "").trim();
-      if (sid && bid && fid) {
-        skuByBeerFormat.set(`${bid}|${fid}`, row);
-      }
-    });
+	    const skuByBeerFormat = new Map<string, any>();
+	    (Array.isArray(localSkus) ? localSkus : []).forEach((row: any) => {
+	      const sid = String(row?.id ?? "").trim();
+	      const bid = String(row?.beer_id ?? "").trim();
+	      const fid = String(row?.format_article_id ?? "").trim();
+	      if (sid && bid && fid) {
+	        skuByBeerFormat.set(`${bid}|${fid}`, row);
+	      }
+	    });
 
-    const year = Number((basis as any).jaar ?? 0) || 0;
-    const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+	    const year = Number((basis as any).jaar ?? 0) || 0;
+	    const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
 
-    // Derive the SKU targets from *wizard input*, not from resultaat_snapshot, because the snapshot
-    // is only guaranteed to be complete after finalize.
-    let productIds: string[] = [];
-    if (skuType === "bier") {
-      if (soort === "Inkoop") {
-        const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
-        const topLevelFactuurregels = Array.isArray((inkoop as any).factuurregels) ? ((inkoop as any).factuurregels as any[]) : [];
-        const facturen = Array.isArray((inkoop as any).facturen) ? ((inkoop as any).facturen as any[]) : [];
-        const factuurRegelsUitFacturen = facturen.flatMap((factuur: any) =>
-          Array.isArray(factuur?.factuurregels) ? (factuur.factuurregels as any[]) : []
-        );
-        const regels = factuurRegelsUitFacturen.length > 0 ? factuurRegelsUitFacturen : topLevelFactuurregels;
-        const purchased = Array.from(
-          new Set(regels.map((regel: any) => String(regel?.eenheid ?? "").trim()).filter(Boolean))
-        );
+	    const targets =
+	      skuType !== "bier"
+	        ? (() => {
+	            const skuId = String(((current.basisgegevens as any)?.sku_id ?? "")).trim();
+	            if (!skuId) return [];
+	            const skuRow = (Array.isArray(localSkus) ? localSkus : []).find((row: any) => String(row?.id ?? "").trim() === skuId) as any;
+	            const label = skuRow ? String(skuRow?.label ?? skuRow?.name ?? skuId) : skuId;
+	            return [
+	              {
+	                id: skuId,
+	                kind: "sku",
+	                label,
+	                current_product_group: String(skuRow?.product_group ?? "").trim(),
+	                current_alcohol_category: String(skuRow?.alcohol_category ?? "").trim(),
+	                current_packaging_type: String(skuRow?.packaging_type ?? "").trim(),
+	              },
+	            ];
+	          })()
+	        : (() => {
+	            const snapshot = buildResultaatSnapshot(current);
+	            const orderedRows = [
+	              ...(((snapshot as any)?.producten?.basisproducten as any[]) ?? []),
+	              ...(((snapshot as any)?.producten?.samengestelde_producten as any[]) ?? []),
+	            ] as any[];
+	            const seen = new Set<string>();
+	            const out: any[] = [];
+	            for (const row of orderedRows) {
+	              const formatId = String(row?.product_id ?? "").trim();
+	              if (!formatId || seen.has(formatId)) continue;
+	              seen.add(formatId);
+	              const verpakkingseenheid = String(row?.verpakkingseenheid ?? "").trim() || formatId;
+	              const label = biernaam ? `${biernaam} - ${verpakkingseenheid}` : verpakkingseenheid;
+	              const skuRow = beerId ? (skuByBeerFormat.get(`${beerId}|${formatId}`) as any) : null;
+	              out.push({
+	                id: formatId,
+	                kind: "format",
+	                label,
+	                current_product_group: String(skuRow?.product_group ?? "").trim(),
+	                current_alcohol_category: String(skuRow?.alcohol_category ?? "").trim(),
+	                current_packaging_type: String(skuRow?.packaging_type ?? "").trim(),
+	              });
+	            }
+	            return out;
+	          })();
 
-        // Include derived formats from the purchased format BOM (same intent as backend activation logic).
-        try {
-          const articlesById = new Map<string, any>();
-          (Array.isArray(articles) ? articles : []).forEach((row: any) => {
-            const id = String(row?.id ?? "").trim();
-            if (!id) return;
-            articlesById.set(id, row);
-          });
-          const formatIds = new Set<string>();
-          articlesById.forEach((row, id) => {
-            if (String(row?.kind ?? "").trim().toLowerCase() === "format") {
-              formatIds.add(id);
-            }
-          });
-          const linesByParent = new Map<string, any[]>();
-          (Array.isArray(bomLines) ? bomLines : []).forEach((row: any) => {
-            const parent = String(row?.parent_article_id ?? "").trim();
-            if (!parent || !formatIds.has(parent)) return;
-            const list = linesByParent.get(parent) ?? [];
-            list.push(row);
-            linesByParent.set(parent, list);
-          });
-          const collectNestedFormats = (parentId: string, visiting = new Set<string>()) => {
-            if (visiting.has(parentId)) return new Set<string>();
-            visiting.add(parentId);
-            const out = new Set<string>();
-            for (const line of linesByParent.get(parentId) ?? []) {
-              const comp = String(line?.component_article_id ?? "").trim();
-              if (!comp || !formatIds.has(comp)) continue;
-              out.add(comp);
-              for (const nested of collectNestedFormats(comp, visiting)) out.add(nested);
-            }
-            return out;
-          };
-
-          const extra = new Set<string>();
-          for (const id of purchased) {
-            if (!formatIds.has(id)) continue;
-            for (const nested of collectNestedFormats(id)) extra.add(nested);
-          }
-          productIds = Array.from(new Set([...purchased, ...Array.from(extra)]));
-        } catch {
-          productIds = purchased;
-        }
-      } else {
-        // For recept/eigen productie: show all available afvuleenheden (basis + samengesteld) for the selected year.
-        productIds = Array.from(
-          new Set(getProductUnitOptions(year, basisproducten, samengesteldeProducten, current).map((opt) => String(opt.id ?? "").trim()).filter(Boolean))
-        );
-      }
-    }
-
-    const targets =
-      skuType !== "bier"
-        ? (() => {
-            const skuId = String(((current.basisgegevens as any)?.sku_id ?? "")).trim();
-            if (!skuId) return [];
-            const skuRow = (Array.isArray(localSkus) ? localSkus : []).find((row: any) => String(row?.id ?? "").trim() === skuId) as any;
-            const label = skuRow ? String(skuRow?.label ?? skuRow?.name ?? skuId) : skuId;
-            return [
-              {
-                sku_id: skuId,
-                label,
-                current_product_group: String(skuRow?.product_group ?? "").trim(),
-                current_alcohol_category: String(skuRow?.alcohol_category ?? "").trim(),
-                current_packaging_type: String(skuRow?.packaging_type ?? "").trim(),
-              },
-            ];
-          })()
-        : productIds
-            .map((productId) => {
-              if (!beerId) return null;
-              const skuRow = skuByBeerFormat.get(`${beerId}|${productId}`) as any;
-              if (!skuRow) return null;
-              const label = String(skuRow?.label ?? skuRow?.name ?? skuRow?.id ?? "").trim() || String(skuRow?.id ?? productId);
-              return {
-                sku_id: String(skuRow?.id ?? "").trim(),
-                label,
-                current_product_group: String(skuRow?.product_group ?? "").trim(),
-                current_alcohol_category: String(skuRow?.alcohol_category ?? "").trim(),
-                current_packaging_type: String(skuRow?.packaging_type ?? "").trim(),
-              };
-            })
-            .filter(Boolean) as any[];
-
-    return (
-      <ClassificatieStep
-        current={current}
-        productgroepen={productgroepen}
-        alcoholcategorieen={alcoholcategorieen}
-        verpakkingstypen={verpakkingstypen}
-        targets={targets}
-        updateCurrent={updateCurrent}
-      />
-    );
-  }
-
-  // Ensure missing beer+format SKUs exist when entering the classificeren step,
-  // so users can immediately classify derived formats on brand-new kostprijsberekeningen.
-  useEffect(() => {
-    if (currentStep.id !== "classificeren") return;
-    const basis = (current.basisgegevens as GenericRecord) ?? {};
-    const skuType = String((basis as any).sku_type ?? "bier").toLowerCase();
-    if (skuType !== "bier") return;
-
-    const biernaam = String((basis as any).biernaam ?? "").trim();
-    const beerIdFromRow = String((current as any)?.bier_id ?? "").trim();
-    const beerId =
-      beerIdFromRow ||
-      (() => {
-        if (!biernaam) return "";
-        const match = (Array.isArray(bieren) ? bieren : []).find((row: any) => {
-          const name = String(row?.biernaam ?? row?.naam ?? "").trim();
-          return name && name.toLowerCase() === biernaam.toLowerCase();
-        }) as any;
-        return match ? String(match.id ?? "").trim() : "";
-      })();
-    if (!beerId) return;
-
-    const year = Number((basis as any).jaar ?? 0) || 0;
-    const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
-    let productIds: string[] = [];
-    if (soort === "Inkoop") {
-      const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
-      const topLevelFactuurregels = Array.isArray((inkoop as any).factuurregels) ? ((inkoop as any).factuurregels as any[]) : [];
-      const facturen = Array.isArray((inkoop as any).facturen) ? ((inkoop as any).facturen as any[]) : [];
-      const factuurRegelsUitFacturen = facturen.flatMap((factuur: any) =>
-        Array.isArray(factuur?.factuurregels) ? (factuur.factuurregels as any[]) : []
-      );
-      const regels = factuurRegelsUitFacturen.length > 0 ? factuurRegelsUitFacturen : topLevelFactuurregels;
-      productIds = Array.from(new Set(regels.map((regel: any) => String(regel?.eenheid ?? "").trim()).filter(Boolean)));
-    } else {
-      productIds = Array.from(
-        new Set(getProductUnitOptions(year, basisproducten, samengesteldeProducten, current).map((opt) => String(opt.id ?? "").trim()).filter(Boolean))
-      );
-    }
-    if (productIds.length === 0) return;
-
-    const skuByBeerFormat = new Map<string, any>();
-    (Array.isArray(localSkus) ? localSkus : []).forEach((row: any) => {
-      const sid = String(row?.id ?? "").trim();
-      const bid = String(row?.beer_id ?? "").trim();
-      const fid = String(row?.format_article_id ?? "").trim();
-      if (sid && bid && fid) skuByBeerFormat.set(`${bid}|${fid}`, row);
-    });
-
-    const beerSlug = (() => {
-      if (beerId.startsWith("beer-") && beerId.slice("beer-".length).trim()) return beerId.slice("beer-".length).trim();
-      let slug = Array.from(biernaam).map((ch) => (/[a-zA-Z0-9]/.test(ch) ? ch.toLowerCase() : "-")).join("");
-      slug = slug.replace(/-+/g, "-").replace(/^-|-$/g, "");
-      return slug || beerId;
-    })();
-    const formatSlug = (fmtId: string) => {
-      const fmt = String(fmtId || "").trim();
-      if (fmt.startsWith("fmt-bottle-")) return fmt.slice("fmt-bottle-".length).trim() || fmt;
-      if (fmt.startsWith("fmt-box-")) return (fmt.slice("fmt-box-".length).replace("x33cl", "x33").trim() || fmt);
-      if (fmt.startsWith("fmt-keg-")) {
-        let suffix = fmt.slice("fmt-keg-".length).trim().replace("l", "");
-        return (`keg${suffix}`).replace(/-+/g, "-").replace(/^-|-$/g, "") || fmt;
-      }
-      if (fmt.startsWith("fmt-")) return fmt.slice("fmt-".length).trim() || fmt;
-      return fmt;
-    };
-
-    const articlesById = new Map<string, any>();
-    (Array.isArray(articles) ? articles : []).forEach((row: any) => {
-      const id = String(row?.id ?? "").trim();
-      if (!id) return;
-      articlesById.set(id, row);
-    });
-
-    const missing = productIds.filter((pid) => !skuByBeerFormat.has(`${beerId}|${pid}`));
-    if (missing.length === 0) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const currentSkus = await loadSkus();
-        const nextSkus = [...currentSkus];
-        const existingKeys = new Set(
-          currentSkus
-            .map((row: any) => `${String(row?.kind ?? "").toLowerCase()}|${String(row?.beer_id ?? "")}|${String(row?.format_article_id ?? "")}|${String(row?.article_id ?? "")}`)
-        );
-
-        for (const fmtId of missing) {
-          const key = `beer_format|${beerId}|${fmtId}|`;
-          if (existingKeys.has(key)) continue;
-          const fmtRow = articlesById.get(fmtId) ?? {};
-          const fmtName = String(fmtRow?.name ?? fmtRow?.naam ?? "").trim() || fmtId;
-          const fmtSlug = formatSlug(fmtId);
-          const skuId = `sku-${beerSlug}-${fmtSlug}`.toLowerCase();
-          nextSkus.push({
-            id: skuId,
-            kind: "beer_format",
-            beer_id: beerId,
-            format_article_id: fmtId,
-            article_id: "",
-            code: `${beerSlug.toUpperCase()}-${fmtSlug.toUpperCase()}`.replace(/--/g, "-"),
-            name: `${biernaam} - ${fmtName}`,
-            active: true,
-          } as any);
-          existingKeys.add(key);
-        }
-
-        await saveSkus(nextSkus);
-        if (!cancelled) {
-          setLocalSkus(nextSkus as any);
-        }
-      } catch {
-        // Non-fatal: we will still render whatever SKUs exist; user can retry by revisiting the step.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentStep.id, current, localSkus, bieren, basisproducten, samengesteldeProducten, articles, bomLines]);
+	    return (
+	      <ClassificatieStep
+	        current={current}
+	        productgroepen={productgroepen}
+	        alcoholcategorieen={alcoholcategorieen}
+	        verpakkingstypen={verpakkingstypen}
+	        targets={targets}
+	        updateCurrent={updateCurrent}
+	      />
+	    );
+	  }
 
   function renderLegacyEigenProductieInput() {
     const ingredienten =

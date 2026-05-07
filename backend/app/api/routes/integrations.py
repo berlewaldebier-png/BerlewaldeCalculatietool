@@ -624,7 +624,22 @@ def post_douano_sync_products(
                 payload=row,
             )
         normalized = douano_sync_storage.upsert_products(items)
-        stats = {"fetched": len(items), "upserted": normalized, "fetch": fetch_meta}
+        deleted = 0
+        # Strict behaviour: for sellable-only syncs we remove products that no longer match the filter,
+        # unless they are explicitly mapped in Productkoppeling (used elsewhere).
+        #
+        # Only do this when we are confident the fetch reached the end (empty_page), otherwise
+        # a low max_pages could incorrectly delete products.
+        if is_sellable and isinstance(fetch_meta, dict):
+            stop_reason = str(fetch_meta.get("stop_reason", "") or "")
+            max_pages_reached = bool(fetch_meta.get("max_pages_reached", False))
+            if stop_reason == "empty_page" and not max_pages_reached:
+                from app.domain import douano_product_mapping_storage
+
+                douano_product_mapping_storage.ensure_schema()
+                keep_ids = {int(row.get("id", 0) or 0) for row in items if isinstance(row, dict)}
+                deleted = douano_sync_storage.delete_products_not_in(keep_ids, keep_mapped=True)
+        stats = {"fetched": len(items), "upserted": normalized, "deleted": int(deleted), "fetch": fetch_meta}
         douano_sync_storage.set_sync_state(resource="products", success=True, since_date=None, stats=stats, error="")
         return {"resource": "products", **stats}
     except HTTPException as exc:
@@ -1017,6 +1032,16 @@ def get_douano_cost_combos(
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
     versions = dataset_store.load_dataset("kostprijsversies")
     skus = dataset_store.load_dataset("skus")
+    articles = dataset_store.load_dataset("articles")
+    article_name_by_id: dict[str, str] = {}
+    if isinstance(articles, list):
+        for row in articles:
+            if not isinstance(row, dict):
+                continue
+            rid = str(row.get("id", "") or "").strip()
+            if not rid:
+                continue
+            article_name_by_id[rid] = str(row.get("name", row.get("naam", "")) or "").strip() or rid
     sku_by_id: dict[str, dict[str, str]] = {}
     if isinstance(skus, list):
         for row in skus:
@@ -1025,33 +1050,67 @@ def get_douano_cost_combos(
             sid = str(row.get("id", "") or "").strip()
             if not sid:
                 continue
-            sku_by_id[sid] = {
+            sku_by_id[sid.lower()] = {
+                "kind": str(row.get("kind", "") or "").strip().lower(),
                 "name": str(row.get("name", row.get("naam", "")) or "").strip() or sid,
                 "beer_id": str(row.get("beer_id", "") or "").strip(),
                 "format_article_id": str(row.get("format_article_id", "") or "").strip(),
+                "article_id": str(row.get("article_id", "") or "").strip(),
             }
 
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
 
+    def _format_slug(format_article_id: str) -> str:
+        fmt = str(format_article_id or "").strip().lower()
+        if fmt.startswith("fmt-"):
+            fmt = fmt[len("fmt-") :]
+        return fmt
+
     def _append_combo(*, sku_id: str) -> None:
         sku_text = str(sku_id or "").strip()
         if not sku_text:
             return
-        key = sku_text
-        if key in seen:
+        sku_norm = sku_text.lower()
+        meta = sku_by_id.get(sku_norm, {})
+        kind = str(meta.get("kind", "") or "").strip().lower()
+        beer_id = str(meta.get("beer_id", "") or "").strip()
+        format_article_id = str(meta.get("format_article_id", "") or "").strip()
+        article_id = str(meta.get("article_id", "") or "").strip()
+
+        # Deduplicate by logical scope where possible (beer×format, or article_id).
+        scope_key = sku_norm
+        if kind == "beer_format" and beer_id and format_article_id:
+            scope_key = f"beer_format|{beer_id}|{format_article_id}"
+        elif kind == "article" and article_id:
+            scope_key = f"article|{article_id}"
+
+        if scope_key in seen:
             return
-        seen.add(key)
-        meta = sku_by_id.get(key, {})
-        bier_naam = meta.get("name", key)
-        product_naam = bier_naam
+        seen.add(scope_key)
+
+        display_name = meta.get("name", sku_text)
+        product_name = ""
+        if kind == "beer_format":
+            fmt_id = str(meta.get("format_article_id", "") or "").strip()
+            if fmt_id:
+                product_name = article_name_by_id.get(fmt_id, "") or fmt_id
+        elif kind == "article":
+            aid = str(meta.get("article_id", "") or "").strip()
+            if aid:
+                product_name = article_name_by_id.get(aid, "") or aid
+        # For beer_format and article SKUs the display_name already includes the format/article name.
+        # Only append a product_name for unknown kinds where the display name may be generic.
+        label_main = display_name
+        if not kind and product_name and product_name not in display_name:
+            label_main = f"{display_name} — {product_name}"
         items.append(
             {
-                "sku_id": key,
+                "sku_id": sku_text,
                 "beer_id": meta.get("beer_id", ""),
                 "format_article_id": meta.get("format_article_id", ""),
-                "label": f"{bier_naam} — {product_naam}",
-                "naam": bier_naam,
+                "label": f"{label_main} ({sku_norm})",
+                "naam": display_name,
             }
         )
 

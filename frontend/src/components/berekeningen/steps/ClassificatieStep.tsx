@@ -9,6 +9,8 @@ type ClassificationDraft = {
   packaging_type_opt_in?: boolean;
 };
 
+type ClassificationTargetKind = "sku" | "format";
+
 export function ClassificatieStep({
   current,
   productgroepen,
@@ -22,7 +24,8 @@ export function ClassificatieStep({
   alcoholcategorieen: GenericRecord[];
   verpakkingstypen: GenericRecord[];
   targets: Array<{
-    sku_id: string;
+    id: string;
+    kind: ClassificationTargetKind;
     label: string;
     current_product_group?: string;
     current_alcohol_category?: string;
@@ -50,12 +53,16 @@ export function ClassificatieStep({
     .filter((row) => row.value && row.label);
 
   const overridesBySkuId = ((current as any).classification_overrides ?? {}) as Record<string, ClassificationDraft>;
+  const overridesByFormatId = ((current as any).classification_overrides_by_format ?? {}) as Record<
+    string,
+    ClassificationDraft
+  >;
   return (
     <div className="wizard-stack">
       <div className="wizard-section">
         <div className="wizard-section-title">Classificatie per SKU</div>
         <div className="wizard-section-subtitle">
-          Een kostprijsberekening kan meerdere SKU’s opleveren (bijv. fles + doos). Koppel hier productgroep en verpakkingstype per SKU.
+          Een kostprijsberekening kan meerdere SKU's opleveren (bijv. fles + doos). Koppel hier productgroep en verpakkingstype per SKU.
         </div>
       </div>
 
@@ -73,13 +80,14 @@ export function ClassificatieStep({
             {targets.length === 0 ? (
               <tr>
                 <td colSpan={4} style={{ opacity: 0.7 }}>
-                  Geen SKU’s gevonden om te classificeren. Vul eerst Inkoop/Recept in.
+                  Geen SKU's gevonden om te classificeren. Vul eerst Inkoop/Recept in.
                 </td>
               </tr>
             ) : (
               targets.map((target) => {
-                const skuId = target.sku_id;
-                const draft = overridesBySkuId[skuId] ?? {};
+                const targetId = target.id;
+                const draft =
+                  target.kind === "format" ? overridesByFormatId[targetId] ?? {} : overridesBySkuId[targetId] ?? {};
                 const productGroup = String(draft.product_group ?? target.current_product_group ?? "");
                 const alcoholCategory = String(draft.alcohol_category ?? target.current_alcohol_category ?? "");
                 const packagingType = String(draft.packaging_type ?? target.current_packaging_type ?? "");
@@ -90,7 +98,7 @@ export function ClassificatieStep({
                   : verpakkingstypeOptions;
 
                 return (
-                  <tr key={skuId}>
+                  <tr key={`${target.kind}:${targetId}`}>
                     <td style={{ fontWeight: 600 }}>{target.label}</td>
                     <td>
                       <select
@@ -99,14 +107,16 @@ export function ClassificatieStep({
                         onChange={(event) =>
                           updateCurrent((draftRow) => {
                             const next = event.target.value;
-                            const map = (((draftRow as any).classification_overrides ?? {}) as Record<string, ClassificationDraft>);
-                            const currentDraft = map[skuId] ?? {};
-                            map[skuId] = { ...currentDraft, product_group: next };
+                            const field =
+                              target.kind === "format" ? "classification_overrides_by_format" : "classification_overrides";
+                            const map = (((draftRow as any)[field] ?? {}) as Record<string, ClassificationDraft>);
+                            const currentDraft = map[targetId] ?? {};
+                            map[targetId] = { ...currentDraft, product_group: next };
                             const required = next === "drank" || next === "giftset";
                             if (!required) {
-                              map[skuId] = { ...map[skuId], packaging_type_opt_in: false, packaging_type: "" };
+                              map[targetId] = { ...map[targetId], packaging_type_opt_in: false, packaging_type: "" };
                             }
-                            (draftRow as any).classification_overrides = map;
+                            (draftRow as any)[field] = map;
                           })
                         }
                       >
@@ -126,10 +136,12 @@ export function ClassificatieStep({
                         title={productGroup !== "drank" && productGroup !== "giftset" ? "Alleen relevant voor drank/giftset." : ""}
                         onChange={(event) =>
                           updateCurrent((draftRow) => {
-                            const map = (((draftRow as any).classification_overrides ?? {}) as Record<string, ClassificationDraft>);
-                            const currentDraft = map[skuId] ?? {};
-                            map[skuId] = { ...currentDraft, alcohol_category: event.target.value };
-                            (draftRow as any).classification_overrides = map;
+                            const field =
+                              target.kind === "format" ? "classification_overrides_by_format" : "classification_overrides";
+                            const map = (((draftRow as any)[field] ?? {}) as Record<string, ClassificationDraft>);
+                            const currentDraft = map[targetId] ?? {};
+                            map[targetId] = { ...currentDraft, alcohol_category: event.target.value };
+                            (draftRow as any)[field] = map;
                           })
                         }
                       >
@@ -152,16 +164,17 @@ export function ClassificatieStep({
                               checked={packagingOptIn}
                               onChange={(event) =>
                                 updateCurrent((draftRow) => {
-                                  const map = (((draftRow as any).classification_overrides ?? {}) as Record<
-                                    string,
-                                    ClassificationDraft
-                                  >);
-                                  const currentDraft = map[skuId] ?? {};
-                                  map[skuId] = { ...currentDraft, packaging_type_opt_in: event.target.checked };
+                                  const field =
+                                    target.kind === "format"
+                                      ? "classification_overrides_by_format"
+                                      : "classification_overrides";
+                                  const map = (((draftRow as any)[field] ?? {}) as Record<string, ClassificationDraft>);
+                                  const currentDraft = map[targetId] ?? {};
+                                  map[targetId] = { ...currentDraft, packaging_type_opt_in: event.target.checked };
                                   if (!event.target.checked) {
-                                    map[skuId] = { ...map[skuId], packaging_type: "" };
+                                    map[targetId] = { ...map[targetId], packaging_type: "" };
                                   }
-                                  (draftRow as any).classification_overrides = map;
+                                  (draftRow as any)[field] = map;
                                 })
                               }
                             />
@@ -175,10 +188,14 @@ export function ClassificatieStep({
                           title={!packagingRequired && !packagingOptIn ? "Optioneel. Zet '+' aan om in te vullen." : ""}
                           onChange={(event) =>
                             updateCurrent((draftRow) => {
-                              const map = (((draftRow as any).classification_overrides ?? {}) as Record<string, ClassificationDraft>);
-                              const currentDraft = map[skuId] ?? {};
-                              map[skuId] = { ...currentDraft, packaging_type: event.target.value };
-                              (draftRow as any).classification_overrides = map;
+                              const field =
+                                target.kind === "format"
+                                  ? "classification_overrides_by_format"
+                                  : "classification_overrides";
+                              const map = (((draftRow as any)[field] ?? {}) as Record<string, ClassificationDraft>);
+                              const currentDraft = map[targetId] ?? {};
+                              map[targetId] = { ...currentDraft, packaging_type: event.target.value };
+                              (draftRow as any)[field] = map;
                             })
                           }
                         >
