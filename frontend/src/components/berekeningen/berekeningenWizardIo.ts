@@ -1,6 +1,6 @@
 "use client";
 
-import { ApiRequestError, apiRequestTextClient } from "@/lib/apiClient";
+import { ApiRequestError, apiGetClient, apiRequestTextClient } from "@/lib/apiClient";
 import type { GenericRecord } from "@/components/berekeningen/berekeningenWizardUtils";
 
 export async function saveKostprijsversies(payload: GenericRecord[]) {
@@ -14,6 +14,19 @@ export async function saveKostprijsversies(payload: GenericRecord[]) {
 export async function activateKostprijsversie(versionId: string) {
   await apiRequestTextClient(`/data/kostprijsversies/${encodeURIComponent(versionId)}/activate`, {
     method: "POST",
+  });
+}
+
+export async function loadSkus(): Promise<GenericRecord[]> {
+  const result = await apiGetClient<{ data?: unknown }>(`/data/skus`);
+  return Array.isArray(result?.data) ? (result.data as GenericRecord[]) : [];
+}
+
+export async function saveSkus(payload: GenericRecord[]) {
+  await apiRequestTextClient("/data/skus", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 }
 

@@ -9,6 +9,8 @@ import { ApiRequestError } from "@/lib/apiClient";
 import {
   activateKostprijsversie,
   saveKostprijsversies,
+  loadSkus,
+  saveSkus,
   saveSkuClassification,
   tryReadApiDetail,
 } from "@/components/berekeningen/berekeningenWizardIo";
@@ -164,6 +166,11 @@ export function BerekeningenWizard({
   onPersisted,
   onFinish
 }: BerekeningenWizardProps) {
+  const [localSkus, setLocalSkus] = useState<GenericRecord[]>(Array.isArray(skus) ? (skus as GenericRecord[]) : []);
+  useEffect(() => {
+    setLocalSkus(Array.isArray(skus) ? (skus as GenericRecord[]) : []);
+  }, [skus]);
+
   const productieJaren = useMemo(
     () =>
       Object.keys(productie ?? {})
@@ -176,7 +183,7 @@ export function BerekeningenWizard({
 
   const initialState = useMemo(() => {
     const skusById = new Map(
-      (Array.isArray(skus) ? skus : [])
+      (Array.isArray(localSkus) ? localSkus : [])
         .map((row) => [String((row as any)?.id ?? ""), row] as const)
         .filter(([id]) => Boolean(id))
     );
@@ -219,7 +226,7 @@ export function BerekeningenWizard({
       rows: normalizedRows,
       selectedId: String(matchedRow?.id ?? normalizedRows[0]?.id ?? createEmptyBerekening().id)
     };
-  }, [defaultProductieJaar, initialRows, initialSelectedId, productieJaren.length, startWithNew]);
+  }, [defaultProductieJaar, initialRows, initialSelectedId, productieJaren.length, startWithNew, localSkus]);
 
   const [rows, setRows] = useState<GenericRecord[]>(initialState.rows);
   const rowsRef = useRef<GenericRecord[]>(initialState.rows);
@@ -590,7 +597,7 @@ export function BerekeningenWizard({
         return match ? String(match.id ?? "").trim() : "";
       })();
     const skuByBeerFormat = new Map<string, any>();
-    (Array.isArray(skus) ? skus : []).forEach((row: any) => {
+    (Array.isArray(localSkus) ? localSkus : []).forEach((row: any) => {
       const sid = String(row?.id ?? "").trim();
       const bid = String(row?.beer_id ?? "").trim();
       const fid = String(row?.format_article_id ?? "").trim();
@@ -675,7 +682,7 @@ export function BerekeningenWizard({
         ? (() => {
             const skuId = String(((current.basisgegevens as any)?.sku_id ?? "")).trim();
             if (!skuId) return [];
-            const skuRow = (Array.isArray(skus) ? skus : []).find((row: any) => String(row?.id ?? "").trim() === skuId) as any;
+            const skuRow = (Array.isArray(localSkus) ? localSkus : []).find((row: any) => String(row?.id ?? "").trim() === skuId) as any;
             const label = skuRow ? String(skuRow?.label ?? skuRow?.name ?? skuId) : skuId;
             return [
               {
@@ -714,6 +721,127 @@ export function BerekeningenWizard({
       />
     );
   }
+
+  // Ensure missing beer+format SKUs exist when entering the classificeren step,
+  // so users can immediately classify derived formats on brand-new kostprijsberekeningen.
+  useEffect(() => {
+    if (currentStep.id !== "classificeren") return;
+    const basis = (current.basisgegevens as GenericRecord) ?? {};
+    const skuType = String((basis as any).sku_type ?? "bier").toLowerCase();
+    if (skuType !== "bier") return;
+
+    const biernaam = String((basis as any).biernaam ?? "").trim();
+    const beerIdFromRow = String((current as any)?.bier_id ?? "").trim();
+    const beerId =
+      beerIdFromRow ||
+      (() => {
+        if (!biernaam) return "";
+        const match = (Array.isArray(bieren) ? bieren : []).find((row: any) => {
+          const name = String(row?.biernaam ?? row?.naam ?? "").trim();
+          return name && name.toLowerCase() === biernaam.toLowerCase();
+        }) as any;
+        return match ? String(match.id ?? "").trim() : "";
+      })();
+    if (!beerId) return;
+
+    const year = Number((basis as any).jaar ?? 0) || 0;
+    const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+    let productIds: string[] = [];
+    if (soort === "Inkoop") {
+      const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
+      const topLevelFactuurregels = Array.isArray((inkoop as any).factuurregels) ? ((inkoop as any).factuurregels as any[]) : [];
+      const facturen = Array.isArray((inkoop as any).facturen) ? ((inkoop as any).facturen as any[]) : [];
+      const factuurRegelsUitFacturen = facturen.flatMap((factuur: any) =>
+        Array.isArray(factuur?.factuurregels) ? (factuur.factuurregels as any[]) : []
+      );
+      const regels = factuurRegelsUitFacturen.length > 0 ? factuurRegelsUitFacturen : topLevelFactuurregels;
+      productIds = Array.from(new Set(regels.map((regel: any) => String(regel?.eenheid ?? "").trim()).filter(Boolean)));
+    } else {
+      productIds = Array.from(
+        new Set(getProductUnitOptions(year, basisproducten, samengesteldeProducten, current).map((opt) => String(opt.id ?? "").trim()).filter(Boolean))
+      );
+    }
+    if (productIds.length === 0) return;
+
+    const skuByBeerFormat = new Map<string, any>();
+    (Array.isArray(localSkus) ? localSkus : []).forEach((row: any) => {
+      const sid = String(row?.id ?? "").trim();
+      const bid = String(row?.beer_id ?? "").trim();
+      const fid = String(row?.format_article_id ?? "").trim();
+      if (sid && bid && fid) skuByBeerFormat.set(`${bid}|${fid}`, row);
+    });
+
+    const beerSlug = (() => {
+      if (beerId.startsWith("beer-") && beerId.slice("beer-".length).trim()) return beerId.slice("beer-".length).trim();
+      let slug = Array.from(biernaam).map((ch) => (/[a-zA-Z0-9]/.test(ch) ? ch.toLowerCase() : "-")).join("");
+      slug = slug.replace(/-+/g, "-").replace(/^-|-$/g, "");
+      return slug || beerId;
+    })();
+    const formatSlug = (fmtId: string) => {
+      const fmt = String(fmtId || "").trim();
+      if (fmt.startsWith("fmt-bottle-")) return fmt.slice("fmt-bottle-".length).trim() || fmt;
+      if (fmt.startsWith("fmt-box-")) return (fmt.slice("fmt-box-".length).replace("x33cl", "x33").trim() || fmt);
+      if (fmt.startsWith("fmt-keg-")) {
+        let suffix = fmt.slice("fmt-keg-".length).trim().replace("l", "");
+        return (`keg${suffix}`).replace(/-+/g, "-").replace(/^-|-$/g, "") || fmt;
+      }
+      if (fmt.startsWith("fmt-")) return fmt.slice("fmt-".length).trim() || fmt;
+      return fmt;
+    };
+
+    const articlesById = new Map<string, any>();
+    (Array.isArray(articles) ? articles : []).forEach((row: any) => {
+      const id = String(row?.id ?? "").trim();
+      if (!id) return;
+      articlesById.set(id, row);
+    });
+
+    const missing = productIds.filter((pid) => !skuByBeerFormat.has(`${beerId}|${pid}`));
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const currentSkus = await loadSkus();
+        const nextSkus = [...currentSkus];
+        const existingKeys = new Set(
+          currentSkus
+            .map((row: any) => `${String(row?.kind ?? "").toLowerCase()}|${String(row?.beer_id ?? "")}|${String(row?.format_article_id ?? "")}|${String(row?.article_id ?? "")}`)
+        );
+
+        for (const fmtId of missing) {
+          const key = `beer_format|${beerId}|${fmtId}|`;
+          if (existingKeys.has(key)) continue;
+          const fmtRow = articlesById.get(fmtId) ?? {};
+          const fmtName = String(fmtRow?.name ?? fmtRow?.naam ?? "").trim() || fmtId;
+          const fmtSlug = formatSlug(fmtId);
+          const skuId = `sku-${beerSlug}-${fmtSlug}`.toLowerCase();
+          nextSkus.push({
+            id: skuId,
+            kind: "beer_format",
+            beer_id: beerId,
+            format_article_id: fmtId,
+            article_id: "",
+            code: `${beerSlug.toUpperCase()}-${fmtSlug.toUpperCase()}`.replace(/--/g, "-"),
+            name: `${biernaam} - ${fmtName}`,
+            active: true,
+          } as any);
+          existingKeys.add(key);
+        }
+
+        await saveSkus(nextSkus);
+        if (!cancelled) {
+          setLocalSkus(nextSkus as any);
+        }
+      } catch {
+        // Non-fatal: we will still render whatever SKUs exist; user can retry by revisiting the step.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStep.id, current, localSkus, bieren, basisproducten, samengesteldeProducten, articles, bomLines]);
 
   function renderLegacyEigenProductieInput() {
     const ingredienten =
