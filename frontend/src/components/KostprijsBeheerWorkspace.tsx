@@ -340,6 +340,7 @@ export function KostprijsBeheerWorkspace({
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         skus={skus}
+        bieren={currentBieren}
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
@@ -389,6 +390,7 @@ export function KostprijsBeheerWorkspace({
           basisproducten={basisproducten}
           samengesteldeProducten={samengesteldeProducten}
           skus={skus}
+          bieren={currentBieren}
           productie={productie}
           vasteKosten={vasteKosten}
           tarievenHeffingen={tarievenHeffingen}
@@ -412,6 +414,7 @@ export function KostprijsBeheerWorkspace({
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
         skus={skus}
+        bieren={currentBieren}
         productie={productie}
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}

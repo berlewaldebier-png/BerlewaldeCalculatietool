@@ -94,6 +94,7 @@ type BerekeningenWizardProps = {
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   skus?: GenericRecord[];
+  bieren?: GenericRecord[];
   productie: Record<string, GenericRecord>;
   vasteKosten: Record<string, GenericRecord[]>;
   tarievenHeffingen: GenericRecord[];
@@ -143,6 +144,7 @@ export function BerekeningenWizard({
   basisproducten,
   samengesteldeProducten,
   skus,
+  bieren,
   productie,
   vasteKosten,
   tarievenHeffingen,
@@ -570,7 +572,19 @@ export function BerekeningenWizard({
 
   function renderClassificatieStep() {
     const skuType = String(((current.basisgegevens as GenericRecord) as any)?.sku_type ?? "bier").toLowerCase();
-    const beerId = String((current as any)?.bier_id ?? "").trim();
+    const basis = (current.basisgegevens as GenericRecord) ?? {};
+    const biernaam = String((basis as any).biernaam ?? "").trim();
+    const beerIdFromRow = String((current as any)?.bier_id ?? "").trim();
+    const beerId =
+      beerIdFromRow ||
+      (() => {
+        if (!biernaam) return "";
+        const match = (Array.isArray(bieren) ? bieren : []).find((row: any) => {
+          const name = String(row?.biernaam ?? row?.naam ?? "").trim();
+          return name && name.toLowerCase() === biernaam.toLowerCase();
+        }) as any;
+        return match ? String(match.id ?? "").trim() : "";
+      })();
     const skuByBeerFormat = new Map<string, any>();
     (Array.isArray(skus) ? skus : []).forEach((row: any) => {
       const sid = String(row?.id ?? "").trim();
@@ -581,7 +595,6 @@ export function BerekeningenWizard({
       }
     });
 
-    const basis = (current.basisgegevens as GenericRecord) ?? {};
     const year = Number((basis as any).jaar ?? 0) || 0;
     const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
 
