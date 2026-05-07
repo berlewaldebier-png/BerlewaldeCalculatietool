@@ -581,18 +581,32 @@ export function BerekeningenWizard({
       }
     });
 
-    const snapshot = ((current as any)?.resultaat_snapshot ?? {}) as any;
-    const productRows = [
-      ...(((snapshot?.producten?.basisproducten ?? []) as any[]) || []),
-      ...(((snapshot?.producten?.samengestelde_producten ?? []) as any[]) || []),
-    ];
-    const productIds = Array.from(
-      new Set(
-        productRows
-          .map((row) => String(row?.product_id ?? "").trim())
-          .filter(Boolean)
-      )
-    );
+    const basis = (current.basisgegevens as GenericRecord) ?? {};
+    const year = Number((basis as any).jaar ?? 0) || 0;
+    const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+
+    // Derive the SKU targets from *wizard input*, not from resultaat_snapshot, because the snapshot
+    // is only guaranteed to be complete after finalize.
+    let productIds: string[] = [];
+    if (skuType === "bier") {
+      if (soort === "Inkoop") {
+        const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
+        const topLevelFactuurregels = Array.isArray((inkoop as any).factuurregels) ? ((inkoop as any).factuurregels as any[]) : [];
+        const facturen = Array.isArray((inkoop as any).facturen) ? ((inkoop as any).facturen as any[]) : [];
+        const factuurRegelsUitFacturen = facturen.flatMap((factuur: any) =>
+          Array.isArray(factuur?.factuurregels) ? (factuur.factuurregels as any[]) : []
+        );
+        const regels = factuurRegelsUitFacturen.length > 0 ? factuurRegelsUitFacturen : topLevelFactuurregels;
+        productIds = Array.from(
+          new Set(regels.map((regel: any) => String(regel?.eenheid ?? "").trim()).filter(Boolean))
+        );
+      } else {
+        // For recept/eigen productie: show all available afvuleenheden (basis + samengesteld) for the selected year.
+        productIds = Array.from(
+          new Set(getProductUnitOptions(year, basisproducten, samengesteldeProducten, current).map((opt) => String(opt.id ?? "").trim()).filter(Boolean))
+        );
+      }
+    }
 
     const targets =
       skuType !== "bier"
