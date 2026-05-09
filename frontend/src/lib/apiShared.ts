@@ -120,7 +120,7 @@ export type ErpDashboardOrdersTrendPoint = {
 };
 
 export type ErpDashboardPayload = {
-  range: { basis: "order"; since: string; until: string };
+  range: { basis: "order" | "invoice"; since: string; until: string };
   available_years?: number[];
   empty_reason?: string;
   kpis: ErpDashboardKpis | null;
@@ -130,6 +130,7 @@ export type ErpDashboardPayload = {
     latest_orders: ErpDashboardOrderRow[];
     under_break_even: ErpDashboardUnderBreakEvenRow[];
     product_groups: Array<{ group: string; margin_pct: number; margin_ex: number }>;
+    packaging_types?: Array<{ packaging_type: string; qty: number }>;
   };
   break_even: { year: number; active_config: unknown | null };
   alerts: ErpDashboardAlert[];

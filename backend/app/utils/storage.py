@@ -1622,6 +1622,40 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     if status not in {"concept", "definitief"}:
         status = "concept"
 
+    def _derive_alcoholpercentage_from_bieren(bier_id: str) -> float | None:
+        """Try to derive alcoholpercentage from bieren masterdata by bier_id.
+
+        This supports flows where a definitive inkoopfactuur version is created from an
+        existing beer record but omits alcoholpercentage in basisgegevens/bier_snapshot.
+        """
+        bid = str(bier_id or "").strip()
+        if not bid:
+            return None
+        postgres_storage = _get_postgres_storage_module()
+        if postgres_storage is None or not postgres_storage.uses_postgres():
+            return None
+        try:
+            payload = postgres_storage.load_dataset("bieren", [])
+        except Exception:
+            return None
+        if not isinstance(payload, list):
+            return None
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("id", "") or "").strip() != bid:
+                continue
+            value = row.get("alcoholpercentage", None)
+            if value is None or value == "":
+                return None
+            try:
+                if isinstance(value, str):
+                    value = value.strip().replace(",", ".")
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+        return None
+
     def _parse_decimal_float(value: Any, *, field_label: str) -> float:
         if isinstance(value, str):
             value = value.strip().replace(",", ".")
@@ -1644,7 +1678,10 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     if status == "definitief" and bier_id_for_validation and basis_biernaam.strip() and (
         basis_raw_alcohol is None or basis_raw_alcohol == ""
     ):
-        raise ValueError("Alcohol % is verplicht voor definitieve kostprijsberekeningen.")
+        derived = _derive_alcoholpercentage_from_bieren(bier_id_for_validation)
+        if derived is None:
+            raise ValueError("Alcohol % is verplicht voor definitieve kostprijsberekeningen.")
+        basis_raw_alcohol = derived
     basis_alcoholpercentage = _parse_decimal_float(
         basis_raw_alcohol or 0.0, field_label="Alcohol %"
     )
@@ -1692,7 +1729,10 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     if status == "definitief" and snapshot_biernaam.strip() and (
         snapshot_raw_alcohol is None or snapshot_raw_alcohol == ""
     ):
-        raise ValueError("Alcohol % is verplicht voor definitieve bier-snapshots.")
+        derived = _derive_alcoholpercentage_from_bieren(bier_id_for_validation)
+        if derived is None:
+            raise ValueError("Alcohol % is verplicht voor definitieve bier-snapshots.")
+        snapshot_raw_alcohol = derived
     snapshot_alcoholpercentage = _parse_decimal_float(
         snapshot_raw_alcohol or 0.0, field_label="Alcohol %"
     )
@@ -7382,6 +7422,38 @@ def save_kostprijsversies(data: list[dict[str, Any]]) -> bool:
         if bieren_changed and not save_bieren(bieren):
             raise ValueError("Kon bierstamdata niet bijwerken vanuit definitieve kostprijsversie.")
 
+        # SKU-aanpak: keep beer×format SKU names in sync with updated bierstamdata.
+        # This is write-side only (no read-side fallback). It ensures that correcting biernaam/style/etc.
+        # in a definitive kostprijs flows through to selectors and productkoppeling dropdown labels.
+        if bieren_changed and postgres_storage_mod is not None and postgres_storage_mod.uses_postgres():
+            try:
+                # Refresh latest bieren_by_id with the updated list so we use the canonical value.
+                bieren_by_id = {
+                    str(bier.get("id", "") or ""): bier
+                    for bier in bieren
+                    if isinstance(bier, dict) and str(bier.get("id", "") or "").strip()
+                }
+                for row in skus_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("kind", "") or "").strip().lower() != "beer_format":
+                        continue
+                    beer_id = str(row.get("beer_id", "") or "").strip()
+                    fmt_id = str(row.get("format_article_id", "") or "").strip()
+                    if not beer_id or not fmt_id:
+                        continue
+                    beer_name = str(bieren_by_id.get(beer_id, {}).get("biernaam", "") or "").strip() or beer_id
+                    fmt_row = articles_by_id.get(fmt_id, {})
+                    fmt_name = str(fmt_row.get("name", fmt_row.get("naam", "")) or "").strip() or fmt_id
+                    desired_name = f"{beer_name} - {fmt_name}".strip(" -")
+                    if desired_name and desired_name != str(row.get("name", "") or ""):
+                        row["name"] = desired_name
+                        skus_changed = True
+                if skus_changed:
+                    postgres_storage_mod.save_dataset("skus", skus_rows, overwrite=True)
+            except Exception:
+                pass
+
         # Prevent implicit destructive deletes: hard delete is only allowed for concept records
         # that are not referenced anywhere. Definitive/active versions must be deactivated instead.
         incoming_ids = {
@@ -7941,6 +8013,19 @@ def activate_kostprijsversie(
             sku_id = sku_by_article.get(article_id, "")
         if not sku_id:
             return None
+        # Require canonical per-SKU cost lines for this version before activating.
+        # This prevents hidden fallback logic and makes missing data explicit + repairable.
+        try:
+            from app.domain import cost_versions_storage
+
+            cost_index = cost_versions_storage.load_cost_row_index_for_versions([str(kostprijsversie_id or "")])
+            if cost_index.get((str(kostprijsversie_id or ""), sku_id)) is None:
+                raise ValueError(
+                    "Kostprijs mist cost lines voor deze SKU. Draai 1x: POST /api/meta/repair/cost-lines?year=%s&dry_run=false"
+                    % str(jaar)
+                )
+        except Exception as exc:
+            raise
         activation_row = {
             "sku_id": sku_id,
             "jaar": jaar,
@@ -8103,20 +8188,33 @@ def activate_kostprijsversie(
                         out |= _collect_nested_formats(comp, visit)
                     return out
 
+                def _is_composite_format(fmt_id: str) -> bool:
+                    """A composite format has at least one format-component in its BOM lines."""
+                    return any(
+                        str(line.get("component_article_id", "") or "").strip() in format_ids
+                        for line in lines_by_parent.get(fmt_id, [])
+                        if isinstance(line, dict)
+                    )
+
                 extra_refs: list[dict[str, str]] = []
                 existing = {(str(r.get("product_type", "")), str(r.get("product_id", ""))) for r in target_refs}
                 for ref in target_refs:
-                    if str(ref.get("product_type", "") or "") != "basis":
+                    # Include nested format components for both leaf + composite formats.
+                    # This is defensive: even if the snapshot does not list derived formats yet,
+                    # we still want their SKU rows activated for quoting/reporting.
+                    ref_type = str(ref.get("product_type", "") or "")
+                    if ref_type not in {"basis", "samengesteld"}:
                         continue
                     pid = str(ref.get("product_id", "") or "").strip()
                     if not pid or pid not in format_ids:
                         continue
                     for nested_id in sorted(_collect_nested_formats(pid)):
-                        key = ("basis", nested_id)
+                        nested_type = "samengesteld" if _is_composite_format(nested_id) else "basis"
+                        key = (nested_type, nested_id)
                         if key in existing:
                             continue
                         existing.add(key)
-                        extra_refs.append({"product_id": nested_id, "product_type": "basis"})
+                        extra_refs.append({"product_id": nested_id, "product_type": nested_type})
 
                 if extra_refs:
                     target_refs = [*target_refs, *extra_refs]
@@ -8133,7 +8231,7 @@ def activate_kostprijsversie(
         needed_format_ids = [
             str(ref.get("product_id", "") or "").strip()
             for ref in target_refs
-            if str(ref.get("product_type", "") or "").strip() == "basis"
+            if str(ref.get("product_type", "") or "").strip() in {"basis", "samengesteld"}
         ]
         needed_format_ids = [fmt_id for fmt_id in needed_format_ids if fmt_id]
 
@@ -8159,6 +8257,14 @@ def activate_kostprijsversie(
                 for row in articles_rows
                 if isinstance(row, dict) and str(row.get("id", "") or "")
             }
+
+            # Only create beer×format SKUs for `articles(kind=format)` ids.
+            format_ids = {
+                aid
+                for aid, a in articles_by_id.items()
+                if str(a.get("kind", "") or "").strip().lower() == "format"
+            }
+            needed_format_ids = [fmt_id for fmt_id in needed_format_ids if fmt_id in format_ids]
 
             def _beer_slug() -> str:
                 if bier_id.startswith("beer-") and bier_id[len("beer-") :].strip():
@@ -8241,6 +8347,21 @@ def activate_kostprijsversie(
 
     if not activation_rows:
         return None
+
+    # Require canonical per-SKU cost lines for this version for every SKU being activated.
+    try:
+        from app.domain import cost_versions_storage
+
+        version_key = str(kostprijsversie_id or "")
+        cost_index = cost_versions_storage.load_cost_row_index_for_versions([version_key])
+        missing = [row["sku_id"] for row in activation_rows if cost_index.get((version_key, str(row.get("sku_id", "")))) is None]
+        if missing:
+            raise ValueError(
+                "Kostprijs mist cost lines voor: %s. Draai 1x: POST /api/meta/repair/cost-lines?year=%s&dry_run=false"
+                % (", ".join(sorted(set(missing))), str(jaar))
+            )
+    except Exception:
+        raise
     if not upsert_kostprijsproductactiveringen(
         activation_rows,
         context={"action": "activate_version", **(context or {})},

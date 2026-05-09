@@ -170,8 +170,10 @@ export function calculateInkoopPrijsPerLiter(
 export function getFactuurTotals(factuur: GenericRecord) {
   const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
   const liters = regels.reduce((sum, regel) => sum + Number(regel.liters ?? 0), 0);
+  const afvulkostenFust = regels.reduce((sum, regel) => sum + getFactuurRegelAfvulkostenFust(regel), 0);
   const bedrag =
     regels.reduce((sum, regel) => sum + Number(regel.subfactuurbedrag ?? 0), 0) +
+    afvulkostenFust +
     Number(factuur.verzendkosten ?? 0) +
     Number(factuur.overige_kosten ?? 0);
   return { liters, bedrag, regels: regels.length };

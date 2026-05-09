@@ -6,6 +6,8 @@ export type CompositionLine = {
   qty: number;
 };
 
+export type GenericRecord = Record<string, unknown>;
+
 export type PackagingLine = {
   id: string;
   kind: "packaging_component" | "format";

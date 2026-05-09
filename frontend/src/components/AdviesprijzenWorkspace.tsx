@@ -216,26 +216,6 @@ export function AdviesprijzenWorkspace(props: {
     return Number.isNaN(t) ? 0 : t;
   }
 
-  function findProductRowInSnapshot(
-    version: KostprijsversieRow,
-    ids: { skuId: string; productId: string }
-  ) {
-    const products = ((version as any).resultaat_snapshot ?? (version as any).resultaatSnapshot ?? {}).producten ?? {};
-    const productRows = [
-      ...(Array.isArray(products.basisproducten) ? products.basisproducten : []),
-      ...(Array.isArray(products.samengestelde_producten) ? products.samengestelde_producten : []),
-    ] as any[];
-
-    const skuId = String(ids.skuId ?? "").trim();
-    if (skuId) {
-      const bySku = productRows.find((r) => String(r?.sku_id ?? "") === skuId);
-      if (bySku) return bySku ?? null;
-    }
-    const productId = String(ids.productId ?? "").trim();
-    if (!productId) return null;
-    return productRows.find((r) => String(r?.product_id ?? "") === productId) ?? null;
-  }
-
   const centralSkuIndex = useCentralSkuIndex({
     year: selectedYear,
     channels: Array.isArray(props.initialChannels) ? props.initialChannels : [],

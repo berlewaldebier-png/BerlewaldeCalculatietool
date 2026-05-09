@@ -1,4 +1,11 @@
-import { slugifyId, text, toNumber, type CompositionLine, type GenericRecord, type PackagingLine } from "@/features/sku-composition/skuCompositionUtils";
+import {
+  slugifyId,
+  text,
+  toNumber,
+  type CompositionLine,
+  type GenericRecord,
+  type PackagingLine,
+} from "@/features/sku-composition/skuCompositionUtils";
 
 type SellableKind = "product" | "dienst";
 
@@ -26,6 +33,8 @@ export async function saveSellableSkuBundle({
   packagingType,
   composition,
   packaging,
+  editArticleId,
+  editSkuId,
   existingArticles,
   existingSkus,
   existingBomLines,
@@ -41,12 +50,14 @@ export async function saveSellableSkuBundle({
   packagingType: string;
   composition: CompositionLine[];
   packaging: PackagingLine[];
+  editArticleId?: string;
+  editSkuId?: string;
   existingArticles: GenericRecord[];
   existingSkus: GenericRecord[];
   existingBomLines: GenericRecord[];
 }) {
-  const articleId = `bundle-${slugifyId(name)}`;
-  const skuId = `sku-${articleId}`;
+  const articleId = text(editArticleId) || `bundle-${slugifyId(name)}`;
+  const skuId = text(editSkuId) || `sku-${articleId}`;
 
   const articlePayload: GenericRecord = {
     id: articleId,
@@ -62,9 +73,12 @@ export async function saveSellableSkuBundle({
     packaging_type: text(packagingType),
   };
 
-  const nextArticles = [...existingArticles, articlePayload];
+  const nextArticles = [
+    ...existingArticles.filter((row) => text((row as any).id) !== articleId),
+    articlePayload,
+  ];
   const nextSkus = [
-    ...existingSkus,
+    ...existingSkus.filter((row) => text((row as any).id) !== skuId),
     {
       id: skuId,
       kind: "article",
@@ -100,7 +114,10 @@ export async function saveSellableSkuBundle({
     });
   });
 
-  const mergedBom = [...existingBomLines, ...nextBomLines];
+  const mergedBom = [
+    ...existingBomLines.filter((row) => text((row as any).parent_article_id) !== articleId),
+    ...nextBomLines,
+  ];
 
   await putDataset(apiBaseUrl, "/data/articles", nextArticles);
   await putDataset(apiBaseUrl, "/data/skus", nextSkus);

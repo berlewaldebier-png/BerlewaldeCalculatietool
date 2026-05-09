@@ -115,6 +115,8 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [filter, setFilter] = useState<string>(String(initialFilter ?? ""));
   const [showIgnored, setShowIgnored] = useState<boolean>(false);
+  const [showGekoppeld, setShowGekoppeld] = useState<boolean>(true);
+  const [showOngekoppeld, setShowOngekoppeld] = useState<boolean>(true);
   const [products, setProducts] = useState<DouanoProduct[]>([]);
   const [combos, setCombos] = useState<ActiveCombo[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
@@ -141,12 +143,38 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
     const q = filter.trim().toLowerCase();
     const ignoredSet = new Set(ignored.map((i) => Number(i?.douano_product_id ?? 0)).filter((id) => id > 0));
     const visible = showIgnored ? products : products.filter((p) => !ignoredSet.has(Number(p.product_id ?? 0)));
-    if (!q) return visible;
-    return visible.filter((p) => {
-      const hay = `${p.name ?? ""} ${p.sku ?? ""} ${p.gtin ?? ""}`.toLowerCase();
-      return hay.includes(q);
+    const byQuery = !q
+      ? visible
+      : visible.filter((p) => {
+          const hay = `${p.name ?? ""} ${p.sku ?? ""} ${p.gtin ?? ""}`.toLowerCase();
+          return hay.includes(q);
+        });
+
+    return byQuery.filter((p) => {
+      const id = Number(p.product_id ?? 0);
+      const mapping = mappingsById.get(id);
+      const skuId = String((mapping as any)?.sku_id ?? "").trim();
+      const productGroup = String(groupDraft[id] ?? (mapping as any)?.product_group ?? "").trim();
+      const alcoholCategory = String(alcoholDraft[id] ?? (mapping as any)?.alcohol_category ?? "").trim();
+      const packagingType = String(packagingDraft[id] ?? (mapping as any)?.packaging_type ?? "").trim();
+      const fullyCoupled = Boolean(skuId && productGroup && alcoholCategory && packagingType);
+
+      if (fullyCoupled && !showGekoppeld) return false;
+      if (!fullyCoupled && !showOngekoppeld) return false;
+      return true;
     });
-  }, [products, filter, ignored, showIgnored]);
+  }, [
+    products,
+    filter,
+    ignored,
+    showIgnored,
+    mappingsById,
+    groupDraft,
+    alcoholDraft,
+    packagingDraft,
+    showGekoppeld,
+    showOngekoppeld,
+  ]);
 
   const combosByKey = useMemo(() => {
     const map = new Map<string, ActiveCombo>();
@@ -296,11 +324,6 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
         alcohol_category: alcoholCategory,
         packaging_type: packagingType
       });
-      await writeJson(`/api/data/skus/${encodeURIComponent(selected)}/classification`, "PUT", {
-        product_group: productGroup,
-        alcohol_category: alcoholCategory,
-        packaging_type: packagingType
-      });
       await refreshAll();
       setStatus("Opgeslagen");
       setTone("success");
@@ -366,6 +389,22 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+            <input
+              type="checkbox"
+              checked={showGekoppeld}
+              onChange={(e) => setShowGekoppeld(e.target.checked)}
+            />
+            Gekoppelde producten tonen
+          </label>
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+            <input
+              type="checkbox"
+              checked={showOngekoppeld}
+              onChange={(e) => setShowOngekoppeld(e.target.checked)}
+            />
+            Ongekoppelde producten tonen
+          </label>
           <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
             <input
               type="checkbox"

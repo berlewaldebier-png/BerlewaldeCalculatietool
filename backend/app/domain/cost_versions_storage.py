@@ -332,6 +332,8 @@ def load_dataset(default_value: Any) -> Any:
         snapshot = dict(snapshot)
         snapshot["producten"] = producten
         merged["resultaat_snapshot"] = snapshot
+        # Canonical per-SKU cost lines (normalized table). Prefer this over parsing `resultaat_snapshot` in read-models.
+        merged["cost_lines"] = basis_by_version.get(str(version_id), [])
         out.append(merged)
 
     return out
@@ -578,3 +580,119 @@ def delete_versions_for_year(year: int) -> dict[str, int]:
             conn.commit()
     # Product rows are deleted via ON DELETE CASCADE.
     return {"deleted_versions": deleted_versions}
+
+
+def audit_sku_row_coverage(*, year: int) -> dict[str, Any]:
+    """Admin helper: audit coverage of normalized SKU snapshot rows for a year.
+
+    Goal: detect versions that exist but have zero `cost_version_sku_rows` rows, which means
+    downstream selectors (offerte/verkoopstrategie/dashboards) cannot resolve per-SKU costs.
+    """
+    ensure_schema()
+    year_value = int(year or 0)
+    if year_value <= 0:
+        return {"year": year_value, "error": "invalid_year"}
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT v.id, v.status, v.bier_id, v.versie_nummer
+                FROM cost_versions v
+                LEFT JOIN cost_version_sku_rows r ON r.version_id = v.id
+                WHERE v.jaar = %s
+                GROUP BY v.id, v.status, v.bier_id, v.versie_nummer
+                HAVING COUNT(r.id) = 0
+                ORDER BY v.status, v.bier_id, v.versie_nummer, v.id
+                """,
+                (year_value,),
+            )
+            missing_rows = [
+                {"version_id": rid, "status": status, "bier_id": bier_id, "versie_nummer": versie_nummer}
+                for rid, status, bier_id, versie_nummer in (cur.fetchall() or [])
+            ]
+            cur.execute("SELECT COUNT(*) FROM cost_versions WHERE jaar = %s", (year_value,))
+            versions_total = int((cur.fetchone() or [0])[0] or 0)
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM cost_version_sku_rows r
+                JOIN cost_versions v ON v.id = r.version_id
+                WHERE v.jaar = %s
+                """,
+                (year_value,),
+            )
+            sku_rows_total = int((cur.fetchone() or [0])[0] or 0)
+
+    return {
+        "year": year_value,
+        "versions_total": versions_total,
+        "sku_rows_total": sku_rows_total,
+        "versions_missing_sku_rows": missing_rows,
+        "missing_count": len(missing_rows),
+    }
+
+
+def rebuild_sku_rows_for_year(*, year: int, dry_run: bool = True) -> dict[str, Any]:
+    """Admin helper: regenerate `cost_version_sku_rows` from version payload snapshots for a year.
+
+    This does **not** change the cost versions themselves; it only ensures the normalized per-SKU rows exist.
+    Intended for dev/ops repair when legacy rows were missing sku_id/product_id references.
+    """
+    ensure_schema()
+    year_value = int(year or 0)
+    if year_value <= 0:
+        return {"year": year_value, "error": "invalid_year"}
+
+    # Pull the canonical dataset view for that year, then re-save it.
+    dataset = load_dataset(default_value=[])
+    records = [row for row in (dataset if isinstance(dataset, list) else []) if isinstance(row, dict)]
+    year_records = [row for row in records if int(row.get("jaar", 0) or 0) == year_value]
+
+    audit_before = audit_sku_row_coverage(year=year_value)
+    if dry_run:
+        return {"year": year_value, "dry_run": True, "audit_before": audit_before, "would_process": len(year_records)}
+
+    # Re-save just this year. `save_dataset` uses replace-by-scope semantics per jaar.
+    save_dataset(year_records, overwrite=True)
+    audit_after = audit_sku_row_coverage(year=year_value)
+    return {"year": year_value, "dry_run": False, "audit_before": audit_before, "audit_after": audit_after}
+
+
+def load_cost_row_index_for_versions(
+    version_ids: list[str] | set[str] | tuple[str, ...],
+) -> dict[tuple[str, str], float]:
+    """Return {(version_id, sku_id): kostprijs} for the given versions.
+
+    This is the canonical read-path for cost resolution in dashboards/margin calculations.
+    It intentionally avoids reading the JSON payload snapshot (`resultaat_snapshot`) to prevent
+    accidental fallback behaviour when legacy snapshots are incomplete.
+    """
+    ensure_schema()
+    wanted = [str(v or "").strip() for v in (version_ids or []) if str(v or "").strip()]
+    wanted = sorted(set(wanted))
+    if not wanted:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(wanted))
+    out: dict[tuple[str, str], float] = {}
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT version_id, sku_id, kostprijs
+                FROM cost_version_sku_rows
+                WHERE version_id IN ({placeholders})
+                """,
+                tuple(wanted),
+            )
+            for version_id, sku_id, kostprijs in cur.fetchall() or []:
+                vid = str(version_id or "").strip()
+                sid = str(sku_id or "").strip()
+                if not vid or not sid:
+                    continue
+                try:
+                    out[(vid, sid)] = float(kostprijs or 0)
+                except (TypeError, ValueError):
+                    out[(vid, sid)] = 0.0
+    return out

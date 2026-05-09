@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { createId } from "@/components/berekeningen/berekeningenWizardUtils";
 import { CurrencyInput, TrashIcon } from "@/components/berekeningen/BerekeningenWizardParts";
@@ -65,6 +65,22 @@ function isFustOption(option: ProductUnitOption | undefined | null) {
 
 export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
   const canEdit = Boolean(props.canEdit ?? true);
+  const [aantalDraftById, setAantalDraftById] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    // Seed draft values from incoming regels. Don't overwrite existing drafts so typing stays stable.
+    setAantalDraftById((prev) => {
+      const next: Record<string, string> = { ...prev };
+      (Array.isArray(props.factuurregels) ? props.factuurregels : []).forEach((regel) => {
+        const id = String((regel as any)?.id ?? "");
+        if (!id) return;
+        if (Object.prototype.hasOwnProperty.call(next, id)) return;
+        const value = (regel as any)?.aantal;
+        next[id] = value === null || value === undefined ? "" : String(value);
+      });
+      return next;
+    });
+  }, [props.factuurregels]);
   const extraKostenPerRegel = props.calculateInkoopExtraKostenPerRegel(
     props.inkoop,
     props.factuurregels.length
@@ -75,7 +91,7 @@ export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
     [props.unitOptions]
   );
 
-  const totaalFactuurbedrag = props.factuurregels.reduce(
+  const totaalSubfactuurbedrag = props.factuurregels.reduce(
     (sum, regel) => sum + Number(regel.subfactuurbedrag ?? 0),
     0
   );
@@ -86,9 +102,10 @@ export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
           0
         )
       : 0;
+  const totaalFactuurbedrag = totaalSubfactuurbedrag + totaalAfvulkostenFust;
   const totaalExtraKosten =
     Number(props.inkoop.verzendkosten ?? 0) + Number(props.inkoop.overige_kosten ?? 0);
-  const totaalBronkosten = totaalFactuurbedrag + totaalExtraKosten + totaalAfvulkostenFust;
+  const totaalBronkosten = totaalFactuurbedrag + totaalExtraKosten;
 
   const totaalLiters =
     props.subjectType === "bier"
@@ -132,9 +149,7 @@ export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
         <div className="stat-card">
           <div className="stat-label">Extra kosten</div>
           <div className="stat-value small">
-            {props.formatCurrencyDisplay(
-              props.subjectType === "bier" ? totaalExtraKosten + totaalAfvulkostenFust : totaalExtraKosten
-            )}
+            {props.formatCurrencyDisplay(totaalExtraKosten)}
           </div>
         </div>
         <div className="stat-card">
@@ -222,12 +237,44 @@ export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
                 <td>
                   <input
                     className="dataset-input"
-                    type="number"
-                    step="1"
-                    value={String(regel.aantal ?? "")}
-                    readOnly={!canEdit}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={aantalDraftById[String(regel.id ?? "")] ?? String(regel.aantal ?? "")}
+                    disabled={!canEdit}
                     onChange={(event) => {
-                      const nextAantal = event.target.value === "" ? null : Number(event.target.value);
+                      const raw = event.target.value;
+                      const rowId = String(regel.id ?? "");
+                      setAantalDraftById((prev) => ({ ...prev, [rowId]: raw }));
+
+                      if (raw.trim() === "") {
+                        // Allow empty while editing.
+                        return;
+                      }
+                      const nextAantal = Number(raw);
+                      if (!Number.isFinite(nextAantal)) return;
+                      if (props.subjectType === "bier") {
+                        const nextRegel = { ...regel, aantal: nextAantal };
+                        props.onChangeRegel(index, {
+                          aantal: nextAantal,
+                          liters: props.getFactuurRegelLiters(nextRegel),
+                        });
+                        return;
+                      }
+                      props.onChangeRegel(index, {
+                        aantal: nextAantal,
+                        liters: 0,
+                        afvulkosten_fust: null,
+                        eenheid: text(props.uom),
+                      });
+                    }}
+                    onBlur={() => {
+                      const rowId = String(regel.id ?? "");
+                      const raw = String(aantalDraftById[rowId] ?? "").trim();
+                      const nextAantal = raw === "" ? 0 : Number(raw);
+                      setAantalDraftById((prev) => ({ ...prev, [rowId]: String(Number.isFinite(nextAantal) ? nextAantal : 0) }));
+
+                      if (!Number.isFinite(nextAantal)) return;
                       if (props.subjectType === "bier") {
                         const nextRegel = { ...regel, aantal: nextAantal };
                         props.onChangeRegel(index, {

@@ -73,6 +73,18 @@ export function ProductenVerpakkingWorkspace({
 
   const availablePriceYears = useMemo(() => buildAvailablePriceYears({ productie, packagingPrices }).availablePriceYears, [packagingPrices, productie]);
 
+  const sellableYear = useMemo(() => {
+    const yearsFromActivations = (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [])
+      .map((row) => Number((row as any)?.jaar ?? 0) || 0)
+      .filter((y) => y > 0);
+    const yearsFromVersions = (Array.isArray(kostprijsversies) ? kostprijsversies : [])
+      .map((row) => Number((row as any)?.jaar ?? (row as any)?.basisgegevens?.jaar ?? 0) || 0)
+      .filter((y) => y > 0);
+    const candidates = [...yearsFromActivations, ...yearsFromVersions];
+    const maxYear = candidates.length ? Math.max(...candidates) : 0;
+    return maxYear || year;
+  }, [kostprijsproductactiveringen, kostprijsversies, year]);
+
   useEffect(() => {
     if (yearPricesYear !== null) return;
     setYearPricesYear(year);
@@ -121,7 +133,7 @@ export function ProductenVerpakkingWorkspace({
       {activeTab === "verkoopbaar" ? (
         <div className="content-card">
           <VerkoopbareArtikelenWorkspace
-            year={year}
+            year={sellableYear}
             channels={Array.isArray(channels) ? channels : []}
             verkoopprijzen={Array.isArray(verkoopprijzen) ? verkoopprijzen : []}
             skus={Array.isArray(skus) ? skus : []}

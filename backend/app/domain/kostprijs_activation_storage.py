@@ -259,26 +259,47 @@ def activate_activations(
                     """,
                     (sku_id, jaar),
                 )
-                existing = cur.fetchone()
-                existing_id = str(existing[0] or "") if existing else ""
-                previous_version_id = str(existing[1] or "") if existing else ""
+                existing_rows = cur.fetchall() or []
+                active_rows: list[tuple[str, str]] = [
+                    (str(row_value[0] or ""), str(row_value[1] or "")) for row_value in existing_rows
+                ]
 
-                if existing_id and previous_version_id == new_version_id:
-                    cur.execute(
-                        "UPDATE kostprijs_sku_activations SET updated_at = %s WHERE id = %s",
-                        (now, existing_id),
-                    )
-                    continue
+                # Defensive: due to legacy/dev operations it's possible to have multiple active rows
+                # for the same (sku_id, jaar). Our DB unique constraint prevents new duplicates,
+                # but we still need to handle/repair existing duplicates before inserting.
+                if active_rows:
+                    same_version_rows = [rid for (rid, version_id) in active_rows if version_id == new_version_id]
 
-                if existing_id:
+                    # If the requested version is already active, keep one row active and close any duplicates.
+                    if same_version_rows:
+                        keep_id = same_version_rows[0]
+                        duplicate_ids = [rid for (rid, _) in active_rows if rid and rid != keep_id]
+                        if duplicate_ids:
+                            cur.execute(
+                                """
+                                UPDATE kostprijs_sku_activations
+                                SET effectief_tot = %s, updated_at = %s
+                                WHERE id = ANY(%s)
+                                """,
+                                (now, now, duplicate_ids),
+                            )
+                        cur.execute(
+                            "UPDATE kostprijs_sku_activations SET updated_at = %s WHERE id = %s",
+                            (now, keep_id),
+                        )
+                        continue
+
+                    # Otherwise: close all active rows (even if multiple exist) before opening a new one.
                     cur.execute(
                         """
                         UPDATE kostprijs_sku_activations
                         SET effectief_tot = %s, updated_at = %s
-                        WHERE id = %s
+                        WHERE sku_id = %s AND jaar = %s AND effectief_tot IS NULL
                         """,
-                        (now, now, existing_id),
+                        (now, now, sku_id, jaar),
                     )
+
+                previous_version_id = str(active_rows[0][1] or "") if active_rows else ""
 
                 effectief_vanaf = row.get("effectief_vanaf") or now
                 cur.execute(

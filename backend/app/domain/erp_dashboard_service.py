@@ -78,13 +78,22 @@ def _has_any_douano_orders() -> bool:
     return bool(row and row[0])
 
 
+def _has_any_douano_invoices() -> bool:
+    postgres_storage.ensure_schema()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM douano_sales_invoices LIMIT 1)")
+            row = cur.fetchone()
+    return bool(row and row[0])
+
+
 def _iter_order_lines(
     *,
     since: date,
     until: date,
-) -> Iterable[tuple[int, date, int, str, str, str, float, float, str, str]]:
+) -> Iterable[tuple[int, date, int, str, str, str, float, float, str, str, str]]:
     """
-    Yield (line_id, order_date, company_id, company_name, order_number, status, quantity, net_revenue_ex, sku_id, product_group).
+    Yield (line_id, order_date, company_id, company_name, order_number, status, quantity, net_revenue_ex, sku_id, product_group, packaging_type).
     Ignores ignored lines. Unmapped lines have sku_id = '' and thus no cost.
     """
     douano_product_mapping_storage.ensure_schema()
@@ -106,7 +115,8 @@ def _iter_order_lines(
                     COALESCE(l.quantity, 0) AS quantity,
                     COALESCE(l.net_revenue_ex, 0) AS net_revenue_ex,
                     COALESCE(m.sku_id, '') AS sku_id,
-                    COALESCE(m.product_group, '') AS product_group
+                    COALESCE(m.product_group, '') AS product_group,
+                    COALESCE(m.packaging_type, '') AS packaging_type
                 FROM douano_sales_order_lines l
                 JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
@@ -131,6 +141,7 @@ def _iter_order_lines(
         net_revenue_ex,
         sku_id,
         product_group,
+        packaging_type,
     ) in rows:
         order_date = douano_margin_service._parse_date(order_date_raw)  # type: ignore[attr-defined]
         if order_date is None:
@@ -146,6 +157,81 @@ def _iter_order_lines(
             float(net_revenue_ex or 0.0),
             str(sku_id or ""),
             str(product_group or ""),
+            str(packaging_type or ""),
+        )
+
+
+def _iter_invoice_lines(
+    *,
+    since: date,
+    until: date,
+) -> Iterable[tuple[int, date, int, str, str, str, float, float, str, str, str]]:
+    """
+    Yield (line_id, invoice_date, company_id, company_name, invoice_number, status, quantity, net_revenue_ex, sku_id, product_group, packaging_type).
+    Ignores ignored lines. Unmapped lines have sku_id = '' and thus no cost.
+    """
+    douano_product_mapping_storage.ensure_schema()
+    douano_product_ignore_storage.ensure_schema()
+    postgres_storage.ensure_schema()
+    since_iso = since.isoformat()
+    until_plus_one = (until + timedelta(days=1)).isoformat()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    l.line_id,
+                    l.invoice_date,
+                    l.company_id,
+                    COALESCE(c.public_name, c.name, '') AS company_name,
+                    COALESCE(i.invoice_number, '') AS invoice_number,
+                    COALESCE(i.transaction_type, '') AS status,
+                    COALESCE(l.quantity, 0) AS quantity,
+                    COALESCE(l.net_revenue_ex, 0) AS net_revenue_ex,
+                    COALESCE(m.sku_id, '') AS sku_id,
+                    COALESCE(m.product_group, '') AS product_group,
+                    COALESCE(m.packaging_type, '') AS packaging_type
+                FROM douano_sales_invoice_lines l
+                JOIN douano_sales_invoices i ON i.sales_invoice_id = l.sales_invoice_id
+                LEFT JOIN douano_companies c ON c.company_id = l.company_id
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                WHERE ig.douano_product_id IS NULL
+                  AND l.invoice_date >= %s::date
+                  AND l.invoice_date < %s::date
+                ORDER BY l.invoice_date ASC, l.line_id ASC
+                """,
+                (since_iso, until_plus_one),
+            )
+            rows = cur.fetchall() or []
+    for (
+        line_id,
+        invoice_date_raw,
+        company_id,
+        company_name,
+        invoice_number,
+        status,
+        quantity,
+        net_revenue_ex,
+        sku_id,
+        product_group,
+        packaging_type,
+    ) in rows:
+        invoice_date = douano_margin_service._parse_date(invoice_date_raw)  # type: ignore[attr-defined]
+        if invoice_date is None:
+            continue
+        yield (
+            int(line_id or 0),
+            invoice_date,
+            int(company_id or 0),
+            str(company_name or ""),
+            str(invoice_number or ""),
+            str(status or ""),
+            float(quantity or 0.0),
+            float(net_revenue_ex or 0.0),
+            str(sku_id or ""),
+            str(product_group or ""),
+            str(packaging_type or ""),
         )
 
 
@@ -164,8 +250,8 @@ def get_erp_dashboard(
     - Cost is derived from active kostprijsversies via kostprijsproductactiveringen (same logic as douano_margin_service).
     - Break-even computation is currently handled client-side; we expose the active config as context.
     """
-    if str(basis or "order").strip().lower() != "order":
-        # Keep the initial dashboard stable and aligned with the product decision.
+    basis = str(basis or "order").strip().lower() or "order"
+    if basis not in ("order", "invoice"):
         basis = "order"
 
     since_text = str(since or "").strip()
@@ -187,7 +273,10 @@ def get_erp_dashboard(
         postgres_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT MAX(order_date)::date FROM douano_sales_orders WHERE order_date IS NOT NULL")
+                if basis == "invoice":
+                    cur.execute("SELECT MAX(invoice_date)::date FROM douano_sales_invoices WHERE invoice_date IS NOT NULL")
+                else:
+                    cur.execute("SELECT MAX(order_date)::date FROM douano_sales_orders WHERE order_date IS NOT NULL")
                 row = cur.fetchone()
         latest_order_date = row[0] if row else None
         if isinstance(latest_order_date, date):
@@ -202,19 +291,23 @@ def get_erp_dashboard(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT DISTINCT EXTRACT(YEAR FROM order_date)::int AS y
-                FROM douano_sales_orders
-                WHERE order_date IS NOT NULL
+                SELECT DISTINCT EXTRACT(YEAR FROM {col})::int AS y
+                FROM {table}
+                WHERE {col} IS NOT NULL
                 ORDER BY y ASC
-                """
+                """.format(
+                    table="douano_sales_invoices" if basis == "invoice" else "douano_sales_orders",
+                    col="invoice_date" if basis == "invoice" else "order_date",
+                )
             )
             years_rows = cur.fetchall() or []
     available_years = [int(r[0] or 0) for r in years_rows if int(r[0] or 0) > 0]
 
-    if not _has_any_douano_orders():
+    has_any = _has_any_douano_invoices() if basis == "invoice" else _has_any_douano_orders()
+    if not has_any:
         year = int(range_since.year)
         return {
-            "range": {"basis": "order", "since": range_since.isoformat(), "until": range_until.isoformat()},
+            "range": {"basis": basis, "since": range_since.isoformat(), "until": range_until.isoformat()},
             "available_years": available_years,
             "empty_reason": "Geen Douano orders gevonden. Synchroniseer eerst orders via Beheer → API.",
             "kpis": None,
@@ -224,6 +317,7 @@ def get_erp_dashboard(
                 "latest_orders": [],
                 "under_break_even": [],
                 "product_groups": [],
+                "packaging_types": [],
             },
             "break_even": _load_break_even_target(year=year),
             "alerts": [],
@@ -256,8 +350,13 @@ def get_erp_dashboard(
     # Product group aggregates (retroactive via mapping table).
     groups: dict[str, dict[str, float]] = {}
 
+    # Packaging type aggregates (order line quantities by uitlevervorm).
+    packaging_types: dict[str, float] = {}
+
     # Per-order totals for latest + under break-even.
     by_order: dict[str, dict[str, Any]] = {}
+
+    lines_iter = _iter_invoice_lines(since=range_since, until=range_until) if basis == "invoice" else _iter_order_lines(since=range_since, until=range_until)
 
     for (
         line_id,
@@ -270,8 +369,17 @@ def get_erp_dashboard(
         net_revenue_ex,
         sku_id,
         product_group,
-    ) in _iter_order_lines(since=range_since, until=range_until):
+        packaging_type,
+    ) in lines_iter:
         revenue_total += float(net_revenue_ex or 0.0)
+
+        pack_key = ""
+        if not str(sku_id or "").strip():
+            pack_key = "Niet gekoppeld"
+        else:
+            pack_key = str(packaging_type or "").strip() or "Geen verpakkingstype"
+        packaging_types[pack_key] = float(packaging_types.get(pack_key, 0.0) or 0.0) + float(quantity or 0.0)
+
         cost_unit = None
         line_cost_total = 0.0
         if str(sku_id or "").strip():
@@ -425,8 +533,15 @@ def get_erp_dashboard(
         )
     product_groups.sort(key=lambda r: float(r.get("margin_pct", 0.0) or 0.0), reverse=True)
 
+    packaging_types_rows = [
+        {"packaging_type": str(key), "qty": float(qty or 0.0)}
+        for key, qty in packaging_types.items()
+        if str(key or "").strip()
+    ]
+    packaging_types_rows.sort(key=lambda r: float(r.get("qty", 0.0) or 0.0), reverse=True)
+
     return {
-        "range": {"basis": "order", "since": range_since.isoformat(), "until": range_until.isoformat()},
+        "range": {"basis": basis, "since": range_since.isoformat(), "until": range_until.isoformat()},
         "available_years": available_years,
         "kpis": {
             "total_revenue_ex": revenue_total,
@@ -444,6 +559,7 @@ def get_erp_dashboard(
             "latest_orders": latest_orders,
             "under_break_even": under_break_even,
             "product_groups": product_groups[:5],
+            "packaging_types": packaging_types_rows,
         },
         "break_even": _load_break_even_target(year=year),
         "alerts": alerts,

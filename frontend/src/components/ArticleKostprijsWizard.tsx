@@ -104,7 +104,9 @@ export function ArticleKostprijsWizard(props: Props) {
     if (initialSelected) {
       const found = rows.find((row) => text((row as any).id) === initialSelected) ?? null;
       const skuId =
-        text(((found as any)?.resultaat_snapshot as any)?.producten?.basisproducten?.[0]?.sku_id) ||
+        text((found as any)?.basisgegevens?.sku_id) ||
+        text((found as any)?.sku_id) ||
+        text(((found as any)?.cost_lines as any)?.[0]?.sku_id) ||
         text((found as any)?.sku_id);
       if (skuId) return skuId;
     }

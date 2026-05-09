@@ -519,6 +519,10 @@ a {
   padding: 1rem 1.05rem;
 }
 
+.erp-chart-area {
+  height: 288px;
+}
+
 .erp-kpi-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

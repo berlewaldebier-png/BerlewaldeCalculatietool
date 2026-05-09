@@ -48,6 +48,7 @@ type KostprijsBeheerWorkspaceProps = {
   initialFocus?: string;
   initialWizardKind?: string;
   initialSkuId?: string;
+  initialSelectedId?: string;
 };
 
 type WorkspaceMode = "landing" | "wizard-new" | "wizard-edit";
@@ -73,12 +74,17 @@ export function KostprijsBeheerWorkspace({
   initialMode,
   initialFocus,
   initialWizardKind,
-  initialSkuId
+  initialSkuId,
+  initialSelectedId
 }: KostprijsBeheerWorkspaceProps) {
   const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(
     Array.isArray(berekeningen) ? berekeningen : []
   );
   const [currentBieren, setCurrentBieren] = useState<GenericRecord[]>(Array.isArray(bieren) ? bieren : []);
+  const [currentSkus, setCurrentSkus] = useState<GenericRecord[]>(Array.isArray(skus) ? skus : []);
+  const [currentActivations, setCurrentActivations] = useState<GenericRecord[]>(
+    Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []
+  );
   const normalizedInitialMode =
     initialMode === "wizard-new" || initialMode === "wizard-edit"
       ? (initialMode as WorkspaceMode)
@@ -90,7 +96,10 @@ export function KostprijsBeheerWorkspace({
       ? "article"
       : "beer";
   const [newWizardKind, setNewWizardKind] = useState<NewWizardKind>(normalizedInitialWizardKind);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const seed = String(initialSelectedId ?? "").trim();
+    return seed ? seed : null;
+  });
   const [search, setSearch] = useState("");
   const [activeSort, setActiveSort] = useState<{
     key: "bron";
@@ -170,6 +179,14 @@ export function KostprijsBeheerWorkspace({
     setCurrentBieren(Array.isArray(bieren) ? bieren : []);
   }, [bieren]);
 
+  useEffect(() => {
+    setCurrentSkus(Array.isArray(skus) ? skus : []);
+  }, [skus]);
+
+  useEffect(() => {
+    setCurrentActivations(Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []);
+  }, [kostprijsproductactiveringen]);
+
   async function refreshBieren() {
     try {
       const response = await fetch(`${API_BASE_URL}/data/bieren`, { cache: "no-store" });
@@ -183,9 +200,39 @@ export function KostprijsBeheerWorkspace({
     }
   }
 
+  async function refreshSkus() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/data/skus`, { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = (await response.json()) as any;
+      const next = Array.isArray(payload?.data) ? (payload.data as GenericRecord[]) : (payload as GenericRecord[]);
+      setCurrentSkus(Array.isArray(next) ? next : []);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function refreshActivations() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/data/kostprijsproductactiveringen`, { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const payload = (await response.json()) as any;
+      const next = Array.isArray(payload?.data) ? (payload.data as GenericRecord[]) : (payload as GenericRecord[]);
+      setCurrentActivations(Array.isArray(next) ? next : []);
+    } catch {
+      // ignore
+    }
+  }
+
   function handleRowsChange(rows: GenericRecord[]) {
     setCurrentBerekeningen(Array.isArray(rows) ? rows : []);
     void refreshBieren();
+    void refreshSkus();
+    void refreshActivations();
   }
 
   function handlePersisted(result: BerekeningenWizardPersistResult) {
@@ -234,14 +281,14 @@ export function KostprijsBeheerWorkspace({
 
   const skuById = useMemo(() => {
     const map = new Map<string, GenericRecord>();
-    (Array.isArray(skus) ? skus : []).forEach((row) => {
+    (Array.isArray(currentSkus) ? currentSkus : []).forEach((row) => {
       const id = String((row as any)?.id ?? "");
       if (id) {
         map.set(id, row);
       }
     });
     return map;
-  }, [skus]);
+  }, [currentSkus]);
 
   const articleById = useMemo(() => {
     const map = new Map<string, GenericRecord>();
@@ -289,7 +336,7 @@ export function KostprijsBeheerWorkspace({
 
   const activeRows: ActiveCostRow[] = useMemo(() => {
     return buildActiveRows({
-      kostprijsproductactiveringen,
+      kostprijsproductactiveringen: currentActivations,
       selectedYear,
       search,
       activeSort,
@@ -308,7 +355,7 @@ export function KostprijsBeheerWorkspace({
     berekeningenById,
     bierenById,
     currentBerekeningen,
-    kostprijsproductactiveringen,
+    currentActivations,
     search,
     samengesteldById,
     selectedYear,
@@ -319,8 +366,8 @@ export function KostprijsBeheerWorkspace({
       return (
         <ArticleKostprijsWizard
           initialRows={currentBerekeningen}
-          kostprijsproductactiveringen={kostprijsproductactiveringen}
-          skus={skus}
+          kostprijsproductactiveringen={currentActivations}
+          skus={currentSkus}
           articles={articles}
           bomLines={bomLines}
           packagingComponentPrices={packagingComponentPrices}
@@ -339,7 +386,7 @@ export function KostprijsBeheerWorkspace({
         initialRows={currentBerekeningen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
-        skus={skus}
+        skus={currentSkus}
         bieren={currentBieren}
         articles={articles}
         bomLines={bomLines}
@@ -347,7 +394,7 @@ export function KostprijsBeheerWorkspace({
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
-        kostprijsproductactiveringen={kostprijsproductactiveringen}
+        kostprijsproductactiveringen={currentActivations}
         productgroepen={productgroepen}
         alcoholcategorieen={alcoholcategorieen}
         verpakkingstypen={verpakkingstypen}
@@ -370,8 +417,8 @@ export function KostprijsBeheerWorkspace({
       return (
         <ArticleKostprijsWizard
           initialRows={currentBerekeningen}
-          kostprijsproductactiveringen={kostprijsproductactiveringen}
-          skus={skus}
+          kostprijsproductactiveringen={currentActivations}
+          skus={currentSkus}
           articles={articles}
           bomLines={bomLines}
           packagingComponentPrices={packagingComponentPrices}
@@ -391,7 +438,7 @@ export function KostprijsBeheerWorkspace({
           initialRows={currentBerekeningen}
           basisproducten={basisproducten}
           samengesteldeProducten={samengesteldeProducten}
-          skus={skus}
+          skus={currentSkus}
           bieren={currentBieren}
           articles={articles}
           bomLines={bomLines}
@@ -399,7 +446,7 @@ export function KostprijsBeheerWorkspace({
           vasteKosten={vasteKosten}
           tarievenHeffingen={tarievenHeffingen}
           packagingComponentPrices={packagingComponentPrices}
-          kostprijsproductactiveringen={kostprijsproductactiveringen}
+          kostprijsproductactiveringen={currentActivations}
           productgroepen={productgroepen}
           alcoholcategorieen={alcoholcategorieen}
           verpakkingstypen={verpakkingstypen}
@@ -417,7 +464,7 @@ export function KostprijsBeheerWorkspace({
         initialRows={currentBerekeningen}
         basisproducten={basisproducten}
         samengesteldeProducten={samengesteldeProducten}
-        skus={skus}
+        skus={currentSkus}
         bieren={currentBieren}
         articles={articles}
         bomLines={bomLines}
@@ -425,7 +472,7 @@ export function KostprijsBeheerWorkspace({
         vasteKosten={vasteKosten}
         tarievenHeffingen={tarievenHeffingen}
         packagingComponentPrices={packagingComponentPrices}
-        kostprijsproductactiveringen={kostprijsproductactiveringen}
+        kostprijsproductactiveringen={currentActivations}
         productgroepen={productgroepen}
         alcoholcategorieen={alcoholcategorieen}
         verpakkingstypen={verpakkingstypen}

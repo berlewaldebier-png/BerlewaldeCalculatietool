@@ -217,6 +217,30 @@ export function InkoopFacturenManager({
     });
   }
 
+  function updateDraftRegelPatch(rowId: string, patch: Record<string, unknown>) {
+    if (!draftFactuur) {
+      return;
+    }
+    const regels = Array.isArray(draftFactuur.factuurregels) ? (draftFactuur.factuurregels as GenericRecord[]) : [];
+    setDraftFactuur({
+      ...draftFactuur,
+      factuurregels: regels.map((regel) => {
+        if (String(regel.id) !== rowId) {
+          return regel;
+        }
+        const nextRegel = { ...regel, ...patch };
+        const aantal = Number(nextRegel.aantal ?? 0);
+        const litersPerUnit = litersPerUnitById.get(String(nextRegel.eenheid ?? "").trim()) ?? 0;
+        if (litersPerUnit > 0 && aantal > 0) {
+          nextRegel.liters = Number((aantal * litersPerUnit).toFixed(6));
+        } else if ("eenheid" in patch || "aantal" in patch) {
+          nextRegel.liters = 0;
+        }
+        return nextRegel;
+      })
+    });
+  }
+
   function addDraftRegel() {
     if (!draftFactuur) {
       return;
@@ -257,11 +281,24 @@ export function InkoopFacturenManager({
       fetch(`${API_BASE_URL}/data/tarieven-heffingen`, { cache: "no-store" })
     ]);
 
-    const productie = productieResp.ok ? ((await productieResp.json()) as Record<string, GenericRecord>) : {};
-    const vasteKosten = vasteKostenResp.ok
-      ? ((await vasteKostenResp.json()) as Record<string, GenericRecord[]>)
-      : {};
-    const tarievenHeffingen = tarievenResp.ok ? ((await tarievenResp.json()) as GenericRecord[]) : [];
+    const productiePayload = productieResp.ok ? ((await productieResp.json()) as any) : {};
+    const productie =
+      productiePayload && typeof productiePayload === "object" && "data" in productiePayload
+        ? (productiePayload.data as Record<string, GenericRecord>)
+        : (productiePayload as Record<string, GenericRecord>);
+
+    const vasteKostenPayload = vasteKostenResp.ok ? ((await vasteKostenResp.json()) as any) : {};
+    const vasteKosten =
+      vasteKostenPayload && typeof vasteKostenPayload === "object" && "data" in vasteKostenPayload
+        ? (vasteKostenPayload.data as Record<string, GenericRecord[]>)
+        : (vasteKostenPayload as Record<string, GenericRecord[]>);
+
+    const tarievenPayload = tarievenResp.ok ? ((await tarievenResp.json()) as any) : [];
+    const tarievenHeffingen = Array.isArray(tarievenPayload)
+      ? (tarievenPayload as GenericRecord[])
+      : Array.isArray(tarievenPayload?.data)
+        ? (tarievenPayload.data as GenericRecord[])
+        : [];
 
     const clampPct = (value: unknown) => {
       const parsed = Number(value);
@@ -306,6 +343,9 @@ export function InkoopFacturenManager({
 
     const options = getProductUnitOptions(basisproducten, samengesteldeProducten);
     const optionMap = new Map(options.map((option) => [option.id, option]));
+    const basisOptionIds = new Set(
+      basisproducten.map((row) => String((row as any)?.id ?? "")).filter(Boolean)
+    );
 
     const totals = regels.reduce<{ liters: number; bedrag: number }>(
       (acc, regel) => {
@@ -329,6 +369,7 @@ export function InkoopFacturenManager({
         const unitId = String(regel.eenheid ?? "").trim();
         const match = optionMap.get(unitId);
         if (!match) return null;
+        const productType = basisOptionIds.has(unitId) ? "basis" : "samengesteld";
         const litersPerUnit = Number(match.litersPerUnit ?? 0);
         const aantal = Number(regel.aantal ?? 0);
         const prijsPerEenheid = aantal > 0 ? (Number(regel.subfactuurbedrag ?? 0) + extraPerRegel) / aantal : 0;
@@ -340,6 +381,8 @@ export function InkoopFacturenManager({
         const vasteKosten = vasteKostenPerLiter * liters;
         return {
           id: unitId,
+          product_id: unitId,
+          product_type: productType,
           verpakkingseenheid: match.label,
           liters_per_product: liters,
           primaire_kosten: prijsPerEenheid,
@@ -351,13 +394,16 @@ export function InkoopFacturenManager({
       })
       .filter(Boolean) as GenericRecord[];
 
+    const basisRows = summaryRows.filter((row) => String((row as any).product_type ?? "") === "basis");
+    const samengesteldRows = summaryRows.filter((row) => String((row as any).product_type ?? "") === "samengesteld");
+
     return {
       integrale_kostprijs_per_liter: Number((variabeleKostenPerLiter + vasteKostenPerLiter).toFixed(6)),
       variabele_kosten_per_liter: Number(variabeleKostenPerLiter.toFixed(6)),
       directe_vaste_kosten_per_liter: Number(vasteKostenPerLiter.toFixed(6)),
       producten: {
-        basisproducten: summaryRows.filter((row) => options.some((opt) => opt.id === String(row.id ?? ""))),
-        samengestelde_producten: []
+        basisproducten: basisRows.filter((row) => options.some((opt) => opt.id === String(row.id ?? ""))),
+        samengestelde_producten: samengesteldRows.filter((row) => options.some((opt) => opt.id === String(row.id ?? "")))
       }
     };
   }
@@ -377,12 +423,44 @@ export function InkoopFacturenManager({
         [];
       const maxVersion = groupRecords.reduce((max, row) => Math.max(max, Number(row.versie_nummer ?? 0) || 0), 0);
 
+      async function readResponseError(response: Response): Promise<string> {
+        try {
+          const text = await response.text();
+          if (!text) {
+            return `HTTP ${response.status}`;
+          }
+          try {
+            const parsed = JSON.parse(text) as any;
+            const detail = typeof parsed?.detail === "string" ? parsed.detail : null;
+            return detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}: ${text}`;
+          } catch {
+            return `HTTP ${response.status}: ${text}`;
+          }
+        } catch {
+          return `HTTP ${response.status}`;
+        }
+      }
+
+      const existingConceptForGroup =
+        rows.find(
+          (row) =>
+            String(row.bier_id ?? "") === String(selectedActiveRecord.bier_id ?? "") &&
+            getRecordYear(row) === getRecordYear(selectedActiveRecord) &&
+            String(row.brontype ?? "").toLowerCase() === "factuur" &&
+            isConceptFactuurVersie(row)
+        ) ?? null;
+
       const nextVersion =
-        draftMode === "edit" && draftVersionId
+        (draftMode === "edit" && draftVersionId) || (existingConceptForGroup && !draftVersionId)
           ? (() => {
-              const existing = rows.find((row) => String(row.id ?? "") === String(draftVersionId));
+              const effectiveId = String(draftVersionId || existingConceptForGroup?.id || "");
+              const existing =
+                rows.find((row) => String(row.id ?? "") === effectiveId) ??
+                (existingConceptForGroup && String(existingConceptForGroup.id ?? "") === effectiveId
+                  ? existingConceptForGroup
+                  : null);
               const updated = existing ? cloneValue(existing) : createFactuurVersieFromSource(selectedActiveRecord, normalizedDraft);
-              updated.id = String(draftVersionId);
+              updated.id = effectiveId || String(updated.id ?? "");
               updated.status = "concept";
               updated.updated_at = new Date().toISOString();
               updated.aangepast_op = updated.updated_at;
@@ -395,6 +473,8 @@ export function InkoopFacturenManager({
               return normalizeBerekening(created);
             })();
       const cleanedRows = rows
+        // Always drop the prior version when saving; we'll re-add the normalized `nextVersion`.
+        .filter((row) => String(row.id ?? "") !== String(nextVersion.id ?? ""))
         .filter(
           (row) =>
             !(
@@ -415,15 +495,16 @@ export function InkoopFacturenManager({
       });
 
       if (!response.ok) {
-        throw new Error("Opslaan mislukt");
+        throw new Error(await readResponseError(response));
       }
 
       setRows(cleanedRows);
       setDraftMode("edit");
       setDraftVersionId(String(nextVersion.id ?? ""));
       setStatus("Factuurversie opgeslagen.");
-    } catch {
-      setStatus("Opslaan mislukt.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setStatus(message ? `Opslaan mislukt: ${message}` : "Opslaan mislukt.");
     } finally {
       setIsSaving(false);
     }
@@ -443,6 +524,24 @@ export function InkoopFacturenManager({
     try {
       const normalizedDraft = normalizeFactuur(draftFactuur);
       const nowIso = new Date().toISOString();
+
+      async function readResponseError(response: Response): Promise<string> {
+        try {
+          const text = await response.text();
+          if (!text) {
+            return `HTTP ${response.status}`;
+          }
+          try {
+            const parsed = JSON.parse(text) as any;
+            const detail = typeof parsed?.detail === "string" ? parsed.detail : null;
+            return detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}: ${text}`;
+          } catch {
+            return `HTTP ${response.status}: ${text}`;
+          }
+        } catch {
+          return `HTTP ${response.status}`;
+        }
+      }
 
       const base =
         draftMode === "edit" && draftVersionId
@@ -477,7 +576,7 @@ export function InkoopFacturenManager({
         body: JSON.stringify(cleanedRows)
       });
       if (!response.ok) {
-        throw new Error("Afronden mislukt");
+        throw new Error(await readResponseError(response));
       }
 
       setRows(cleanedRows);
@@ -486,8 +585,44 @@ export function InkoopFacturenManager({
       setDraftMode("new");
       setDraftSourceKey("");
       setStatus("Factuurversie afgerond als definitief.");
-    } catch {
-      setStatus("Afronden mislukt.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setStatus(message ? `Afronden mislukt: ${message}` : "Afronden mislukt.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deleteDraftVersion(versionId: string) {
+    if (!versionId) return;
+
+    setStatus("");
+    setIsSaving(true);
+    try {
+      const cleanedRows = rows
+        .filter((row) => String(row.id ?? "") !== String(versionId))
+        .map((row) => normalizeBerekening(row));
+
+      const response = await fetch(KOSTPRIJSVERSIES_API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cleanedRows)
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(text ? `HTTP ${response.status}: ${text}` : `HTTP ${response.status}`);
+      }
+
+      setRows(cleanedRows);
+      setDraftFactuur(null);
+      setDraftVersionId("");
+      setDraftMode("new");
+      setDraftSourceKey("");
+      setStatus("Conceptversie verwijderd.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setStatus(message ? `Verwijderen mislukt: ${message}` : "Verwijderen mislukt.");
     } finally {
       setIsSaving(false);
     }
@@ -603,6 +738,7 @@ export function InkoopFacturenManager({
                                       <th>Regels</th>
                                       <th>Liters</th>
                                       <th>Bedrag</th>
+                                      <th />
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -620,12 +756,6 @@ export function InkoopFacturenManager({
                                             if (!record) {
                                               return;
                                             }
-                                            if (String((row as any).recordStatus ?? "").toLowerCase() === "definitief") {
-                                              setStatus(
-                                                "Definitieve factuurversies kun je niet bewerken. Start een nieuwe versie met +."
-                                              );
-                                              return;
-                                            }
                                             openExistingFactuurVersie(record);
                                           }}
                                         >
@@ -636,11 +766,31 @@ export function InkoopFacturenManager({
                                           <td>{row.regels}</td>
                                           <td>{Number(row.liters).toLocaleString("nl-NL")}</td>
                                           <td>{formatCurrency(Number(row.bedrag))}</td>
+                                          <td style={{ whiteSpace: "nowrap" }}>
+                                            {String((row as any).recordStatus ?? "").toLowerCase() === "concept" ? (
+                                              <button
+                                                type="button"
+                                                className="icon-button-table icon-button-neutral"
+                                                aria-label="Verwijder conceptversie"
+                                                title="Verwijder conceptversie"
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  requestDelete(
+                                                    "Conceptversie verwijderen",
+                                                    "Weet je zeker dat je deze concept-factuurversie wilt verwijderen?",
+                                                    () => deleteDraftVersion(String((row as any).recordId ?? ""))
+                                                  );
+                                                }}
+                                              >
+                                                ×
+                                              </button>
+                                            ) : null}
+                                          </td>
                                         </tr>
                                       ))
                                     ) : (
                                       <tr>
-                                        <td className="dataset-empty" colSpan={7}>
+                                        <td className="dataset-empty" colSpan={8}>
                                           Nog geen facturen gevonden voor dit bier.
                                         </td>
                                       </tr>
@@ -718,7 +868,7 @@ export function InkoopFacturenManager({
                 const regel = regels[index];
                 if (!regel) return;
                 const id = String(regel.id);
-                Object.entries(patch).forEach(([k, v]) => updateDraftRegel(id, k, v));
+                updateDraftRegelPatch(id, patch as Record<string, unknown>);
               }}
               onDeleteRegel={(index) => {
                 const regels = Array.isArray(draftFactuur.factuurregels) ? (draftFactuur.factuurregels as GenericRecord[]) : [];
@@ -749,6 +899,22 @@ export function InkoopFacturenManager({
               <div className="editor-actions-group" />
               <div className="editor-actions-group">
                 {status ? <span className="editor-status">{status}</span> : null}
+                {draftMode === "edit" && editingRecord && editingStatus === "concept" ? (
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() =>
+                      requestDelete(
+                        "Conceptversie verwijderen",
+                        "Weet je zeker dat je deze concept-factuurversie wilt verwijderen?",
+                        () => deleteDraftVersion(String(editingRecord.id ?? ""))
+                      )
+                    }
+                    disabled={isSaving}
+                  >
+                    Verwijderen
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="editor-button editor-button-secondary"

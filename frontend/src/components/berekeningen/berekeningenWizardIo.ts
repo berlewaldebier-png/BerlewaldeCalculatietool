@@ -45,6 +45,23 @@ export async function saveSkuClassification(skuId: string, payload: Record<strin
   });
 }
 
+export type DouanoProductMapping = {
+  douano_product_id: number;
+  sku_id: string;
+  product_group?: string;
+  alcohol_category?: string;
+  packaging_type?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export async function loadDouanoProductMappings(limit = 10000): Promise<DouanoProductMapping[]> {
+  const result = await apiGetClient<{ items?: unknown }>(
+    `/integrations/douano/product-mappings?limit=${encodeURIComponent(String(limit))}`
+  );
+  return Array.isArray(result?.items) ? (result.items as DouanoProductMapping[]) : [];
+}
+
 export function tryReadApiDetail(error: unknown): string {
   if (!(error instanceof ApiRequestError)) return "";
   try {

@@ -10,8 +10,10 @@ export function StepControle(props: {
   uom: string;
   totals: { liters: number; cost: number; packagingCost: number; totalCost: number };
   blockingWarnings: string[];
+  beheerWarning?: string;
+  onGoToBeheer?: () => void;
 }) {
-  const { mode, sellableKind, name, uom, totals, blockingWarnings } = props;
+  const { mode, sellableKind, name, uom, totals, blockingWarnings, beheerWarning, onGoToBeheer } = props;
   return (
     <div className="wizard-form-grid">
       <div className="nested-field" style={{ gridColumn: "1 / -1" }}>
@@ -67,6 +69,16 @@ export function StepControle(props: {
       {blockingWarnings.length > 0 ? (
         <div className="editor-status wizard-inline-status" style={{ gridColumn: "1 / -1" }}>
           <strong>Kan niet afronden:</strong> {blockingWarnings.join(" ")}
+        </div>
+      ) : null}
+      {beheerWarning ? (
+        <div className="editor-status wizard-inline-status" style={{ gridColumn: "1 / -1" }}>
+          <strong>Let op:</strong> {beheerWarning}{" "}
+          {onGoToBeheer ? (
+            <button type="button" className="cpq-button" style={{ marginLeft: 10 }} onClick={onGoToBeheer}>
+              Naar productkoppeling
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

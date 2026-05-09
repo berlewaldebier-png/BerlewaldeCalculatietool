@@ -61,13 +61,17 @@ def put_sku_classification(
     data: dict[str, Any] = Body(default_factory=dict),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
-    """Update SKU classification fields in the SKU payload.
+    """Update classification for a SKU.
 
-    This is a narrow endpoint used by Productkoppeling and later wizards to persist
-    `product_group`, `alcohol_category` and `packaging_type` as the SSOT on `skus`.
+    Important: productkoppeling (Douano mappings) is the source of truth for ERP-related
+    classification. This endpoint is kept for backward compatibility with older UI code,
+    but it updates the `douano_product_mapping` records that reference the given SKU.
+
+    If the SKU is not mapped to any Douano product yet, this endpoint returns 409 to
+    prevent multiple sources of truth.
     """
     try:
-        from app.domain import skus_storage
+        from app.domain import douano_product_mapping_storage
 
         sku_value = str(sku_id or "").strip()
         if not sku_value:
@@ -77,15 +81,18 @@ def put_sku_classification(
         alcohol_category = str(data.get("alcohol_category", "") or "").strip()
         packaging_type = str(data.get("packaging_type", "") or "").strip()
 
-        updated = skus_storage.update_classification(
-            sku_value,
+        report = douano_product_mapping_storage.update_classification_by_sku_id(
+            sku_id=sku_value,
             product_group=product_group,
             alcohol_category=alcohol_category,
             packaging_type=packaging_type,
         )
-        if updated is None:
-            raise HTTPException(status_code=404, detail="SKU niet gevonden.")
-        return {"ok": True, "sku": updated}
+        if int(report.get("updated", 0) or 0) <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail="SKU is nog niet gekoppeld in Beheer > Productkoppeling; classificatie kan pas daar worden opgeslagen.",
+            )
+        return {"ok": True, "mapping_update": report}
     except HTTPException:
         raise
     except Exception as exc:
@@ -113,6 +120,8 @@ def post_activate_kostprijsversie(
             raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden of niet definitief")
         logger.info(f"Activated cost version: {version_id}")
         return {"activated": True, "record": activated}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -150,6 +159,8 @@ def post_activate_kostprijsversie_products(
         
         logger.info(f"Activated {len(product_ids)} products for cost version: {version_id}")
         return {"activated": True, "record": activated}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:

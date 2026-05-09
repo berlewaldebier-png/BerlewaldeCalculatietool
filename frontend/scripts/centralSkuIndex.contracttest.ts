@@ -69,6 +69,14 @@ function run() {
     {
       id: "kpv-blond-2025",
       basisgegevens: { btw_tarief: "21%" },
+      cost_lines: [
+        {
+          sku_id: "sku-blond-33cl",
+          product_id: "fmt-bottle-33cl",
+          kostprijs: 1.34,
+          vaste_kosten: 0.12,
+        },
+      ],
       resultaat_snapshot: {
         producten: {
           basisproducten: [

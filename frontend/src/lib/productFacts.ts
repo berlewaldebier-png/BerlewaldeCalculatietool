@@ -129,17 +129,17 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       seen.add(ref);
 
       const version = versionById.get(kostprijsversieId);
-      const snapshotRow = getSnapshotProductRow(version, { skuId, productId });
+      const costLineRow = getCostLineRow(version, { skuId, productId });
       const master = formatById.get(productId) ?? productMasterById.get(productId);
       const packLabel =
         master?.packLabel ||
-        text((snapshotRow as any).verpakking_label || (snapshotRow as any).verpakking || productId);
+        text((costLineRow as any).verpakking_label || (costLineRow as any).verpakking || productId);
       const litersPerUnit =
         master?.litersPerUnit ||
         toNumber(
-          (snapshotRow as any).liters_per_product ??
-            (snapshotRow as any).totale_inhoud_liter ??
-            (snapshotRow as any).inhoud_per_eenheid_liter,
+          (costLineRow as any).liters_per_product ??
+            (costLineRow as any).totale_inhoud_liter ??
+            (costLineRow as any).inhoud_per_eenheid_liter,
           0
         );
       const fallbackArticleLiters =
@@ -148,9 +148,9 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         skuKind === "article" ? toNumber((version as any)?.kostprijs, 0) : 0;
       const baseLitersPerUnit = litersPerUnit > 0 ? litersPerUnit : fallbackArticleLiters;
       const costPriceEx =
-        toNumber((snapshotRow as any).kostprijs, 0) || fallbackArticleCost;
+        toNumber((costLineRow as any).kostprijs, 0) || fallbackArticleCost;
       const fixedCostAllocationEx = toNumber(
-        (snapshotRow as any).vaste_kosten ?? (snapshotRow as any).vaste_directe_kosten,
+        (costLineRow as any).vaste_kosten ?? (costLineRow as any).vaste_directe_kosten,
         0
       );
       const variableCostEx = Math.max(0, costPriceEx - fixedCostAllocationEx);
@@ -293,30 +293,19 @@ function buildProductMasterById(
   return map;
 }
 
-function getSnapshotProductRow(
-  version: GenericRecord | undefined,
-  ids: { skuId: string; productId: string }
-) {
-  const snapshotProducts = ((version as any)?.resultaat_snapshot?.producten ?? {}) as Record<
-    string,
-    unknown
-  >;
-  const productRows = [
-    ...(Array.isArray(snapshotProducts.basisproducten) ? snapshotProducts.basisproducten : []),
-    ...(Array.isArray(snapshotProducts.samengestelde_producten)
-      ? snapshotProducts.samengestelde_producten
-      : []),
-  ] as GenericRecord[];
+function getCostLineRow(version: GenericRecord | undefined, ids: { skuId: string; productId: string }) {
+  const costLines = ((version as any)?.cost_lines ?? (version as any)?.costLines ?? []) as unknown;
+  const rows = Array.isArray(costLines) ? (costLines as GenericRecord[]) : [];
 
   const skuId = text(ids.skuId);
   if (skuId) {
-    const bySku = productRows.find((row) => text((row as any).sku_id) === skuId);
+    const bySku = rows.find((row) => text((row as any).sku_id) === skuId);
     if (bySku) return bySku;
   }
 
   const productId = text(ids.productId);
   if (productId) {
-    return productRows.find((row) => text((row as any).product_id) === productId) ?? {};
+    return rows.find((row) => text((row as any).product_id) === productId) ?? {};
   }
   return {};
 }

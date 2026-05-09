@@ -7,6 +7,7 @@ import { buildCentralSkuIndex } from "@/features/sku/centralSkuIndex";
 import { API_BASE_URL } from "@/lib/api";
 import { StepControle } from "@/features/sku-composition/steps/StepControle";
 import { StepLijst } from "@/features/sku-composition/steps/StepLijst";
+import { StepClassificeren } from "@/features/sku-composition/steps/StepClassificeren";
 import {
   text,
   toNumber,
@@ -23,6 +24,7 @@ type Props = {
   year: number;
   initialMode?: FlowMode;
   editFormatId?: string;
+  editArticleId?: string;
   channels: GenericRecord[];
   verkoopprijzen: GenericRecord[];
   skus: GenericRecord[];
@@ -56,23 +58,90 @@ export function ProductSamenstellenWizard(props: Props) {
   const [createdSkuId, setCreatedSkuId] = useState<string>("");
   const [createdArticleId, setCreatedArticleId] = useState<string>("");
   const [didLoadEditFormat, setDidLoadEditFormat] = useState(false);
+  const [didLoadEditArticle, setDidLoadEditArticle] = useState(false);
 
   const [productGroup, setProductGroup] = useState<string>("giftset");
   const [alcoholCategory, setAlcoholCategory] = useState<string>("normaal");
   const [packagingType, setPackagingType] = useState<string>("");
   const [packagingTypeOptIn, setPackagingTypeOptIn] = useState<boolean>(false);
+  const [douanoMappedSkuIds, setDouanoMappedSkuIds] = useState<Set<string>>(new Set());
+  const [douanoMappingBySkuId, setDouanoMappingBySkuId] = useState<Map<string, any>>(new Map());
 
-  const steps = useMemo(
-    () => [
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/integrations/douano/product-mappings?limit=10000`, { cache: "no-store" });
+        const payload = await response.json();
+        const items = Array.isArray((payload as any)?.items) ? (((payload as any).items as any[]) ?? []) : [];
+        const next = new Set<string>();
+        const mapping = new Map<string, any>();
+        items.forEach((row) => {
+          const sid = String((row as any)?.sku_id ?? "").trim();
+          if (!sid) return;
+          next.add(sid);
+          const prev = mapping.get(sid);
+          const nextUpdated = String((row as any)?.updated_at ?? "").trim();
+          const prevUpdated = String(prev?.updated_at ?? "").trim();
+          if (!prev || (nextUpdated && (!prevUpdated || nextUpdated > prevUpdated))) {
+            mapping.set(sid, row);
+          }
+        });
+        if (!cancelled) {
+          setDouanoMappedSkuIds(next);
+          setDouanoMappingBySkuId(mapping);
+        }
+      } catch {
+        if (!cancelled) {
+          setDouanoMappedSkuIds(new Set());
+          setDouanoMappingBySkuId(new Map());
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const showClassificeren = useMemo(() => {
+    if (mode !== "verkoopbaar") return false;
+    const skuId = String(createdSkuId ?? "").trim();
+    if (!skuId) return false;
+    return douanoMappedSkuIds.has(skuId);
+  }, [createdSkuId, douanoMappedSkuIds, mode]);
+
+  const steps = useMemo(() => {
+    const base = [
       { id: "type", label: "Type kiezen", description: "Afvuleenheid of verkoopbaar artikel" },
       { id: "samenstelling", label: "Samenstelling", description: "Items en aantallen" },
       { id: "extras", label: "Extra’s", description: "Verpakking en opties" },
+    ];
+
+    const extra =
+      mode === "verkoopbaar" && showClassificeren
+        ? [
+            {
+              id: "classificeren",
+              label: "Classificeren",
+              description: "Productgroep, alcoholcategorie en verpakkingstype",
+            },
+          ]
+        : [];
+
+    return [
+      ...base,
+      ...extra,
       { id: "controle", label: "Controle", description: "Controleer voor je afrondt" },
       { id: "lijst", label: "Lijst", description: "Resultaat en vervolgstap" },
-    ],
-    []
-  );
+    ];
+  }, [mode, showClassificeren]);
   const currentStep = steps[stepIndex] ?? steps[0];
+
+  useEffect(() => {
+    if (stepIndex >= steps.length) {
+      setStepIndex(0);
+    }
+  }, [stepIndex, steps.length]);
 
   const central = useMemo(() => {
     return buildCentralSkuIndex({
@@ -198,6 +267,67 @@ export function ProductSamenstellenWizard(props: Props) {
     setDidLoadEditFormat(true);
   }, [didLoadEditFormat, props.articles, props.bomLines, props.editFormatId]);
 
+  useEffect(() => {
+    if (didLoadEditArticle) return;
+    if (!props.editArticleId) return;
+    const editId = text(props.editArticleId);
+    if (!editId) return;
+
+    const article = (Array.isArray(props.articles) ? props.articles : []).find((row) => text((row as any).id) === editId);
+    if (!article) return;
+    if (text((article as any).kind).toLowerCase() !== "bundle") return;
+
+    const existingSku = (Array.isArray(props.skus) ? props.skus : []).find((row) => text((row as any).article_id) === editId);
+    const skuId = text((existingSku as any)?.id);
+
+    const subtype = text((article as any).sellable_subtype).toLowerCase();
+    setMode("verkoopbaar");
+    setSellableKind(subtype === "dienst" ? "dienst" : "product");
+    setName(text((article as any).name) || text((article as any).naam) || "Nieuw artikel");
+    setUom((() => {
+      const value = text((article as any).uom).toLowerCase();
+      if (value === "uur") return "uur";
+      if (value === "stuk") return "stuk";
+      if (value === "doos") return "doos";
+      if (value === "fust") return "fust";
+      return "pakket";
+    })());
+    setContentLiter(toNumber((article as any).content_liter, 0));
+    setManualRateEx(toNumber((article as any).manual_rate_ex, 125));
+
+    setProductGroup(text((article as any).product_group) || "giftset");
+    setAlcoholCategory(text((article as any).alcohol_category) || "normaal");
+    setPackagingType(text((article as any).packaging_type) || "");
+    setPackagingTypeOptIn(Boolean(text((article as any).packaging_type)));
+
+    const lines = (Array.isArray(props.bomLines) ? props.bomLines : []).filter((row) => text((row as any).parent_article_id) === editId);
+    const nextComposition: CompositionLine[] = [];
+    const nextPackaging: PackagingLine[] = [];
+    lines.forEach((row) => {
+      const componentSkuId = text((row as any).component_sku_id);
+      const componentArticleId = text((row as any).component_article_id);
+      const qty = Math.max(0, toNumber((row as any).quantity, 0));
+      if (componentSkuId) {
+        nextComposition.push({
+          id: `edit-${editId}-sku-${text((row as any).id) || Math.random().toString(16).slice(2)}`,
+          componentSkuId,
+          qty,
+        });
+        return;
+      }
+      if (componentArticleId) {
+        nextPackaging.push({ id: `edit-${editId}-${text((row as any).id) || Math.random().toString(16).slice(2)}`, kind: "packaging_component", componentId: componentArticleId, qty });
+      }
+    });
+    setComposition(nextComposition);
+    setPackaging(nextPackaging);
+
+    setCreatedArticleId(editId);
+    setCreatedSkuId(skuId);
+    setDidLoadEditArticle(true);
+    setStepIndex(0);
+  }, [didLoadEditArticle, props.articles, props.bomLines, props.editArticleId, props.skus]);
+
   const totals = useMemo(() => {
     let liters = 0;
     let cost = 0;
@@ -317,10 +447,6 @@ export function ProductSamenstellenWizard(props: Props) {
     if (mode === "verkoopbaar" && sellableKind === "dienst") {
       if (toNumber(manualRateEx, 0) <= 0) warnings.push("Tarief per uur is verplicht.");
     }
-    if (mode === "verkoopbaar") {
-      if (!productGroup.trim()) warnings.push("Productgroep is verplicht.");
-      if (packagingRequired && !packagingType.trim()) warnings.push("Verpakkingstype is verplicht voor Drank/Giftset.");
-    }
     return warnings;
   }, [
     composition.length,
@@ -329,12 +455,25 @@ export function ProductSamenstellenWizard(props: Props) {
     sellableKind,
     afvulParts.length,
     manualRateEx,
-    packagingRequired,
-    packagingType,
-    productGroup,
   ]);
 
-  async function createSellableAndRouteToKostprijs() {
+  const beheerClassificationWarning = useMemo(() => {
+    if (mode !== "verkoopbaar") return "";
+    if (sellableKind !== "product") return "";
+    const skuId = String(createdSkuId ?? "").trim();
+    if (!skuId) return "";
+    const mapping = douanoMappingBySkuId.get(skuId) ?? null;
+    if (!mapping) return "Koppeling ontbreekt in Beheer → productkoppeling. Koppel dit SKU om kostprijs te kunnen activeren.";
+    const productGroupValue = String((mapping as any)?.product_group ?? "").trim();
+    const packagingTypeValue = String((mapping as any)?.packaging_type ?? "").trim();
+    if (!productGroupValue) return "Productgroep ontbreekt in Beheer → productkoppeling. Vul dit aan om kostprijs te kunnen activeren.";
+    if ((productGroupValue === "drank" || productGroupValue === "giftset") && !packagingTypeValue) {
+      return "Verpakkingstype is verplicht voor Drank/Giftset. Vul dit aan in Beheer → productkoppeling om kostprijs te kunnen activeren.";
+    }
+    return "";
+  }, [createdSkuId, douanoMappingBySkuId, mode, sellableKind]);
+
+  async function saveSellable(options?: { goToList?: boolean }) {
     setIsSaving(true);
     setStatus("");
     try {
@@ -350,6 +489,8 @@ export function ProductSamenstellenWizard(props: Props) {
         packagingType: packagingRequired || packagingTypeOptIn ? packagingType : "",
         composition,
         packaging,
+        editArticleId: createdArticleId || props.editArticleId || "",
+        editSkuId: createdSkuId || "",
         existingArticles: Array.isArray(props.articles) ? props.articles : [],
         existingSkus: Array.isArray(props.skus) ? props.skus : [],
         existingBomLines: Array.isArray(props.bomLines) ? props.bomLines : [],
@@ -358,8 +499,10 @@ export function ProductSamenstellenWizard(props: Props) {
       setCreatedSkuId(skuId);
       setCreatedArticleId(articleId);
       setStatus("Opgeslagen.");
-      // Always land on the list step; from there the user can continue to kostprijsbeheer if needed.
-      setStepIndex(4);
+      if (options?.goToList) {
+        // Land on the list step; from there the user can continue to kostprijsbeheer if needed.
+        setStepIndex(steps.findIndex((s) => s.id === "lijst"));
+      }
     } catch (err) {
       setStatus(`Opslaan mislukt: ${String((err as any)?.message ?? err)}`);
     } finally {
@@ -367,7 +510,7 @@ export function ProductSamenstellenWizard(props: Props) {
     }
   }
 
-  async function createAfvuleenheid() {
+  async function saveAfvuleenheid(options?: { goToList?: boolean }) {
     setIsSaving(true);
     setStatus("");
     try {
@@ -383,7 +526,9 @@ export function ProductSamenstellenWizard(props: Props) {
       });
       setStatus("Afvuleenheid opgeslagen.");
       setCreatedArticleId(articleId);
-      setStepIndex(4);
+      if (options?.goToList) {
+        setStepIndex(steps.findIndex((s) => s.id === "lijst"));
+      }
     } catch (err) {
       setStatus(`Opslaan mislukt: ${String((err as any)?.message ?? err)}`);
     } finally {
@@ -462,6 +607,7 @@ export function ProductSamenstellenWizard(props: Props) {
                           </select>
                         </label>
 
+                        {false ? (<>
                         <label className="nested-field">
                           <span>Productgroep</span>
                           <select
@@ -540,9 +686,30 @@ export function ProductSamenstellenWizard(props: Props) {
                             </select>
                           </div>
                         </div>
+                        </>) : null}
                       </>
                     ) : null}
                   </div>
+                ) : null}
+
+                {currentStep.id === "classificeren" ? (
+                  <StepClassificeren
+                    mode={mode}
+                    sellableKind={sellableKind}
+                    name={name}
+                    uom={uom}
+                    productGroup={productGroup}
+                    alcoholCategory={alcoholCategory}
+                    packagingType={packagingType}
+                    packagingTypeOptIn={packagingTypeOptIn}
+                    productgroepen={props.productgroepen}
+                    alcoholcategorieen={props.alcoholcategorieen}
+                    verpakkingstypen={props.verpakkingstypen}
+                    setProductGroup={setProductGroup}
+                    setAlcoholCategory={setAlcoholCategory}
+                    setPackagingType={setPackagingType}
+                    setPackagingTypeOptIn={setPackagingTypeOptIn}
+                  />
                 ) : null}
 
                 {currentStep.id === "samenstelling" ? (
@@ -827,6 +994,10 @@ export function ProductSamenstellenWizard(props: Props) {
                     uom={uom}
                     totals={totals}
                     blockingWarnings={blockingWarnings}
+                    beheerWarning={beheerClassificationWarning}
+                    onGoToBeheer={() => {
+                      window.location.href = "/beheer/productkoppeling";
+                    }}
                   />
                 ) : null}
 
@@ -835,6 +1006,7 @@ export function ProductSamenstellenWizard(props: Props) {
                     mode={mode}
                     sellableKind={sellableKind}
                     name={name}
+                    year={props.year}
                     createdSkuId={createdSkuId}
                     createdArticleId={createdArticleId}
                     onBackToControle={() => setStepIndex(3)}
@@ -855,28 +1027,72 @@ export function ProductSamenstellenWizard(props: Props) {
                   ) : null}
                 </div>
                 <div className="editor-actions-group">
-                  <button type="button" className="editor-button editor-button-secondary" onClick={() => window.history.back()}>
-                    Terug
-                  </button>
                   {currentStep.id === "lijst" ? null : (
                     <button
                       type="button"
-                      className="editor-button"
-                      disabled={isSaving || (currentStep.id === "controle" && blockingWarnings.length > 0)}
-                      onClick={() => {
-                        if (currentStep.id === "controle") {
+                      className="editor-button editor-button-secondary"
+                      onClick={() => window.history.back()}
+                    >
+                      Terug
+                    </button>
+                  )}
+
+                  {currentStep.id === "controle" ? (
+                    <>
+                      <button
+                        type="button"
+                        className="editor-button"
+                        disabled={isSaving || blockingWarnings.length > 0}
+                        onClick={() => {
                           if (mode === "afvuleenheid") {
-                            void createAfvuleenheid();
+                            void saveAfvuleenheid();
                             return;
                           }
-                          void createSellableAndRouteToKostprijs();
-                          return;
-                        }
-                        setStepIndex((i) => Math.min(steps.length - 1, i + 1));
-                      }}
-                    >
-                      {isSaving ? "Opslaan..." : currentStep.id === "controle" ? "Opslaan" : "Volgende"}
-                    </button>
+                          void saveSellable();
+                        }}
+                      >
+                        {isSaving ? "Opslaan..." : "Opslaan"}
+                      </button>
+                      <button
+                        type="button"
+                        className="editor-button editor-button-primary"
+                        disabled={isSaving || blockingWarnings.length > 0}
+                        onClick={() => {
+                          if (mode === "afvuleenheid") {
+                            void saveAfvuleenheid({ goToList: true });
+                            return;
+                          }
+                          void saveSellable({ goToList: true });
+                        }}
+                      >
+                        {isSaving ? "Opslaan..." : "Opslaan & verder"}
+                      </button>
+                    </>
+                  ) : currentStep.id === "lijst" ? null : (
+                    <>
+                      <button
+                        type="button"
+                        className="editor-button"
+                        disabled={isSaving || blockingWarnings.length > 0}
+                        onClick={() => {
+                          if (mode === "afvuleenheid") {
+                            void saveAfvuleenheid();
+                            return;
+                          }
+                          void saveSellable();
+                        }}
+                      >
+                        {isSaving ? "Opslaan..." : "Opslaan"}
+                      </button>
+                      <button
+                        type="button"
+                        className="editor-button editor-button-primary"
+                        disabled={isSaving}
+                        onClick={() => setStepIndex((i) => Math.min(steps.length - 1, i + 1))}
+                      >
+                        Volgende
+                      </button>
+                    </>
                   )}
                 </div>
               </div>

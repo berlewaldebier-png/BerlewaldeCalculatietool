@@ -124,8 +124,10 @@ export function findSnapshotRowForSku(args: {
 }) {
   const { version, skuId, skuById } = args;
   if (!version) return null;
-  const products = ((version as any).resultaat_snapshot ?? {}).producten ?? {};
-  const list = Array.isArray(products.basisproducten) ? products.basisproducten : [];
+  // Canonical: use normalized cost lines provided by the backend (derived from cost_version_sku_rows).
+  // Avoid reading `resultaat_snapshot` to prevent hidden fallback logic.
+  const costLines = ((version as any).cost_lines ?? (version as any).costLines ?? []) as unknown;
+  const list = Array.isArray(costLines) ? (costLines as any[]) : [];
 
   // 1) Preferred: explicit sku_id in snapshot rows (article/bundle cost versions).
   const direct = (list as any[]).find((row) => text(row?.sku_id) === skuId) ?? null;

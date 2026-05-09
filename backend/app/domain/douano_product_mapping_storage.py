@@ -142,3 +142,81 @@ def list_mappings(*, limit: int = 2000) -> list[dict[str, Any]]:
         )
     return out
 
+
+def update_classification_by_sku_id(
+    *,
+    sku_id: str,
+    product_group: str = "",
+    alcohol_category: str = "",
+    packaging_type: str = "",
+) -> dict[str, Any]:
+    """Update classification fields for all mappings that point to `sku_id`.
+
+    Productkoppeling (douano_product_mapping) is treated as the source of truth for
+    classification used by ERP/margin/dashboard services.
+
+    Returns a small report including the list of updated douano_product_id's.
+    """
+    ensure_schema()
+    sku = str(sku_id or "").strip()
+    if not sku:
+        raise ValueError("sku_id is verplicht")
+
+    group = str(product_group or "").strip()
+    alcohol = str(alcohol_category or "").strip()
+    packaging = str(packaging_type or "").strip()
+    now = datetime.now(UTC)
+
+    updated_ids: list[int] = []
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE douano_product_mapping
+                SET product_group = %s,
+                    alcohol_category = %s,
+                    packaging_type = %s,
+                    updated_at = %s
+                WHERE sku_id = %s
+                RETURNING douano_product_id
+                """,
+                (group, alcohol, packaging, now, sku),
+            )
+            rows = cur.fetchall() or []
+            updated_ids = [int(pid or 0) for (pid,) in rows if int(pid or 0) > 0]
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    return {
+        "sku_id": sku,
+        "updated": len(updated_ids),
+        "douano_product_ids": updated_ids,
+        "updated_at": now.isoformat(),
+    }
+
+
+def delete_mappings_for_sku_id(*, sku_id: str) -> dict[str, Any]:
+    """Delete product-mapping rows for a given sku_id (dev/admin only helper)."""
+    ensure_schema()
+    sku = str(sku_id or "").strip()
+    if not sku:
+        raise ValueError("sku_id is verplicht")
+
+    deleted_ids: list[int] = []
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM douano_product_mapping
+                WHERE sku_id = %s
+                RETURNING douano_product_id
+                """,
+                (sku,),
+            )
+            rows = cur.fetchall() or []
+            deleted_ids = [int(pid or 0) for (pid,) in rows if int(pid or 0) > 0]
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    return {"sku_id": sku, "deleted": len(deleted_ids), "douano_product_ids": deleted_ids}
+

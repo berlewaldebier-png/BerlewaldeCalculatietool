@@ -68,6 +68,10 @@ function run() {
       {
         id: "kpv",
         basisgegevens: { btw_tarief: "21%" },
+        cost_lines: [
+          { sku_id: "sku-a", product_id: "fmt-a", kostprijs: 1, vaste_kosten: 0.1 },
+          { sku_id: "sku-b", product_id: "fmt-b", kostprijs: 1, vaste_kosten: 0.1 },
+        ],
         resultaat_snapshot: {
           producten: {
             basisproducten: [

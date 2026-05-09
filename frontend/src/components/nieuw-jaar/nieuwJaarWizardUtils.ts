@@ -63,11 +63,8 @@ export function formatEur(value: number) {
 }
 
 export function snapshotProductCostFromRecord(record: any, productId: string) {
-  const producten = record?.resultaat_snapshot?.producten;
-  const rows = [
-    ...(Array.isArray(producten?.basisproducten) ? producten.basisproducten : []),
-    ...(Array.isArray(producten?.samengestelde_producten) ? producten.samengestelde_producten : []),
-  ];
+  const costLines = record?.cost_lines ?? record?.costLines ?? [];
+  const rows = Array.isArray(costLines) ? costLines : [];
   const found = rows.find((row: any) => String(row.product_id ?? "") === productId) ?? null;
   if (!found) return null;
   return {

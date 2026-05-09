@@ -51,6 +51,7 @@ export default async function ProductSamenstellenPage({
 
   const modeParam = typeof searchParams?.mode === "string" ? searchParams.mode : "";
   const formatIdParam = typeof searchParams?.format_id === "string" ? searchParams.format_id : "";
+  const articleIdParam = typeof searchParams?.article_id === "string" ? searchParams.article_id : "";
 
   return (
     <PageShell
@@ -63,6 +64,7 @@ export default async function ProductSamenstellenPage({
         year={year}
         initialMode={modeParam === "afvuleenheid" ? "afvuleenheid" : "verkoopbaar"}
         editFormatId={formatIdParam || ""}
+        editArticleId={articleIdParam || ""}
         channels={channels}
         verkoopprijzen={verkoopprijzen}
         skus={skus}

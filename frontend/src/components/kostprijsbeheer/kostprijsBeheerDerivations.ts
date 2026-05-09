@@ -161,15 +161,8 @@ export function buildActiveRows(args: {
       );
 
       const packagingLabel = basisById.get(productId) ?? samengesteldById.get(productId) ?? "";
-      const producten =
-        (versie as any)?.resultaat_snapshot && typeof (versie as any)?.resultaat_snapshot === "object"
-          ? (((versie as any).resultaat_snapshot as any).producten as any)
-          : undefined;
-      const basisSnapshot = Array.isArray(producten?.basisproducten) ? (producten.basisproducten as GenericRecord[]) : [];
-      const samengesteldSnapshot = Array.isArray(producten?.samengestelde_producten)
-        ? (producten.samengestelde_producten as GenericRecord[])
-        : [];
-      const snapshotRows = [...basisSnapshot, ...samengesteldSnapshot];
+      const costLinesRaw = (versie as any)?.cost_lines ?? (versie as any)?.costLines ?? [];
+      const snapshotRows = Array.isArray(costLinesRaw) ? (costLinesRaw as GenericRecord[]) : [];
       const matchingSnapshotRow =
         (effectiefProductId
           ? snapshotRows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId)
@@ -207,16 +200,8 @@ export function buildActiveRows(args: {
 
         // Definitive versions must have a snapshot containing this packaging label.
         if (statusValue === "definitief") {
-          const snapshot =
-            (record as any)?.resultaat_snapshot && typeof (record as any)?.resultaat_snapshot === "object"
-              ? (((record as any).resultaat_snapshot as any).producten as any)
-              : undefined;
-          const rows = [
-            ...(Array.isArray(snapshot?.basisproducten) ? (snapshot.basisproducten as GenericRecord[]) : []),
-            ...(Array.isArray(snapshot?.samengestelde_producten)
-              ? (snapshot.samengestelde_producten as GenericRecord[])
-              : []),
-          ];
+          const costLines = (record as any)?.cost_lines ?? (record as any)?.costLines ?? [];
+          const rows = Array.isArray(costLines) ? (costLines as GenericRecord[]) : [];
           return rows.some(
             (item) =>
               String(getSnapshotPackagingLabel(item)).trim().toLowerCase() ===
@@ -258,18 +243,8 @@ export function buildActiveRows(args: {
           return finalized > activeFinalized || updated > activeUpdated;
         })
         .map((record) => {
-          const snapshot =
-            (record as any)?.resultaat_snapshot && typeof (record as any)?.resultaat_snapshot === "object"
-              ? (((record as any).resultaat_snapshot as any).producten as any)
-              : undefined;
-          const rows = snapshot
-            ? [
-                ...(Array.isArray(snapshot?.basisproducten) ? (snapshot.basisproducten as GenericRecord[]) : []),
-                ...(Array.isArray(snapshot?.samengestelde_producten)
-                  ? (snapshot.samengestelde_producten as GenericRecord[])
-                  : []),
-              ]
-            : [];
+          const costLinesRaw = (record as any)?.cost_lines ?? (record as any)?.costLines ?? [];
+          const rows = Array.isArray(costLinesRaw) ? (costLinesRaw as GenericRecord[]) : [];
           const match =
             (effectiefProductId
               ? rows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId)

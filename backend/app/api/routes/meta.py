@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.domain import dataset_store
+from app.domain import cost_versions_storage
 from app.domain import dashboard_service
 from app.domain import erp_dashboard_service
 from app.domain import auth_service
@@ -944,6 +945,310 @@ def post_dev_cleanup_duplicate_skus(
         return {"result": skus_storage.cleanup_duplicate_skus(dry_run=bool(dry_run))}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/dev/delete-sellable")
+def post_dev_delete_sellable(
+    article_id: str = Query("", description="Article id (bundle/article) to delete."),
+    sku_id: str = Query("", description="SKU id to delete (optional; inferred from article_id when omitted)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: delete a sellable article/SKU and related rows (development only)."""
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Delete is alleen toegestaan in local/dev.")
+
+    target_article_id = str(article_id or "").strip()
+    target_sku_id = str(sku_id or "").strip()
+    if not target_article_id and not target_sku_id:
+        raise HTTPException(status_code=400, detail="Geef article_id of sku_id mee.")
+
+    try:
+        from app.domain import douano_product_mapping_storage
+
+        # Resolve sku ids when only article_id is provided.
+        skus = postgres_storage.load_dataset("skus", [])
+        if not isinstance(skus, list):
+            skus = []
+        sku_ids: set[str] = set()
+        if target_sku_id:
+            sku_ids.add(target_sku_id)
+        if target_article_id:
+            for row in skus:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("article_id", "") or "").strip() == target_article_id:
+                    sid = str(row.get("id", "") or "").strip()
+                    if sid:
+                        sku_ids.add(sid)
+
+        report: dict[str, Any] = {"article_id": target_article_id, "sku_ids": sorted(sku_ids), "deleted": {}}
+
+        # Articles.
+        if target_article_id:
+            articles = postgres_storage.load_dataset("articles", [])
+            if isinstance(articles, list):
+                before = len(articles)
+                articles = [
+                    row
+                    for row in articles
+                    if not (isinstance(row, dict) and str(row.get("id", "") or "").strip() == target_article_id)
+                ]
+                report["deleted"]["articles"] = before - len(articles)
+                postgres_storage.save_dataset("articles", articles, overwrite=True)
+
+        # SKUs.
+        if sku_ids:
+            # cost_version_sku_rows has a FK to skus (ON DELETE RESTRICT). Clear those rows first.
+            try:
+                with postgres_storage.connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "DELETE FROM cost_version_sku_rows WHERE sku_id = ANY(%s)",
+                            (list(sku_ids),),
+                        )
+                        report["deleted"]["cost_version_sku_rows"] = int(cur.rowcount or 0)
+                    if not postgres_storage.in_transaction():
+                        conn.commit()
+            except Exception:
+                report["deleted"]["cost_version_sku_rows"] = "error"
+
+            before = len(skus)
+            skus = [
+                row
+                for row in skus
+                if not (isinstance(row, dict) and str(row.get("id", "") or "").strip() in sku_ids)
+            ]
+            report["deleted"]["skus"] = before - len(skus)
+            postgres_storage.save_dataset("skus", skus, overwrite=True)
+
+        # BOM lines referencing the article as parent.
+        if target_article_id:
+            bom_lines = postgres_storage.load_dataset("bom-lines", [])
+            if isinstance(bom_lines, list):
+                before = len(bom_lines)
+                bom_lines = [
+                    row
+                    for row in bom_lines
+                    if not (isinstance(row, dict) and str(row.get("parent_article_id", "") or "").strip() == target_article_id)
+                ]
+                report["deleted"]["bom-lines"] = before - len(bom_lines)
+                postgres_storage.save_dataset("bom-lines", bom_lines, overwrite=True)
+
+        # Kostprijsversies referencing the article/sku.
+        kostprijsversies = postgres_storage.load_dataset("kostprijsversies", [])
+        if isinstance(kostprijsversies, list):
+            before = len(kostprijsversies)
+
+            def _keep_kv(row: Any) -> bool:
+                if not isinstance(row, dict):
+                    return True
+                basis = row.get("basisgegevens", {})
+                if not isinstance(basis, dict):
+                    basis = {}
+                a_id = str(basis.get("article_id", "") or "").strip()
+                s_id = str(basis.get("sku_id", "") or "").strip()
+                if target_article_id and a_id == target_article_id:
+                    return False
+                if sku_ids and s_id in sku_ids:
+                    return False
+                return True
+
+            kostprijsversies = [row for row in kostprijsversies if _keep_kv(row)]
+            report["deleted"]["kostprijsversies"] = before - len(kostprijsversies)
+            postgres_storage.save_dataset("kostprijsversies", kostprijsversies, overwrite=True)
+
+        # Activations for sku ids.
+        if sku_ids:
+            activations = postgres_storage.load_dataset("kostprijsproductactiveringen", [])
+            if isinstance(activations, list):
+                before = len(activations)
+                activations = [
+                    row
+                    for row in activations
+                    if not (isinstance(row, dict) and str(row.get("sku_id", "") or "").strip() in sku_ids)
+                ]
+                report["deleted"]["kostprijsproductactiveringen"] = before - len(activations)
+                postgres_storage.save_dataset("kostprijsproductactiveringen", activations, overwrite=True)
+
+        # Verkoopprijzen for sku ids.
+        if sku_ids:
+            verkoopprijzen = postgres_storage.load_dataset("verkoopprijzen", [])
+            if isinstance(verkoopprijzen, list):
+                before = len(verkoopprijzen)
+                verkoopprijzen = [
+                    row
+                    for row in verkoopprijzen
+                    if not (isinstance(row, dict) and str(row.get("sku_id", "") or "").strip() in sku_ids)
+                ]
+                report["deleted"]["verkoopprijzen"] = before - len(verkoopprijzen)
+                postgres_storage.save_dataset("verkoopprijzen", verkoopprijzen, overwrite=True)
+
+        # Remove product-mappings that point to these sku ids.
+        mapping_deleted: list[dict[str, Any]] = []
+        for sid in sorted(sku_ids):
+            try:
+                mapping_deleted.append(douano_product_mapping_storage.delete_mappings_for_sku_id(sku_id=sid))
+            except Exception:
+                continue
+        report["deleted"]["douano_product_mapping"] = mapping_deleted
+
+        return report
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/dev/delete-kostprijs-activation")
+def post_dev_delete_kostprijs_activation(
+    sku_id: str = Query(..., description="SKU id waarvan de kostprijs-activatie verwijderd moet worden."),
+    jaar: int | None = Query(None, description="Optioneel: beperk tot jaar. Wanneer leeg: verwijder alle jaren."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: delete kostprijs activations for a SKU (development only).
+
+    This is useful when a SKU shows up in 'Actieve kostprijzen' with an unknown kostprijsversie
+    because the referenced kostprijsversie was removed during dev work.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Delete is alleen toegestaan in local/dev.")
+
+    target_sku_id = str(sku_id or "").strip()
+    if not target_sku_id:
+        raise HTTPException(status_code=400, detail="sku_id is verplicht.")
+
+    try:
+        from app.domain import kostprijs_activation_storage
+
+        kostprijs_activation_storage.ensure_schema()
+        deleted_activations = 0
+        deleted_events = 0
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                if jaar is None:
+                    cur.execute(
+                        "DELETE FROM kostprijs_sku_activation_events WHERE sku_id = %s",
+                        (target_sku_id,),
+                    )
+                    deleted_events = int(cur.rowcount or 0)
+                    cur.execute(
+                        "DELETE FROM kostprijs_sku_activations WHERE sku_id = %s",
+                        (target_sku_id,),
+                    )
+                    deleted_activations = int(cur.rowcount or 0)
+                else:
+                    year_value = int(jaar or 0)
+                    cur.execute(
+                        "DELETE FROM kostprijs_sku_activation_events WHERE sku_id = %s AND jaar = %s",
+                        (target_sku_id, year_value),
+                    )
+                    deleted_events = int(cur.rowcount or 0)
+                    cur.execute(
+                        "DELETE FROM kostprijs_sku_activations WHERE sku_id = %s AND jaar = %s",
+                        (target_sku_id, year_value),
+                    )
+                    deleted_activations = int(cur.rowcount or 0)
+            if not postgres_storage.in_transaction():
+                conn.commit()
+        return {
+            "sku_id": target_sku_id,
+            "jaar": int(jaar) if jaar is not None else None,
+            "deleted": {"kostprijs_sku_activations": deleted_activations, "kostprijs_sku_activation_events": deleted_events},
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/dev/delete-cost-version")
+def post_dev_delete_cost_version(
+    version_id: str = Query(..., description="Kostprijsversie id om te verwijderen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: delete a cost version (and its normalized cost lines).
+
+    Safety:
+    - Refuses deletion when there are active activations referencing this version id.
+    """
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Delete is alleen toegestaan in local/dev.")
+
+    target_version_id = str(version_id or "").strip()
+    if not target_version_id:
+        raise HTTPException(status_code=400, detail="version_id is verplicht.")
+
+    try:
+        from app.domain import cost_versions_storage, kostprijs_activation_storage
+
+        cost_versions_storage.ensure_schema()
+        kostprijs_activation_storage.ensure_schema()
+
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*)::int
+                    FROM kostprijs_sku_activations
+                    WHERE kostprijsversie_id = %s
+                      AND effectief_tot IS NULL
+                    """,
+                    (target_version_id,),
+                )
+                active_refs = int((cur.fetchone() or [0])[0] or 0)
+                if active_refs > 0:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Kan kostprijsversie niet verwijderen: er zijn actieve activaties die hiernaar verwijzen.",
+                    )
+
+                cur.execute("SELECT COUNT(*)::int FROM kostprijs_sku_activations WHERE kostprijsversie_id = %s", (target_version_id,))
+                total_refs = int((cur.fetchone() or [0])[0] or 0)
+
+                cur.execute("DELETE FROM cost_versions WHERE id = %s", (target_version_id,))
+                deleted_versions = int(cur.rowcount or 0)
+
+            if not postgres_storage.in_transaction():
+                conn.commit()
+
+        return {
+            "version_id": target_version_id,
+            "deleted": {"cost_versions": deleted_versions},
+            "references": {"activations_total": total_refs, "activations_active": active_refs},
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/audit/cost-lines")
+def get_audit_cost_lines(
+    year: int = Query(2025, description="Jaar om te auditen (default 2025)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin audit: detect kostprijsversies without normalized per-SKU cost lines."""
+    try:
+        return {"result": cost_versions_storage.audit_sku_row_coverage(year=int(year))}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/repair/cost-lines")
+def post_repair_cost_lines(
+    year: int = Query(2025, description="Jaar om te repareren (default 2025)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin repair: regenerate normalized per-SKU cost lines from version payload snapshots."""
+    try:
+        return {
+            "result": cost_versions_storage.rebuild_sku_rows_for_year(year=int(year), dry_run=bool(dry_run))
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/new-year-draft")

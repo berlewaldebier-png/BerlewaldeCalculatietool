@@ -70,6 +70,55 @@ export function VerkoopbareArtikelenWorkspace({
     });
   }, [rows, query, showOnlyMissing]);
 
+  const kostprijsBySkuId = useMemo(() => {
+    const index = new Map<string, string>();
+    const lastTsBySkuId = new Map<string, string>();
+    const candidates = Array.isArray(kostprijsversies) ? kostprijsversies : [];
+    candidates.forEach((row) => {
+      const rec = row as any;
+      const jaar = Number(rec?.jaar ?? rec?.basisgegevens?.jaar ?? 0) || 0;
+      if (jaar !== year) return;
+      const skuId = String(rec?.basisgegevens?.sku_id ?? "").trim();
+      const id = String(rec?.id ?? "").trim();
+      if (!skuId || !id) return;
+      // Prefer the most recently updated record per SKU (definitief usually wins by updated_at).
+      const ts = String(rec?.aangepast_op ?? rec?.updated_at ?? rec?.aangemaakt_op ?? rec?.created_at ?? "");
+      const prevTs = lastTsBySkuId.get(skuId) ?? "";
+      if (!prevTs || (ts && ts > prevTs)) {
+        index.set(skuId, id);
+        lastTsBySkuId.set(skuId, ts);
+      }
+    });
+    return index;
+  }, [kostprijsversies, year]);
+
+  const skuById = useMemo(() => {
+    const map = new Map<string, GenericRecord>();
+    (Array.isArray(skus) ? skus : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "").trim();
+      if (id) map.set(id, row as any);
+    });
+    return map;
+  }, [skus]);
+
+  const activationVersionBySkuId = useMemo(() => {
+    const map = new Map<string, { versionId: string; updatedAt: string }>();
+    (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).forEach((row) => {
+      const rec = row as any;
+      const jaar = Number(rec?.jaar ?? 0) || 0;
+      if (jaar !== year) return;
+      const skuId = String(rec?.sku_id ?? "").trim();
+      const versionId = String(rec?.kostprijsversie_id ?? "").trim();
+      if (!skuId || !versionId) return;
+      const updatedAt = String(rec?.updated_at ?? rec?.updatedAt ?? rec?.effectief_vanaf ?? "").trim();
+      const prev = map.get(skuId);
+      if (!prev || (updatedAt && (!prev.updatedAt || updatedAt > prev.updatedAt))) {
+        map.set(skuId, { versionId, updatedAt });
+      }
+    });
+    return map;
+  }, [kostprijsproductactiveringen, year]);
+
   return (
     <section className="module-card">
       <div className="module-card-header">
@@ -135,11 +184,34 @@ export function VerkoopbareArtikelenWorkspace({
                       : "Nog te activeren";
                 const actionHref =
                   row.pricingMethod === "cost_plus"
-                    ? ({
-                        pathname: "/nieuwe-kostprijsberekening",
-                        query: { mode: "sku", kind: row.subtype, sku_id: row.skuId },
-                      } as any)
+                    ? (() => {
+                        const activationVersionId = activationVersionBySkuId.get(row.skuId)?.versionId ?? "";
+                        const existingId = activationVersionId || (kostprijsBySkuId.get(row.skuId) ?? "");
+                        if (existingId) {
+                          return {
+                            pathname: "/nieuwe-kostprijsberekening",
+                            query: { mode: "wizard-edit", selected_id: existingId },
+                          } as any;
+                        }
+                        const kind = row.subtype === "bier" ? "beer" : "article";
+                        return {
+                          pathname: "/nieuwe-kostprijsberekening",
+                          query: { mode: "wizard-new", kind, sku_id: row.skuId },
+                        } as any;
+                      })()
                     : null;
+                const editBundleHref = (() => {
+                  const skuRow = skuById.get(row.skuId) as any;
+                  if (!skuRow) return null;
+                  const kind = String(skuRow?.kind ?? "").trim().toLowerCase();
+                  if (kind !== "article") return null;
+                  const articleId = String(skuRow?.article_id ?? "").trim();
+                  if (!articleId) return null;
+                  return {
+                    pathname: "/product-samenstellen",
+                    query: { mode: "verkoopbaar", article_id: articleId },
+                  } as any;
+                })();
                 return (
                   <tr key={row.skuId}>
                     <td style={{ fontWeight: 600 }}>{row.label}</td>
@@ -149,13 +221,20 @@ export function VerkoopbareArtikelenWorkspace({
                     <td>{row.pricingMethod === "cost_plus" ? moneyEUR(row.kostprijsEx) : "—"}</td>
                     <td>{status}</td>
                     <td style={{ textAlign: "right" }}>
-                      {actionHref ? (
-                        <Link className="cpq-button" href={actionHref}>
-                          Kostprijs beheren
-                        </Link>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
+                      <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+                        {editBundleHref ? (
+                          <Link className="cpq-button" href={editBundleHref}>
+                            Bewerken
+                          </Link>
+                        ) : null}
+                        {actionHref ? (
+                          <Link className="cpq-button" href={actionHref}>
+                            Kostprijs beheren
+                          </Link>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 );

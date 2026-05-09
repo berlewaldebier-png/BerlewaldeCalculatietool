@@ -52,6 +52,7 @@ export default async function NieuweKostprijsberekeningPage({
   const focus = typeof resolvedSearchParams.focus === "string" ? resolvedSearchParams.focus : "";
   const kind = typeof resolvedSearchParams.kind === "string" ? resolvedSearchParams.kind : "";
   const skuId = typeof resolvedSearchParams.sku_id === "string" ? resolvedSearchParams.sku_id : "";
+  const selectedId = typeof resolvedSearchParams.selected_id === "string" ? resolvedSearchParams.selected_id : "";
 
   return (
     <PageShell
@@ -80,6 +81,7 @@ export default async function NieuweKostprijsberekeningPage({
         initialFocus={focus}
         initialWizardKind={kind}
         initialSkuId={skuId}
+        initialSelectedId={selectedId}
       />
     </PageShell>
   );

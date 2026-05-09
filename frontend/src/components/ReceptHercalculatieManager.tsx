@@ -218,44 +218,32 @@ export function ReceptHercalculatieManager({
   }
 
   function getVersionProducts(row: GenericRecord) {
-    const producten =
-      typeof row.resultaat_snapshot === "object" && row.resultaat_snapshot !== null
-        ? ((row.resultaat_snapshot as GenericRecord).producten as GenericRecord | undefined)
-        : undefined;
     const out = new Map<string, { id: string; label: string; type: "basis" | "samengesteld" }>();
-    const basisRows = Array.isArray(producten?.basisproducten)
-      ? (producten?.basisproducten as GenericRecord[])
-      : [];
-    const samengesteldeRows = Array.isArray(producten?.samengestelde_producten)
-      ? (producten?.samengestelde_producten as GenericRecord[])
-      : [];
 
-    basisRows.forEach((productRow) => {
-      const productId =
-        String(productRow.product_id ?? "") ||
-        String(
-          [...basisById.values()].find(
-            (item) => normalizeKey(item.omschrijving) === normalizeKey(productRow.verpakking ?? productRow.verpakkingseenheid)
-          )?.id ?? ""
-        );
-      const label = String(productRow.verpakking ?? productRow.verpakkingseenheid ?? productRow.omschrijving ?? "");
-      if (productId && label) {
-        out.set(productId, { id: productId, label, type: "basis" });
-      }
-    });
+    const costLines = Array.isArray((row as any)?.cost_lines)
+      ? ((row as any).cost_lines as GenericRecord[])
+      : Array.isArray((row as any)?.costLines)
+        ? ((row as any).costLines as GenericRecord[])
+        : [];
 
-    samengesteldeRows.forEach((productRow) => {
-      const productId =
-        String(productRow.product_id ?? "") ||
-        String(
-          [...samengesteldById.values()].find(
-            (item) => normalizeKey(item.omschrijving) === normalizeKey(productRow.verpakking ?? productRow.verpakkingseenheid)
-          )?.id ?? ""
-        );
-      const label = String(productRow.verpakking ?? productRow.verpakkingseenheid ?? productRow.omschrijving ?? "");
-      if (productId && label) {
-        out.set(productId, { id: productId, label, type: "samengesteld" });
-      }
+    costLines.forEach((productRow) => {
+      const productId = String((productRow as any).product_id ?? "").trim();
+      const label = String(
+        (productRow as any).verpakking ??
+          (productRow as any).verpakkingseenheid ??
+          (productRow as any).verpakking_label ??
+          (productRow as any).omschrijving ??
+          ""
+      ).trim();
+      if (!productId || !label) return;
+
+      const type: "basis" | "samengesteld" = basisById.has(productId)
+        ? "basis"
+        : samengesteldById.has(productId)
+          ? "samengesteld"
+          : "basis";
+
+      out.set(productId, { id: productId, label, type });
     });
 
     return [...out.values()];

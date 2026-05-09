@@ -9,13 +9,16 @@ export default async function HomePage({
   const sinceRaw = searchParams?.since;
   const untilRaw = searchParams?.until;
   const yearRaw = searchParams?.year;
+  const basisRaw = searchParams?.basis;
   const since = Array.isArray(sinceRaw) ? sinceRaw[0] : sinceRaw;
   const until = Array.isArray(untilRaw) ? untilRaw[0] : untilRaw;
   const year = Array.isArray(yearRaw) ? yearRaw[0] : yearRaw;
+  const basis = Array.isArray(basisRaw) ? basisRaw[0] : basisRaw;
   const extraParams: Record<string, string> = {};
   if (since) extraParams.since = String(since);
   if (until) extraParams.until = String(until);
   if (year) extraParams.year = String(year);
+  if (basis) extraParams.basis = String(basis);
 
   const nextPath = Object.keys(extraParams).length
     ? `/?${new URLSearchParams(extraParams).toString()}`
@@ -45,7 +48,7 @@ export default async function HomePage({
     range: { basis: "order", since: "", until: "" },
     kpis: null,
     trends: { revenue: [], orders: [] },
-    tables: { top_customers: [], latest_orders: [], under_break_even: [], product_groups: [] },
+    tables: { top_customers: [], latest_orders: [], under_break_even: [], product_groups: [], packaging_types: [] },
     break_even: { year: 0, active_config: null },
     alerts: []
   };
@@ -69,7 +72,7 @@ export default async function HomePage({
       navigation={navigation}
       payload={payload}
       breakEvenContext={breakEvenContext}
-      initialFilters={{ since: since ? String(since) : "", until: until ? String(until) : "", year: year ? String(year) : "" }}
+      initialFilters={{ since: since ? String(since) : "", until: until ? String(until) : "", year: year ? String(year) : "", basis: basis ? String(basis) : "" }}
     />
   );
 }

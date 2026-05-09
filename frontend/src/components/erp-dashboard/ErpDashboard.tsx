@@ -46,7 +46,7 @@ import {
 type Props = {
   navigation: NavigationItem[];
   payload: ErpDashboardPayload;
-  initialFilters?: { since: string; until: string; year: string };
+  initialFilters?: { since: string; until: string; year: string; basis?: string };
   breakEvenContext?: {
     configs?: unknown;
     vasteKosten?: unknown;
@@ -67,6 +67,13 @@ type KpiDef = {
   value: string;
   sub: string;
   icon: React.ComponentType<{ className?: string }>;
+};
+
+const CHART_COLORS = {
+  blue: "#2563eb",
+  blueFill: "rgba(37, 99, 235, 0.12)",
+  slate: "#94a3b8",
+  purple: "#8b5cf6",
 };
 
 function clampPct(value: number) {
@@ -128,12 +135,16 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
   const hasInitialFilters = Boolean(
     (initialFilters?.since || "").trim() ||
       (initialFilters?.until || "").trim() ||
-      (initialFilters?.year || "").trim()
+      (initialFilters?.year || "").trim() ||
+      (initialFilters?.basis || "").trim()
   );
   const [showFilters, setShowFilters] = useState(hasInitialFilters);
   const [sinceInput, setSinceInput] = useState((initialFilters?.since || payload.range?.since || "").trim());
   const [untilInput, setUntilInput] = useState((initialFilters?.until || payload.range?.until || "").trim());
   const [yearInput, setYearInput] = useState<string>((initialFilters?.year || "").trim());
+  const [basisInput, setBasisInput] = useState<string>(
+    (initialFilters?.basis || payload.range?.basis || "order").trim() || "order"
+  );
 
   const availableYears = (payload.available_years ?? []).filter((y) => Number.isFinite(y) && y > 0);
 
@@ -254,10 +265,10 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
     return (payload.trends?.revenue ?? []).map((row) => {
       const dateLabel = shortDateLabel(row.date);
       return {
-      date: shortDateLabel(row.date),
-      omzet: Number(row.revenue_ex || 0),
-      breakEven: Number(beByDate.get(dateLabel) || 0),
-    };
+        date: dateLabel,
+        omzet: Number(row.revenue_ex || 0),
+        breakEven: Number(beByDate.get(dateLabel) || 0),
+      };
     });
   }, [payload.trends?.revenue, breakEvenTrend.line]);
 
@@ -273,6 +284,25 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
   const underBreakEven = payload.tables?.under_break_even ?? [];
   const latestOrders = payload.tables?.latest_orders ?? [];
   const alerts = payload.alerts ?? [];
+
+  const packagingTypes = useMemo(() => {
+    const rows = (payload.tables as any)?.packaging_types ?? [];
+    const normalized = Array.isArray(rows)
+      ? rows
+          .filter((row) => row && typeof row === "object")
+          .map((row) => ({
+            packaging_type: String((row as any).packaging_type || "").trim() || "-",
+            qty: Number((row as any).qty || 0) || 0,
+          }))
+          .filter((row) => row.qty > 0)
+      : [];
+    const total = normalized.reduce((sum, row) => sum + row.qty, 0);
+    const withPct = normalized.map((row) => ({
+      ...row,
+      pct: total > 0 ? (row.qty / total) * 100 : 0,
+    }));
+    return { rows: withPct, total };
+  }, [payload.tables]);
 
   const pieData = useMemo(() => {
     const groups = payload.tables?.product_groups ?? [];
@@ -322,10 +352,22 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
               <Card className="erp-pad" aria-label="Filters">
                 <div className="module-card-title">Filters</div>
                 <div className="module-card-text" style={{ marginTop: 4 }}>
-                  Kies een periode (YYYY-MM-DD). Basis is altijd Douano orders.
+                  Kies een periode (YYYY-MM-DD). Basis bepaalt of we filteren op orderdatum of factuurdatum.
                 </div>
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                  <label className="editor-field" style={{ minWidth: 220 }}>
+                    <div className="editor-label">Datumtype</div>
+                    <select
+                      className="editor-input"
+                      value={basisInput}
+                      onChange={(e) => setBasisInput(e.target.value)}
+                      aria-label="Datumtype"
+                    >
+                      <option value="order">Orderdatum</option>
+                      <option value="invoice">Factuurdatum</option>
+                    </select>
+                  </label>
                   <label className="editor-field" style={{ minWidth: 180 }}>
                     <div className="editor-label">Jaar</div>
                     <select
@@ -371,6 +413,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         if (yearInput.trim()) params.set("year", yearInput.trim());
                         if (sinceInput.trim()) params.set("since", sinceInput.trim());
                         if (untilInput.trim()) params.set("until", untilInput.trim());
+                        if (basisInput.trim()) params.set("basis", basisInput.trim());
                         const qs = params.toString();
                         router.push(qs ? `/?${qs}` : "/");
                         setShowFilters(false);
@@ -385,6 +428,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         setSinceInput((initialFilters?.since || payload.range?.since || "").trim());
                         setUntilInput((initialFilters?.until || payload.range?.until || "").trim());
                         setYearInput((initialFilters?.year || "").trim());
+                        setBasisInput((initialFilters?.basis || payload.range?.basis || "order").trim() || "order");
                         setShowFilters(false);
                       }}
                     >
@@ -398,6 +442,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         setSinceInput((payload.range?.since || "").trim());
                         setUntilInput((payload.range?.until || "").trim());
                         setYearInput("");
+                        setBasisInput("order");
                         setShowFilters(false);
                       }}
                       title="Verwijder filters"
@@ -490,7 +535,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                   <h2 className="module-card-title">Omzet over tijd</h2>
                   <span className="erp-chip">Maand</span>
                 </div>
-                <div className="h-72">
+                <div className="erp-chart-area">
                   {revenueData.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={revenueData}>
@@ -499,8 +544,20 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         <YAxis fontSize={12} tickFormatter={(v) => `€ ${Math.round(Number(v) / 1000)}k`} />
                         <Tooltip formatter={(v) => euro(Number(v))} />
                         <Legend />
-                        <Area type="monotone" dataKey="omzet" stroke="currentColor" fill="currentColor" fillOpacity={0.08} className="text-blue-600" />
-                        <Line type="monotone" dataKey="breakEven" stroke="currentColor" strokeDasharray="5 5" className="text-slate-400" />
+                        <Area
+                          type="monotone"
+                          dataKey="omzet"
+                          stroke={CHART_COLORS.blue}
+                          fill={CHART_COLORS.blueFill}
+                          fillOpacity={1}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="breakEven"
+                          stroke={CHART_COLORS.slate}
+                          strokeDasharray="5 5"
+                          dot={false}
+                        />
                       </AreaChart>
                     </ResponsiveContainer>
                   ) : (
@@ -514,7 +571,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                   <h2 className="module-card-title">Orders & gem. orderwaarde</h2>
                   <span className="erp-chip">Maand</span>
                 </div>
-                <div className="h-72">
+                <div className="erp-chart-area">
                   {ordersData.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={ordersData}>
@@ -524,8 +581,15 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         <YAxis yAxisId="right" orientation="right" fontSize={12} tickFormatter={(v) => `€ ${Math.round(Number(v))}`} />
                         <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString("nl-NL") : String(v))} />
                         <Legend />
-                        <Bar yAxisId="left" dataKey="orders" fill="currentColor" radius={[8, 8, 0, 0]} className="text-blue-500" />
-                        <Line yAxisId="right" type="monotone" dataKey="aov" stroke="currentColor" strokeWidth={3} className="text-purple-500" />
+                        <Bar yAxisId="left" dataKey="orders" fill={CHART_COLORS.blue} radius={[8, 8, 0, 0]} />
+                        <Line
+                          yAxisId="right"
+                          type="monotone"
+                          dataKey="aov"
+                          stroke={CHART_COLORS.purple}
+                          strokeWidth={3}
+                          dot={false}
+                        />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
@@ -563,28 +627,34 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
 
               <Card className="erp-pad">
                 <h2 className="module-card-title">
-                  Productgroepen <span className="erp-muted-inline">op marge %</span>
+                  Verpakkingstypen <span className="erp-muted-inline">op aantallen</span>
                 </h2>
-                {(payload.tables?.product_groups ?? []).length ? (
+                {packagingTypes.rows.length ? (
                   <>
                     <div className="erp-stack">
-                      {(payload.tables?.product_groups ?? []).map((row, index) => (
-                        <div key={`${row.group}-${index}`} className="erp-row-grid">
+                      {packagingTypes.rows.map((row, index) => (
+                        <div key={`${row.packaging_type}-${index}`} className="erp-row-grid">
                           <span className="erp-rank">{index + 1}</span>
-                          <span className="erp-strong">{row.group}</span>
-                          <span>{pct(Number(row.margin_pct || 0), 1)}</span>
-                          <span className="erp-strong">{euro(Number(row.margin_ex || 0))}</span>
+                          <span className="erp-strong">{row.packaging_type}</span>
+                          <span>{row.qty.toLocaleString("nl-NL")}</span>
+                          <span className="erp-strong">{pct(row.pct, 1)}</span>
                         </div>
                       ))}
+                      <div className="erp-row-grid">
+                        <span className="erp-rank">—</span>
+                        <span className="erp-strong">Totaal</span>
+                        <span>{packagingTypes.total.toLocaleString("nl-NL")}</span>
+                        <span className="erp-strong">{pct(100, 0)}</span>
+                      </div>
                     </div>
                     <Link href={"/beheer/productkoppeling" as Route} className="erp-link">
-                      Beheer productgroepen <ArrowRight className="h-4 w-4" />
+                      Beheer productkoppelingen <ArrowRight className="h-4 w-4" />
                     </Link>
                   </>
                 ) : (
                   <EmptyState
-                    title="Nog geen productgroepen"
-                    body="Vul productgroep in Beheer → Productkoppeling (Douano). Dit is leidend voor het dashboard."
+                    title="Nog geen verpakkingstypen"
+                    body="Koppel Douano producten aan SKU's en vul verpakkingstype in Beheer → Productkoppeling."
                     href="/beheer/productkoppeling"
                     hrefLabel="Naar productkoppeling"
                   />

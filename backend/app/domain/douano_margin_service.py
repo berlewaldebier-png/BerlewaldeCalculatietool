@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 from app.domain import (
     dataset_store,
+    cost_versions_storage,
     douano_product_ignore_storage,
     douano_product_mapping_storage,
     douano_margin_snapshot_storage,
@@ -84,6 +85,12 @@ def _build_snapshot_cost_index(
     versions_by_id: dict[str, dict[str, Any]],
     version_ids: Iterable[str],
 ) -> dict[tuple[str, str], float]:
+    # Canonical: resolve from normalized cost lines table (`cost_version_sku_rows`).
+    # Avoid reading `resultaat_snapshot` here to prevent hidden fallback logic.
+    _ = versions_by_id
+    version_list = [str(v or "").strip() for v in version_ids if str(v or "").strip()]
+    return cost_versions_storage.load_cost_row_index_for_versions(version_list)
+
     # Some older kostprijs snapshots may lack `sku_id` on product rows. We can deterministically
     # derive it from the canonical SKU table (bier_id × format_article_id) without any fallback
     # joins. This keeps ERP/dashboard calculations stable while allowing a gradual rewrite of
