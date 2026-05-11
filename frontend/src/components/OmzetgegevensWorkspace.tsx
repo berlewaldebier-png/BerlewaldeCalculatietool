@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { formatMoneyEUR } from "@/lib/formatters";
+import { SortButton as TableSortButton, type PageSizeValue } from "@/components/table/TableControls";
+import { clampPage, computeTotalPages, slicePage } from "@/lib/tableControls";
 
 type Row = {
   company_id: number;
@@ -111,7 +113,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
   const [basis, setBasis] = useState<"invoice" | "order">("invoice");
 
   const [query, setQuery] = useState<string>("");
-  const [pageSize, setPageSize] = useState<number>(20);
+  const [pageSize, setPageSize] = useState<PageSizeValue>(20);
   const [page, setPage] = useState<number>(1);
   const [sortKey, setSortKey] = useState<SortKey>("netto_omzet_ex");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -192,14 +194,12 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
     return filtered;
   }, [normalizedQuery, rows, sortDir, sortKey]);
 
-  const safePageSize = Math.max(1, Math.min(Number(pageSize || 20) || 20, 5000));
-  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / safePageSize));
-  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const totalPages = computeTotalPages(filteredSorted.length, pageSize);
+  const currentPage = clampPage(page, totalPages);
 
   const pageRows = useMemo(() => {
-    const start = (currentPage - 1) * safePageSize;
-    return filteredSorted.slice(start, start + safePageSize);
-  }, [currentPage, filteredSorted, safePageSize]);
+    return slicePage(filteredSorted, currentPage, pageSize);
+  }, [currentPage, filteredSorted, pageSize]);
 
   function toggleSort(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -249,21 +249,6 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
             onChange={(e) => setQuery(e.target.value)}
           />
 
-          <select
-            className="editor-input"
-            style={{ width: 140 }}
-            value={String(pageSize)}
-            onChange={(e) => setPageSize(Math.max(1, Math.min(Number(e.target.value || 20) || 20, 5000)))}
-            aria-label="Per pagina"
-            title="Aantal klanten per pagina"
-          >
-            {[20, 50, 100, 200, 500, 1000, 2000, 5000].map((n) => (
-              <option key={n} value={String(n)}>
-                {n} / pagina
-              </option>
-            ))}
-          </select>
-
           <input
             className="editor-input"
             style={{ width: 180 }}
@@ -296,7 +281,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
           <thead>
             <tr>
               <th>
-                <SortButton
+                <TableSortButton
                   label="Klant"
                   active={sortKey === "company_name"}
                   dir={sortDir}
@@ -304,10 +289,10 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 150 }}>
-                <SortButton label="Omzet" active={sortKey === "omzet_ex"} dir={sortDir} onClick={() => toggleSort("omzet_ex")} />
+                <TableSortButton label="Omzet" active={sortKey === "omzet_ex"} dir={sortDir} onClick={() => toggleSort("omzet_ex")} />
               </th>
               <th style={{ width: 150 }}>
-                <SortButton
+                <TableSortButton
                   label="Kortingen"
                   active={sortKey === "korting_ex"}
                   dir={sortDir}
@@ -315,7 +300,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 150 }}>
-                <SortButton
+                <TableSortButton
                   label="Charges"
                   active={sortKey === "charges_ex"}
                   dir={sortDir}
@@ -323,7 +308,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 160 }}>
-                <SortButton
+                <TableSortButton
                   label="Netto omzet"
                   active={sortKey === "netto_omzet_ex"}
                   dir={sortDir}
@@ -331,7 +316,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 150 }}>
-                <SortButton
+                <TableSortButton
                   label="Kostprijs"
                   active={sortKey === "kostprijs_ex"}
                   dir={sortDir}
@@ -339,7 +324,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 150 }}>
-                <SortButton
+                <TableSortButton
                   label="Brutomarge"
                   active={sortKey === "brutomarge_ex"}
                   dir={sortDir}
@@ -347,10 +332,10 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 100 }}>
-                <SortButton label="Regels" active={sortKey === "lines"} dir={sortDir} onClick={() => toggleSort("lines")} />
+                <TableSortButton label="Regels" active={sortKey === "lines"} dir={sortDir} onClick={() => toggleSort("lines")} />
               </th>
               <th style={{ width: 120 }}>
-                <SortButton
+                <TableSortButton
                   label="Unmapped"
                   active={sortKey === "unmapped_lines"}
                   dir={sortDir}
@@ -358,7 +343,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 110 }}>
-                <SortButton
+                <TableSortButton
                   label="Ignored"
                   active={sortKey === "ignored_lines"}
                   dir={sortDir}
@@ -366,7 +351,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 />
               </th>
               <th style={{ width: 130 }}>
-                <SortButton
+                <TableSortButton
                   label="Missing cost"
                   active={sortKey === "missing_cost_lines"}
                   dir={sortDir}
@@ -448,15 +433,32 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
         <div style={{ opacity: 0.85 }}>
           {filteredSorted.length ? (
             <span>
-              Showing {(currentPage - 1) * safePageSize + 1} to{" "}
-              {Math.min(currentPage * safePageSize, filteredSorted.length)} of {filteredSorted.length} entries
+              Pagina {currentPage} / {totalPages} (totaal {filteredSorted.length} klanten)
             </span>
           ) : (
-            <span>Showing 0 entries</span>
+            <span>Pagina {currentPage} / {totalPages} (totaal 0 klanten)</span>
           )}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <select
+            className="editor-input"
+            style={{ width: 140 }}
+            value={String(pageSize)}
+            onChange={(e) => {
+              setPage(1);
+              setPageSize((Number(e.target.value) as PageSizeValue) ?? 20);
+            }}
+            aria-label="Per pagina"
+            title="Aantal klanten per pagina"
+          >
+            {[5, 10, 20, 50, 100, 0].map((n) => (
+              <option key={String(n)} value={String(n)}>
+                {n === 0 ? "Alles" : `${n} / pagina`}
+              </option>
+            ))}
+          </select>
+
           {currentPage > 1 ? (
             <button
               type="button"

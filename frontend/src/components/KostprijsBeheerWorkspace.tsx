@@ -102,7 +102,7 @@ export function KostprijsBeheerWorkspace({
   });
   const [search, setSearch] = useState("");
   const [activeSort, setActiveSort] = useState<{
-    key: "bron";
+    key: "bron" | "artikel" | "categorie" | "since" | "kostprijs";
     direction: "asc" | "desc";
   }>({ key: "bron", direction: "desc" });
   const [pendingActivation, setPendingActivation] = useState<PendingActivationState | null>(null);

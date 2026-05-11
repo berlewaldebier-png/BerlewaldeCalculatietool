@@ -98,7 +98,7 @@ export function buildActiveRows(args: {
   kostprijsproductactiveringen: GenericRecord[];
   selectedYear: number;
   search: string;
-  activeSort: { key: "bron"; direction: "asc" | "desc" };
+  activeSort: { key: "bron" | "artikel" | "categorie" | "since" | "kostprijs"; direction: "asc" | "desc" };
   bierenById: Map<string, string>;
   basisById: Map<string, string>;
   skuById: Map<string, GenericRecord>;
@@ -291,10 +291,29 @@ export function buildActiveRows(args: {
       });
 
   const direction = activeSort.direction === "asc" ? 1 : -1;
-  // Default (and only) sort: newest kostprijsversie (bron) first.
+  const key = activeSort.key;
   return [...filtered].sort((a, b) => {
-    const delta = (a.versieTimestamp - b.versieTimestamp) * direction;
-    if (delta !== 0) return delta;
+    if (key === "artikel") {
+      const delta = a.artikelNaam.localeCompare(b.artikelNaam) * direction;
+      if (delta !== 0) return delta;
+    } else if (key === "categorie") {
+      const delta = (a.categorie || "").localeCompare(b.categorie || "") * direction;
+      if (delta !== 0) return delta;
+    } else if (key === "since") {
+      const av = parseSortTimestamp(a.effectiefVanaf || "");
+      const bv = parseSortTimestamp(b.effectiefVanaf || "");
+      const delta = (av - bv) * direction;
+      if (delta !== 0) return delta;
+    } else if (key === "kostprijs") {
+      const av = typeof a.currentCost === "number" && Number.isFinite(a.currentCost) ? a.currentCost : -Infinity;
+      const bv = typeof b.currentCost === "number" && Number.isFinite(b.currentCost) ? b.currentCost : -Infinity;
+      const delta = (av - bv) * direction;
+      if (delta !== 0) return delta;
+    } else {
+      const delta = (a.versieTimestamp - b.versieTimestamp) * direction;
+      if (delta !== 0) return delta;
+    }
+
     return (a.artikelNaam + a.versieLabel).localeCompare(b.artikelNaam + b.versieLabel);
   });
 }

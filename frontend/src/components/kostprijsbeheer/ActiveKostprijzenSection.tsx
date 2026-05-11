@@ -1,9 +1,12 @@
 "use client";
 
 import type { RefObject } from "react";
+import { useState } from "react";
 
 import { ActivationModal, type PendingActivationState } from "@/components/kostprijsbeheer/ActivationModal";
-import { ActivateIcon, InfoIcon, SortIcon, WarningIcon } from "@/components/kostprijsbeheer/KostprijsBeheerParts";
+import { ActivateIcon, InfoIcon, WarningIcon } from "@/components/kostprijsbeheer/KostprijsBeheerParts";
+import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
+import { clampPage, computeTotalPages, slicePage } from "@/lib/tableControls";
 
 export type ActiveCostRow = {
   key: string;
@@ -11,6 +14,7 @@ export type ActiveCostRow = {
   categorie: string;
   effectiefVanaf: string;
   versieLabel: string;
+  versieTimestamp?: number;
   currentCost: number | null;
   hasUpdate: boolean;
   isWarning: boolean;
@@ -40,8 +44,8 @@ export function ActiveKostprijzenSection({
   yearOptions: number[];
   search: string;
   setSearch: (next: string) => void;
-  activeSort: { key: "bron"; direction: "asc" | "desc" };
-  setActiveSort: (updater: (current: { key: "bron"; direction: "asc" | "desc" }) => { key: "bron"; direction: "asc" | "desc" }) => void;
+  activeSort: { key: "bron" | "artikel" | "categorie" | "since" | "kostprijs"; direction: "asc" | "desc" };
+  setActiveSort: (updater: (current: { key: "bron" | "artikel" | "categorie" | "since" | "kostprijs"; direction: "asc" | "desc" }) => { key: "bron" | "artikel" | "categorie" | "since" | "kostprijs"; direction: "asc" | "desc" }) => void;
   activeRows: ActiveCostRow[];
   formatEuro: (value: number) => string;
   pendingActivation: PendingActivationState | null;
@@ -49,6 +53,12 @@ export function ActiveKostprijzenSection({
   setPendingActivation: (next: PendingActivationState | null) => void;
   setActivationStatus: (next: string) => void;
 }) {
+  const [pageSize, setPageSize] = useState<PageSizeValue>(20);
+  const [page, setPage] = useState(1);
+  const totalPages = computeTotalPages(activeRows.length, pageSize);
+  const currentPage = clampPage(page, totalPages);
+  const pageRows = slicePage(activeRows, currentPage, pageSize);
+
   return (
     <section className="module-card" ref={activeCostsRef}>
       <div className="module-card-header">
@@ -89,32 +99,28 @@ export function ActiveKostprijzenSection({
         <table className="dataset-editor-table">
           <thead>
             <tr>
-              <th>Artikel</th>
-              <th>Categorie</th>
-              <th>Actief sinds</th>
-              <th
-                style={{ cursor: "pointer" }}
-                title="Sorteer op kostprijsversie (bron)"
-                onClick={() =>
-                  setActiveSort((current) => ({
-                    key: "bron",
-                    direction: current.direction === "desc" ? "asc" : "desc"
-                  }))
-                }
-              >
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  Kostprijsversie (bron)
-                  <SortIcon direction={activeSort.direction} />
-                </span>
+              <th>
+                <SortButton label="Artikel" active={activeSort.key === "artikel"} dir={activeSort.direction} onClick={() => setActiveSort((cur) => ({ key: "artikel", direction: cur.key === "artikel" && cur.direction === "desc" ? "asc" : "desc" }))} />
               </th>
-              <th>Kostprijs</th>
+              <th>
+                <SortButton label="Categorie" active={activeSort.key === "categorie"} dir={activeSort.direction} onClick={() => setActiveSort((cur) => ({ key: "categorie", direction: cur.key === "categorie" && cur.direction === "desc" ? "asc" : "desc" }))} />
+              </th>
+              <th>
+                <SortButton label="Actief sinds" active={activeSort.key === "since"} dir={activeSort.direction} onClick={() => setActiveSort((cur) => ({ key: "since", direction: cur.key === "since" && cur.direction === "desc" ? "asc" : "desc" }))} />
+              </th>
+              <th>
+                <SortButton label="Kostprijsversie (bron)" active={activeSort.key === "bron"} dir={activeSort.direction} onClick={() => setActiveSort((cur) => ({ key: "bron", direction: cur.key === "bron" && cur.direction === "desc" ? "asc" : "desc" }))} />
+              </th>
+              <th>
+                <SortButton label="Kostprijs" active={activeSort.key === "kostprijs"} dir={activeSort.direction} onClick={() => setActiveSort((cur) => ({ key: "kostprijs", direction: cur.key === "kostprijs" && cur.direction === "desc" ? "asc" : "desc" }))} />
+              </th>
               <th />
               <th />
             </tr>
           </thead>
           <tbody>
-            {activeRows.length > 0 ? (
-              activeRows.map((row) => (
+            {pageRows.length > 0 ? (
+              pageRows.map((row) => (
                 <tr key={row.key}>
                   <td>{row.artikelNaam}</td>
                   <td>{row.categorie || "-"}</td>
@@ -182,6 +188,23 @@ export function ActiveKostprijzenSection({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div style={{ opacity: 0.75 }}>
+          Pagina {currentPage} / {totalPages} (totaal {activeRows.length})
+        </div>
+        <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+          <PageSizeSelect
+            value={pageSize}
+            onChange={(next) => {
+              setPage(1);
+              setPageSize(next);
+            }}
+            title="Aantal regels per pagina"
+          />
+          <PaginationBar page={currentPage} totalPages={totalPages} onChange={setPage} />
+        </div>
       </div>
 
       {pendingActivation ? (

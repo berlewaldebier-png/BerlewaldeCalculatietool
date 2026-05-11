@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
+import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
+import { clampPage, compareNullableNumber, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
 
 type EditorValue = string | number | boolean | null;
 type EditorRow = Record<string, EditorValue>;
@@ -88,6 +90,10 @@ export function DatasetTableEditor({
   const [rows, setRows] = useState<InternalRow[]>(preparedRows);
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [pageSize, setPageSize] = useState<PageSizeValue>(20);
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<string>("");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const onRowsChangeRef = useRef<typeof onRowsChange>(onRowsChange);
   const readOnlyKeys = useMemo(
     () => new Set(columns.filter((column) => column.readOnly).map((column) => column.key)),
@@ -102,6 +108,48 @@ export function DatasetTableEditor({
     // Notify after React committed the update (avoid setState during another component update).
     onRowsChangeRef.current?.(rows.map(stripInternal));
   }, [rows]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize, sortKey, sortDir]);
+
+  const sortedRows = useMemo(() => {
+    if (!sortKey) return rows;
+    const col = columns.find((c) => c.key === sortKey) ?? null;
+    const type = (col?.type ?? "text") as ColumnType;
+    const dir = sortDir;
+    const withIndex = rows.map((row, index) => ({ row, index }));
+    withIndex.sort((a, b) => {
+      const av = (a.row as any)[sortKey];
+      const bv = (b.row as any)[sortKey];
+      const cmp =
+        type === "number"
+          ? compareNullableNumber(av, bv, dir)
+          : type === "checkbox"
+            ? compareNullableNumber(Boolean(av) ? 1 : 0, Boolean(bv) ? 1 : 0, dir)
+            : compareText(av, bv, dir);
+      return cmp !== 0 ? cmp : a.index - b.index;
+    });
+    return withIndex.map((item) => item.row);
+  }, [columns, rows, sortDir, sortKey]);
+
+  const totalPages = useMemo(() => computeTotalPages(sortedRows.length, pageSize), [pageSize, sortedRows.length]);
+  const currentPage = clampPage(page, totalPages);
+
+  useEffect(() => {
+    if (currentPage !== page) setPage(currentPage);
+  }, [currentPage, page]);
+
+  const pageRows = useMemo(() => slicePage(sortedRows, currentPage, pageSize), [currentPage, pageSize, sortedRows]);
+
+  function toggleSort(key: string) {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir("asc");
+  }
 
   function updateCell(rowId: string, key: string, value: EditorValue) {
     setRows((current) =>
@@ -204,21 +252,26 @@ export function DatasetTableEditor({
             <tr>
               {columns.map((column) => (
                 <th key={column.key} style={column.width ? { width: column.width } : undefined}>
-                  {column.label}
+                  <SortButton
+                    label={column.label}
+                    active={sortKey === column.key}
+                    dir={sortDir}
+                    onClick={() => toggleSort(column.key)}
+                  />
                 </th>
               ))}
               <th />
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {pageRows.length === 0 ? (
               <tr>
                 <td className="dataset-empty" colSpan={columns.length + 1}>
                   Nog geen regels. Voeg hieronder een nieuwe rij toe.
                 </td>
               </tr>
             ) : null}
-            {rows.map((row) => (
+            {pageRows.map((row) => (
               <tr key={row._uiId}>
                 {columns.map((column) => {
                   const type = column.type ?? "text";
@@ -299,6 +352,23 @@ export function DatasetTableEditor({
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div style={{ opacity: 0.75 }}>
+          Pagina {currentPage} / {totalPages} (totaal {sortedRows.length} regels)
+        </div>
+        <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+          <PageSizeSelect
+            value={pageSize}
+            onChange={(next) => {
+              setPage(1);
+              setPageSize(next);
+            }}
+            title="Aantal rijen per pagina"
+          />
+          <PaginationBar page={currentPage} totalPages={totalPages} onChange={setPage} />
+        </div>
       </div>
 
       <div className="editor-actions">

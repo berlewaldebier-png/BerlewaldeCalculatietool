@@ -1,6 +1,9 @@
 "use client";
 
+import { useMemo, useState, useEffect } from "react";
 import { toNumber } from "@/components/producten-verpakking/productenVerpakkingUtils";
+import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
+import { clampPage, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -25,6 +28,32 @@ export function YearPricesTab({
   handleSaveYearPricesLayer: () => Promise<void>;
   yearPricesStatus: string;
 }) {
+  const [pageSize, setPageSize] = useState<PageSizeValue>(20);
+  const [page, setPage] = useState(1);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeYearForPrices, pageSize, sortDir]);
+
+  const sortedMasters = useMemo(() => {
+    const copy = [...packagingMasters];
+    copy.sort((a, b) => {
+      const al = String((a as any)?.omschrijving ?? (a as any)?.id ?? "");
+      const bl = String((b as any)?.omschrijving ?? (b as any)?.id ?? "");
+      return compareText(al, bl, sortDir);
+    });
+    return copy;
+  }, [packagingMasters, sortDir]);
+
+  const totalPages = useMemo(() => computeTotalPages(sortedMasters.length, pageSize), [pageSize, sortedMasters.length]);
+  const currentPage = clampPage(page, totalPages);
+  useEffect(() => {
+    if (currentPage !== page) setPage(currentPage);
+  }, [currentPage, page]);
+
+  const pageRows = useMemo(() => slicePage(sortedMasters, currentPage, pageSize), [currentPage, pageSize, sortedMasters]);
+
   return (
     <div className="content-card">
       <div className="module-card-header">
@@ -53,18 +82,26 @@ export function YearPricesTab({
                 ))}
               </select>
             </label>
+
           </div>
 
           <div className="dataset-editor-scroll" style={{ marginTop: 12 }}>
             <table className="dataset-editor-table wizard-table-compact wizard-table-fit">
               <thead>
                 <tr>
-                  <th>Onderdeel</th>
+                  <th>
+                    <SortButton
+                      label="Onderdeel"
+                      active
+                      dir={sortDir}
+                      onClick={() => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))}
+                    />
+                  </th>
                   <th style={{ width: 180 }}>Prijs per stuk</th>
                 </tr>
               </thead>
               <tbody>
-                {packagingMasters.map((row) => {
+                {pageRows.map((row) => {
                   const id = String((row as any)?.id ?? "").trim();
                   const label = String((row as any)?.omschrijving ?? "").trim() || id;
                   return (
@@ -89,6 +126,16 @@ export function YearPricesTab({
                 })}
               </tbody>
             </table>
+          </div>
+
+          <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div style={{ opacity: 0.75 }}>
+              Pagina {currentPage} / {totalPages} (totaal {sortedMasters.length} onderdelen)
+            </div>
+            <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+              <PageSizeSelect value={pageSize} onChange={setPageSize} title="Aantal regels per pagina" />
+              <PaginationBar page={currentPage} totalPages={totalPages} onChange={setPage} />
+            </div>
           </div>
 
           <div className="editor-actions" style={{ marginTop: 12 }}>

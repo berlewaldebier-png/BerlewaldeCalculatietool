@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
 import { moneyEUR, type GenericRecord } from "@/features/sku/adapters/common";
+import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
+import { clampPage, compareNullableNumber, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
 import {
   toSellableTableRows,
   type PricingMethod,
@@ -39,6 +41,14 @@ export function VerkoopbareArtikelenWorkspace({
 }) {
   const [query, setQuery] = useState("");
   const [showOnlyMissing, setShowOnlyMissing] = useState(false);
+  const [pageSize, setPageSize] = useState<PageSizeValue>(20);
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<"label" | "subtype" | "uom" | "content" | "price" | "status">("label");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize, query, showOnlyMissing, sortDir, sortKey]);
 
   const central = useCentralSkuIndex({
     year,
@@ -70,6 +80,39 @@ export function VerkoopbareArtikelenWorkspace({
       );
     });
   }, [rows, query, showOnlyMissing]);
+
+  const sorted = useMemo(() => {
+    const copy = [...filtered];
+    copy.sort((a, b) => {
+      if (sortKey === "label") return compareText(a.label, b.label, sortDir);
+      if (sortKey === "subtype") return compareText(subtypeLabel(a.subtype), subtypeLabel(b.subtype), sortDir);
+      if (sortKey === "uom") return compareText(a.uom, b.uom, sortDir);
+      if (sortKey === "content") return compareNullableNumber(a.contentLiter ?? 0, b.contentLiter ?? 0, sortDir);
+      if (sortKey === "price") return compareNullableNumber(a.kostprijsEx ?? 0, b.kostprijsEx ?? 0, sortDir);
+
+      const score = (row: any) => {
+        if (row.pricingMethod === "manual_rate") return row.manualRateEx > 0 ? 2 : 0;
+        if (row.hasActiveCost) return 3;
+        if (row.kostprijsEx > 0) return 1;
+        return 0;
+      };
+      return compareNullableNumber(score(a), score(b), sortDir);
+    });
+    return copy;
+  }, [filtered, sortDir, sortKey]);
+
+  const totalPages = useMemo(() => computeTotalPages(sorted.length, pageSize), [pageSize, sorted.length]);
+  const currentPage = clampPage(page, totalPages);
+  const pageRows = useMemo(() => slicePage(sorted, currentPage, pageSize), [currentPage, pageSize, sorted]);
+
+  function toggleSort(key: typeof sortKey) {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "label" ? "asc" : "desc");
+  }
 
   const kostprijsBySkuId = useMemo(() => {
     const index = new Map<string, string>();
@@ -149,7 +192,6 @@ export function VerkoopbareArtikelenWorkspace({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Zoek op naam (of ID)…"
           />
-
         </div>
       </div>
 
@@ -157,24 +199,36 @@ export function VerkoopbareArtikelenWorkspace({
         <table className="dataset-editor-table">
           <thead>
             <tr>
-              <th style={{ width: 360 }}>Naam</th>
-              <th style={{ width: 140 }}>Type</th>
-              <th style={{ width: 140 }}>UoM</th>
-              <th style={{ width: 140 }}>Inhoud (L)</th>
-              <th style={{ width: 170 }}>{methodLabel("cost_plus")}</th>
-              <th style={{ width: 220 }}>Status</th>
+              <th style={{ width: 360 }}>
+                <SortButton label="Naam" active={sortKey === "label"} dir={sortDir} onClick={() => toggleSort("label")} />
+              </th>
+              <th style={{ width: 140 }}>
+                <SortButton label="Type" active={sortKey === "subtype"} dir={sortDir} onClick={() => toggleSort("subtype")} />
+              </th>
+              <th style={{ width: 140 }}>
+                <SortButton label="UoM" active={sortKey === "uom"} dir={sortDir} onClick={() => toggleSort("uom")} />
+              </th>
+              <th style={{ width: 140 }}>
+                <SortButton label="Inhoud (L)" active={sortKey === "content"} dir={sortDir} onClick={() => toggleSort("content")} />
+              </th>
+              <th style={{ width: 170 }}>
+                <SortButton label={methodLabel("cost_plus")} active={sortKey === "price"} dir={sortDir} onClick={() => toggleSort("price")} />
+              </th>
+              <th style={{ width: 220 }}>
+                <SortButton label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggleSort("status")} />
+              </th>
               <th style={{ width: 220 }} />
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {pageRows.length === 0 ? (
               <tr>
                 <td colSpan={7} className="muted" style={{ padding: "1rem" }}>
                   Geen resultaten.
                 </td>
               </tr>
             ) : (
-              filtered.map((row) => {
+              pageRows.map((row) => {
                 const status =
                   row.pricingMethod === "manual_rate"
                     ? row.manualRateEx > 0
@@ -245,6 +299,23 @@ export function VerkoopbareArtikelenWorkspace({
             )}
           </tbody>
         </table>
+      </div>
+
+      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div style={{ opacity: 0.75 }}>
+          Pagina {currentPage} / {totalPages} (totaal {sorted.length} artikelen)
+        </div>
+        <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+          <PageSizeSelect
+            value={pageSize}
+            onChange={(next) => {
+              setPage(1);
+              setPageSize(next);
+            }}
+            title="Aantal rijen per pagina"
+          />
+          <PaginationBar page={currentPage} totalPages={totalPages} onChange={setPage} />
+        </div>
       </div>
     </section>
   );

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { SectionCard } from "@/components/SectionCard";
+import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
+import { clampPage, compareNullableNumber, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
 
 type DouanoProduct = {
   product_id: number;
@@ -138,6 +140,10 @@ export function DouanoProductMappingCard({
   const [packagingDraft, setPackagingDraft] = useState<Record<number, string>>({});
   const [packagingOptIn, setPackagingOptIn] = useState<Record<number, boolean>>({});
   const [skuProductDraft, setSkuProductDraft] = useState<Record<string, string>>({});
+  const [pageSize, setPageSize] = useState<PageSizeValue>(20);
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<string>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const [productgroepen, setProductgroepen] = useState<Productgroep[]>([]);
   const [alcoholcategorieen, setAlcoholcategorieen] = useState<AlcoholCategorie[]>([]);
@@ -217,6 +223,61 @@ export function DouanoProductMappingCard({
       return true;
     });
   }, [filter, mappedSkuIds, showGekoppeld, showOngekoppeld, skus]);
+
+  const sortedProducts = useMemo(() => {
+    const copy = [...filteredProducts];
+    const dir = sortDir;
+    const key = sortKey;
+    copy.sort((a, b) => {
+      if (key === "sku") return compareText((a as any)?.sku, (b as any)?.sku, dir);
+      if (key === "gtin") return compareText((a as any)?.gtin, (b as any)?.gtin, dir);
+      if (key === "mapped") {
+        const aid = Number((a as any)?.product_id ?? 0);
+        const bid = Number((b as any)?.product_id ?? 0);
+        const aMap = mappingsById.get(aid);
+        const bMap = mappingsById.get(bid);
+        const aSku = String((aMap as any)?.sku_id ?? "").trim();
+        const bSku = String((bMap as any)?.sku_id ?? "").trim();
+        const aGroup = String(groupDraft[aid] ?? (aMap as any)?.product_group ?? "").trim();
+        const bGroup = String(groupDraft[bid] ?? (bMap as any)?.product_group ?? "").trim();
+        const aAlc = String(alcoholDraft[aid] ?? (aMap as any)?.alcohol_category ?? "").trim();
+        const bAlc = String(alcoholDraft[bid] ?? (bMap as any)?.alcohol_category ?? "").trim();
+        const aPkg = String(packagingDraft[aid] ?? (aMap as any)?.packaging_type ?? "").trim();
+        const bPkg = String(packagingDraft[bid] ?? (bMap as any)?.packaging_type ?? "").trim();
+        const aFull = Boolean(aSku && aGroup && aAlc && aPkg);
+        const bFull = Boolean(bSku && bGroup && bAlc && bPkg);
+        return compareNullableNumber(aFull ? 1 : 0, bFull ? 1 : 0, dir);
+      }
+      return compareText((a as any)?.name, (b as any)?.name, dir);
+    });
+    return copy;
+  }, [alcoholDraft, compareText, filteredProducts, groupDraft, mappingsById, packagingDraft, sortDir, sortKey]);
+
+  const sortedSkus = useMemo(() => {
+    const copy = [...filteredSkus];
+    const dir = sortDir;
+    const key = sortKey;
+    copy.sort((a, b) => {
+      if (key === "sku_name") return compareText(a.name, b.name, dir);
+      if (key === "mapped") return compareNullableNumber(mappedSkuIds.has(a.id) ? 1 : 0, mappedSkuIds.has(b.id) ? 1 : 0, dir);
+      return compareText(a.id, b.id, dir);
+    });
+    return copy;
+  }, [filteredSkus, mappedSkuIds, sortDir, sortKey]);
+
+  const totalPages = useMemo(() => {
+    const total = viewMode === "douano" ? sortedProducts.length : sortedSkus.length;
+    return computeTotalPages(total, pageSize);
+  }, [pageSize, sortedProducts.length, sortedSkus.length, viewMode]);
+
+  const currentPage = clampPage(page, totalPages);
+
+  useEffect(() => {
+    if (currentPage !== page) setPage(currentPage);
+  }, [currentPage, page]);
+
+  const pageProducts = useMemo(() => slicePage(sortedProducts, currentPage, pageSize), [currentPage, pageSize, sortedProducts]);
+  const pageSkus = useMemo(() => slicePage(sortedSkus, currentPage, pageSize), [currentPage, pageSize, sortedSkus]);
 
   const combosByKey = useMemo(() => {
     const map = new Map<string, ActiveCombo>();
@@ -345,6 +406,19 @@ export function DouanoProductMappingCard({
     setViewMode("skus");
     setFilter(sid);
   }, [initialSkuId]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter, pageSize, sortDir, sortKey, showGekoppeld, showOngekoppeld, showIgnored, viewMode]);
+
+  function toggleSort(nextKey: string) {
+    if (sortKey === nextKey) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDir(nextKey === "name" || nextKey === "sku_name" ? "asc" : "desc");
+  }
 
   async function saveSkuMapping(skuId: string) {
     const normalizedSkuId = String(skuId ?? "").trim();
@@ -572,9 +646,15 @@ export function DouanoProductMappingCard({
           <thead>
             <tr>
               <th style={{ width: 90 }}>ID</th>
-              <th>Douano product</th>
-              <th style={{ width: 160 }}>SKU</th>
-              <th style={{ width: 180 }}>GTIN</th>
+              <th>
+                <SortButton label="Douano product" active={sortKey === "name"} dir={sortDir} onClick={() => toggleSort("name")} />
+              </th>
+              <th style={{ width: 160 }}>
+                <SortButton label="SKU" active={sortKey === "sku"} dir={sortDir} onClick={() => toggleSort("sku")} />
+              </th>
+              <th style={{ width: 180 }}>
+                <SortButton label="GTIN" active={sortKey === "gtin"} dir={sortDir} onClick={() => toggleSort("gtin")} />
+              </th>
               <th style={{ width: 420 }}>Koppeling</th>
               <th style={{ width: 220 }}>Productgroep</th>
               <th style={{ width: 220 }}>Alcohol</th>
@@ -583,7 +663,7 @@ export function DouanoProductMappingCard({
             </tr>
           </thead>
           <tbody>
-            {filteredProducts.slice(0, 500).map((p) => {
+            {pageProducts.map((p) => {
               const id = Number(p.product_id || 0);
               const mapping = mappingsById.get(id);
               const mappedKey = mapping ? String((mapping as any).sku_id ?? "").trim() : "";
@@ -753,10 +833,10 @@ export function DouanoProductMappingCard({
                 </tr>
               );
             })}
-            {products.length === 0 ? (
+            {pageProducts.length === 0 ? (
               <tr>
                 <td colSpan={9} style={{ opacity: 0.75 }}>
-                  Geen Douano producten geladen. Gebruik “Ververs” (en zorg dat je eerder “Sync products” hebt gedaan).
+                  Geen Douano producten geladen. Gebruik "Ververs" (en zorg dat je eerder "Sync products" hebt gedaan).
                 </td>
               </tr>
             ) : null}
@@ -774,8 +854,12 @@ export function DouanoProductMappingCard({
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: 320 }}>SKU</th>
-                  <th>Naam</th>
+                  <th style={{ width: 320 }}>
+                    <SortButton label="SKU" active={sortKey === "sku_id"} dir={sortDir} onClick={() => toggleSort("sku_id")} />
+                  </th>
+                  <th>
+                    <SortButton label="Naam" active={sortKey === "sku_name"} dir={sortDir} onClick={() => toggleSort("sku_name")} />
+                  </th>
                   <th style={{ width: 360 }}>Douano product</th>
                   <th style={{ width: 220 }}>Productgroep</th>
                   <th style={{ width: 220 }}>Alcohol</th>
@@ -784,7 +868,7 @@ export function DouanoProductMappingCard({
                 </tr>
               </thead>
               <tbody>
-                {filteredSkus.slice(0, 500).map((row) => {
+                {pageSkus.map((row) => {
                   const skuId = row.id;
                   const mapping = mappingsBySkuId.get(skuId) ?? null;
                   const mappedProductId = mapping ? Number((mapping as any)?.douano_product_id ?? 0) : 0;
@@ -922,7 +1006,7 @@ export function DouanoProductMappingCard({
                     </tr>
                   );
                 })}
-                {filteredSkus.length === 0 ? (
+                {pageSkus.length === 0 ? (
                   <tr>
                     <td colSpan={7} style={{ opacity: 0.75 }}>
                       Geen SKUs gevonden (filter aanpassen of zet &quot;Gekoppelde/Ongekoppelde&quot; aan).
@@ -937,6 +1021,24 @@ export function DouanoProductMappingCard({
           </div>
         </>
       )}
+
+      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div style={{ opacity: 0.75 }}>
+          Pagina {currentPage} / {totalPages} (totaal{" "}
+          {viewMode === "douano" ? `${sortedProducts.length} producten` : `${sortedSkus.length} SKUs`})
+        </div>
+        <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+          <PageSizeSelect
+            value={pageSize}
+            onChange={(next) => {
+              setPage(1);
+              setPageSize(next);
+            }}
+            title="Aantal regels per pagina"
+          />
+          <PaginationBar page={currentPage} totalPages={totalPages} onChange={setPage} />
+        </div>
+      </div>
     </SectionCard>
   );
 }
