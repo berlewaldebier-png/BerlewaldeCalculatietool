@@ -87,6 +87,7 @@ export function buildCentralSkuIndex(params: {
   articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
+  includeDraftCostPlus?: boolean;
 }) {
   const skuById = new Map<string, NormalizedSku>();
   (Array.isArray(params.skus) ? params.skus : []).forEach((row) => {
@@ -103,6 +104,31 @@ export function buildCentralSkuIndex(params: {
     const normalized = normalizeKostprijsVersie(row);
     if (normalized) versionById.set(normalized.id, normalized);
   });
+
+  const latestVersionBySkuId = new Map<string, NormalizedKostprijsVersie>();
+  if (params.includeDraftCostPlus) {
+    const latestTsBySkuId = new Map<string, string>();
+    (Array.isArray(params.kostprijsversies) ? params.kostprijsversies : []).forEach((row) => {
+      const normalized = normalizeKostprijsVersie(row);
+      if (!normalized) return;
+      const basis = ((row as any)?.basisgegevens ?? {}) as any;
+      const jaar = toNumber((row as any)?.jaar ?? basis?.jaar ?? 0, 0);
+      if (jaar !== params.year) return;
+      const skuId = text(basis?.sku_id);
+      if (!skuId) return;
+      const ts =
+        text((row as any)?.finalized_at) ||
+        text((row as any)?.aangepast_op) ||
+        text((row as any)?.updated_at) ||
+        text((row as any)?.created_at) ||
+        text((row as any)?.aangemaakt_op);
+      const prevTs = latestTsBySkuId.get(skuId) ?? "";
+      if (!prevTs || (ts && ts > prevTs)) {
+        latestTsBySkuId.set(skuId, ts);
+        latestVersionBySkuId.set(skuId, normalized);
+      }
+    });
+  }
 
   const activeActivationBySku = new Map<string, NormalizedActivation>();
   (Array.isArray(params.kostprijsproductactiveringen) ? params.kostprijsproductactiveringen : [])
@@ -228,6 +254,25 @@ export function buildCentralSkuIndex(params: {
     const manualRateEx = readManualRateEx(sku, article);
     if (manualRateEx <= 0) continue;
     pushRow({ skuId, sku, article, productId: articleId, activation: null, version: undefined });
+  }
+
+  // Optional: include cost-plus sellables that exist as SKUs but are not yet activated.
+  // This is used by beheer/workspace views to show "concept/nog te activeren" items
+  // without exposing them as active offerable items.
+  if (params.includeDraftCostPlus) {
+    for (const [skuId, sku] of skuById.entries()) {
+      if (rows.some((row) => row.skuId === skuId)) continue;
+      const kind = text(sku.kind).toLowerCase();
+      if (kind !== "article") continue;
+      const articleId = text(sku.articleId);
+      if (!articleId) continue;
+      const article = articleById.get(articleId) ?? null;
+      const subtype = inferSubtypeFromSku(sku, article);
+      const pricingMethod = inferPricingMethod(subtype, sku, article);
+      if (pricingMethod !== "cost_plus") continue;
+      const version = latestVersionBySkuId.get(skuId);
+      pushRow({ skuId, sku, article, productId: articleId, activation: null, version });
+    }
   }
 
   return {

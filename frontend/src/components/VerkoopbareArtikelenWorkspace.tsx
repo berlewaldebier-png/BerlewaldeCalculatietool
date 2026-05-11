@@ -48,6 +48,7 @@ export function VerkoopbareArtikelenWorkspace({
     articles: Array.isArray(articles) ? articles : [],
     kostprijsversies: Array.isArray(kostprijsversies) ? kostprijsversies : [],
     kostprijsproductactiveringen: Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [],
+    includeDraftCostPlus: true,
   });
 
   const rows = useMemo(() => {
@@ -181,7 +182,9 @@ export function VerkoopbareArtikelenWorkspace({
                       : "Tarief ontbreekt"
                     : row.hasActiveCost
                       ? `Actief (kostprijs: ${moneyEUR(row.kostprijsEx)})`
-                      : "Nog te activeren";
+                      : row.kostprijsEx > 0
+                        ? `Concept (kostprijs: ${moneyEUR(row.kostprijsEx)})`
+                        : "Nog te activeren";
                 const actionHref =
                   row.pricingMethod === "cost_plus"
                     ? (() => {

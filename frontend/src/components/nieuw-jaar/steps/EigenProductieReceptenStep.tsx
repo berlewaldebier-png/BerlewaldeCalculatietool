@@ -49,7 +49,7 @@ type EigenProductieReceptenStepProps = {
   deleteEigenIngredient: (bierId: string, ingredientId: string) => void;
   addEigenIngredient: (bierId: string) => void;
 
-  getProductieForYear: (year: number) => GenericRecord;
+  getProductieForYear: (year: number) => GenericRecord | null;
   computeEigenProductieReceptTotals: (override: EigenProductieOverride, batchGrootte: number) => EigenProductieTotals;
   calculateEigenProductieKostenRecept: (regel: IngredientRule) => number;
 };

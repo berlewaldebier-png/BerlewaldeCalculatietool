@@ -494,6 +494,33 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         )
                         sort_index += 1
 
+                    # Deterministic fallback for non-beer SKUs: if a definitive version has no snapshot items,
+                    # we still want a single normalized row for the version's own SKU (used by offerte selectors).
+                    if sort_index == 0:
+                        basisgegevens = version.get("basisgegevens") if isinstance(version.get("basisgegevens"), dict) else {}
+                        version_sku_id = str((basisgegevens or {}).get("sku_id", "") or "").strip()
+                        if version_sku_id:
+                            try:
+                                kostprijs_total = float(version.get("kostprijs", 0) or 0)
+                            except (TypeError, ValueError):
+                                kostprijs_total = 0.0
+                            row_id = str(uuid5(NAMESPACE_URL, f"cost_version_sku_row:{version_id}:{version_sku_id}"))
+                            row_ids_by_version.setdefault(version_id, set()).add(row_id)
+                            row_params.append(
+                                (
+                                    row_id,
+                                    version_id,
+                                    version_sku_id,
+                                    str((basisgegevens or {}).get("biernaam", "") or ""),
+                                    kostprijs_total,
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    kostprijs_total,
+                                    0,
+                                )
+                            )
+
                 # Replace-by-scope for snapshot rows: per version_id, delete rows that are no longer present.
                 if overwrite:
                     for version in records:
@@ -657,6 +684,148 @@ def rebuild_sku_rows_for_year(*, year: int, dry_run: bool = True) -> dict[str, A
     save_dataset(year_records, overwrite=True)
     audit_after = audit_sku_row_coverage(year=year_value)
     return {"year": year_value, "dry_run": False, "audit_before": audit_before, "audit_after": audit_after}
+
+
+def repair_inkoop_unit_costs_for_year(*, year: int, dry_run: bool = True) -> dict[str, Any]:
+    """Admin helper: recompute definitive inkoop snapshots using unit-cost SSOT and rebuild sku rows.
+
+    Why: legacy definitive inkoop versions historically derived per-SKU costs from EUR/liter KPIs.
+    This repair recomputes `resultaat_snapshot.producten.basisproducten` deterministically from:
+    - inkoop factuurregels (unit-cost per purchased unit incl. allocated extras)
+    - format composition BOM (doos -> fles) for derived units
+    Then `save_dataset` rebuilds `cost_version_sku_rows` accordingly.
+    """
+    ensure_schema()
+    year_value = int(year or 0)
+    if year_value <= 0:
+        return {"year": year_value, "error": "invalid_year"}
+
+    from app.utils.storage import normalize_berekening_record
+
+    def _is_definitive_inkoop(payload: dict[str, Any]) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        if str(payload.get("status", "") or "").strip().lower() != "definitief":
+            return False
+        # Primary discriminator: top-level "type" stored by UI (inkoop/bundle/article/...)
+        if str(payload.get("type", "") or "").strip().lower() == "inkoop":
+            return True
+        soort = payload.get("soort_berekening")
+        if isinstance(soort, dict) and str(soort.get("type", "") or "").strip().lower() == "inkoop":
+            return True
+        return False
+
+    def _force_empty_product_snapshot(record: dict[str, Any]) -> None:
+        snapshot = record.get("resultaat_snapshot")
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        producten = snapshot.get("producten")
+        if not isinstance(producten, dict):
+            producten = {}
+        producten = dict(producten)
+        producten["basisproducten"] = []
+        producten["samengestelde_producten"] = []
+        snapshot = dict(snapshot)
+        snapshot["producten"] = producten
+        record["resultaat_snapshot"] = snapshot
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload
+                FROM cost_versions
+                WHERE jaar = %s
+                  AND LOWER(status) = 'definitief'
+                ORDER BY bier_id, versie_nummer, id
+                """,
+                (year_value,),
+            )
+            rows = cur.fetchall() or []
+
+    candidates: list[dict[str, Any]] = []
+    recomputed_by_id: dict[str, dict[str, Any]] = {}
+    issues: list[dict[str, Any]] = []
+    for (
+        version_id,
+        jaar,
+        status,
+        bier_id,
+        versie_nummer,
+        created_at,
+        updated_at,
+        finalized_at,
+        payload,
+    ) in rows:
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        if not isinstance(payload, dict):
+            issues.append({"version_id": str(version_id), "error": "invalid_payload"})
+            continue
+        merged: dict[str, Any] = dict(payload)
+        merged["id"] = str(version_id)
+        merged["jaar"] = int(jaar or 0)
+        merged["status"] = str(status or "")
+        merged["bier_id"] = str(bier_id or "")
+        merged["versie_nummer"] = int(versie_nummer or 0)
+        merged["created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else ""
+        merged["updated_at"] = updated_at.isoformat() if hasattr(updated_at, "isoformat") and updated_at else ""
+        merged["finalized_at"] = finalized_at.isoformat() if hasattr(finalized_at, "isoformat") and finalized_at else ""
+
+        if not _is_definitive_inkoop(merged):
+            continue
+
+        _force_empty_product_snapshot(merged)
+        try:
+            normalized = normalize_berekening_record(merged)
+        except Exception as exc:
+            issues.append({"version_id": str(version_id), "error": str(exc)})
+            continue
+        candidates.append(normalized)
+        recomputed_by_id[str(version_id)] = normalized
+
+    audit_before = audit_sku_row_coverage(year=year_value)
+    if dry_run:
+        return {
+            "year": year_value,
+            "dry_run": True,
+            "audit_before": audit_before,
+            "inkoop_versions_found": len(candidates),
+            "issues": issues,
+        }
+
+    # Important: `save_dataset(..., overwrite=True)` uses replace-by-scope semantics per `jaar`.
+    # So we must preserve *all* cost versions for this year, and only replace the inkoop ones we recomputed.
+    dataset = load_dataset(default_value=[])
+    all_records = [row for row in (dataset if isinstance(dataset, list) else []) if isinstance(row, dict)]
+    year_records = [row for row in all_records if int(row.get("jaar", 0) or 0) == year_value]
+    preserved_count_before = len(year_records)
+    updated_year_records: list[dict[str, Any]] = []
+    replaced = 0
+    for row in year_records:
+        vid = str(row.get("id", "") or "").strip()
+        if vid and vid in recomputed_by_id:
+            updated_year_records.append(recomputed_by_id[vid])
+            replaced += 1
+        else:
+            updated_year_records.append(row)
+
+    # Re-save this whole year. This updates cost_versions payload snapshots and rebuilds sku rows.
+    save_dataset(updated_year_records, overwrite=True)
+    audit_after = audit_sku_row_coverage(year=year_value)
+    return {
+        "year": year_value,
+        "dry_run": False,
+        "audit_before": audit_before,
+        "audit_after": audit_after,
+        "inkoop_versions_processed": len(candidates),
+        "year_versions_preserved": preserved_count_before,
+        "year_versions_replaced": replaced,
+        "issues": issues,
+    }
 
 
 def load_cost_row_index_for_versions(

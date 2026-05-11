@@ -110,6 +110,22 @@ export type QuoteBreakEvenSnapshot = {
   calculatedAt: string;
 };
 
+export type BreakEvenConfig = {
+  id: string;
+  naam: string;
+  jaar: number;
+};
+
+export type BreakEvenResult = {
+  breakEvenRevenue: number;
+  breakEvenLiters: number;
+  weightedSellInPerLiter: number;
+  weightedVariableCostPerLiter: number;
+  weightedContributionPerLiter: number;
+  contributionMarginPct: number;
+  mixTotalPct: number;
+};
+
 export type QuoteBuilderUiState = {
   step: StepKey;
   activeScenario: ScenarioId;

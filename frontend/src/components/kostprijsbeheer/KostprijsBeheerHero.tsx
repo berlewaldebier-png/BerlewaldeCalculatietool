@@ -12,6 +12,13 @@ export function KostprijsBeheerHero({
         <div className="module-card-text">
           Start direct een nieuwe kostprijswizard. Na afronden kun je de versie activeren zodat deze overal als actieve kostprijs beschikbaar is.
         </div>
+        <div className="module-card-text" style={{ marginTop: 8 }}>
+          Problemen of onlogische waarden? Bekijk{" "}
+          <a href="/beheer/handleiding" className="inline-link">
+            Problemen oplossen
+          </a>
+          .
+        </div>
       </div>
       <div className="proposal-hub-hero-actions">
         <button

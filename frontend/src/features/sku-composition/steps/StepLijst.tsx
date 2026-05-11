@@ -10,9 +10,23 @@ export function StepLijst(props: {
   year: number;
   createdSkuId: string;
   createdArticleId: string;
+  bomSaved: boolean;
+  beheerClassificationWarning: string;
+  kostprijsIsActive: boolean;
   onBackToControle: () => void;
 }) {
-  const { mode, sellableKind, name, year, createdSkuId, createdArticleId, onBackToControle } = props;
+  const {
+    mode,
+    sellableKind,
+    name,
+    year,
+    createdSkuId,
+    createdArticleId,
+    bomSaved,
+    beheerClassificationWarning,
+    kostprijsIsActive,
+    onBackToControle,
+  } = props;
 
   async function goToKostprijsWizard() {
     const skuId = String(createdSkuId ?? "").trim();
@@ -70,6 +84,22 @@ export function StepLijst(props: {
             Afvuleenheid: <code>{createdArticleId}</code>
           </div>
         ) : null}
+
+        <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+          <div className="muted">
+            <strong>Status</strong>
+          </div>
+          <div className="muted">- SKU aangemaakt: {createdSkuId ? "ja" : "nee"}</div>
+          <div className="muted">- BOM opgeslagen: {bomSaved ? "ja" : "nee"}</div>
+          {mode === "verkoopbaar" && sellableKind !== "dienst" ? (
+            <div className="muted">- Kostprijs actief: {kostprijsIsActive ? "ja" : "nee"}</div>
+          ) : null}
+          {beheerClassificationWarning ? (
+            <div className="muted" style={{ color: "var(--cpq-warning-text, #8a4b00)" }}>
+              - Beheer koppeling: {beheerClassificationWarning}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {mode === "afvuleenheid" ? (

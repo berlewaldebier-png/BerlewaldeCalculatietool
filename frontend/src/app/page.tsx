@@ -4,12 +4,13 @@ import { getBootstrap } from "@/lib/apiServer";
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const sinceRaw = searchParams?.since;
-  const untilRaw = searchParams?.until;
-  const yearRaw = searchParams?.year;
-  const basisRaw = searchParams?.basis;
+  const resolved = (await searchParams) ?? {};
+  const sinceRaw = resolved.since;
+  const untilRaw = resolved.until;
+  const yearRaw = resolved.year;
+  const basisRaw = resolved.basis;
   const since = Array.isArray(sinceRaw) ? sinceRaw[0] : sinceRaw;
   const until = Array.isArray(untilRaw) ? untilRaw[0] : untilRaw;
   const year = Array.isArray(yearRaw) ? yearRaw[0] : yearRaw;

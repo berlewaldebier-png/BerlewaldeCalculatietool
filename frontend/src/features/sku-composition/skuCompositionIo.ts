@@ -1,24 +1,37 @@
 import {
-  slugifyId,
   text,
   toNumber,
   type CompositionLine,
-  type GenericRecord,
   type PackagingLine,
 } from "@/features/sku-composition/skuCompositionUtils";
+import { parseUpsertBundleResponse, parseUpsertFormatResponse } from "@/lib/parsers/skuCompositionParsers";
 
 type SellableKind = "product" | "dienst";
 
-async function putDataset(apiBaseUrl: string, endpoint: string, payload: unknown) {
-  const res = await fetch(`${apiBaseUrl}${endpoint}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(msg || `Opslaan mislukt (${endpoint})`);
+async function readApiErrorMessage(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text || "{}");
+    const detail = (parsed && parsed.detail) || parsed;
+    if (detail && typeof detail === "object") {
+      const message = String((detail as any).message ?? (detail as any).detail ?? "").trim();
+      const fieldErrors = Array.isArray((detail as any).field_errors) ? (detail as any).field_errors : [];
+      if (fieldErrors.length > 0) {
+        const lines = fieldErrors
+          .map((e: any) => {
+            const field = String(e?.field ?? "").trim();
+            const msg = String(e?.message ?? "").trim();
+            return field && msg ? `${field}: ${msg}` : msg || field;
+          })
+          .filter(Boolean);
+        return [message || "Validatiefout.", ...lines].join("\n");
+      }
+      if (message) return message;
+    }
+  } catch {
+    // fall through
   }
+  return text || res.statusText || "Onbekende fout.";
 }
 
 export async function saveSellableSkuBundle({
@@ -35,9 +48,6 @@ export async function saveSellableSkuBundle({
   packaging,
   editArticleId,
   editSkuId,
-  existingArticles,
-  existingSkus,
-  existingBomLines,
 }: {
   apiBaseUrl: string;
   name: string;
@@ -52,78 +62,39 @@ export async function saveSellableSkuBundle({
   packaging: PackagingLine[];
   editArticleId?: string;
   editSkuId?: string;
-  existingArticles: GenericRecord[];
-  existingSkus: GenericRecord[];
-  existingBomLines: GenericRecord[];
 }) {
-  const articleId = text(editArticleId) || `bundle-${slugifyId(name)}`;
-  const skuId = text(editSkuId) || `sku-${articleId}`;
-
-  const articlePayload: GenericRecord = {
-    id: articleId,
-    name,
-    kind: "bundle",
-    uom,
-    content_liter: totalsLiters,
-    sellable_subtype: sellableKind === "dienst" ? "dienst" : "product",
-    pricing_method: sellableKind === "dienst" ? "manual_rate" : "cost_plus",
-    manual_rate_ex: sellableKind === "dienst" ? toNumber(manualRateEx, 0) : 0,
-    product_group: text(productGroup),
-    alcohol_category: text(alcoholCategory),
-    packaging_type: text(packagingType),
-  };
-
-  const nextArticles = [
-    ...existingArticles.filter((row) => text((row as any).id) !== articleId),
-    articlePayload,
-  ];
-  const nextSkus = [
-    ...existingSkus.filter((row) => text((row as any).id) !== skuId),
-    {
-      id: skuId,
-      kind: "article",
-      article_id: articleId,
+  const res = await fetch(`${apiBaseUrl}/data/sku-composition/upsert-bundle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
       name,
-      pricing_method: articlePayload.pricing_method,
-      manual_rate_ex: articlePayload.manual_rate_ex,
+      uom,
+      totals_liters: Math.max(0, toNumber(totalsLiters, 0)),
+      sellable_kind: sellableKind === "dienst" ? "dienst" : "product",
+      manual_rate_ex: Math.max(0, toNumber(manualRateEx, 0)),
       product_group: text(productGroup),
       alcohol_category: text(alcoholCategory),
       packaging_type: text(packagingType),
-    },
-  ];
-
-  const nextBomLines: GenericRecord[] = [];
-  composition.forEach((line, idx) => {
-    nextBomLines.push({
-      id: `bom-${articleId}-sku-${idx}`,
-      parent_article_id: articleId,
-      component_sku_id: line.componentSkuId,
-      component_article_id: "",
-      quantity: line.qty,
-      uom: "stuk",
-    });
+      composition: composition.map((line) => ({
+        component_sku_id: text(line.componentSkuId),
+        qty: Math.max(0, toNumber(line.qty, 0)),
+      })),
+      packaging: packaging.map((line) => ({
+        kind: line.kind,
+        component_id: text(line.componentId),
+        qty: Math.max(0, toNumber(line.qty, 0)),
+      })),
+      edit_article_id: text(editArticleId),
+      edit_sku_id: text(editSkuId),
+    }),
   });
-  packaging.forEach((line, idx) => {
-    nextBomLines.push({
-      id: `bom-${articleId}-pkg-${idx}`,
-      parent_article_id: articleId,
-      component_article_id: line.componentId,
-      component_sku_id: "",
-      quantity: line.qty,
-      uom: "stuk",
-    });
-  });
-
-  const mergedBom = [
-    ...existingBomLines.filter((row) => text((row as any).parent_article_id) !== articleId),
-    ...nextBomLines,
-  ];
-
-  await putDataset(apiBaseUrl, "/data/articles", nextArticles);
-  await putDataset(apiBaseUrl, "/data/skus", nextSkus);
-  await putDataset(apiBaseUrl, "/data/bom-lines", mergedBom);
-
-  return { skuId, articleId };
+  if (!res.ok) {
+    const msg = await readApiErrorMessage(res);
+    throw new Error(msg || "Opslaan mislukt (upsert-bundle)");
+  }
+  const json = await res.json().catch(() => ({}));
+  const parsed = parseUpsertBundleResponse(json);
+  return { skuId: parsed.sku_id, articleId: parsed.article_id };
 }
 
 export async function saveAfvuleenheidFormat({
@@ -132,8 +103,6 @@ export async function saveAfvuleenheidFormat({
   uom,
   totalsLiters,
   afvulParts,
-  existingArticles,
-  existingBomLines,
   editFormatId,
 }: {
   apiBaseUrl: string;
@@ -141,38 +110,29 @@ export async function saveAfvuleenheidFormat({
   uom: string;
   totalsLiters: number;
   afvulParts: PackagingLine[];
-  existingArticles: GenericRecord[];
-  existingBomLines: GenericRecord[];
   editFormatId?: string;
 }) {
-  const articleId = `fmt-${slugifyId(name)}`;
-  const targetArticleId = editFormatId ? text(editFormatId) || articleId : articleId;
-
-  const articlePayload: GenericRecord = {
-    id: targetArticleId,
-    name,
-    kind: "format",
-    uom: uom === "pakket" || uom === "uur" ? "stuk" : uom,
-    content_liter: Math.max(0, toNumber(totalsLiters, 0)),
-  };
-
-  const nextArticles = [...existingArticles.filter((row) => text((row as any).id) !== targetArticleId), articlePayload];
-  const nextBomLines: GenericRecord[] = afvulParts.map((line, idx) => ({
-    id: `bom-${targetArticleId}-${line.kind}-${idx}`,
-    parent_article_id: targetArticleId,
-    component_article_id: line.componentId,
-    component_sku_id: "",
-    quantity: line.qty,
-    uom: "stuk",
-  }));
-  const mergedBom = [
-    ...existingBomLines.filter((row) => text((row as any).parent_article_id) !== targetArticleId),
-    ...nextBomLines,
-  ];
-
-  await putDataset(apiBaseUrl, "/data/articles", nextArticles);
-  await putDataset(apiBaseUrl, "/data/bom-lines", mergedBom);
-
-  return { articleId: targetArticleId };
+  const res = await fetch(`${apiBaseUrl}/data/sku-composition/upsert-format`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      uom,
+      totals_liters: Math.max(0, toNumber(totalsLiters, 0)),
+      edit_format_id: text(editFormatId),
+      afvul_parts: afvulParts.map((line) => ({
+        kind: line.kind,
+        component_id: text(line.componentId),
+        qty: Math.max(0, toNumber(line.qty, 0)),
+      })),
+    }),
+  });
+  if (!res.ok) {
+    const msg = await readApiErrorMessage(res);
+    throw new Error(msg || "Opslaan mislukt (upsert-format)");
+  }
+  const json = await res.json().catch(() => ({}));
+  const parsed = parseUpsertFormatResponse(json);
+  return { articleId: parsed.article_id };
 }
 

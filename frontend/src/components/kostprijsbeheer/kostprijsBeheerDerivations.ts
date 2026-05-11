@@ -1,6 +1,5 @@
 import {
   buildVersionLabel,
-  getSnapshotPackagingLabel,
   getSnapshotProductCost,
   parseSortTimestamp,
 } from "@/components/kostprijsbeheer/kostprijsBeheerUtils";
@@ -160,23 +159,13 @@ export function buildActiveRows(args: {
         (versie as any)?.finalized_at ?? (versie as any)?.updated_at ?? effectiefVanaf
       );
 
-      const packagingLabel = basisById.get(productId) ?? samengesteldById.get(productId) ?? "";
       const costLinesRaw = (versie as any)?.cost_lines ?? (versie as any)?.costLines ?? [];
       const snapshotRows = Array.isArray(costLinesRaw) ? (costLinesRaw as GenericRecord[]) : [];
       const matchingSnapshotRow =
-        (effectiefProductId
-          ? snapshotRows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId)
-          : undefined) ||
-        (packagingLabel
-          ? snapshotRows.find(
-              (item) =>
-                String(getSnapshotPackagingLabel(item)).trim().toLowerCase() ===
-                String(packagingLabel).trim().toLowerCase()
-            )
-          : undefined);
+        effectiefProductId ? snapshotRows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId) : undefined;
       const versionType = String((versie as any)?.type ?? "").toLowerCase();
       const currentCost =
-        matchingSnapshotRow && (effectiefProductId || packagingLabel)
+        matchingSnapshotRow && effectiefProductId
           ? getSnapshotProductCost(matchingSnapshotRow)
           : skuId && !productId && (versionType === "bundle" || versionType === "article")
             ? Number((versie as any)?.kostprijs ?? Number.NaN)
@@ -194,19 +183,14 @@ export function buildActiveRows(args: {
       };
 
       const affectsProduct = (record: GenericRecord) => {
-        if (!packagingLabel) return false;
-        if (skuId && !productId) return false;
+        if (!effectiefProductId) return false;
         const statusValue = String((record as any)?.status ?? "").toLowerCase();
 
-        // Definitive versions must have a snapshot containing this packaging label.
+        // Definitive versions must have a snapshot containing this product_id.
         if (statusValue === "definitief") {
           const costLines = (record as any)?.cost_lines ?? (record as any)?.costLines ?? [];
           const rows = Array.isArray(costLines) ? (costLines as GenericRecord[]) : [];
-          return rows.some(
-            (item) =>
-              String(getSnapshotPackagingLabel(item)).trim().toLowerCase() ===
-              String(packagingLabel).trim().toLowerCase()
-          );
+          return rows.some((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId);
         }
 
         // Concept (factuur) versions don't have a snapshot; infer by invoice unit id inclusion.
@@ -218,7 +202,7 @@ export function buildActiveRows(args: {
         for (const factuur of facturen) {
           const regels = Array.isArray((factuur as any)?.factuurregels) ? (factuur as any).factuurregels : [];
           for (const regel of regels) {
-            if (String((regel as any)?.eenheid ?? "").trim() === String(productId)) {
+            if (String((regel as any)?.eenheid ?? "").trim() === String(effectiefProductId)) {
               return true;
             }
           }
@@ -245,17 +229,9 @@ export function buildActiveRows(args: {
         .map((record) => {
           const costLinesRaw = (record as any)?.cost_lines ?? (record as any)?.costLines ?? [];
           const rows = Array.isArray(costLinesRaw) ? (costLinesRaw as GenericRecord[]) : [];
-          const match =
-            (effectiefProductId
-              ? rows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId)
-              : undefined) ||
-            (packagingLabel
-              ? rows.find(
-                  (item) =>
-                    String(getSnapshotPackagingLabel(item)).trim().toLowerCase() ===
-                    String(packagingLabel).trim().toLowerCase()
-                )
-              : undefined);
+          const match = effectiefProductId
+            ? rows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId)
+            : undefined;
           const cost = match ? getSnapshotProductCost(match) : null;
           const deltaEuro = currentCost !== null && cost !== null ? cost - currentCost : null;
           const deltaPct =

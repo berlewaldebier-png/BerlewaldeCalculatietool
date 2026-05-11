@@ -23,7 +23,7 @@ export function PreviewStep({
   conceptStarted: boolean;
   saveAndCloseButton: ReactNode;
   navigateToStep: (nextStep: number) => Promise<void> | void;
-  saveDraftToServer: (statusMessage: string) => Promise<void> | void;
+  saveDraftToServer: (statusMessage?: string) => Promise<unknown> | unknown;
 }) {
   return (
     <div>

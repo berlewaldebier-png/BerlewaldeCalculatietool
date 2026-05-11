@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:smoke:sku-composition": "node ./scripts/smoke/skuCompositionUpsert.smoke.js",
     "test:pricing": "node ./node_modules/typescript/bin/tsc -p ./scripts/tsconfig.pricing.json && node ./.tmp/pricing-tests/scripts/pricingEngine.contracttest.js && node ./.tmp/pricing-tests/scripts/quoteBuilderGuards.contracttest.js && node ./.tmp/pricing-tests/scripts/quoteScenarioCalculations.contracttest.js && node ./.tmp/pricing-tests/scripts/centralSkuIndex.contracttest.js && node ./.tmp/pricing-tests/scripts/quoteOptionBuilding.contracttest.js && node ./.tmp/pricing-tests/scripts/activationUniqueness.contracttest.js && node ./.tmp/pricing-tests/scripts/quoteOptionOrdering.contracttest.js"
   },
   "dependencies": {

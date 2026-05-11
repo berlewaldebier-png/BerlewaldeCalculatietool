@@ -8,6 +8,9 @@ import { API_BASE_URL } from "@/lib/api";
 import { StepControle } from "@/features/sku-composition/steps/StepControle";
 import { StepLijst } from "@/features/sku-composition/steps/StepLijst";
 import { StepClassificeren } from "@/features/sku-composition/steps/StepClassificeren";
+import { StepExtras } from "@/features/sku-composition/steps/StepExtras";
+import { StepSamenstelling } from "@/features/sku-composition/steps/StepSamenstelling";
+import { StepType } from "@/features/sku-composition/steps/StepType";
 import {
   text,
   toNumber,
@@ -16,6 +19,8 @@ import {
   type PackagingLine,
 } from "@/features/sku-composition/skuCompositionUtils";
 import { saveAfvuleenheidFormat, saveSellableSkuBundle } from "@/features/sku-composition/skuCompositionIo";
+import { useSkuCompositionIndexes } from "@/features/sku-composition/skuCompositionIndexes";
+import { computeTotals } from "@/features/sku-composition/skuCompositionDerivations";
 
 type FlowMode = "afvuleenheid" | "verkoopbaar";
 type SellableKind = "product" | "dienst";
@@ -66,6 +71,13 @@ export function ProductSamenstellenWizard(props: Props) {
   const [packagingTypeOptIn, setPackagingTypeOptIn] = useState<boolean>(false);
   const [douanoMappedSkuIds, setDouanoMappedSkuIds] = useState<Set<string>>(new Set());
   const [douanoMappingBySkuId, setDouanoMappingBySkuId] = useState<Map<string, any>>(new Map());
+
+  const indexes = useSkuCompositionIndexes({
+    year: props.year,
+    packagingComponentPrices: Array.isArray(props.packagingComponentPrices) ? props.packagingComponentPrices : [],
+    articles: Array.isArray(props.articles) ? props.articles : [],
+    bomLines: Array.isArray(props.bomLines) ? props.bomLines : [],
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -329,110 +341,31 @@ export function ProductSamenstellenWizard(props: Props) {
   }, [didLoadEditArticle, props.articles, props.bomLines, props.editArticleId, props.skus]);
 
   const totals = useMemo(() => {
-    let liters = 0;
-    let cost = 0;
-    if (mode === "verkoopbaar" && sellableKind === "dienst") {
-      // Services are priced as a manual rate per UOM (e.g. €/uur) and do not have liters,
-      // composition items, or packaging costs.
-      liters = 0;
-      cost = Math.max(0, toNumber(manualRateEx, 0));
-      return { liters, cost, packagingCost: 0, totalCost: cost };
-    }
-
-    composition.forEach((line) => {
-      const sku = central.bySkuId.get(line.componentSkuId);
-      if (!sku) return;
-      const qty = Math.max(0, toNumber(line.qty, 0));
-      liters += qty * (sku.contentLiter || 0);
-      cost += qty * (sku.pricingMethod === "manual_rate" ? sku.manualRateEx : sku.kostprijsEx);
-    });
-    const packagingCostById = new Map<string, number>();
-    (Array.isArray(props.packagingComponentPrices) ? props.packagingComponentPrices : []).forEach((row) => {
-      const year = toNumber((row as any).jaar, 0);
-      if (year !== props.year) return;
-      const id = text((row as any).verpakkingsonderdeel_id || (row as any).packaging_component_id);
-      if (!id) return;
-      packagingCostById.set(id, toNumber((row as any).prijs_per_stuk, 0));
-    });
-
-    const articlesById = new Map<string, GenericRecord>();
-    (Array.isArray(props.articles) ? props.articles : []).forEach((row) => {
-      const id = text((row as any).id);
-      if (id) articlesById.set(id, row);
-    });
-    const bomByParent = new Map<string, GenericRecord[]>();
-    (Array.isArray(props.bomLines) ? props.bomLines : []).forEach((row) => {
-      const parent = text((row as any).parent_article_id);
-      if (!parent) return;
-      const next = bomByParent.get(parent) ?? [];
-      next.push(row);
-      bomByParent.set(parent, next);
-    });
-    const formatCostMemo = new Map<string, number>();
-    const visiting = new Set<string>();
-    const computeFormatPackagingCost = (formatId: string): number => {
-      if (formatCostMemo.has(formatId)) return formatCostMemo.get(formatId)!;
-      if (visiting.has(formatId)) return 0;
-      visiting.add(formatId);
-      const lines = bomByParent.get(formatId) ?? [];
-      let subtotal = 0;
-      lines.forEach((line) => {
-        const componentArticleId = text((line as any).component_article_id);
-        if (!componentArticleId) return;
-        const qty = Math.max(0, toNumber((line as any).quantity, 0));
-        if (qty === 0) return;
-        const component = articlesById.get(componentArticleId);
-        const kind = text((component as any)?.kind).toLowerCase();
-        if (kind === "packaging_component") {
-          subtotal += qty * (packagingCostById.get(componentArticleId) ?? 0);
-          return;
-        }
-        if (kind === "format") {
-          subtotal += qty * computeFormatPackagingCost(componentArticleId);
-        }
-      });
-      visiting.delete(formatId);
-      formatCostMemo.set(formatId, subtotal);
-      return subtotal;
-    };
-
-    let packagingCost = 0;
     const allPackaging = mode === "afvuleenheid" ? afvulParts : packaging;
-    allPackaging.forEach((line) => {
-      const qty = Math.max(0, toNumber(line.qty, 0));
-      if (mode === "afvuleenheid" && line.kind === "format") {
-        packagingCost += qty * computeFormatPackagingCost(line.componentId);
-      } else {
-        packagingCost += qty * (packagingCostById.get(line.componentId) ?? 0);
-      }
+    return computeTotals({
+      mode,
+      sellableKind,
+      manualRateEx,
+      composition,
+      packagingLines: allPackaging,
+      contentLiter,
+      formatOptions,
+      centralSkuById: central.bySkuId,
+      bomByParent: indexes.bomByParent,
+      articlesById: indexes.articlesById,
+      packagingCostById: indexes.packagingCostById,
     });
-
-    if (mode === "afvuleenheid") {
-      liters =
-        toNumber(contentLiter, 0) > 0
-          ? Math.max(0, toNumber(contentLiter, 0))
-          : afvulParts.reduce((sum, line) => {
-              if (line.kind !== "format") return sum;
-              const opt = formatOptions.find((candidate) => candidate.value === line.componentId);
-              if (!opt) return sum;
-              return sum + Math.max(0, toNumber(line.qty, 0)) * (opt.contentLiter || 0);
-            }, 0);
-    }
-    return { liters, cost, packagingCost, totalCost: cost + packagingCost };
   }, [
     central.bySkuId,
     composition,
     packaging,
     afvulParts,
-    props.packagingComponentPrices,
-    props.articles,
-    props.bomLines,
-    props.year,
     mode,
     sellableKind,
     manualRateEx,
     contentLiter,
     formatOptions,
+    indexes,
   ]);
 
   const blockingWarnings = useMemo(() => {
@@ -463,15 +396,36 @@ export function ProductSamenstellenWizard(props: Props) {
     const skuId = String(createdSkuId ?? "").trim();
     if (!skuId) return "";
     const mapping = douanoMappingBySkuId.get(skuId) ?? null;
-    if (!mapping) return "Koppeling ontbreekt in Beheer → productkoppeling. Koppel dit SKU om kostprijs te kunnen activeren.";
+    if (!mapping) return "Koppeling ontbreekt in Beheer → productkoppeling. Koppel dit SKU om Douano-export/omzetregels/dashboards te kunnen gebruiken.";
     const productGroupValue = String((mapping as any)?.product_group ?? "").trim();
     const packagingTypeValue = String((mapping as any)?.packaging_type ?? "").trim();
-    if (!productGroupValue) return "Productgroep ontbreekt in Beheer → productkoppeling. Vul dit aan om kostprijs te kunnen activeren.";
+    if (!productGroupValue) return "Productgroep ontbreekt in Beheer → productkoppeling. Vul dit aan voor Douano-export/omzetregels/dashboards.";
     if ((productGroupValue === "drank" || productGroupValue === "giftset") && !packagingTypeValue) {
-      return "Verpakkingstype is verplicht voor Drank/Giftset. Vul dit aan in Beheer → productkoppeling om kostprijs te kunnen activeren.";
+      return "Verpakkingstype is verplicht voor Drank/Giftset. Vul dit aan in Beheer → productkoppeling voor Douano-export/omzetregels/dashboards.";
     }
     return "";
   }, [createdSkuId, douanoMappingBySkuId, mode, sellableKind]);
+
+  const kostprijsIsActive = useMemo(() => {
+    if (mode !== "verkoopbaar") return false;
+    if (sellableKind === "dienst") return true;
+    const skuId = String(createdSkuId ?? "").trim();
+    if (!skuId) return false;
+    const year = Number(props.year || 0) || 0;
+    return (Array.isArray(props.kostprijsproductactiveringen) ? props.kostprijsproductactiveringen : []).some((row) => {
+      const recYear = Number((row as any)?.jaar ?? 0) || 0;
+      if (recYear !== year) return false;
+      const recSku = String((row as any)?.sku_id ?? "").trim();
+      if (recSku !== skuId) return false;
+      const effectiefTot = String((row as any)?.effectief_tot ?? "").trim();
+      return !effectiefTot;
+    });
+  }, [createdSkuId, mode, props.kostprijsproductactiveringen, props.year, sellableKind]);
+
+  const bomSaved = useMemo(() => {
+    if (mode === "afvuleenheid") return Boolean(String(createdArticleId ?? "").trim());
+    return Boolean(String(createdSkuId ?? "").trim() && String(createdArticleId ?? "").trim());
+  }, [createdArticleId, createdSkuId, mode]);
 
   async function saveSellable(options?: { goToList?: boolean }) {
     setIsSaving(true);
@@ -491,9 +445,6 @@ export function ProductSamenstellenWizard(props: Props) {
         packaging,
         editArticleId: createdArticleId || props.editArticleId || "",
         editSkuId: createdSkuId || "",
-        existingArticles: Array.isArray(props.articles) ? props.articles : [],
-        existingSkus: Array.isArray(props.skus) ? props.skus : [],
-        existingBomLines: Array.isArray(props.bomLines) ? props.bomLines : [],
       });
 
       setCreatedSkuId(skuId);
@@ -504,7 +455,8 @@ export function ProductSamenstellenWizard(props: Props) {
         setStepIndex(steps.findIndex((s) => s.id === "lijst"));
       }
     } catch (err) {
-      setStatus(`Opslaan mislukt: ${String((err as any)?.message ?? err)}`);
+      const raw = String((err as any)?.message ?? err);
+      setStatus(raw.startsWith("{") ? "Opslaan mislukt: controleer invoer (validatiefout)." : `Opslaan mislukt: ${raw}`);
     } finally {
       setIsSaving(false);
     }
@@ -520,8 +472,6 @@ export function ProductSamenstellenWizard(props: Props) {
         uom,
         totalsLiters: totals.liters,
         afvulParts,
-        existingArticles: Array.isArray(props.articles) ? props.articles : [],
-        existingBomLines: Array.isArray(props.bomLines) ? props.bomLines : [],
         editFormatId: props.editFormatId,
       });
       setStatus("Afvuleenheid opgeslagen.");
@@ -530,7 +480,8 @@ export function ProductSamenstellenWizard(props: Props) {
         setStepIndex(steps.findIndex((s) => s.id === "lijst"));
       }
     } catch (err) {
-      setStatus(`Opslaan mislukt: ${String((err as any)?.message ?? err)}`);
+      const raw = String((err as any)?.message ?? err);
+      setStatus(raw.startsWith("{") ? "Opslaan mislukt: controleer invoer (validatiefout)." : `Opslaan mislukt: ${raw}`);
     } finally {
       setIsSaving(false);
     }
@@ -562,134 +513,32 @@ export function ProductSamenstellenWizard(props: Props) {
 
               <div className="wizard-step-body">
                 {currentStep.id === "type" ? (
-                  <div className="wizard-form-grid">
-                    <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                      <span>Wat wil je maken?</span>
-                      <select
-                        className="dataset-input"
-                        value={mode}
-                        onChange={(e) => {
-                          const next = e.target.value as FlowMode;
-                          setMode(next);
-                          if (next === "afvuleenheid") {
-                            setSellableKind("product");
-                            setUom("stuk");
-                          } else {
-                            setUom("pakket");
-                          }
-                        }}
-                      >
-                        <option value="afvuleenheid">Afvuleenheid</option>
-                        <option value="verkoopbaar">Verkoopbaar artikel</option>
-                      </select>
-                    </label>
-
-                    {mode === "verkoopbaar" ? (
-                      <>
-                        <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                          <span>Soort</span>
-                          <select
-                            className="dataset-input"
-                            value={sellableKind}
-                            onChange={(e) => {
-                              const next = e.target.value as SellableKind;
-                              setSellableKind(next);
-                              setUom(next === "dienst" ? "uur" : "pakket");
-                              if (next === "dienst") {
-                                setProductGroup("dienst");
-                                setPackagingTypeOptIn(false);
-                                setPackagingType("");
-                              }
-                            }}
-                          >
-                            <option value="product">Product</option>
-                            <option value="dienst">Dienstverlening</option>
-                          </select>
-                        </label>
-
-                        {false ? (<>
-                        <label className="nested-field">
-                          <span>Productgroep</span>
-                          <select
-                            className="dataset-input"
-                            value={productGroup}
-                            onChange={(e) => {
-                              const next = e.target.value;
-                              setProductGroup(next);
-                              const required = next === "drank" || next === "giftset";
-                              if (!required) {
-                                setPackagingTypeOptIn(false);
-                                setPackagingType("");
-                              }
-                            }}
-                          >
-                            <option value="">Selecteer…</option>
-                            {productgroepOptions.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="nested-field">
-                          <span>Alcoholcategorie</span>
-                          <select
-                            className="dataset-input"
-                            value={alcoholCategory}
-                            onChange={(e) => setAlcoholCategory(e.target.value)}
-                            disabled={productGroup !== "drank" && productGroup !== "giftset"}
-                            title={productGroup !== "drank" && productGroup !== "giftset" ? "Alleen relevant voor drank/giftset." : ""}
-                          >
-                            <option value="">—</option>
-                            {alcoholOptions.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <div className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                          <span>Verpakkingstype</span>
-                          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                            {packagingRequired ? (
-                              <span style={{ fontWeight: 700, opacity: 0.75 }}>verplicht</span>
-                            ) : (
-                              <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
-                                <input
-                                  type="checkbox"
-                                  checked={packagingTypeOptIn}
-                                  onChange={(e) => {
-                                    const next = e.target.checked;
-                                    setPackagingTypeOptIn(next);
-                                    if (!next) setPackagingType("");
-                                  }}
-                                />
-                                + verpakkingstype
-                              </label>
-                            )}
-                            <select
-                              className="dataset-input"
-                              style={{ flex: 1 }}
-                              value={packagingType}
-                              onChange={(e) => setPackagingType(e.target.value)}
-                              disabled={!packagingRequired && !packagingTypeOptIn}
-                              title={!packagingRequired && !packagingTypeOptIn ? "Optioneel. Zet ‘+ verpakkingstype’ aan om in te vullen." : ""}
-                            >
-                              <option value="">{packagingRequired || packagingTypeOptIn ? "Selecteer…" : "—"}</option>
-                              {packagingAllowedOptions.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                  {opt.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                        </>) : null}
-                      </>
-                    ) : null}
-                  </div>
+                  <>
+                    <StepType
+                      mode={mode}
+                      sellableKind={sellableKind}
+                      onModeChange={(next) => {
+                        setMode(next);
+                        if (next === "afvuleenheid") {
+                          setSellableKind("product");
+                          setUom("stuk");
+                        } else {
+                          setUom("pakket");
+                        }
+                      }}
+                      onSellableKindChange={(next) => {
+                        setSellableKind(next);
+                        setUom(next === "dienst" ? "uur" : "pakket");
+                        if (next === "dienst") {
+                          setProductGroup("dienst");
+                          setPackagingTypeOptIn(false);
+                          setPackagingType("");
+                        }
+                      }}
+                    />
+                    
+                    
+                  </>
                 ) : null}
 
                 {currentStep.id === "classificeren" ? (
@@ -713,277 +562,41 @@ export function ProductSamenstellenWizard(props: Props) {
                 ) : null}
 
                 {currentStep.id === "samenstelling" ? (
-                  <div className="wizard-form-grid">
-                    <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                      <span>Naam</span>
-                      <input className="dataset-input" value={name} onChange={(e) => setName(e.target.value)} />
-                    </label>
-
-                    {mode === "verkoopbaar" ? (
-                      <div style={{ gridColumn: "1 / -1" }}>
-                        <div className="content-card-title" style={{ marginBottom: 8 }}>
-                          Items
-                        </div>
-                        {composition.map((line) => (
-                          <div key={line.id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 40px", gap: 10, marginBottom: 10 }}>
-                            <select
-                              className="dataset-input"
-                              value={line.componentSkuId}
-                              onChange={(e) =>
-                                setComposition((current) =>
-                                  current.map((row) =>
-                                    row.id === line.id ? { ...row, componentSkuId: e.target.value } : row
-                                  )
-                                )
-                              }
-                            >
-                              <option value="">Kies item…</option>
-                              {selectableSkuOptions
-                                .filter(
-                                  (opt) =>
-                                    opt.value === line.componentSkuId ||
-                                    !composition.some(
-                                      (row) => row.id !== line.id && row.componentSkuId === opt.value
-                                    )
-                                )
-                                .map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                            </select>
-                            <input
-                              className="dataset-input"
-                              type="number"
-                              min={0}
-                              value={String(line.qty)}
-                              onChange={(e) =>
-                                setComposition((current) =>
-                                  current.map((row) =>
-                                    row.id === line.id ? { ...row, qty: toNumber(e.target.value, 0) } : row
-                                  )
-                                )
-                              }
-                            />
-                            <button
-                              type="button"
-                              className="icon-button-table"
-                              onClick={() => setComposition((current) => current.filter((row) => row.id !== line.id))}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          className="editor-button editor-button-secondary"
-                          onClick={() =>
-                            setComposition((current) => [
-                              ...current,
-                              { id: `c-${Date.now()}-${Math.random().toString(16).slice(2)}`, componentSkuId: "", qty: 1 },
-                            ])
-                          }
-                        >
-                          Item toevoegen
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ gridColumn: "1 / -1" }}>
-                        <div className="content-card-title" style={{ marginBottom: 8 }}>
-                          Verpakkingsonderdelen
-                        </div>
-                        {afvulParts.map((line) => (
-                          <div
-                            key={line.id}
-                            style={{ display: "grid", gridTemplateColumns: "160px 1fr 120px 40px", gap: 10, marginBottom: 10 }}
-                          >
-                            <select
-                              className="dataset-input"
-                              value={line.kind}
-                              onChange={(e) =>
-                                setAfvulParts((current) =>
-                                  current.map((row) =>
-                                    row.id === line.id ? { ...row, kind: e.target.value as any, componentId: "" } : row
-                                  )
-                                )
-                              }
-                            >
-                              <option value="format">Afvuleenheid</option>
-                              <option value="packaging_component">Verpakkingsonderdeel</option>
-                            </select>
-                            <select
-                              className="dataset-input"
-                              value={line.componentId}
-                              onChange={(e) =>
-                                setAfvulParts((current) =>
-                                  current.map((row) =>
-                                    row.id === line.id ? { ...row, componentId: e.target.value } : row
-                                  )
-                                )
-                              }
-                            >
-                              <option value="">Kies onderdeel…</option>
-                              {(line.kind === "format" ? formatOptions : packagingOptions)
-                                .filter((opt) => {
-                                  const selected = afvulParts.some(
-                                    (row) => row.id !== line.id && row.kind === line.kind && row.componentId === opt.value
-                                  );
-                                  return opt.value === line.componentId || !selected;
-                                })
-                                .map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                            </select>
-                            <input
-                              className="dataset-input"
-                              type="number"
-                              min={0}
-                              value={String(line.qty)}
-                              onChange={(e) =>
-                                setAfvulParts((current) =>
-                                  current.map((row) =>
-                                    row.id === line.id ? { ...row, qty: toNumber(e.target.value, 0) } : row
-                                  )
-                                )
-                              }
-                            />
-                            <button
-                              type="button"
-                              className="icon-button-table"
-                              onClick={() => setAfvulParts((current) => current.filter((row) => row.id !== line.id))}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          className="editor-button editor-button-secondary"
-                          onClick={() =>
-                            setAfvulParts((current) => [
-                              ...current,
-                              { id: `ap-${Date.now()}-${Math.random().toString(16).slice(2)}`, kind: "packaging_component", componentId: "", qty: 1 },
-                            ])
-                          }
-                        >
-                          Onderdeel toevoegen
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <>
+                    <StepSamenstelling
+                      mode={mode}
+                      sellableKind={sellableKind}
+                      name={name}
+                      setName={setName}
+                      composition={composition}
+                      setComposition={setComposition}
+                      selectableSkuOptions={selectableSkuOptions}
+                      afvulParts={afvulParts}
+                      setAfvulParts={setAfvulParts}
+                      formatOptions={formatOptions}
+                      packagingOptions={packagingOptions}
+                    />
+                    
+                  </>
                 ) : null}
 
                 {currentStep.id === "extras" ? (
-                  <div className="wizard-form-grid">
-                    {mode === "verkoopbaar" ? (
-                      <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                        <span>Eenheid</span>
-                        <select className="dataset-input" value={uom} onChange={(e) => setUom(e.target.value as any)}>
-                          <option value="stuk">stuk</option>
-                          <option value="pakket">pakket</option>
-                          <option value="uur">uur</option>
-                        </select>
-                      </label>
-                    ) : (
-                      <>
-                        <label className="nested-field">
-                          <span>Eenheid</span>
-                          <select className="dataset-input" value={uom} onChange={(e) => setUom(e.target.value as any)}>
-                            <option value="stuk">stuk</option>
-                            <option value="doos">doos</option>
-                            <option value="fust">fust</option>
-                          </select>
-                        </label>
-                        <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                          <span>Inhoud (L) (optioneel, anders afgeleid)</span>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            step="any"
-                            value={String(contentLiter)}
-                            onChange={(e) => setContentLiter(toNumber(e.target.value, 0))}
-                          />
-                        </label>
-                      </>
-                    )}
-
-                    {mode === "verkoopbaar" && sellableKind === "dienst" ? (
-                      <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
-                        <span>Tarief (ex) per uur</span>
-                        <input
-                          className="dataset-input"
-                          type="number"
-                          step="any"
-                          value={String(manualRateEx)}
-                          onChange={(e) => setManualRateEx(toNumber(e.target.value, 0))}
-                        />
-                      </label>
-                    ) : null}
-
-                    {mode === "verkoopbaar" ? (
-                      <div style={{ gridColumn: "1 / -1" }}>
-                      <div className="content-card-title" style={{ marginBottom: 8 }}>
-                        Extra verpakking
-                      </div>
-                      {packaging.map((line) => (
-                        <div key={line.id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 40px", gap: 10, marginBottom: 10 }}>
-                          <select
-                            className="dataset-input"
-                            value={line.componentId}
-                            onChange={(e) =>
-                              setPackaging((current) =>
-                                current.map((row) =>
-                                  row.id === line.id ? { ...row, componentId: e.target.value } : row
-                                )
-                              )
-                            }
-                          >
-                            <option value="">Kies verpakking…</option>
-                            {packagingOptions.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            className="dataset-input"
-                            type="number"
-                            min={0}
-                            value={String(line.qty)}
-                            onChange={(e) =>
-                              setPackaging((current) =>
-                                current.map((row) =>
-                                  row.id === line.id ? { ...row, qty: toNumber(e.target.value, 0) } : row
-                                )
-                              )
-                            }
-                          />
-                          <button
-                            type="button"
-                            className="icon-button-table"
-                            onClick={() => setPackaging((current) => current.filter((row) => row.id !== line.id))}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        className="editor-button editor-button-secondary"
-                        onClick={() =>
-                          setPackaging((current) => [
-                            ...current,
-                            { id: `p-${Date.now()}-${Math.random().toString(16).slice(2)}`, kind: "packaging_component", componentId: "", qty: 1 },
-                          ])
-                        }
-                      >
-                        Verpakking toevoegen
-                      </button>
-                      </div>
-                    ) : null}
-                  </div>
+                  <>
+                    <StepExtras
+                      mode={mode}
+                      sellableKind={sellableKind}
+                      uom={uom}
+                      setUom={setUom}
+                      contentLiter={contentLiter}
+                      setContentLiter={setContentLiter}
+                      manualRateEx={manualRateEx}
+                      setManualRateEx={setManualRateEx}
+                      packaging={packaging}
+                      setPackaging={setPackaging}
+                      packagingOptions={packagingOptions}
+                    />
+                    
+                  </>
                 ) : null}
 
                 {currentStep.id === "controle" ? (
@@ -996,7 +609,10 @@ export function ProductSamenstellenWizard(props: Props) {
                     blockingWarnings={blockingWarnings}
                     beheerWarning={beheerClassificationWarning}
                     onGoToBeheer={() => {
-                      window.location.href = "/beheer/productkoppeling";
+                      const skuId = String(createdSkuId ?? "").trim();
+                      window.location.href = skuId
+                        ? `/beheer/productkoppeling?sku_id=${encodeURIComponent(skuId)}`
+                        : "/beheer/productkoppeling";
                     }}
                   />
                 ) : null}
@@ -1009,6 +625,9 @@ export function ProductSamenstellenWizard(props: Props) {
                     year={props.year}
                     createdSkuId={createdSkuId}
                     createdArticleId={createdArticleId}
+                    bomSaved={bomSaved}
+                    beheerClassificationWarning={beheerClassificationWarning}
+                    kostprijsIsActive={kostprijsIsActive}
                     onBackToControle={() => setStepIndex(3)}
                   />
                 ) : null}

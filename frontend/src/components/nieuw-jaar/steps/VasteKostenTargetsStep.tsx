@@ -41,11 +41,11 @@ type VasteKostenTargetsStepProps = {
   updateVasteKostenRow: (uiId: string, patch: Partial<VasteKostenUiRow>) => void;
   addVasteKostenRow: () => void;
 
-  fixedCostRowsForYear: (year: number) => unknown[];
-  computeHerverdelingTotals: (rows: unknown[]) => HerverdelingTotals;
+  fixedCostRowsForYear: (year: number) => Array<Record<string, unknown>>;
+  computeHerverdelingTotals: (rows: Array<Record<string, unknown>>) => HerverdelingTotals;
   formatEur: (value: number) => string;
 
-  saveDraftToServer: (message: string) => Promise<void> | void;
+  saveDraftToServer: (message?: string) => Promise<unknown> | unknown;
 };
 
 export function VasteKostenTargetsStep({

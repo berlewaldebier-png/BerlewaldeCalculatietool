@@ -16,6 +16,7 @@ export function useCentralSkuIndex(params: {
   articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
+  includeDraftCostPlus?: boolean;
 }): CentralSkuIndex {
   const {
     year,
@@ -25,6 +26,7 @@ export function useCentralSkuIndex(params: {
     articles,
     kostprijsversies,
     kostprijsproductactiveringen,
+    includeDraftCostPlus,
   } = params;
 
   return useMemo(() => {
@@ -36,7 +38,8 @@ export function useCentralSkuIndex(params: {
       articles: Array.isArray(articles) ? articles : [],
       kostprijsversies: Array.isArray(kostprijsversies) ? kostprijsversies : [],
       kostprijsproductactiveringen: Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [],
+      includeDraftCostPlus,
     });
-  }, [year, channels, verkoopprijzen, skus, articles, kostprijsversies, kostprijsproductactiveringen]);
+  }, [year, channels, verkoopprijzen, skus, articles, kostprijsversies, kostprijsproductactiveringen, includeDraftCostPlus]);
 }
 

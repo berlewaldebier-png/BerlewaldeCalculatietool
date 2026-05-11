@@ -14,12 +14,12 @@ export const OPTION_TYPES_ORDER: OptionType[] = [
   "Tapverhuur",
 ];
 
-export function buildOptionAvailabilityMap({
+export function buildOptionAvailabilityMap<R>({
   scenario,
   evaluateOptionAvailability,
 }: {
   scenario: QuoteScenario;
-  evaluateOptionAvailability: (args: { scenario: QuoteScenario; type: OptionType; editingBlockId?: string | null }) => unknown;
+  evaluateOptionAvailability: (args: { scenario: QuoteScenario; type: OptionType; editingBlockId?: string | null }) => R;
 }) {
   const entries = OPTION_TYPES_ORDER.map((type) => [
     type,
@@ -29,5 +29,5 @@ export function buildOptionAvailabilityMap({
     }),
   ]);
 
-  return Object.fromEntries(entries) as Record<OptionType, ReturnType<typeof evaluateOptionAvailability>>;
+  return Object.fromEntries(entries) as Record<OptionType, R>;
 }

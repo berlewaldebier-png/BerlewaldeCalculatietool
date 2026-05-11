@@ -1251,6 +1251,23 @@ def post_repair_cost_lines(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/repair/inkoop-unit-costs")
+def post_repair_inkoop_unit_costs(
+    year: int = Query(2025, description="Jaar om te repareren (default 2025)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin repair: recompute definitive inkoop snapshots using unit-cost SSOT and rebuild sku rows."""
+    try:
+        return {
+            "result": cost_versions_storage.repair_inkoop_unit_costs_for_year(year=int(year), dry_run=bool(dry_run))
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.get("/new-year-draft")
 def get_new_year_draft(
     target_year: int = Query(..., description="Doeljaar waarvoor de draft opgehaald moet worden."),

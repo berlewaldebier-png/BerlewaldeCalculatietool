@@ -1,8 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 
-type TariefTarget = {
+type TariefRow = {
+  id: string;
+  jaar: number;
   tarief_hoog: number;
   tarief_laag: number;
   verbruikersbelasting: number;
@@ -12,8 +14,8 @@ type TarievenTargetsStepProps = {
   sourceYear: number;
   targetYear: number;
   sourceTarief: unknown;
-  draftTariefTarget: TariefTarget;
-  setDraftTariefTarget: (setter: (current: TariefTarget) => TariefTarget) => void;
+  draftTariefTarget: TariefRow;
+  setDraftTariefTarget: Dispatch<SetStateAction<TariefRow>>;
   copyTariefFromSource: () => void;
   saveTariefTarget: () => void;
   navigateToStep: (nextStep: number) => Promise<void> | void;

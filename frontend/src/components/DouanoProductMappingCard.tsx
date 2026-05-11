@@ -110,10 +110,20 @@ function EyeIcon() {
   );
 }
 
-export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter?: string }) {
+type ViewMode = "douano" | "skus";
+type SkuRow = { id: string; name: string; kind: string; active: boolean };
+
+export function DouanoProductMappingCard({
+  initialFilter = "",
+  initialSkuId = "",
+}: {
+  initialFilter?: string;
+  initialSkuId?: string;
+}) {
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [filter, setFilter] = useState<string>(String(initialFilter ?? ""));
+  const [viewMode, setViewMode] = useState<ViewMode>(String(initialSkuId ?? "").trim() ? "skus" : "douano");
   const [showIgnored, setShowIgnored] = useState<boolean>(false);
   const [showGekoppeld, setShowGekoppeld] = useState<boolean>(true);
   const [showOngekoppeld, setShowOngekoppeld] = useState<boolean>(true);
@@ -121,11 +131,13 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   const [combos, setCombos] = useState<ActiveCombo[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [ignored, setIgnored] = useState<Array<{ douano_product_id: number; reason: string }>>([]);
+  const [skus, setSkus] = useState<SkuRow[]>([]);
   const [draft, setDraft] = useState<Record<number, string>>({});
   const [groupDraft, setGroupDraft] = useState<Record<number, string>>({});
   const [alcoholDraft, setAlcoholDraft] = useState<Record<number, string>>({});
   const [packagingDraft, setPackagingDraft] = useState<Record<number, string>>({});
   const [packagingOptIn, setPackagingOptIn] = useState<Record<number, boolean>>({});
+  const [skuProductDraft, setSkuProductDraft] = useState<Record<string, string>>({});
 
   const [productgroepen, setProductgroepen] = useState<Productgroep[]>([]);
   const [alcoholcategorieen, setAlcoholcategorieen] = useState<AlcoholCategorie[]>([]);
@@ -137,6 +149,24 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
       if (m?.douano_product_id) map.set(Number(m.douano_product_id), m);
     });
     return map;
+  }, [mappings]);
+
+  const mappingsBySkuId = useMemo(() => {
+    const map = new Map<string, Mapping>();
+    mappings.forEach((row) => {
+      const skuId = String((row as any)?.sku_id ?? "").trim();
+      if (skuId) map.set(skuId, row);
+    });
+    return map;
+  }, [mappings]);
+
+  const mappedSkuIds = useMemo(() => {
+    const set = new Set<string>();
+    mappings.forEach((row) => {
+      const skuId = String((row as any)?.sku_id ?? "").trim();
+      if (skuId) set.add(skuId);
+    });
+    return set;
   }, [mappings]);
 
   const filteredProducts = useMemo(() => {
@@ -175,6 +205,18 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
     showGekoppeld,
     showOngekoppeld,
   ]);
+
+  const filteredSkus = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const candidates = skus.filter((row) => row.active && row.kind === "article");
+    const byQuery = !q ? candidates : candidates.filter((row) => `${row.name} ${row.id}`.toLowerCase().includes(q));
+    return byQuery.filter((row) => {
+      const isMapped = mappedSkuIds.has(row.id);
+      if (isMapped && !showGekoppeld) return false;
+      if (!isMapped && !showOngekoppeld) return false;
+      return true;
+    });
+  }, [filter, mappedSkuIds, showGekoppeld, showOngekoppeld, skus]);
 
   const combosByKey = useMemo(() => {
     const map = new Map<string, ActiveCombo>();
@@ -216,14 +258,15 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
     setStatus("Laden...");
     setTone("");
     try {
-      const [p, c, m, ig, pg, ac, vt] = await Promise.all([
+      const [p, c, m, ig, pg, ac, vt, skuRows] = await Promise.all([
         readJson("/api/integrations/douano/products?limit=2000"),
         readJson("/api/integrations/douano/cost-combos"),
         readJson("/api/integrations/douano/product-mappings?limit=10000"),
         readJson("/api/integrations/douano/product-ignored?limit=50000"),
         readDataset<Productgroep>("productgroepen"),
         readDataset<AlcoholCategorie>("alcoholcategorieen"),
-        readDataset<Verpakkingstype>("verpakkingstypen")
+        readDataset<Verpakkingstype>("verpakkingstypen"),
+        readDataset<any>("skus"),
       ]);
       setProducts(Array.isArray(p?.items) ? p.items : []);
       setCombos(Array.isArray(c?.items) ? c.items : []);
@@ -232,6 +275,16 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
       setProductgroepen(pg);
       setAlcoholcategorieen(ac);
       setVerpakkingstypen(vt);
+      setSkus(
+        (Array.isArray(skuRows) ? skuRows : [])
+          .map((row: any) => ({
+            id: String(row?.id ?? "").trim(),
+            name: String(row?.name ?? row?.naam ?? "").trim(),
+            kind: String(row?.kind ?? "").trim().toLowerCase(),
+            active: row?.active !== false && row?.actief !== false,
+          }))
+          .filter((row) => row.id && row.kind)
+      );
       setGroupDraft(() => {
         const next: Record<number, string> = {};
         (Array.isArray(m?.items) ? m.items : []).forEach((row: any) => {
@@ -272,6 +325,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
       setCombos([]);
       setMappings([]);
       setIgnored([]);
+      setSkus([]);
       setProductgroepen([]);
       setAlcoholcategorieen([]);
       setVerpakkingstypen([]);
@@ -284,6 +338,66 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
     void refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const sid = String(initialSkuId ?? "").trim();
+    if (!sid) return;
+    setViewMode("skus");
+    setFilter(sid);
+  }, [initialSkuId]);
+
+  async function saveSkuMapping(skuId: string) {
+    const normalizedSkuId = String(skuId ?? "").trim();
+    if (!normalizedSkuId) return;
+
+    const productIdRaw = String(skuProductDraft[normalizedSkuId] ?? "").trim();
+    const productId = Number(productIdRaw || 0);
+    if (!productId) {
+      setStatus("Selecteer eerst een Douano product.");
+      setTone("error");
+      return;
+    }
+
+    const productGroup = String(groupDraft[productId] ?? "").trim();
+    const alcoholCategory = String(alcoholDraft[productId] ?? "").trim();
+    const packagingType = String(packagingDraft[productId] ?? "").trim();
+    const wantsPackaging = Boolean(packagingOptIn[productId]);
+
+    if (!productGroup) {
+      setStatus("Kies eerst een productgroep.");
+      setTone("error");
+      return;
+    }
+
+    const requiresPackaging = productGroup === "drank" || productGroup === "giftset";
+    if (requiresPackaging && !packagingType) {
+      setStatus("Verpakkingstype is verplicht voor Drank/Giftset.");
+      setTone("error");
+      return;
+    }
+    if (!requiresPackaging && !wantsPackaging && packagingType) {
+      setStatus("Zet eerst '+ verpakkingstype' aan om dit veld te gebruiken.");
+      setTone("error");
+      return;
+    }
+
+    setStatus("Opslaan...");
+    setTone("");
+    try {
+      await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", {
+        sku_id: normalizedSkuId,
+        product_group: productGroup,
+        alcohol_category: alcoholCategory,
+        packaging_type: packagingType
+      });
+      await refreshAll();
+      setStatus("Opgeslagen");
+      setTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
 
   async function save(productId: number) {
     const selected = String(draft[productId] ?? "").trim();
@@ -310,12 +424,12 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
       return;
     }
     if (!requiresPackaging && !wantsPackaging && packagingType) {
-      setStatus("Zet eerst ‘+ verpakkingstype’ aan om dit veld te gebruiken.");
+      setStatus("Zet eerst '+ verpakkingstype' aan om dit veld te gebruiken.");
       setTone("error");
       return;
     }
 
-    setStatus("Opslaan…");
+    setStatus("Opslaan...");
     setTone("");
     try {
       await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "PUT", {
@@ -334,7 +448,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   }
 
   async function remove(productId: number) {
-    setStatus("Verwijderen…");
+    setStatus("Verwijderen...");
     setTone("");
     try {
       await writeJson(`/api/integrations/douano/product-mappings/${productId}`, "DELETE");
@@ -348,7 +462,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   }
 
   async function ignore(productId: number) {
-    setStatus("Negeren…");
+    setStatus("Negeren...");
     setTone("");
     try {
       await writeJson(`/api/integrations/douano/product-ignored/${productId}`, "PUT", { reason: "" });
@@ -362,7 +476,7 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
   }
 
   async function unignore(productId: number) {
-    setStatus("Tonen…");
+    setStatus("Tonen...");
     setTone("");
     try {
       await writeJson(`/api/integrations/douano/product-ignored/${productId}`, "DELETE");
@@ -377,15 +491,33 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
 
   return (
     <SectionCard
-      title="Productkoppeling (Douano → Kostprijs)"
-      description="Koppel Douano producten aan een actieve SKU-kostprijscombinatie. Dit is nodig voor kostprijs + marge op omzetregels."
+      title="Productkoppeling (Douano -> SKU)"
+      description="Koppel Douano producten aan SKUs. Dit is nodig voor Douano-export, omzetregels en dashboards."
     >
       <div className="editor-actions" style={{ marginTop: 8 }}>
         <div className="editor-actions-group">
+          <div style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              className={`editor-button editor-button-secondary${viewMode === "skus" ? " active" : ""}`}
+              onClick={() => setViewMode("skus")}
+              title="Koppel SKUs die nog niet aan Douano gekoppeld zijn."
+            >
+              SKUs
+            </button>
+            <button
+              type="button"
+              className={`editor-button editor-button-secondary${viewMode === "douano" ? " active" : ""}`}
+              onClick={() => setViewMode("douano")}
+              title="Bekijk Douano producten en hun koppeling."
+            >
+              Douano producten
+            </button>
+          </div>
           <input
             className="editor-input"
             style={{ width: 320 }}
-            placeholder="Filter Douano producten (naam/sku/gtin)"
+            placeholder={viewMode === "skus" ? "Filter SKUs (naam/id)" : "Filter Douano producten (naam/sku/gtin)"}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
@@ -405,14 +537,16 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
             />
             Ongekoppelde producten tonen
           </label>
-          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
-            <input
-              type="checkbox"
-              checked={showIgnored}
-              onChange={(e) => setShowIgnored(e.target.checked)}
-            />
-            Toon genegeerde
-          </label>
+          {viewMode === "douano" ? (
+            <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+              <input
+                type="checkbox"
+                checked={showIgnored}
+                onChange={(e) => setShowIgnored(e.target.checked)}
+              />
+              Toon genegeerde
+            </label>
+          ) : null}
         </div>
         <div className="editor-actions-group">
           <button type="button" className="editor-button editor-button-secondary" onClick={() => void refreshAll()}>
@@ -431,6 +565,8 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
         </div>
       ) : null}
 
+      {viewMode === "douano" ? (
+        <>
       <div className="data-table" style={{ marginTop: 12 }}>
         <table>
           <thead>
@@ -631,6 +767,176 @@ export function DouanoProductMappingCard({ initialFilter = "" }: { initialFilter
       <div style={{ marginTop: 10, opacity: 0.75 }}>
         Toont max. 500 producten (filter om te zoeken). Combinaties komen uit definitieve kostprijssnapshots + activaties (alle jaren).
       </div>
+        </>
+      ) : (
+        <>
+          <div className="data-table" style={{ marginTop: 12 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: 320 }}>SKU</th>
+                  <th>Naam</th>
+                  <th style={{ width: 360 }}>Douano product</th>
+                  <th style={{ width: 220 }}>Productgroep</th>
+                  <th style={{ width: 220 }}>Alcohol</th>
+                  <th style={{ width: 260 }}>Verpakkingstype</th>
+                  <th style={{ width: 110 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSkus.slice(0, 500).map((row) => {
+                  const skuId = row.id;
+                  const mapping = mappingsBySkuId.get(skuId) ?? null;
+                  const mappedProductId = mapping ? Number((mapping as any)?.douano_product_id ?? 0) : 0;
+                  const selectedProductId = Number(String(skuProductDraft[skuId] ?? mappedProductId ?? 0)) || 0;
+
+                  const groupValue = selectedProductId
+                    ? String(groupDraft[selectedProductId] ?? (mapping as any)?.product_group ?? "")
+                    : "";
+                  const alcoholValue = selectedProductId
+                    ? String(alcoholDraft[selectedProductId] ?? (mapping as any)?.alcohol_category ?? "")
+                    : "";
+                  const packagingValue = selectedProductId
+                    ? String(packagingDraft[selectedProductId] ?? (mapping as any)?.packaging_type ?? "")
+                    : "";
+
+                  const requiresPackaging = groupValue === "drank" || groupValue === "giftset";
+                  const optIn = selectedProductId ? (requiresPackaging ? true : Boolean(packagingOptIn[selectedProductId])) : false;
+                  const allowedPackaging = requiresPackaging
+                    ? activePackaging.filter((p) => (p.allowed_product_groups ?? []).includes(groupValue))
+                    : activePackaging;
+
+                  return (
+                    <tr key={skuId}>
+                      <td>
+                        <code>{skuId}</code>
+                      </td>
+                      <td>{row.name}</td>
+                      <td>
+                        <select
+                          className="editor-input"
+                          style={{ width: "100%" }}
+                          value={selectedProductId ? String(selectedProductId) : ""}
+                          onChange={(e) => setSkuProductDraft((prev) => ({ ...prev, [skuId]: e.target.value }))}
+                        >
+                          <option value="">Selecteer Douano product...</option>
+                          {products.map((p) => (
+                            <option key={p.product_id} value={String(p.product_id)}>
+                              {p.name} ({p.sku})
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          className="editor-input"
+                          style={{ width: "100%" }}
+                          value={groupValue}
+                          onChange={(e) => {
+                            const pid = selectedProductId;
+                            if (!pid) return;
+                            setGroupDraft((prev) => ({ ...prev, [pid]: e.target.value }));
+                          }}
+                          disabled={!selectedProductId}
+                        >
+                          <option value="">{selectedProductId ? "Selecteer..." : "-"}</option>
+                          {activeProductgroepen.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          className="editor-input"
+                          style={{ width: "100%" }}
+                          value={alcoholValue}
+                          onChange={(e) => {
+                            const pid = selectedProductId;
+                            if (!pid) return;
+                            setAlcoholDraft((prev) => ({ ...prev, [pid]: e.target.value }));
+                          }}
+                          disabled={!selectedProductId || (groupValue !== "drank" && groupValue !== "giftset")}
+                          title={groupValue !== "drank" && groupValue !== "giftset" ? "Alleen relevant voor drank/giftset." : ""}
+                        >
+                          <option value="">-</option>
+                          {activeAlcohol.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {a.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          {!requiresPackaging ? (
+                            <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12, opacity: 0.85 }}>
+                              <input
+                                type="checkbox"
+                                checked={optIn}
+                                onChange={(e) => {
+                                  const pid = selectedProductId;
+                                  if (!pid) return;
+                                  setPackagingOptIn((prev) => ({ ...prev, [pid]: e.target.checked }));
+                                }}
+                                disabled={!selectedProductId}
+                              />
+                              + verpakkingstype
+                            </label>
+                          ) : (
+                            <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.75 }}>verplicht</span>
+                          )}
+                          <select
+                            className="editor-input"
+                            style={{ width: "100%" }}
+                            value={packagingValue}
+                            onChange={(e) => {
+                              const pid = selectedProductId;
+                              if (!pid) return;
+                              setPackagingDraft((prev) => ({ ...prev, [pid]: e.target.value }));
+                            }}
+                            disabled={!selectedProductId || !optIn}
+                            title={!optIn ? "Optioneel. Zet '+ verpakkingstype' aan om in te vullen." : ""}
+                          >
+                            <option value="">{selectedProductId && optIn ? "Selecteer..." : "-"}</option>
+                            {allowedPackaging.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <button
+                          type="button"
+                          className="editor-button editor-button-icon"
+                          aria-label="Opslaan"
+                          title="Opslaan"
+                          onClick={() => void saveSkuMapping(skuId)}
+                        >
+                          <SaveIcon />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filteredSkus.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ opacity: 0.75 }}>
+                      Geen SKUs gevonden (filter aanpassen of zet &quot;Gekoppelde/Ongekoppelde&quot; aan).
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 10, opacity: 0.75 }}>
+            Toont max. 500 SKUs (filter om te zoeken).
+          </div>
+        </>
+      )}
     </SectionCard>
   );
 }

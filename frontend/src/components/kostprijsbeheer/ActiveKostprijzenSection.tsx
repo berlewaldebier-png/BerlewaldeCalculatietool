@@ -11,7 +11,7 @@ export type ActiveCostRow = {
   categorie: string;
   effectiefVanaf: string;
   versieLabel: string;
-  currentCost: number;
+  currentCost: number | null;
   hasUpdate: boolean;
   isWarning: boolean;
   recommendedVersionId?: string;
@@ -120,7 +120,7 @@ export function ActiveKostprijzenSection({
                   <td>{row.categorie || "-"}</td>
                   <td>{row.effectiefVanaf || "-"}</td>
                   <td>{row.versieLabel}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.currentCost)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{row.currentCost == null ? "—" : formatEuro(row.currentCost)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {row.hasUpdate ? (
                       <span style={{ display: "inline-flex", gap: 6 }}>

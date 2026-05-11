@@ -5,10 +5,10 @@ import type { RefObject } from "react";
 export type ExistingBerekeningRow = {
   id: string;
   bierNaam: string;
-  jaar: number;
+  jaar: number | null;
   status: string;
   type: string;
-  kostprijsPerLiter: number;
+  kostprijsPerLiter: number | null;
   ts: string;
 };
 
@@ -98,7 +98,7 @@ export function ExistingBerekeningenSection({
                     <td>{row.jaar || "-"}</td>
                     <td>{row.status || "-"}</td>
                     <td>{row.type || "-"}</td>
-                    <td style={{ whiteSpace: "nowrap" }}>{formatEuro(row.kostprijsPerLiter)}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{row.kostprijsPerLiter == null ? "—" : formatEuro(row.kostprijsPerLiter)}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{row.ts || "-"}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button

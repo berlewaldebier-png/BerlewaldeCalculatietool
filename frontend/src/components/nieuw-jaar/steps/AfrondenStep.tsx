@@ -24,7 +24,7 @@ export function AfrondenStep({
   commitTargetYearForce: () => Promise<void> | void;
   saveAndCloseButton: ReactNode;
   navigateToStep: (nextStep: number) => Promise<void> | void;
-  saveDraftToServer: (statusMessage: string) => Promise<void> | void;
+  saveDraftToServer: (statusMessage?: string) => Promise<unknown> | unknown;
   commitTargetYear: () => Promise<void> | void;
 }) {
   return (

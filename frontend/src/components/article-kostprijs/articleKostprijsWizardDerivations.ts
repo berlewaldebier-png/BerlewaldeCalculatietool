@@ -126,7 +126,15 @@ export function findSnapshotRowForSku(args: {
   if (!version) return null;
   // Canonical: use normalized cost lines provided by the backend (derived from cost_version_sku_rows).
   // Avoid reading `resultaat_snapshot` to prevent hidden fallback logic.
-  const costLines = ((version as any).cost_lines ?? (version as any).costLines ?? []) as unknown;
+  const costLines = (
+    // Backend canonical: `cost_lines` (snake-case)
+    (version as any).cost_lines ??
+    // Alternate shapes seen in older UI state / in-flight objects
+    (version as any).costLines ??
+    // Some code paths still use the non-underscored key name.
+    (version as any).cost_lines ??
+    []
+  ) as unknown;
   const list = Array.isArray(costLines) ? (costLines as any[]) : [];
 
   // 1) Preferred: explicit sku_id in snapshot rows (article/bundle cost versions).

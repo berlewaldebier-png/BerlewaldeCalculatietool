@@ -43,7 +43,7 @@ type VerkoopstrategieDraftStepProps = {
   setVerkoopstrategieSave: Dispatch<SetStateAction<null | (() => Promise<void>)>>;
   setDraftVerkoopstrategieTarget: Dispatch<SetStateAction<GenericRecord[]>>;
   setCompletedStepIds: Dispatch<SetStateAction<string[]>>;
-  saveDraftToServer: (message: string) => Promise<void>;
+  saveDraftToServer: (message?: string) => Promise<unknown> | unknown;
 };
 
 export function VerkoopstrategieDraftStep({
@@ -155,7 +155,7 @@ export function VerkoopstrategieDraftStep({
           bierId: row.bierId,
           biernaam: row.biernaam,
           productId: row.productId,
-          productType: row.productType,
+          productType: row.productType === "basis" || row.productType === "samengesteld" ? row.productType : "",
           productLabel: row.productLabel,
           kostprijs: row.estimatedTargetCost,
         }))}

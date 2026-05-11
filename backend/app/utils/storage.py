@@ -1930,6 +1930,12 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         "versie_nummer": versie_nummer,
         "type": soort,
         "kostprijs": kostprijs,
+        # Canonical per-SKU cost lines (derived from cost_version_sku_rows in Postgres).
+        # Keep this on the read model so UIs (e.g. bundle/article wizard) can resolve component costs
+        # without parsing resultaat_snapshot or applying any fallback logic.
+        "cost_lines": record.get("cost_lines")
+        if isinstance(record.get("cost_lines"), list)
+        else (record.get("costLines") if isinstance(record.get("costLines"), list) else []),
         "brontype": bron_type,
         "bron_id": bron_id,
         "effectief_vanaf": effectief_vanaf,
@@ -1990,6 +1996,20 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
                     for row in articles_rows
                     if isinstance(row, dict) and str(row.get("id", "") or "")
                 }
+                bom_rows = (
+                    postgres_mod.load_dataset("bom-lines", [])
+                    if postgres_mod is not None and postgres_mod.uses_postgres()
+                    else []
+                )
+                bom_by_parent: dict[str, list[dict[str, Any]]] = {}
+                if isinstance(bom_rows, list):
+                    for row in bom_rows:
+                        if not isinstance(row, dict):
+                            continue
+                        parent_id = str(row.get("parent_article_id", "") or "").strip()
+                        if not parent_id:
+                            continue
+                        bom_by_parent.setdefault(parent_id, []).append(row)
                 invoices = (((normalized.get("invoer", {}) or {}).get("inkoop", {}) or {}).get("facturen", []) or [])
                 if not isinstance(invoices, list):
                     invoices = []
@@ -2000,22 +2020,158 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
                         continue
                     inv_lines = inv.get("factuurregels", [])
                     if isinstance(inv_lines, list):
-                        lines.extend([ln for ln in inv_lines if isinstance(ln, dict)])
+                        extra_per_regel = 0.0
+                        try:
+                            extra_per_regel = (
+                                (float(inv.get("verzendkosten", 0.0) or 0.0) + float(inv.get("overige_kosten", 0.0) or 0.0))
+                                / max(len(inv_lines), 1)
+                            )
+                        except Exception:
+                            extra_per_regel = 0.0
+                        for ln in inv_lines:
+                            if not isinstance(ln, dict):
+                                continue
+                            lines.append({**ln, "_extra_kosten_per_regel": extra_per_regel})
+                if not lines:
+                    # Fall back to the top-level factuurregels if no nested invoices exist.
+                    inkoop = (((normalized.get("invoer", {}) or {}).get("inkoop", {}) or {}))
+                    top_level_lines = inkoop.get("factuurregels", [])
+                    if isinstance(top_level_lines, list):
+                        extra_per_regel = 0.0
+                        try:
+                            extra_per_regel = (
+                                (float(inkoop.get("verzendkosten", 0.0) or 0.0) + float(inkoop.get("overige_kosten", 0.0) or 0.0))
+                                / max(len(top_level_lines), 1)
+                            )
+                        except Exception:
+                            extra_per_regel = 0.0
+                        for ln in top_level_lines:
+                            if not isinstance(ln, dict):
+                                continue
+                            lines.append({**ln, "_extra_kosten_per_regel": extra_per_regel})
 
-                cost_per_liter = _snapshot_float(snapshot.get("integrale_kostprijs_per_liter"))
-                out_rows: list[dict[str, Any]] = []
+                def _derive_unit_cost_from_invoice_line(line: dict[str, Any]) -> float:
+                    try:
+                        qty = float(line.get("aantal", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        qty = 0.0
+                    if qty <= 0:
+                        return 0.0
+                    extra = _snapshot_float(line.get("_extra_kosten_per_regel", 0.0))
+                    return (
+                        _snapshot_float(line.get("subfactuurbedrag", 0.0))
+                        + extra
+                        + _snapshot_float(line.get("afvulkosten_fust", 0.0))
+                    ) / qty
+
+                unit_cost_by_format: dict[str, float] = {}
+                liters_per_unit_by_format: dict[str, float] = {}
                 seen_units: set[str] = set()
                 for line in lines:
                     unit_id = str(line.get("eenheid", "") or "").strip()
                     if not unit_id or unit_id in seen_units:
                         continue
                     seen_units.add(unit_id)
-                    qty = _snapshot_float(line.get("aantal", 0.0))
-                    liters_total = _snapshot_float(line.get("liters", 0.0))
-                    liters_per_unit = liters_total / qty if qty > 0 else 0.0
-                    unit_cost = cost_per_liter * liters_per_unit if liters_per_unit > 0 else _snapshot_float(line.get("subfactuurbedrag", 0.0)) / max(qty, 1)
+                    unit_cost_by_format[unit_id] = _derive_unit_cost_from_invoice_line(line)
+                    # Prefer canonical content_liter from the format article; fall back to invoice liters if needed.
+                    article_row = articles_by_id.get(unit_id, {})
+                    liters_from_master = _snapshot_float(article_row.get("content_liter", 0.0))
+                    if liters_from_master > 0:
+                        liters_per_unit_by_format[unit_id] = liters_from_master
+                    else:
+                        qty = _snapshot_float(line.get("aantal", 0.0))
+                        liters_total = _snapshot_float(line.get("liters", 0.0))
+                        liters_per_unit_by_format[unit_id] = (liters_total / qty) if qty > 0 else 0.0
+
+                # Derive child format costs (e.g. Doos 24x33cl -> Fles 33cl) using BOM lines.
+                derived_unit_cost_by_format: dict[str, float] = dict(unit_cost_by_format)
+                visiting: set[str] = set()
+
+                def _propagate_from_parent(parent_id: str) -> None:
+                    if parent_id in visiting:
+                        return
+                    visiting.add(parent_id)
+                    parent_cost = float(derived_unit_cost_by_format.get(parent_id, 0.0) or 0.0)
+                    if parent_cost <= 0:
+                        visiting.remove(parent_id)
+                        return
+                    child_format_lines: list[tuple[str, float]] = []
+                    for raw in bom_by_parent.get(parent_id, []):
+                        component_article_id = str(raw.get("component_article_id", "") or "").strip()
+                        if not component_article_id:
+                            continue
+                        component = articles_by_id.get(component_article_id, {})
+                        kind = str(component.get("kind", "") or "").strip().lower()
+                        if kind != "format":
+                            continue
+                        qty = _snapshot_float(raw.get("quantity", 0.0))
+                        if qty <= 0:
+                            continue
+                        child_format_lines.append((component_article_id, qty))
+
+                    # Strict: we only support 1 child-format per parent-format for cost derivation in inkoop.
+                    # (Typical: Doos 24x33cl -> 24x Fles 33cl + packaging_components).
+                    if len(child_format_lines) != 1:
+                        visiting.remove(parent_id)
+                        return
+
+                    child_id, qty = child_format_lines[0]
+                    child_cost = parent_cost / qty if qty > 0 else 0.0
+                    if child_cost > 0:
+                        existing = derived_unit_cost_by_format.get(child_id)
+                        if existing is None or existing <= 0:
+                            derived_unit_cost_by_format[child_id] = child_cost
+                            # Derive liters per unit for the child as well.
+                            child_article = articles_by_id.get(child_id, {})
+                            child_liters = _snapshot_float(child_article.get("content_liter", 0.0))
+                            if child_liters > 0:
+                                liters_per_unit_by_format[child_id] = child_liters
+                            _propagate_from_parent(child_id)
+                    visiting.remove(parent_id)
+
+                for parent_id in list(unit_cost_by_format.keys()):
+                    _propagate_from_parent(parent_id)
+
+                out_rows: list[dict[str, Any]] = []
+                # Determine per-liter overhead (direct fixed allocation) for this year.
+                direct_fixed_cost_per_liter = _snapshot_float(
+                    (normalized.get("resultaat_snapshot", {}) or {}).get("directe_vaste_kosten_per_liter", 0.0)
+                )
+                if direct_fixed_cost_per_liter <= 0:
+                    try:
+                        derived = bereken_directe_vaste_kosten_per_liter(int(basisgegevens.get("jaar", 0) or 0))
+                        direct_fixed_cost_per_liter = float(derived or 0.0)
+                    except Exception:
+                        direct_fixed_cost_per_liter = 0.0
+
+                # Determine accijns parameters from basisgegevens (already validated for definitive versions).
+                try:
+                    alcoholpercentage_value = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    alcoholpercentage_value = 0.0
+                tarief_accijns_value = str(basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS)
+                belastingsoort_value = str(basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT)
+
+                for unit_id, unit_cost in derived_unit_cost_by_format.items():
+                    if unit_cost <= 0:
+                        continue
                     article_row = articles_by_id.get(unit_id, {})
                     unit_name = str(article_row.get("name", article_row.get("naam", "")) or "").strip() or unit_id
+                    liters_per_unit = float(liters_per_unit_by_format.get(unit_id, 0.0) or 0.0)
+                    vaste_kosten = max(direct_fixed_cost_per_liter, 0.0) * max(liters_per_unit, 0.0)
+                    accijns = 0.0
+                    if liters_per_unit > 0 and alcoholpercentage_value > 0:
+                        try:
+                            accijns = bereken_accijns_voor_liters(
+                                year=int(basisgegevens.get("jaar", 0) or 0),
+                                liters=float(liters_per_unit),
+                                alcoholpercentage=float(alcoholpercentage_value),
+                                tarief_accijns=str(tarief_accijns_value),
+                                belastingsoort=str(belastingsoort_value),
+                            )
+                        except Exception:
+                            accijns = 0.0
+                    kostprijs_total = float(unit_cost) + float(vaste_kosten) + float(accijns)
                     out_rows.append(
                         _normalize_resultaat_snapshot_product_row(
                             {
@@ -2026,9 +2182,9 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
                                 "verpakking": unit_name,
                                 "primaire_kosten": unit_cost,
                                 "verpakkingskosten": 0.0,
-                                "vaste_kosten": 0.0,
-                                "accijns": 0.0,
-                                "kostprijs": unit_cost,
+                                "vaste_kosten": vaste_kosten,
+                                "accijns": accijns,
+                                "kostprijs": kostprijs_total,
                                 "liters_per_product": liters_per_unit,
                             },
                             product_type_hint="basis",
@@ -8141,6 +8297,38 @@ def activate_kostprijsversie(
     )
     if not target_refs:
         return None
+
+    # Hard requirement: a definitive version must have canonical per-SKU cost lines for all activated refs.
+    # This prevents hidden fallback logic and makes missing data explicit + repairable.
+    try:
+        from app.domain import cost_versions_storage
+
+        cost_index = cost_versions_storage.load_cost_row_index_for_versions([str(kostprijsversie_id or "")])
+        missing: list[dict[str, str]] = []
+        for ref in target_refs:
+            sku_id = str(ref.get("sku_id", "") or "").strip()
+            if not sku_id:
+                product_id = str(ref.get("product_id", "") or "").strip()
+                if product_id:
+                    sku_id = sku_by_beer_format.get((bier_id, product_id), "")
+            if not sku_id:
+                continue
+            if cost_index.get((str(kostprijsversie_id or ""), sku_id)) is None:
+                missing.append({"sku_id": sku_id, "product_id": str(ref.get("product_id", "") or "")})
+        if missing:
+            raise RuntimeError(
+                "Kostprijs mist cost lines voor (een deel van) de SKU's. "
+                f"Draai reparaties voor jaar {jaar}: "
+                f"POST /api/meta/repair/inkoop-unit-costs?year={jaar}&dry_run=false en "
+                f"POST /api/meta/repair/cost-lines?year={jaar}&dry_run=false. "
+                f"Missing: {missing[:5]}"
+            )
+    except RuntimeError:
+        raise
+    except Exception:
+        raise RuntimeError(
+            "Kon cost-lines niet valideren voor activatie. Controleer storage en draai repair indien nodig."
+        )
 
     # SKU-aanpak: for inkoop we also want derived formats from the purchased format BOM
     # (e.g. buying "Doos 24x33cl" should also activate the "Fles 33cl" SKU for quoting).
