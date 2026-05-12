@@ -26,7 +26,7 @@ export default async function BreakEvenV2Page() {
 
   return (
     <PageShell
-      title="Break-even (v2)"
+      title="Break-even analyseren"
       subtitle="Break-even op basis van gerealiseerde verkoop (Douano facturen) + scenario’s."
       activePath="/break-even-v2"
       navigation={bootstrap.navigation ?? []}
