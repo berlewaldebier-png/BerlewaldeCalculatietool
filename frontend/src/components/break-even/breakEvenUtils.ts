@@ -33,6 +33,10 @@ export type BreakEvenConfig = {
   scenario_type: BreakEvenScenarioType | null;
   parent_config_id: string | null;
   is_active_for_quotes: boolean;
+  source_mode?: "realized_invoice" | "manual";
+  basis?: "invoice" | "order";
+  active_channel?: string;
+  channel_mix?: Record<string, number>;
   mix_mode: BreakEvenMixMode;
   product_mix: Record<string, number>;
   packaging_mix: Record<string, number>;
@@ -154,6 +158,10 @@ export function normalizeBreakEvenConfig(row: unknown, fallbackYear: number): Br
   const kind = source.kind === "scenario" ? "scenario" : "basis";
   const scenarioType = normalizeScenarioType(source.scenario_type);
   const parentConfigId = String(source.parent_config_id ?? "").trim() || null;
+  const activeChannel = String(source.active_channel ?? "").trim() || "horeca";
+  const sourceMode =
+    source.source_mode === "manual" ? "manual" : "realized_invoice";
+  const basis = source.basis === "order" ? "order" : "invoice";
 
   return {
     id,
@@ -163,6 +171,10 @@ export function normalizeBreakEvenConfig(row: unknown, fallbackYear: number): Br
     scenario_type: kind === "scenario" ? scenarioType ?? "custom" : null,
     parent_config_id: kind === "scenario" ? parentConfigId : null,
     is_active_for_quotes: Boolean(source.is_active_for_quotes),
+    source_mode: sourceMode,
+    basis,
+    active_channel: activeChannel,
+    channel_mix: normalizeNumberMap(source.channel_mix),
     mix_mode: mixMode,
     product_mix: normalizeNumberMap(source.product_mix),
     packaging_mix: normalizeNumberMap(source.packaging_mix),

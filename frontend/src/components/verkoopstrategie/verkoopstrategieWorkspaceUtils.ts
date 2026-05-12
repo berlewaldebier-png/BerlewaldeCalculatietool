@@ -13,6 +13,7 @@ export type StrategyRow = {
   id: string;
   record_type: string;
   jaar: number;
+  sku_id?: string;
   bier_id: string;
   biernaam: string;
   product_id: string;
@@ -66,6 +67,7 @@ export function computeDraftSignature(records: GenericRecord[], channelCodes: st
       id: String(row.id ?? ""),
       record_type: String(row.record_type ?? ""),
       jaar: Number(row.jaar ?? 0),
+      sku_id: String((row as any).sku_id ?? ""),
       bier_id: String((row as any).bier_id ?? ""),
       product_id: String((row as any).product_id ?? ""),
       sell_in_margins: mapToSortedPairs((row as any).sell_in_margins ?? (row as any).kanaalmarges ?? {}),

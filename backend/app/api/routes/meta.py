@@ -108,6 +108,13 @@ def get_navigation() -> list[NavigationItem]:
             section="Verkoop",
         ),
         NavigationItem(
+            key="break-even-v2",
+            label="Break-even (v2)",
+            description="Break-even op basis van gerealiseerde verkoop (Douano) + scenario's.",
+            href="/break-even-v2",
+            section="Verkoop",
+        ),
+        NavigationItem(
             key="omzet-en-marge",
             label="Omzet & marge",
             description="Omzet, kostprijs en brutomarge per klant (Douano).",

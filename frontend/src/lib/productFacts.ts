@@ -192,6 +192,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       let sellInEx = 0;
       if (params.channelCode) {
         sellInEx = resolveSellInPriceEx({
+          skuId,
           bierId,
           productId,
           costPriceEx: effectiveCostPriceEx,
