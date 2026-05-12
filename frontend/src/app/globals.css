@@ -3288,6 +3288,23 @@ a {
   padding: 1rem;
 }
 
+.cpq-right .cpq-intro-summary-metric-value {
+  margin-top: 0.3rem;
+  font-size: clamp(0.74rem, 1.05vw, 0.96rem);
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cpq-right .cpq-intro-summary-metric {
+  padding: 0.6rem 0.7rem;
+}
+
+.cpq-right .cpq-intro-summary-metric-label {
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+}
+
 .cpq-main {
   padding: 1rem 1.1rem 1.25rem;
   background: rgba(255, 255, 255, 0.92);
@@ -3448,6 +3465,34 @@ a {
 .cpq-card-subtitle {
   margin: 0.35rem 0 0;
   font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.cpq-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+}
+
+.cpq-impact-row {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.55rem 0;
+  border-top: 1px solid rgba(228, 233, 242, 1);
+}
+
+.cpq-impact-row:first-child {
+  border-top: 0;
+  padding-top: 0.25rem;
+}
+
+.cpq-impact-title {
+  font-weight: 900;
+  font-size: 0.9rem;
+}
+
+.cpq-impact-meta {
+  font-size: 0.85rem;
   color: var(--muted);
 }
 

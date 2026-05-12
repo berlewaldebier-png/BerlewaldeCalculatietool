@@ -604,6 +604,54 @@ export function VerkoopstrategieWorkspace({
       }));
   }, [filteredSellRows]);
 
+  const beerFormatSkuIdByScope = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(skus) ? skus : []).forEach((row) => {
+      const kind = String((row as any).kind ?? "").trim().toLowerCase();
+      if (kind !== "beer_format") return;
+      const skuId = String((row as any).id ?? "").trim();
+      const beerId = String((row as any).beer_id ?? "").trim();
+      const formatId = String((row as any).format_article_id ?? "").trim();
+      if (!skuId || !beerId || !formatId) return;
+      map.set(`${beerId}:${formatId}`, skuId);
+    });
+    return map;
+  }, [skus]);
+
+  const articleSkuIdByArticleId = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(skus) ? skus : []).forEach((row) => {
+      const kind = String((row as any).kind ?? "").trim().toLowerCase();
+      if (kind !== "article") return;
+      const skuId = String((row as any).id ?? "").trim();
+      const articleId = String((row as any).article_id ?? "").trim();
+      if (!skuId || !articleId) return;
+      map.set(articleId, skuId);
+    });
+    return map;
+  }, [skus]);
+
+  function ensureStrategySkuId(row: StrategyRow): StrategyRow {
+    const currentSkuId = String((row as any).sku_id ?? "").trim();
+    if (currentSkuId) return row;
+
+    const recordType = String(row.record_type ?? "").trim().toLowerCase();
+    if (recordType === "verkoopstrategie_product") {
+      const beerId = String((row as any).bier_id ?? "").trim();
+      const productId = String((row as any).product_id ?? "").trim();
+      const derived = beerId && productId ? beerFormatSkuIdByScope.get(`${beerId}:${productId}`) : undefined;
+      return derived ? ({ ...row, sku_id: derived } as StrategyRow) : row;
+    }
+
+    if (recordType === "verkoopstrategie_verpakking") {
+      const productId = String((row as any).product_id ?? "").trim();
+      const derived = productId ? articleSkuIdByArticleId.get(productId) : undefined;
+      return derived ? ({ ...row, sku_id: derived } as StrategyRow) : row;
+    }
+
+    return row;
+  }
+
   function resetChannelOverrides(channelCode: string) {
     markDirty();
     setOpslagDraft({});
@@ -810,7 +858,7 @@ export function VerkoopstrategieWorkspace({
       setIsSaving(true);
     }
     try {
-      const payload = [...verkoopPassthroughRows, ...rows.map(stripInternal)];
+      const payload = [...verkoopPassthroughRows, ...rows.map(ensureStrategySkuId).map(stripInternal)];
       if (mode === "draft") {
         await onDraftSave?.(payload);
         if (isMountedRef.current) {

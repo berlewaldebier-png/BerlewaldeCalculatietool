@@ -865,3 +865,52 @@ def load_cost_row_index_for_versions(
                 except (TypeError, ValueError):
                     out[(vid, sid)] = 0.0
     return out
+
+
+def load_cost_row_components_index_for_versions(
+    version_ids: list[str] | set[str] | tuple[str, ...],
+) -> dict[tuple[str, str], dict[str, float]]:
+    """Return {(version_id, sku_id): {kostprijs, indirecte_kosten, inkoop, verpakkingskosten, accijns}}.
+
+    This is the canonical read-path when callers need more than the total kostprijs, e.g.
+    to separate variable vs allocated fixed components for break-even analyses.
+    """
+    ensure_schema()
+    wanted = [str(v or "").strip() for v in (version_ids or []) if str(v or "").strip()]
+    wanted = sorted(set(wanted))
+    if not wanted:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(wanted))
+    out: dict[tuple[str, str], dict[str, float]] = {}
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT version_id, sku_id, kostprijs, indirecte_kosten, inkoop, verpakkingskosten, accijns
+                FROM cost_version_sku_rows
+                WHERE version_id IN ({placeholders})
+                """,
+                tuple(wanted),
+            )
+            for (
+                version_id,
+                sku_id,
+                kostprijs,
+                indirecte_kosten,
+                inkoop,
+                verpakkingskosten,
+                accijns,
+            ) in cur.fetchall() or []:
+                vid = str(version_id or "").strip()
+                sid = str(sku_id or "").strip()
+                if not vid or not sid:
+                    continue
+                out[(vid, sid)] = {
+                    "kostprijs": float(kostprijs or 0),
+                    "indirecte_kosten": float(indirecte_kosten or 0),
+                    "inkoop": float(inkoop or 0),
+                    "verpakkingskosten": float(verpakkingskosten or 0),
+                    "accijns": float(accijns or 0),
+                }
+    return out

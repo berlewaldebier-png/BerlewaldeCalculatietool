@@ -48,7 +48,9 @@ function getChannelSellInPriceOverride(
 export type SellInLookup = {
   yearStrategy: GenericRecord | null;
   packagingOverrideByProduct: Map<string, GenericRecord>;
+  packagingOverrideBySkuId: Map<string, GenericRecord>;
   productOverrideByScope: Map<string, GenericRecord>;
+  productOverrideBySkuId: Map<string, GenericRecord>;
 };
 
 export function buildSellInLookup(
@@ -58,7 +60,9 @@ export function buildSellInLookup(
   const lookup: SellInLookup = {
     yearStrategy: null,
     packagingOverrideByProduct: new Map<string, GenericRecord>(),
+    packagingOverrideBySkuId: new Map<string, GenericRecord>(),
     productOverrideByScope: new Map<string, GenericRecord>(),
+    productOverrideBySkuId: new Map<string, GenericRecord>(),
   };
 
   verkoopprijzenRows.forEach((row) => {
@@ -72,12 +76,22 @@ export function buildSellInLookup(
     }
 
     if (recordType === "verkoopstrategie_verpakking") {
+      const skuId = String((row as any).sku_id ?? "").trim();
+      if (skuId) {
+        lookup.packagingOverrideBySkuId.set(skuId, row);
+        return;
+      }
       const productId = String((row as any).product_id ?? "").trim();
       if (productId) lookup.packagingOverrideByProduct.set(productId, row);
       return;
     }
 
     if (recordType === "verkoopstrategie_product") {
+      const skuId = String((row as any).sku_id ?? "").trim();
+      if (skuId) {
+        lookup.productOverrideBySkuId.set(skuId, row);
+        return;
+      }
       const bierId = String((row as any).bier_id ?? "").trim();
       const productId = String((row as any).product_id ?? "").trim();
       if (bierId && productId) {
@@ -107,6 +121,7 @@ export function buildChannelDefaultOpslagMap(channels: GenericRecord[]) {
 }
 
 export function resolveSellInPriceEx(params: {
+  skuId?: string;
   bierId: string;
   productId: string;
   costPriceEx: number;
@@ -114,12 +129,17 @@ export function resolveSellInPriceEx(params: {
   lookup: SellInLookup;
   channelDefaultOpslag: Map<string, number>;
 }) {
+  const skuId = String(params.skuId ?? "").trim();
+  const skuOverride = skuId ? params.lookup.productOverrideBySkuId.get(skuId) ?? null : null;
   const productOverride =
-    params.lookup.productOverrideByScope.get(
+    skuOverride ??
+    (params.lookup.productOverrideByScope.get(
       `${params.bierId}:${params.productId}`
-    ) ?? null;
+    ) ?? null);
   const packagingOverride =
-    params.lookup.packagingOverrideByProduct.get(params.productId) ?? null;
+    (skuId ? params.lookup.packagingOverrideBySkuId.get(skuId) ?? null : null) ??
+    params.lookup.packagingOverrideByProduct.get(params.productId) ??
+    null;
 
   const priceOverride =
     getChannelSellInPriceOverride(productOverride, params.channelCode) ??

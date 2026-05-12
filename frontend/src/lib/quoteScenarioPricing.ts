@@ -88,6 +88,31 @@ export function calculateQuoteScenarioMetrics(
   });
 }
 
+export function calculateQuoteScenarioLines(params: {
+  scenario: QuoteScenario;
+  activePeriod: PeriodKey;
+  includeBlocks?: boolean;
+}) {
+  const includeBlocks = params.includeBlocks ?? true;
+  const scenario = includeBlocks
+    ? params.scenario
+    : { ...params.scenario, blocks: [] as QuoteScenario["blocks"] };
+  const state = createCalculationState(scenario, params.activePeriod);
+
+  if (state.lines.length === 0) {
+    return { lines: [], notes: state.notes };
+  }
+
+  applyIntroToLines(state);
+  applyStaffelToLines(state);
+  applyDiscountToLines(state);
+  applyWholesaleToLines(state);
+  applyMixDealToLines(state);
+  finalizeLineTotals(state);
+
+  return { lines: state.lines, notes: state.notes };
+}
+
 function createCalculationState(
   scenario: QuoteScenario,
   activePeriod: PeriodKey

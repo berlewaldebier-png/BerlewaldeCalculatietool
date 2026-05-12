@@ -831,6 +831,23 @@ def get_douano_margin_summary(
     }
 
 
+@router.get("/douano/sales-by-sku")
+def get_douano_sales_by_sku(
+    year: int = Query(..., ge=2000, le=2100, description="Rapportagejaar op basis van invoice_date (of order_date)."),
+    basis: str = Query("invoice", description="Basis voor rapportage: invoice (factuurdatum) of order (orderdatum)."),
+    limit: int = Query(5000, ge=1, le=20000),
+) -> dict[str, Any]:
+    from app.domain import douano_sales_mix_service
+
+    return {
+        "result": douano_sales_mix_service.get_sales_by_sku_summary(
+            year=int(year or 0),
+            basis=basis,
+            limit=int(limit),
+        )
+    }
+
+
 @router.get("/douano/company-lines")
 def get_douano_company_lines(
     company_id: int = Query(..., ge=1),

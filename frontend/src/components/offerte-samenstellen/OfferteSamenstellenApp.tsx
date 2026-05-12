@@ -40,10 +40,17 @@ import { buildOptionAvailabilityMap } from "@/components/offerte-samenstellen/of
 import {
   buildBreakEvenProductLines,
   calculateBreakEvenResult,
+  calculateFixedCostsTotal,
   normalizeConfigList,
   type BreakEvenConfig,
   type BreakEvenResult,
 } from "@/components/break-even/breakEvenUtils";
+import {
+  buildRealizedBreakEvenRows,
+  calculateBreakEvenV2Summary,
+  type BreakEvenV2Summary,
+  type RealizedSalesBySkuPayload,
+} from "@/components/break-even-v2/breakEvenV2Utils";
 import type {
   BasisData,
   BuilderBlock,
@@ -71,6 +78,7 @@ import { FinalizeStep } from "@/components/offerte-samenstellen/steps/FinalizeSt
 import { CompareStep } from "@/components/offerte-samenstellen/steps/CompareStep";
 import { BuilderBlockCard } from "@/components/offerte-samenstellen/steps/BuilderBlockCard";
 import { BuilderStep } from "@/components/offerte-samenstellen/steps/BuilderStep";
+import { calculateQuoteScenarioLines } from "@/lib/quoteScenarioPricing";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -135,6 +143,8 @@ export function OfferteSamenstellenApp({
   const [draftError, setDraftError] = useState<string | null>(null);
 
   const [basis, setBasis] = useState<BasisData>(() => createInitialBasisData());
+  const [realizedSales, setRealizedSales] = useState<RealizedSalesBySkuPayload | null>(null);
+  const [realizedSalesError, setRealizedSalesError] = useState<string | null>(null);
 
   const appliedScenario = useMemo(() => {
     const id = String(scenarioId ?? "").trim();
@@ -220,10 +230,100 @@ export function OfferteSamenstellenApp({
     if (!activeBreakEvenConfig) return null;
     return calculateBreakEvenResult(activeBreakEvenConfig, breakEvenProductLines, vasteKosten);
   }, [activeBreakEvenConfig, breakEvenProductLines, vasteKosten]);
-  const currentBreakEvenSnapshot = useMemo(
-    () => buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult),
-    [activeBreakEvenConfig, breakEvenResult]
-  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const basisMode = activeBreakEvenConfig?.basis ?? "invoice";
+    setRealizedSalesError(null);
+
+    fetch(`/api/integrations/douano/sales-by-sku?year=${currentYear}&basis=${basisMode}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `HTTP ${response.status}`);
+        }
+        return (await response.json()) as { result?: RealizedSalesBySkuPayload };
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        const result = payload?.result ?? null;
+        setRealizedSales(result);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setRealizedSales(null);
+        setRealizedSalesError(String(err?.message ?? err ?? "Onbekende fout"));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentYear, activeBreakEvenConfig?.basis]);
+
+  const breakEvenV2Summary = useMemo<BreakEvenV2Summary | null>(() => {
+    if (!realizedSales) return null;
+    const channelCode = String(basis.kanaal || "horeca").trim() || "horeca";
+    const realized = buildRealizedBreakEvenRows({
+      year: currentYear,
+      channelCode,
+      sales: realizedSales,
+      channels,
+      bieren,
+      kostprijsversies,
+      kostprijsproductactiveringen,
+      verkoopprijzen,
+      skus,
+      articles,
+      basisproducten,
+      samengesteldeProducten,
+    });
+
+    const fixedCostsTotal = calculateFixedCostsTotal(vasteKosten, currentYear);
+    return calculateBreakEvenV2Summary({
+      year: currentYear,
+      fixedCostsTotal,
+      fixedCostAdjustment: 0,
+      adjustments: [],
+      rows: realized.rows,
+      totalSoldLiters: realized.totalSoldLiters,
+    });
+  }, [
+    realizedSales,
+    basis.kanaal,
+    currentYear,
+    channels,
+    bieren,
+    kostprijsversies,
+    kostprijsproductactiveringen,
+    verkoopprijzen,
+    skus,
+    articles,
+    basisproducten,
+    samengesteldeProducten,
+    vasteKosten,
+  ]);
+
+  const breakEvenV2Snapshot = useMemo(() => {
+    if (!breakEvenV2Summary) return null;
+    return {
+      configId: `be-v2-${currentYear}`,
+      configName: `Break-even v2 ${currentYear}`,
+      year: currentYear,
+      breakEvenRevenue: breakEvenV2Summary.breakEvenRevenue,
+      breakEvenLiters: breakEvenV2Summary.breakEvenLiters,
+      weightedSellInPerLiter: breakEvenV2Summary.weightedSellInPerLiter,
+      weightedVariableCostPerLiter: breakEvenV2Summary.weightedVariableCostPerLiter,
+      weightedContributionPerLiter: breakEvenV2Summary.weightedContributionPerLiter,
+      contributionMarginPct: breakEvenV2Summary.contributionMarginPct,
+      mixTotalPct: 100,
+      calculatedAt: new Date().toISOString(),
+    };
+  }, [breakEvenV2Summary, currentYear]);
+
+  const currentBreakEvenSnapshot = useMemo(() => {
+    if (!activeBreakEvenConfig) return breakEvenV2Snapshot;
+    return buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult);
+  }, [activeBreakEvenConfig, breakEvenResult, breakEvenV2Snapshot]);
   const hasFrozenBreakEvenSnapshot = Boolean(savedBreakEvenSnapshot?.configId);
   const effectiveBreakEvenSnapshot = savedBreakEvenSnapshot ?? currentBreakEvenSnapshot;
 
@@ -277,6 +377,84 @@ export function OfferteSamenstellenApp({
     () => buildScenarioMetricsMap({ scenarios, effectiveBreakEvenSnapshot }),
     [effectiveBreakEvenSnapshot, scenarios]
   );
+
+  const offerBreakEvenImpact = useMemo(() => {
+    if (!breakEvenV2Summary) return null;
+
+    const labelByRef = new Map<string, string>();
+    productIndex.options.forEach((opt) => {
+      const ref = String((opt as any)?.ref ?? "").trim();
+      const label = String((opt as any)?.label ?? "").trim();
+      if (ref && label) labelByRef.set(ref, label);
+    });
+
+    const baseline = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: false }).lines;
+    const current = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: true }).lines;
+
+    const baselineByRef = new Map(baseline.map((line) => [line.ref, line]));
+    const impacts = current
+      .map((line) => {
+        const base = baselineByRef.get(line.ref);
+        if (!base) return null;
+
+        const baseContributionUnit = Math.max(0, (base.baseUnitPriceEx ?? 0) - (base.costPriceEx ?? 0));
+        const scenarioContributionUnit = Math.max(0, (line.offerUnitPriceEx ?? 0) - (line.costPriceEx ?? 0));
+
+        const qtyPaid = Math.max(0, line.qtyPaid ?? 0);
+        const lostContributionEx = Math.max(
+          0,
+          (baseContributionUnit - scenarioContributionUnit) * qtyPaid
+        );
+
+        const needsMore = lostContributionEx > 0.0001;
+        if (!needsMore) return null;
+
+        const extraUnits =
+          scenarioContributionUnit > 0 ? lostContributionEx / scenarioContributionUnit : Number.POSITIVE_INFINITY;
+        const litersPerUnit = Math.max(0, line.litersPerUnit ?? 0);
+        const extraLiters = litersPerUnit > 0 && Number.isFinite(extraUnits) ? extraUnits * litersPerUnit : null;
+
+        const label = labelByRef.get(line.ref) ?? line.ref;
+        return {
+          ref: line.ref,
+          label,
+          qtyPaid,
+          baseUnitPriceEx: base.baseUnitPriceEx,
+          offerUnitPriceEx: line.offerUnitPriceEx,
+          costPriceEx: line.costPriceEx,
+          lostContributionEx,
+          extraUnits,
+          extraLiters,
+        };
+      })
+      .filter(Boolean) as Array<{
+      ref: string;
+      label: string;
+      qtyPaid: number;
+      baseUnitPriceEx: number;
+      offerUnitPriceEx: number;
+      costPriceEx: number;
+      lostContributionEx: number;
+      extraUnits: number;
+      extraLiters: number | null;
+    }>;
+
+    const totalLostContributionEx = impacts.reduce((sum, row) => sum + row.lostContributionEx, 0);
+    const weightedContributionPerLiter = breakEvenV2Summary.weightedContributionPerLiter;
+    const portfolioExtraLiters =
+      weightedContributionPerLiter > 0 ? totalLostContributionEx / weightedContributionPerLiter : null;
+
+    return { impacts, totalLostContributionEx, portfolioExtraLiters };
+  }, [breakEvenV2Summary, scenario, productIndex.options]);
+
+  function SummaryMetric({ label, value }: { label: string; value: string }) {
+    return (
+      <div className="cpq-intro-summary-metric">
+        <div className="cpq-intro-summary-metric-label">{label}</div>
+        <div className="cpq-intro-summary-metric-value">{value}</div>
+      </div>
+    );
+  }
 
   function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
     setScenarios((prev) => ({
@@ -628,7 +806,7 @@ export function OfferteSamenstellenApp({
           </div>
         ) : null}
 
-        <div className="cpq-grid cpq-grid-two">
+        <div className="cpq-grid">
           <aside className="cpq-left">
             <WizardSteps
               title="Stappen"
@@ -651,7 +829,13 @@ export function OfferteSamenstellenApp({
                 <QuickCell label="Jaar" value={String(year)} />
                 <QuickCell
                   label="Break-even"
-                  value={activeBreakEvenConfig ? activeBreakEvenConfig.naam : "Geen actieve versie"}
+                  value={
+                    activeBreakEvenConfig
+                      ? activeBreakEvenConfig.naam
+                      : breakEvenV2Summary
+                        ? `Break-even v2 ${currentYear}`
+                        : "Geen actieve versie"
+                  }
                 />
                 <QuickCell label="Versie" value={String(draftMeta.version)} />
                 <QuickCell label="Bewaard" value={draftMeta.updatedAt ? new Date(draftMeta.updatedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "Nog niet"} />
@@ -724,6 +908,77 @@ export function OfferteSamenstellenApp({
               />
             ) : null}
           </main>
+
+          <aside className="cpq-right">
+            <div className="cpq-right-kicker">Break-even (v2)</div>
+            {!breakEvenV2Summary ? (
+              <div className="cpq-alert cpq-alert-warn">
+                Break-even v2 niet geladen.
+                {realizedSalesError ? <div style={{ marginTop: "0.35rem" }}>{realizedSalesError}</div> : null}
+              </div>
+            ) : (
+              <div className="cpq-intro-summary-card">
+                <div className="cpq-intro-summary-grid">
+                  <SummaryMetric label="Vaste kosten" value={euro(breakEvenV2Summary.adjustedFixedCostsTotal)} />
+                  <SummaryMetric label="Gewogen contributie/L" value={euro(breakEvenV2Summary.weightedContributionPerLiter)} />
+                  <SummaryMetric label="Break-even liters" value={`${Math.round(breakEvenV2Summary.breakEvenLiters).toLocaleString("nl-NL")} L`} />
+                  <SummaryMetric label="Break-even omzet (bier)" value={euro(breakEvenV2Summary.breakEvenRevenue)} />
+                  <SummaryMetric label="Margin of safety" value={euro(breakEvenV2Summary.marginOfSafetyEx)} />
+                  <SummaryMetric label="Verkochte liters" value={`${Math.round(breakEvenV2Summary.totalSoldLiters).toLocaleString("nl-NL")} L`} />
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: "1rem" }}>
+              <div className="cpq-right-kicker">Impact offerte</div>
+              {!offerBreakEvenImpact ? (
+                <div className="cpq-intro-summary-card">
+                  <div className="cpq-muted">Selecteer producten om impact te zien.</div>
+                </div>
+              ) : offerBreakEvenImpact.impacts.length === 0 ? (
+                <div className="cpq-intro-summary-card">
+                  <div className="cpq-muted">Geen korting/toeslag impact t.o.v. standaardprijzen.</div>
+                </div>
+              ) : (
+                <>
+                  <div className="cpq-intro-summary-card">
+                    <div className="cpq-intro-summary-grid">
+                      <SummaryMetric label="Verlies contributie" value={euro(offerBreakEvenImpact.totalLostContributionEx)} />
+                      <SummaryMetric
+                        label="Extra liters (portfolio)"
+                        value={
+                          typeof offerBreakEvenImpact.portfolioExtraLiters === "number"
+                            ? `${Math.round(offerBreakEvenImpact.portfolioExtraLiters).toLocaleString("nl-NL")} L`
+                            : "—"
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="cpq-intro-summary-card" style={{ marginTop: "0.8rem" }}>
+                    <div className="cpq-intro-card-title">Extra volume per product</div>
+                    <div style={{ marginTop: "0.75rem" }}>
+                      {offerBreakEvenImpact.impacts.map((row) => (
+                        <div key={row.ref} className="cpq-impact-row">
+                          <div className="cpq-impact-title">{row.label}</div>
+                          <div className="cpq-impact-meta">
+                            {row.extraUnits === Number.POSITIVE_INFINITY ? (
+                              <span>Contributie per eenheid ≤ 0 bij actieprijs.</span>
+                            ) : (
+                              <span>
+                                Extra nodig: {Math.ceil(row.extraUnits).toLocaleString("nl-NL")}
+                                {row.extraLiters !== null ? ` (${Math.round(row.extraLiters).toLocaleString("nl-NL")} L)` : ""}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </aside>
         </div>
 
         {selectedOption ? (
