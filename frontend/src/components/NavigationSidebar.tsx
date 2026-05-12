@@ -18,7 +18,7 @@ function buildNavItems(navigation: NavigationItem[], activePath: string): Dashbo
     "/",
     "/nieuwe-kostprijsberekening",
     "/prijsvoorstellen",
-    "/break-even",
+    "/break-even-v2",
     "/scenario-analyse",
     "/omzet-en-marge",
     "/productie",
@@ -45,11 +45,8 @@ function buildNavItems(navigation: NavigationItem[], activePath: string): Dashbo
   if (!byHref.has("/prijsvoorstellen")) {
     byHref.set("/prijsvoorstellen", { label: "Prijsvoorstel maken", href: "/prijsvoorstellen" });
   }
-  if (!byHref.has("/break-even")) {
-    byHref.set("/break-even", { label: "Break-even analyseren", href: "/break-even" });
-  }
   if (!byHref.has("/break-even-v2")) {
-    byHref.set("/break-even-v2", { label: "Break-even (v2)", href: "/break-even-v2" });
+    byHref.set("/break-even-v2", { label: "Break-even analyseren", href: "/break-even-v2" });
   }
   if (!byHref.has("/omzet-en-marge")) {
     byHref.set("/omzet-en-marge", { label: "Omzet & marge", href: "/omzet-en-marge" });

@@ -104,13 +104,6 @@ def get_navigation() -> list[NavigationItem]:
             key="break-even",
             label="Break-even analyseren",
             description="Maak break-even scenario's voor productmix, prijs en vaste kosten.",
-            href="/break-even",
-            section="Verkoop",
-        ),
-        NavigationItem(
-            key="break-even-v2",
-            label="Break-even (v2)",
-            description="Break-even op basis van gerealiseerde verkoop (Douano) + scenario's.",
             href="/break-even-v2",
             section="Verkoop",
         ),
