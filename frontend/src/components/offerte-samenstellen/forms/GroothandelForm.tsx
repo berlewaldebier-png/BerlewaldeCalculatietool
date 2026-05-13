@@ -31,6 +31,14 @@ export function getGroothandelFormError(form: QuoteFormState, baseOfferRefs: str
     return "Vul een geldige groothandelsmarge in.";
   }
 
+  const expectedLitersRaw = String(form.wholesaleExpectedLiters ?? "").trim();
+  if (expectedLitersRaw) {
+    const expectedLiters = Number(expectedLitersRaw.replace(",", "."));
+    if (!Number.isFinite(expectedLiters) || expectedLiters < 0) {
+      return "Vul een geldige verwachte afname in liters in.";
+    }
+  }
+
   return "";
 }
 
@@ -82,7 +90,17 @@ export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Prop
         onChange={(value) => setForm((prev) => ({ ...prev, wholesaleMarginPct: value }))}
       />
 
+      <Field
+        label="Verwachte afname (liters)"
+        value={form.wholesaleExpectedLiters}
+        onChange={(value) => setForm((prev) => ({ ...prev, wholesaleExpectedLiters: value }))}
+        placeholder="Bijv. 10000"
+        type="number"
+        min="0"
+      />
+
       <Idea text="V1 rekent terug vanaf de huidige horeca-sell-in prijs: groothandelsprijs = horeca prijs / (1 + marge%)." />
+      <Idea text="Vul verwachte afname in om direct te zien wat korting/marge doet met break-even liters (portfolio). Leeg laten = alleen impact op de aantallen in deze offerte." />
     </div>
   );
 }

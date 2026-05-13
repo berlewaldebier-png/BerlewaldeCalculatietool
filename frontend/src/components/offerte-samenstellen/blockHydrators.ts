@@ -110,6 +110,7 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
           payload.useBaseOfferProducts ?? initial.wholesaleUseBaseOfferProducts
         ),
         wholesaleMarginPct: String(payload.marginPct ?? initial.wholesaleMarginPct),
+        wholesaleExpectedLiters: String(payload.expectedLiters ?? initial.wholesaleExpectedLiters),
         wholesaleEligibleRefs: asStringArray(payload.eligibleRefs),
       };
 

@@ -225,6 +225,7 @@ export function buildBlockFromForm({
           : [];
       const productLabels = resolveProductLabels(productOptions, eligibleRefs);
       const marginPct = clampNumber(form.wholesaleMarginPct, 0);
+      const expectedLiters = clampNumber(form.wholesaleExpectedLiters, 0);
 
       return {
         id: blockId,
@@ -235,6 +236,7 @@ export function buildBlockFromForm({
         lines: [
           `Gewenste groothandelsmarge: ${normalizeText(form.wholesaleMarginPct) || "0"}%`,
           `Producten: ${productLabels.length > 0 ? productLabels.join(", ") : "Alle producten in dit voorstel"}`,
+          `Verwachte afname (liters): ${expectedLiters > 0 ? expectedLiters.toLocaleString("nl-NL") : "-"}`,
           "Verkoopprijs aan groothandel wordt teruggerekend vanaf de huidige horeca-sell-in prijs.",
         ],
         tone: tones[type],
@@ -242,6 +244,7 @@ export function buildBlockFromForm({
         payload: {
           useBaseOfferProducts: form.wholesaleUseBaseOfferProducts,
           marginPct,
+          expectedLiters,
           eligibleRefs,
           productLabels,
         },

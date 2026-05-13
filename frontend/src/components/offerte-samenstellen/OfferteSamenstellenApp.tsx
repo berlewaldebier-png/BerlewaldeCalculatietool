@@ -393,6 +393,30 @@ export function OfferteSamenstellenApp({
     const baseline = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: false }).lines;
     const current = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: true }).lines;
 
+    const wholesaleBlock = scenario.blocks.find(
+      (block) =>
+        block.type === "Groothandel" &&
+        (((block.appliesTo ?? "standard") as any) === "standard" ||
+          ((block.appliesTo ?? "standard") as any) === "global")
+    );
+    const wholesaleExpectedLiters = Math.max(
+      0,
+      Number((wholesaleBlock?.payload as any)?.expectedLiters ?? 0)
+    );
+    const wholesaleEligible = Array.isArray((wholesaleBlock?.payload as any)?.eligibleRefs)
+      ? new Set(((wholesaleBlock?.payload as any)?.eligibleRefs as any[]).map(String))
+      : new Set<string>();
+
+    const eligibleLitersByRef = new Map<string, number>();
+    if (wholesaleExpectedLiters > 0) {
+      for (const line of current) {
+        if (wholesaleEligible.size > 0 && !wholesaleEligible.has(line.ref)) continue;
+        const liters = Math.max(0, (line.litersPerUnit ?? 0) * (line.qtyPaid ?? 0));
+        if (liters > 0) eligibleLitersByRef.set(line.ref, liters);
+      }
+    }
+    const eligibleLitersTotal = Array.from(eligibleLitersByRef.values()).reduce((sum, v) => sum + v, 0);
+
     const baselineByRef = new Map(baseline.map((line) => [line.ref, line]));
     const impacts = current
       .map((line) => {
@@ -403,9 +427,15 @@ export function OfferteSamenstellenApp({
         const scenarioContributionUnit = Math.max(0, (line.offerUnitPriceEx ?? 0) - (line.costPriceEx ?? 0));
 
         const qtyPaid = Math.max(0, line.qtyPaid ?? 0);
+        const litersPerUnit = Math.max(0, line.litersPerUnit ?? 0);
+        const eligibleShare =
+          wholesaleExpectedLiters > 0 && eligibleLitersTotal > 0 ? (eligibleLitersByRef.get(line.ref) ?? 0) / eligibleLitersTotal : 0;
+        const expectedLitersForLine = wholesaleExpectedLiters > 0 && eligibleShare > 0 ? wholesaleExpectedLiters * eligibleShare : 0;
+        const qtyPaidForImpact =
+          expectedLitersForLine > 0 && litersPerUnit > 0 ? expectedLitersForLine / litersPerUnit : qtyPaid;
         const lostContributionEx = Math.max(
           0,
-          (baseContributionUnit - scenarioContributionUnit) * qtyPaid
+          (baseContributionUnit - scenarioContributionUnit) * qtyPaidForImpact
         );
 
         const needsMore = lostContributionEx > 0.0001;
@@ -413,14 +443,13 @@ export function OfferteSamenstellenApp({
 
         const extraUnits =
           scenarioContributionUnit > 0 ? lostContributionEx / scenarioContributionUnit : Number.POSITIVE_INFINITY;
-        const litersPerUnit = Math.max(0, line.litersPerUnit ?? 0);
         const extraLiters = litersPerUnit > 0 && Number.isFinite(extraUnits) ? extraUnits * litersPerUnit : null;
 
         const label = labelByRef.get(line.ref) ?? line.ref;
         return {
           ref: line.ref,
           label,
-          qtyPaid,
+          qtyPaid: qtyPaidForImpact,
           baseUnitPriceEx: base.baseUnitPriceEx,
           offerUnitPriceEx: line.offerUnitPriceEx,
           costPriceEx: line.costPriceEx,

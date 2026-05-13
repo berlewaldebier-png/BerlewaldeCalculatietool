@@ -246,6 +246,7 @@ export type QuoteFormState = {
   wholesaleUseBaseOfferProducts: boolean;
   wholesaleEligibleRefs: string[];
   wholesaleMarginPct: string;
+  wholesaleExpectedLiters: string;
   transportDistanceKm: string;
   transportRateEx: string;
   transportDeliveries: string;

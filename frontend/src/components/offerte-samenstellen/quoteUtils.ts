@@ -98,6 +98,7 @@ export function createInitialQuoteFormState(): QuoteFormState {
     wholesaleUseBaseOfferProducts: true,
     wholesaleEligibleRefs: [],
     wholesaleMarginPct: "18",
+    wholesaleExpectedLiters: "",
     transportDistanceKm: "42",
     transportRateEx: "0,50",
     transportDeliveries: "1",
