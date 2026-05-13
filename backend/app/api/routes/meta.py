@@ -1099,6 +1099,234 @@ def post_dev_delete_sellable(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/delete-sellable")
+def post_delete_sellable(
+    sku_id: str = Query(..., description="SKU id om te verwijderen (alleen wanneer ongerefereerd)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen valideren/rapporteren, niets verwijderen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Safely delete a sellable SKU and its owned bundle/article rows when unreferenced.
+
+    Hard-delete is only allowed when the SKU has zero references in:
+    - kostprijs activations (any year)
+    - Douano product mappings (productkoppeling)
+    - offertes (quote_drafts)
+    - BOM lines as component (component_sku_id)
+
+    When allowed, we remove:
+    - the SKU row
+    - its owned article (article_id) + bom_lines where parent_article_id == article_id
+    - any cost_version_sku_rows rows for sku_id
+    - any dataset rows that reference the sku/article (kostprijsversies/verkoopprijzen/kostprijsproductactiveringen)
+    """
+    rid = str(sku_id or "").strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="sku_id is verplicht.")
+
+    def _scan_for_sku_ids(value: Any, out: set[str]) -> None:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if k in {"sku_id", "component_sku_id"}:
+                    sid = str(v or "").strip()
+                    if sid:
+                        out.add(sid)
+                _scan_for_sku_ids(v, out)
+        elif isinstance(value, list):
+            for item in value:
+                _scan_for_sku_ids(item, out)
+
+    try:
+        # Load SKU row (must exist).
+        skus = postgres_storage.load_dataset("skus", [])
+        if not isinstance(skus, list):
+            skus = []
+        sku_row = next((row for row in skus if isinstance(row, dict) and str(row.get("id", "") or "").strip() == rid), None)
+        if not isinstance(sku_row, dict):
+            raise HTTPException(status_code=404, detail=f"SKU '{rid}' niet gevonden.")
+
+        kind = str(sku_row.get("kind", "") or "").strip().lower()
+        if kind != "article":
+            raise HTTPException(status_code=400, detail="Alleen kind=article SKUs kunnen via deze route verwijderd worden.")
+
+        owned_article_id = str(sku_row.get("article_id", "") or "").strip()
+
+        # Reference checks.
+        reasons: list[str] = []
+
+        # 1) Kostprijs activations (any year).
+        activations = postgres_storage.load_dataset("kostprijsproductactiveringen", [])
+        if isinstance(activations, list):
+            if any(
+                isinstance(row, dict) and str(row.get("sku_id", "") or "").strip() == rid
+                for row in activations
+            ):
+                reasons.append("SKU heeft kostprijs-activaties (kostprijsbeheer).")
+
+        # 2) Douano product mappings table.
+        try:
+            from app.domain import douano_product_mapping_storage
+
+            douano_product_mapping_storage.ensure_schema()
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM douano_product_mapping WHERE sku_id = %s", (rid,))
+                    count = int((cur.fetchone() or [0])[0] or 0)
+                    if count > 0:
+                        reasons.append("SKU heeft een productkoppeling (Douano mapping).")
+        except Exception:
+            # If we can't verify, block hard delete (safety).
+            reasons.append("Kon productkoppelingen niet verifiëren (veiligheidsblokkade).")
+
+        # 3) BOM as component.
+        bom_lines = postgres_storage.load_dataset("bom-lines", [])
+        if isinstance(bom_lines, list):
+            if any(
+                isinstance(row, dict) and str(row.get("component_sku_id", "") or "").strip() == rid
+                for row in bom_lines
+            ):
+                reasons.append("SKU wordt gebruikt als component in een samenstelling (BOM).")
+
+        # 4) Offertes (quote_drafts table payload scan).
+        try:
+            from app.domain import quote_drafts_storage
+
+            quote_drafts_storage.ensure_schema()
+            referenced_in_quotes = False
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, quote_number, status, year, payload FROM quote_drafts")
+                    for (qid, qnum, qstatus, qyear, payload) in cur.fetchall() or []:
+                        sku_ids: set[str] = set()
+                        _scan_for_sku_ids(payload, sku_ids)
+                        if rid in sku_ids:
+                            referenced_in_quotes = True
+                            break
+            if referenced_in_quotes:
+                reasons.append("SKU komt voor in offertes/prijsvoorstellen.")
+        except Exception:
+            reasons.append("Kon offertes niet verifiëren (veiligheidsblokkade).")
+
+        report: dict[str, Any] = {
+            "sku_id": rid,
+            "article_id": owned_article_id,
+            "dry_run": bool(dry_run),
+            "can_delete": len(reasons) == 0,
+            "blocked_reasons": reasons,
+            "deleted": {},
+        }
+
+        if reasons:
+            if dry_run:
+                return {"result": report}
+            raise HTTPException(status_code=409, detail={"message": "Verwijderen geblokkeerd.", "reasons": reasons})
+
+        if dry_run:
+            return {"result": report}
+
+        # --- Perform deletion ---
+        # 1) Remove SKU row.
+        before = len(skus)
+        skus = [
+            row
+            for row in skus
+            if not (isinstance(row, dict) and str(row.get("id", "") or "").strip() == rid)
+        ]
+        report["deleted"]["skus"] = before - len(skus)
+        postgres_storage.save_dataset("skus", skus, overwrite=True)
+
+        # 2) Remove owned article and bom-lines (parent) when present.
+        if owned_article_id:
+            articles = postgres_storage.load_dataset("articles", [])
+            if isinstance(articles, list):
+                before = len(articles)
+                articles = [
+                    row
+                    for row in articles
+                    if not (isinstance(row, dict) and str(row.get("id", "") or "").strip() == owned_article_id)
+                ]
+                report["deleted"]["articles"] = before - len(articles)
+                postgres_storage.save_dataset("articles", articles, overwrite=True)
+
+            bom_lines = postgres_storage.load_dataset("bom-lines", [])
+            if isinstance(bom_lines, list):
+                before = len(bom_lines)
+                bom_lines = [
+                    row
+                    for row in bom_lines
+                    if not (
+                        isinstance(row, dict)
+                        and str(row.get("parent_article_id", "") or "").strip() == owned_article_id
+                    )
+                ]
+                report["deleted"]["bom-lines"] = before - len(bom_lines)
+                postgres_storage.save_dataset("bom-lines", bom_lines, overwrite=True)
+
+        # 3) Remove cost_version_sku_rows (table-backed).
+        try:
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM cost_version_sku_rows WHERE sku_id = %s", (rid,))
+                    report["deleted"]["cost_version_sku_rows"] = int(cur.rowcount or 0)
+                if not postgres_storage.in_transaction():
+                    conn.commit()
+        except Exception:
+            report["deleted"]["cost_version_sku_rows"] = "error"
+
+        # 4) Cleanup datasets that may have references.
+        kostprijsversies = postgres_storage.load_dataset("kostprijsversies", [])
+        if isinstance(kostprijsversies, list):
+            before = len(kostprijsversies)
+
+            def _keep_kv(row: Any) -> bool:
+                if not isinstance(row, dict):
+                    return True
+                basis = row.get("basisgegevens", {})
+                if not isinstance(basis, dict):
+                    basis = {}
+                a_id = str(basis.get("article_id", "") or "").strip()
+                s_id = str(basis.get("sku_id", "") or "").strip()
+                if owned_article_id and a_id == owned_article_id:
+                    return False
+                if s_id == rid:
+                    return False
+                return True
+
+            kostprijsversies = [row for row in kostprijsversies if _keep_kv(row)]
+            report["deleted"]["kostprijsversies"] = before - len(kostprijsversies)
+            postgres_storage.save_dataset("kostprijsversies", kostprijsversies, overwrite=True)
+
+        verkoopprijzen = postgres_storage.load_dataset("verkoopprijzen", [])
+        if isinstance(verkoopprijzen, list):
+            before = len(verkoopprijzen)
+            verkoopprijzen = [
+                row
+                for row in verkoopprijzen
+                if not (isinstance(row, dict) and str(row.get("sku_id", "") or "").strip() == rid)
+            ]
+            report["deleted"]["verkoopprijzen"] = before - len(verkoopprijzen)
+            postgres_storage.save_dataset("verkoopprijzen", verkoopprijzen, overwrite=True)
+
+        # We already enforced activations==0; still remove any stale activation rows defensively.
+        activations = postgres_storage.load_dataset("kostprijsproductactiveringen", [])
+        if isinstance(activations, list):
+            before = len(activations)
+            activations = [
+                row
+                for row in activations
+                if not (isinstance(row, dict) and str(row.get("sku_id", "") or "").strip() == rid)
+            ]
+            report["deleted"]["kostprijsproductactiveringen"] = before - len(activations)
+            postgres_storage.save_dataset("kostprijsproductactiveringen", activations, overwrite=True)
+
+        return {"result": report}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/dev/delete-kostprijs-activation")
 def post_dev_delete_kostprijs_activation(
     sku_id: str = Query(..., description="SKU id waarvan de kostprijs-activatie verwijderd moet worden."),
