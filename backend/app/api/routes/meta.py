@@ -1415,6 +1415,8 @@ def post_repair_beer_bundles(
             next_row["beer_id"] = target_beer_id
             next_row["packaging_type"] = target_packaging_type
             next_row["sellable_subtype"] = "beer_bundle"
+            # A beer bundle behaves like a beer sellable (not a giftset), so classify it under the beer product group.
+            next_row["product_group"] = "drank"
             next_skus.append(next_row)
             report["mutations"]["updated"] += 1
 
