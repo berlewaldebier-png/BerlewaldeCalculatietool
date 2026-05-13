@@ -136,11 +136,10 @@ function buildCalculationLines(scenario: QuoteScenario): CalculationLine[] {
   return scenario.products
     .filter((product) => product.qty > 0)
     .map((product) => {
-      const ref =
-        product.source?.bier_id && product.source?.product_id
-          ? `beer:${String(product.source.bier_id)}:product:${String(
-              product.source.product_id
-            )}`
+      const ref = product.source?.sku_id
+        ? `sku:${String(product.source.sku_id)}`
+        : product.source?.bier_id && product.source?.product_id
+          ? `beer:${String(product.source.bier_id)}:product:${String(product.source.product_id)}`
           : product.id;
 
       return {
