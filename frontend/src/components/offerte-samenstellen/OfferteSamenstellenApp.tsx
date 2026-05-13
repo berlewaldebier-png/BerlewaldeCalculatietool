@@ -26,6 +26,7 @@ import {
 } from "@/components/offerte-samenstellen/persistence";
 import {
   createQuoteDraft,
+  deleteQuoteDraft,
   loadQuoteDraft,
   updateQuoteDraft,
 } from "@/components/offerte-samenstellen/quoteApi";
@@ -139,6 +140,7 @@ export function OfferteSamenstellenApp({
     () => createInitialQuoteDraft(year).breakEven
   );
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isDeletingDraft, setIsDeletingDraft] = useState(false);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
 
@@ -758,6 +760,23 @@ export function OfferteSamenstellenApp({
       })
     : null;
 
+  async function handleDeleteDraft() {
+    if (isDeletingDraft) return;
+    const draftId = draftMeta.draftId;
+    if (!draftId) return;
+    const confirmed = window.confirm("Offerte verwijderen? Dit kan niet ongedaan gemaakt worden.");
+    if (!confirmed) return;
+    setIsDeletingDraft(true);
+    try {
+      await deleteQuoteDraft(draftId);
+      router.push("/prijsvoorstellen");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Verwijderen mislukt.";
+      setDraftError(message);
+      setIsDeletingDraft(false);
+    }
+  }
+
   return (
     <div className="cpq-root">
       <div className="cpq-frame">
@@ -773,6 +792,16 @@ export function OfferteSamenstellenApp({
               onClick={() => router.push("/prijsvoorstellen")}
             >
               Terug
+            </button>
+            <button
+              type="button"
+              className="cpq-icon-button"
+              title={draftMeta.draftId ? "Offerte verwijderen" : "Sla eerst een offerte op om te kunnen verwijderen."}
+              aria-label="Offerte verwijderen"
+              onClick={() => void handleDeleteDraft()}
+              disabled={!draftMeta.draftId || isDeletingDraft}
+            >
+              <IconTrash />
             </button>
             <span className="pill">{draftMeta.status === "definitief" ? "Definitief" : "Concept"}</span>
           </div>

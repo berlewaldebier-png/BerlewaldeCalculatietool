@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 import { DataTablePro } from "@/components/DataTablePro";
+import { IconTrash } from "@/components/offerte-samenstellen/offerteSamenstellenConfig";
+import { deleteQuoteDraft } from "@/components/offerte-samenstellen/quoteApi";
 import type { QuoteDraftRecord } from "@/components/offerte-samenstellen/types";
 
 function formatDate(value: string | null) {
@@ -34,6 +38,25 @@ function statusLabel(status: string) {
 }
 
 export function PrijsvoorstellenTable({ quotes }: { quotes: QuoteDraftRecord[] }) {
+  const router = useRouter();
+  const [deletingId, setDeletingId] = useState("");
+
+  async function handleDeleteQuote(quoteId: string) {
+    if (deletingId) return;
+    const confirmed = window.confirm("Offerte verwijderen? Dit kan niet ongedaan gemaakt worden.");
+    if (!confirmed) return;
+    setDeletingId(quoteId);
+    try {
+      await deleteQuoteDraft(quoteId);
+      router.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Verwijderen mislukt.";
+      window.alert(message);
+    } finally {
+      setDeletingId("");
+    }
+  }
+
   return (
     <DataTablePro<QuoteDraftRecord>
       rows={quotes}
@@ -100,9 +123,21 @@ export function PrijsvoorstellenTable({ quotes }: { quotes: QuoteDraftRecord[] }
           key: "action",
           header: "Actie",
           render: (row) => (
-            <Link href={`/offerte-samenstellen?draft=${encodeURIComponent(row.id)}`} className="proposal-hub-link">
-              Openen
-            </Link>
+            <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+              <Link href={`/offerte-samenstellen?draft=${encodeURIComponent(row.id)}`} className="proposal-hub-link">
+                Openen
+              </Link>
+              <button
+                type="button"
+                className="icon-button-table"
+                title="Offerte verwijderen"
+                aria-label="Offerte verwijderen"
+                onClick={() => void handleDeleteQuote(row.id)}
+                disabled={Boolean(deletingId)}
+              >
+                <IconTrash />
+              </button>
+            </span>
           )
         }
       ]}

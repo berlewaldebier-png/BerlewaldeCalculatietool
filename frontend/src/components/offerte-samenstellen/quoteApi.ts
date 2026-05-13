@@ -50,3 +50,9 @@ export function updateQuoteDraft(
     body: JSON.stringify(payload),
   });
 }
+
+export function deleteQuoteDraft(draftId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/quotes/${encodeURIComponent(draftId)}`, {
+    method: "DELETE",
+  });
+}
