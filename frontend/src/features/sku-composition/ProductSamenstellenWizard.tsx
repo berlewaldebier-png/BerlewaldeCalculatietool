@@ -31,6 +31,7 @@ type Props = {
   editFormatId?: string;
   editArticleId?: string;
   channels: GenericRecord[];
+  bieren: GenericRecord[];
   verkoopprijzen: GenericRecord[];
   skus: GenericRecord[];
   articles: GenericRecord[];
@@ -48,6 +49,8 @@ export function ProductSamenstellenWizard(props: Props) {
   const [stepIndex, setStepIndex] = useState(0);
   const [mode, setMode] = useState<FlowMode>(props.initialMode ?? "verkoopbaar");
   const [sellableKind, setSellableKind] = useState<SellableKind>("product");
+  const [bundleContext, setBundleContext] = useState<"giftset" | "beer_variant">("giftset");
+  const [beerId, setBeerId] = useState<string>("");
 
   const [name, setName] = useState("Nieuw artikel");
   const [uom, setUom] = useState<"stuk" | "pakket" | "uur" | "doos" | "fust">("pakket");
@@ -117,10 +120,12 @@ export function ProductSamenstellenWizard(props: Props) {
 
   const showClassificeren = useMemo(() => {
     if (mode !== "verkoopbaar") return false;
+    if (sellableKind !== "product") return false;
+    if (bundleContext === "beer_variant") return true;
     const skuId = String(createdSkuId ?? "").trim();
     if (!skuId) return false;
     return douanoMappedSkuIds.has(skuId);
-  }, [createdSkuId, douanoMappedSkuIds, mode]);
+  }, [bundleContext, createdSkuId, douanoMappedSkuIds, mode, sellableKind]);
 
   const steps = useMemo(() => {
     const base = [
@@ -181,6 +186,17 @@ export function ProductSamenstellenWizard(props: Props) {
       .filter((row) => (row.pricingMethod === "cost_plus" ? row.hasActiveCost : row.manualRateEx > 0))
       .map((row) => ({ value: row.skuId, label: row.label, uom: row.uom }));
   }, [central.rows]);
+
+  const beerOptions = useMemo(() => {
+    return (Array.isArray(props.bieren) ? props.bieren : [])
+      .filter((row) => (row as any)?.active !== false)
+      .map((row) => ({
+        value: text((row as any).id),
+        label: text((row as any).biernaam || (row as any).naam || (row as any).id),
+      }))
+      .filter((row) => row.value && row.label)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [props.bieren]);
 
   const packagingOptions = useMemo(() => {
     return (Array.isArray(props.packagingComponents) ? props.packagingComponents : [])
@@ -291,10 +307,13 @@ export function ProductSamenstellenWizard(props: Props) {
 
     const existingSku = (Array.isArray(props.skus) ? props.skus : []).find((row) => text((row as any).article_id) === editId);
     const skuId = text((existingSku as any)?.id);
+    const skuBeerId = text((existingSku as any)?.beer_id);
 
     const subtype = text((article as any).sellable_subtype).toLowerCase();
     setMode("verkoopbaar");
     setSellableKind(subtype === "dienst" ? "dienst" : "product");
+    setBundleContext(subtype === "beer_bundle" ? "beer_variant" : "giftset");
+    setBeerId(skuBeerId);
     setName(text((article as any).name) || text((article as any).naam) || "Nieuw artikel");
     setUom((() => {
       const value = text((article as any).uom).toLowerCase();
@@ -307,7 +326,7 @@ export function ProductSamenstellenWizard(props: Props) {
     setContentLiter(toNumber((article as any).content_liter, 0));
     setManualRateEx(toNumber((article as any).manual_rate_ex, 125));
 
-    setProductGroup(text((article as any).product_group) || "giftset");
+    setProductGroup(text((article as any).product_group) || (subtype === "beer_bundle" ? "drank" : "giftset"));
     setAlcoholCategory(text((article as any).alcohol_category) || "normaal");
     setPackagingType(text((article as any).packaging_type) || "");
     setPackagingTypeOptIn(Boolean(text((article as any).packaging_type)));
@@ -374,6 +393,9 @@ export function ProductSamenstellenWizard(props: Props) {
     if (mode === "verkoopbaar" && sellableKind === "product" && composition.length === 0) {
       warnings.push("Samenstelling is leeg.");
     }
+    if (mode === "verkoopbaar" && sellableKind === "product" && bundleContext === "beer_variant" && !beerId) {
+      warnings.push("Bier is verplicht voor een bier-variant samenstelling.");
+    }
     if (mode === "afvuleenheid" && afvulParts.length === 0) {
       warnings.push("Samenstelling is leeg.");
     }
@@ -386,6 +408,8 @@ export function ProductSamenstellenWizard(props: Props) {
     mode,
     name,
     sellableKind,
+    bundleContext,
+    beerId,
     afvulParts.length,
     manualRateEx,
   ]);
@@ -437,6 +461,8 @@ export function ProductSamenstellenWizard(props: Props) {
         uom,
         totalsLiters: totals.liters,
         sellableKind,
+        bundleContext,
+        beerId,
         manualRateEx,
         productGroup,
         alcoholCategory,
@@ -517,11 +543,16 @@ export function ProductSamenstellenWizard(props: Props) {
                     <StepType
                       mode={mode}
                       sellableKind={sellableKind}
+                      bundleContext={bundleContext}
+                      beerId={beerId}
+                      beerOptions={beerOptions}
                       onModeChange={(next) => {
                         setMode(next);
                         if (next === "afvuleenheid") {
                           setSellableKind("product");
                           setUom("stuk");
+                          setBundleContext("giftset");
+                          setBeerId("");
                         } else {
                           setUom("pakket");
                         }
@@ -533,8 +564,21 @@ export function ProductSamenstellenWizard(props: Props) {
                           setProductGroup("dienst");
                           setPackagingTypeOptIn(false);
                           setPackagingType("");
+                          setBundleContext("giftset");
+                          setBeerId("");
                         }
                       }}
+                      onBundleContextChange={(next) => {
+                        setBundleContext(next);
+                        if (next === "beer_variant") {
+                          setProductGroup("drank");
+                          setPackagingTypeOptIn(true);
+                        } else {
+                          setProductGroup("giftset");
+                          setBeerId("");
+                        }
+                      }}
+                      onBeerIdChange={(next) => setBeerId(next)}
                     />
                     
                     

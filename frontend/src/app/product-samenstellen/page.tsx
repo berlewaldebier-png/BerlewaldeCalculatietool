@@ -11,6 +11,7 @@ export default async function ProductSamenstellenPage({
   const bootstrap = await getBootstrap(
     [
       "channels",
+      "bieren",
       "verkoopprijzen",
       "productie",
       "skus",
@@ -31,6 +32,7 @@ export default async function ProductSamenstellenPage({
   const navigation = bootstrap.navigation ?? [];
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
+  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
   const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
   const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
   const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
@@ -66,6 +68,7 @@ export default async function ProductSamenstellenPage({
         editFormatId={formatIdParam || ""}
         editArticleId={articleIdParam || ""}
         channels={channels}
+        bieren={bieren}
         verkoopprijzen={verkoopprijzen}
         skus={skus}
         articles={articles}

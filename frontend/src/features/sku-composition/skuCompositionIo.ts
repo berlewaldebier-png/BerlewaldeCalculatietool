@@ -40,6 +40,8 @@ export async function saveSellableSkuBundle({
   uom,
   totalsLiters,
   sellableKind,
+  bundleContext,
+  beerId,
   manualRateEx,
   productGroup,
   alcoholCategory,
@@ -54,6 +56,8 @@ export async function saveSellableSkuBundle({
   uom: string;
   totalsLiters: number;
   sellableKind: SellableKind;
+  bundleContext: "giftset" | "beer_variant";
+  beerId: string;
   manualRateEx: number;
   productGroup: string;
   alcoholCategory: string;
@@ -71,6 +75,8 @@ export async function saveSellableSkuBundle({
       uom,
       totals_liters: Math.max(0, toNumber(totalsLiters, 0)),
       sellable_kind: sellableKind === "dienst" ? "dienst" : "product",
+      bundle_context: bundleContext === "beer_variant" ? "beer_variant" : "giftset",
+      beer_id: text(beerId),
       manual_rate_ex: Math.max(0, toNumber(manualRateEx, 0)),
       product_group: text(productGroup),
       alcohol_category: text(alcoholCategory),

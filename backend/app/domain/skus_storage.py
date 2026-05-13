@@ -415,6 +415,14 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
         name = str(row.get("name", row.get("naam", "")) or "").strip()
         active = bool(row.get("active", row.get("actief", True)))
         payload = {k: v for (k, v) in row.items() if k not in {"naam"}}
+
+        sellable_subtype = str(payload.get("sellable_subtype", "") or "").strip().lower()
+        packaging_type = str(payload.get("packaging_type", payload.get("verpakkingstype", "")) or "").strip()
+        if kind == "article" and sellable_subtype == "beer_bundle":
+            if not beer_id:
+                raise ValueError(f"SKU '{rid}' is beer_bundle maar mist beer_id.")
+            if not packaging_type:
+                raise ValueError(f"SKU '{rid}' is beer_bundle maar mist packaging_type.")
         incoming_ids.append(rid)
         params.append((rid, kind, beer_id, format_article_id, article_id, code, name, active, json.dumps(payload), now))
 

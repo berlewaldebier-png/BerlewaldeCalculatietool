@@ -131,8 +131,19 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       const version = versionById.get(kostprijsversieId);
       const costLineRow = getCostLineRow(version, { skuId, productId });
       const master = formatById.get(productId) ?? productMasterById.get(productId);
+      const isArticleSku = Boolean(skuId && skuKind === "article");
+      const skuPackagingType = text((skuRow as any)?.packaging_type);
+      const articleNameRaw = text((articleById.get(text((skuRow as any)?.article_id) || productId) as any)?.name) ||
+        text((skuRow as any)?.name) ||
+        "";
+      const beerNameFromMaster = bierNameById.get(bierId) || bierId;
+      const packLabelFromArticleName =
+        bierId && articleNameRaw && articleNameRaw.toLowerCase().includes(beerNameFromMaster.toLowerCase())
+          ? articleNameRaw.split(" - ").slice(1).join(" - ").trim()
+          : "";
       const packLabel =
         master?.packLabel ||
+        (isArticleSku && bierId ? (packLabelFromArticleName || skuPackagingType) : "") ||
         text((costLineRow as any).verpakking_label || (costLineRow as any).verpakking || productId);
       const litersPerUnit =
         master?.litersPerUnit ||
@@ -157,7 +168,6 @@ export function buildProductFacts(params: BuildProductFactsParams) {
       const vatRatePct = readVatRatePct(version);
       const warningsForFact: string[] = [];
 
-      const isArticleSku = skuId && skuKind === "article";
       if (baseLitersPerUnit <= 0 && !isArticleSku) warningsForFact.push("Literinhoud ontbreekt.");
       if (costPriceEx <= 0) warningsForFact.push("Kostprijs ontbreekt.");
       if (fixedCostAllocationEx <= 0)
@@ -215,9 +225,11 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         return;
       }
 
-      const bierName = isArticleSku
-        ? articleNameById.get(text((skuRow as any)?.article_id) || productId) || packLabel
-        : bierNameById.get(bierId) || bierId;
+      const bierName = isArticleSku && bierId
+        ? bierNameById.get(bierId) || bierId
+        : isArticleSku
+          ? articleNameById.get(text((skuRow as any)?.article_id) || productId) || packLabel
+          : bierNameById.get(bierId) || bierId;
       facts.push({
         ref,
         bierId: effectiveBierId,

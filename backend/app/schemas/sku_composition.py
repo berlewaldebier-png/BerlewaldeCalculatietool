@@ -33,6 +33,8 @@ class UpsertBundleRequest(BaseModel):
     uom: str = "stuk"
     totals_liters: float = Field(0, ge=0)
     sellable_kind: Literal["product", "dienst"] = "product"
+    bundle_context: Literal["giftset", "beer_variant"] = "giftset"
+    beer_id: str = ""
     manual_rate_ex: float = Field(0, ge=0)
     product_group: str = ""
     alcohol_category: str = ""

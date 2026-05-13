@@ -1268,6 +1268,171 @@ def post_repair_inkoop_unit_costs(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/repair/beer-bundles")
+def post_repair_beer_bundles(
+    year: int = Query(2025, description="Jaar om te gebruiken voor activatie-detectie (default 2025)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    beer_id: str = Query("", description="Beer id om te koppelen (bijv. Berlewalde Blond)."),
+    packaging_type: str = Query("", description="Verpakkingstype id (bijv. doos-12x33cl)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin repair: dedupe + migrate single-beer bundles (beer_bundle) to carry beer_id + packaging_type.
+
+    Intended for cases where a bundle should appear under a beer/style in offer pickers and reporting.
+    """
+    target_beer_id = str(beer_id or "").strip()
+    target_packaging_type = str(packaging_type or "").strip()
+    if not target_beer_id:
+        raise HTTPException(status_code=400, detail="beer_id is verplicht.")
+    if not target_packaging_type:
+        raise HTTPException(status_code=400, detail="packaging_type is verplicht.")
+
+    def normalize_name(value: str) -> str:
+        return (
+            str(value or "")
+            .strip()
+            .lower()
+            .replace("*", "x")
+            .replace("×", "x")
+            .replace("  ", " ")
+        )
+
+    skus = postgres_storage.load_dataset("skus", [])
+    articles = postgres_storage.load_dataset("articles", [])
+    activations = postgres_storage.load_dataset("kostprijsproductactiveringen", [])
+
+    skus_list = [row for row in skus if isinstance(row, dict)] if isinstance(skus, list) else []
+    articles_list = [row for row in articles if isinstance(row, dict)] if isinstance(articles, list) else []
+    activations_list = [row for row in activations if isinstance(row, dict)] if isinstance(activations, list) else []
+
+    # Candidates: article SKUs with "doos 12" and "33cl" in the name.
+    candidates = []
+    for row in skus_list:
+        if str(row.get("kind", "") or "").strip().lower() != "article":
+            continue
+        name = str(row.get("name", row.get("naam", "")) or "").strip()
+        n = normalize_name(name)
+        if "doos" not in n:
+            continue
+        if "12" not in n:
+            continue
+        if "33cl" not in n:
+            continue
+        if "blond" not in n:
+            continue
+        candidates.append(row)
+
+    # Decide keep vs delete based on active activation for the year.
+    active_skus_for_year: set[str] = set()
+    for act in activations_list:
+        if int(act.get("jaar", 0) or 0) != int(year):
+            continue
+        if str(act.get("effectief_tot", "") or "").strip():
+            continue
+        sid = str(act.get("sku_id", "") or "").strip()
+        if sid:
+            active_skus_for_year.add(sid)
+
+    keep: dict[str, Any] | None = None
+    to_delete: list[dict[str, Any]] = []
+    for row in candidates:
+        sid = str(row.get("id", "") or "").strip()
+        if not sid:
+            continue
+        if sid in active_skus_for_year:
+            keep = row
+        else:
+            to_delete.append(row)
+
+    # Fallback: if none active, keep the first candidate (stable by id sort).
+    if keep is None and candidates:
+        keep = sorted(candidates, key=lambda r: str(r.get("id", "") or ""))[0]
+        to_delete = [r for r in candidates if r is not keep]
+
+    report: dict[str, Any] = {
+        "year": int(year),
+        "dry_run": bool(dry_run),
+        "candidates": [str(r.get("id", "") or "") for r in candidates],
+        "keep_sku_id": str((keep or {}).get("id", "") or ""),
+        "delete_sku_ids": [str(r.get("id", "") or "") for r in to_delete],
+        "mutations": {"updated": 0, "deleted": 0},
+    }
+
+    if not keep:
+        report["note"] = "Geen candidates gevonden."
+        return {"result": report}
+
+    keep_sku_id = str(keep.get("id", "") or "").strip()
+    keep_article_id = str(keep.get("article_id", "") or "").strip()
+
+    # Update keep SKU: set beer_id + packaging_type + sellable_subtype.
+    next_skus: list[dict[str, Any]] = []
+    for row in skus_list:
+        sid = str(row.get("id", "") or "").strip()
+        if not sid:
+            continue
+        if sid != keep_sku_id:
+            next_skus.append(row)
+            continue
+        next_row = dict(row)
+        next_row["beer_id"] = target_beer_id
+        next_row["packaging_type"] = target_packaging_type
+        next_row["sellable_subtype"] = "beer_bundle"
+        next_skus.append(next_row)
+        report["mutations"]["updated"] += 1
+
+    # Keep article payload in sync (useful for UI lists).
+    next_articles: list[dict[str, Any]] = []
+    for row in articles_list:
+        aid = str(row.get("id", "") or "").strip()
+        if not aid:
+            continue
+        if aid != keep_article_id:
+            next_articles.append(row)
+            continue
+        next_row = dict(row)
+        next_row["packaging_type"] = target_packaging_type
+        next_row["sellable_subtype"] = "beer_bundle"
+        next_articles.append(next_row)
+
+    if dry_run:
+        return {"result": report}
+
+    # Persist updates first.
+    postgres_storage.save_dataset("skus", next_skus, overwrite=True)
+    postgres_storage.save_dataset("articles", next_articles, overwrite=True)
+
+    # Delete duplicates that are not active (dev-safe: we only delete SKUs/articles/BOM when unreferenced by activations).
+    deleted = 0
+    delete_ids = {str(r.get("id", "") or "").strip() for r in to_delete if str(r.get("id", "") or "").strip()}
+    if delete_ids:
+        # Remove from tables directly for safety (preserve other rows).
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM cost_version_sku_rows WHERE sku_id = ANY(%s)", (list(delete_ids),))
+                cur.execute("DELETE FROM skus WHERE id = ANY(%s)", (list(delete_ids),))
+                deleted = int(cur.rowcount or 0)
+            if not postgres_storage.in_transaction():
+                conn.commit()
+
+        # Delete bundle articles + bom lines that belong to the deleted SKUs (best-effort, based on article_id links).
+        deleted_article_ids = {
+            str(r.get("article_id", "") or "").strip()
+            for r in to_delete
+            if str(r.get("article_id", "") or "").strip()
+        }
+        if deleted_article_ids:
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM bom_lines WHERE parent_article_id = ANY(%s)", (list(deleted_article_ids),))
+                    cur.execute("DELETE FROM articles WHERE id = ANY(%s)", (list(deleted_article_ids),))
+                if not postgres_storage.in_transaction():
+                    conn.commit()
+
+    report["mutations"]["deleted"] = deleted
+    return {"result": report}
+
+
 @router.get("/new-year-draft")
 def get_new_year_draft(
     target_year: int = Query(..., description="Doeljaar waarvoor de draft opgehaald moet worden."),

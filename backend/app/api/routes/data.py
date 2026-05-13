@@ -365,6 +365,13 @@ def post_upsert_bundle(
         sellable_kind = str(payload.sellable_kind or "product").strip().lower()
         is_service = sellable_kind == "dienst"
 
+        bundle_context = str(getattr(payload, "bundle_context", "giftset") or "giftset").strip().lower()
+        if bundle_context not in {"giftset", "beer_variant"}:
+            bundle_context = "giftset"
+        beer_id = str(getattr(payload, "beer_id", "") or "").strip()
+        if bundle_context == "beer_variant" and not beer_id:
+            raise HTTPException(status_code=400, detail="Bier ontbreekt voor bier-variant bundle.")
+
         article_payload: dict[str, Any] = {
             "id": article_id,
             "name": name,
@@ -373,7 +380,7 @@ def post_upsert_bundle(
             "content_liter": max(float(payload.totals_liters or 0.0), 0.0),
             "active": True,
             "actief": True,
-            "sellable_subtype": "dienst" if is_service else "product",
+            "sellable_subtype": "dienst" if is_service else ("beer_bundle" if bundle_context == "beer_variant" else "product"),
             "pricing_method": "manual_rate" if is_service else "cost_plus",
             "manual_rate_ex": float(payload.manual_rate_ex or 0.0) if is_service else 0.0,
             "product_group": str(payload.product_group or "").strip(),
@@ -384,10 +391,12 @@ def post_upsert_bundle(
         sku_payload: dict[str, Any] = {
             "id": sku_id,
             "kind": "article",
+            "beer_id": beer_id if bundle_context == "beer_variant" else "",
             "article_id": article_id,
             "name": name,
             "active": True,
             "actief": True,
+            "sellable_subtype": article_payload["sellable_subtype"],
             "pricing_method": article_payload["pricing_method"],
             "manual_rate_ex": article_payload["manual_rate_ex"],
             "product_group": article_payload["product_group"],
@@ -519,6 +528,18 @@ def post_upsert_bundle(
                             "message": "Component SKU is niet actief/verkoopbaar.",
                         }
                     )
+
+                # Beer-variant bundles may only contain SKUs from the same beer.
+                if bundle_context == "beer_variant":
+                    component_beer_id = str(component_sku.get("beer_id", "") or "").strip()
+                    if component_beer_id != beer_id:
+                        field_errors.append(
+                            {
+                                "field": f"composition[{idx}].component_sku_id",
+                                "code": "beer_mismatch",
+                                "message": "Component SKU hoort bij een ander bier dan de bundle.",
+                            }
+                        )
 
             # Validate packaging component kinds.
             articles_by_id = {str(row.get("id", "") or "").strip(): row for row in articles if str(row.get("id", "") or "").strip()}
