@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -20,6 +20,18 @@ function subtypeLabel(value: SellableSubtype) {
 
 function methodLabel(value: PricingMethod) {
   return value === "manual_rate" ? "Tarief" : "Kostprijs";
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 7h16" />
+      <path d="M9 4h6" />
+      <path d="M7 7l1 12h8l1-12" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  );
 }
 
 export function VerkoopbareArtikelenWorkspace({
@@ -45,6 +57,7 @@ export function VerkoopbareArtikelenWorkspace({
   const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<"label" | "subtype" | "uom" | "content" | "price" | "status">("label");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [deletingSkuId, setDeletingSkuId] = useState("");
 
   useEffect(() => {
     setPage(1);
@@ -104,6 +117,41 @@ export function VerkoopbareArtikelenWorkspace({
   const totalPages = useMemo(() => computeTotalPages(sorted.length, pageSize), [pageSize, sorted.length]);
   const currentPage = clampPage(page, totalPages);
   const pageRows = useMemo(() => slicePage(sorted, currentPage, pageSize), [currentPage, pageSize, sorted]);
+
+  async function deleteSellableSku(skuId: string) {
+    const id = String(skuId || "").trim();
+    if (!id) return;
+    if (deletingSkuId) return;
+
+    const ok = window.confirm(
+      `Verkoopbaar artikel verwijderen?\n\nSKU: ${id}\n\nAlleen mogelijk als dit SKU nergens aan gekoppeld is (productkoppeling/offertes/kostprijs/BOM).`
+    );
+    if (!ok) return;
+
+    try {
+      setDeletingSkuId(id);
+      const res = await fetch(`/api/meta/delete-sellable?sku_id=${encodeURIComponent(id)}&dry_run=false`, {
+        method: "POST",
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        const detail = (payload as any)?.detail ?? payload;
+        const reasons = (detail as any)?.reasons;
+        if (Array.isArray(reasons) && reasons.length > 0) {
+          window.alert(`Verwijderen geblokkeerd:\n- ${reasons.join("\n- ")}`);
+        } else if (typeof detail === "string" && detail) {
+          window.alert(detail);
+        } else {
+          window.alert("Verwijderen mislukt.");
+        }
+        return;
+      }
+
+      window.location.reload();
+    } finally {
+      setDeletingSkuId("");
+    }
+  }
 
   function toggleSort(key: typeof sortKey) {
     if (sortKey === key) {
@@ -190,7 +238,7 @@ export function VerkoopbareArtikelenWorkspace({
             style={{ width: 320 }}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Zoek op naam (of ID)…"
+            placeholder="Zoek op naam (of ID)â€¦"
           />
         </div>
       </div>
@@ -239,6 +287,7 @@ export function VerkoopbareArtikelenWorkspace({
                       : row.kostprijsEx > 0
                         ? `Concept (kostprijs: ${moneyEUR(row.kostprijsEx)})`
                         : "Nog te activeren";
+                const canDelete = row.pricingMethod === "cost_plus" && !row.hasActiveCost && row.kostprijsEx <= 0;
                 const actionHref =
                   row.pricingMethod === "cost_plus"
                     ? (() => {
@@ -274,8 +323,8 @@ export function VerkoopbareArtikelenWorkspace({
                     <td style={{ fontWeight: 600 }}>{row.label}</td>
                     <td>{subtypeLabel(row.subtype)}</td>
                     <td>{row.uom}</td>
-                    <td>{row.contentLiter ? row.contentLiter.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}</td>
-                    <td>{row.pricingMethod === "cost_plus" ? moneyEUR(row.kostprijsEx) : "—"}</td>
+                    <td>{row.contentLiter ? row.contentLiter.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "â€”"}</td>
+                    <td>{row.pricingMethod === "cost_plus" ? moneyEUR(row.kostprijsEx) : "â€”"}</td>
                     <td>{status}</td>
                     <td style={{ textAlign: "right" }}>
                       <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
@@ -289,8 +338,19 @@ export function VerkoopbareArtikelenWorkspace({
                             Kostprijs beheren
                           </Link>
                         ) : (
-                          <span className="muted">—</span>
+                          <span className="muted">â€”</span>
                         )}
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            className="cpq-icon-button"
+                            title="Verwijder verkoopbaar artikel"
+                            onClick={() => deleteSellableSku(row.skuId)}
+                            disabled={Boolean(deletingSkuId)}
+                          >
+                            <TrashIcon />
+                          </button>
+                        ) : null}
                       </span>
                     </td>
                   </tr>
