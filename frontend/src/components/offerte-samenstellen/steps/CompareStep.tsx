@@ -95,7 +95,7 @@ export function CompareStep({
 
       <div className="cpq-actions cpq-actions-split">
         <button onClick={onBack} className="cpq-button cpq-button-secondary" type="button">
-          Terug
+          Vorige
         </button>
         <div className="cpq-actions-inline">
           <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>

@@ -767,6 +767,20 @@ export function OfferteSamenstellenApp({
             <h1 className="cpq-title">Offerte samenstellen</h1>
           </div>
           <div className="cpq-topbar-actions">
+            <button
+              type="button"
+              className="cpq-button cpq-button-secondary"
+              onClick={() => router.push("/prijsvoorstellen")}
+            >
+              Terug
+            </button>
+            <span className="pill">{draftMeta.status === "definitief" ? "Definitief" : "Concept"}</span>
+          </div>
+        </div>
+
+        <div className="cpq-topbar" style={{ marginTop: 12, paddingTop: 0, borderTop: 0 }}>
+          <div />
+          <div className="cpq-topbar-actions">
             <div className="cpq-toggle-strip" role="group" aria-label="Eenheden">
               <button
                 onClick={() => setUnitMode("producten")}
