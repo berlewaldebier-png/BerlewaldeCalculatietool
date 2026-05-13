@@ -2176,6 +2176,19 @@ a {
   color: var(--accent-strong);
 }
 
+.icon-button-table.icon-button-primary {
+  border-color: var(--accent-border);
+  background: #f3f7ff;
+  color: var(--accent-strong);
+}
+
+.icon-button-table.icon-button-primary:hover {
+  transform: translateY(-1px);
+  border-color: #9bb8ff;
+  background: #eaf1ff;
+  color: var(--accent-strong);
+}
+
 .table-sort-button {
   display: inline-flex;
   align-items: center;

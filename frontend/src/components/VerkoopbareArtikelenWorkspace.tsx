@@ -34,6 +34,31 @@ function TrashIcon() {
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+    </svg>
+  );
+}
+
+function CalculatorIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="6" y="2.5" width="12" height="19" rx="2.2" />
+      <path d="M8 6.5h8" />
+      <path d="M9 11h.01" />
+      <path d="M12 11h.01" />
+      <path d="M15 11h.01" />
+      <path d="M9 14h.01" />
+      <path d="M12 14h.01" />
+      <path d="M15 14h.01" />
+      <path d="M9 17h6" />
+    </svg>
+  );
+}
+
 export function VerkoopbareArtikelenWorkspace({
   year,
   channels,
@@ -329,13 +354,23 @@ export function VerkoopbareArtikelenWorkspace({
                     <td style={{ textAlign: "right" }}>
                       <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
                         {editBundleHref ? (
-                          <Link className="cpq-button" href={editBundleHref}>
-                            Bewerken
+                          <Link
+                            className="icon-button-table icon-button-neutral"
+                            href={editBundleHref}
+                            title="Bewerken"
+                            aria-label="Bewerken"
+                          >
+                            <PencilIcon />
                           </Link>
                         ) : null}
                         {actionHref ? (
-                          <Link className="cpq-button" href={actionHref}>
-                            Kostprijs beheren
+                          <Link
+                            className="icon-button-table icon-button-primary"
+                            href={actionHref}
+                            title="Kostprijs beheren"
+                            aria-label="Kostprijs beheren"
+                          >
+                            <CalculatorIcon />
                           </Link>
                         ) : (
                           <span className="muted">â€”</span>
@@ -343,8 +378,9 @@ export function VerkoopbareArtikelenWorkspace({
                         {canDelete ? (
                           <button
                             type="button"
-                            className="cpq-icon-button"
+                            className="icon-button-table"
                             title="Verwijder verkoopbaar artikel"
+                            aria-label="Verwijder verkoopbaar artikel"
                             onClick={() => deleteSellableSku(row.skuId)}
                             disabled={Boolean(deletingSkuId)}
                           >
