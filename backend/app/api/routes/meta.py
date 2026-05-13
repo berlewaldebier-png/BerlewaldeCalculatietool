@@ -1302,7 +1302,9 @@ def post_repair_beer_bundles(
 
     def packaging_tokens(value: str) -> set[str]:
         normalized = normalize_name(value)
-        return {tok for tok in normalized.replace("-", " ").split(" ") if tok.strip()}
+        # Make tokens comparable to SKU names like "Doos 12 x 33cl" (packaging_type often uses "12x33cl").
+        expanded = normalized.replace("-", " ").replace("x", " x ")
+        return {tok for tok in expanded.split(" ") if tok.strip()}
 
     try:
         target_beer_id = str(beer_id or "").strip()
@@ -1354,7 +1356,8 @@ def post_repair_beer_bundles(
             n = normalize_name(name)
             if not n:
                 continue
-            name_tokens = {tok for tok in n.replace("-", " ").split(" ") if tok.strip()}
+            expanded_name = n.replace("-", " ").replace("x", " x ")
+            name_tokens = {tok for tok in expanded_name.split(" ") if tok.strip()}
             if wanted_tokens.issubset(name_tokens):
                 candidates.append(row)
 
