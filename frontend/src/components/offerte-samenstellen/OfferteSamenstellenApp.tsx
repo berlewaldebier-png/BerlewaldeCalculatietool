@@ -195,13 +195,30 @@ export function OfferteSamenstellenApp({
   );
 
   const activeBreakEvenConfig = useMemo<BreakEvenConfig | null>(() => {
-    return breakEvenConfigs.find((config) => config.jaar === currentYear && config.is_active_for_quotes) ?? null;
-  }, [breakEvenConfigs, currentYear]);
+    if (breakEvenConfigs.length === 0) return null;
+
+    const activeCandidates = breakEvenConfigs.filter((config) => config.is_active_for_quotes);
+    const candidates = activeCandidates.length > 0 ? activeCandidates : breakEvenConfigs;
+
+    const sorted = [...candidates].sort((a, b) => {
+      const yearDiff = (b.jaar ?? 0) - (a.jaar ?? 0);
+      if (yearDiff !== 0) return yearDiff;
+      const updatedA = String(a.updated_at ?? a.created_at ?? "");
+      const updatedB = String(b.updated_at ?? b.created_at ?? "");
+      if (updatedA && updatedB && updatedA !== updatedB) return updatedB.localeCompare(updatedA);
+      return String(b.id ?? "").localeCompare(String(a.id ?? ""));
+    });
+
+    return sorted[0] ?? null;
+  }, [breakEvenConfigs]);
+
+  const breakEvenYear = activeBreakEvenConfig?.jaar ?? currentYear;
+  const breakEvenChannelCode = (activeBreakEvenConfig?.active_channel ?? "horeca").toLowerCase();
 
   const breakEvenProductLines = useMemo(
     () =>
       buildBreakEvenProductLines({
-        year: currentYear,
+        year: breakEvenYear,
         channels,
         bieren,
         skus,
@@ -213,7 +230,7 @@ export function OfferteSamenstellenApp({
         samengesteldeProducten,
       }),
     [
-      currentYear,
+      breakEvenYear,
       channels,
       bieren,
       skus,
@@ -236,7 +253,7 @@ export function OfferteSamenstellenApp({
     const basisMode = activeBreakEvenConfig?.basis ?? "invoice";
     setRealizedSalesError(null);
 
-    fetch(`/api/integrations/douano/sales-by-sku?year=${currentYear}&basis=${basisMode}`)
+    fetch(`/api/integrations/douano/sales-by-sku?year=${breakEvenYear}&basis=${basisMode}`)
       .then(async (response) => {
         if (!response.ok) {
           const text = await response.text();
@@ -258,13 +275,13 @@ export function OfferteSamenstellenApp({
     return () => {
       cancelled = true;
     };
-  }, [currentYear, activeBreakEvenConfig?.basis]);
+  }, [breakEvenYear, activeBreakEvenConfig?.basis]);
 
   const breakEvenV2Summary = useMemo<BreakEvenV2Summary | null>(() => {
     if (!realizedSales) return null;
-    const channelCode = String(basis.kanaal || "horeca").trim() || "horeca";
+    const channelCode = breakEvenChannelCode || "horeca";
     const realized = buildRealizedBreakEvenRows({
-      year: currentYear,
+      year: breakEvenYear,
       channelCode,
       sales: realizedSales,
       channels,
@@ -278,9 +295,9 @@ export function OfferteSamenstellenApp({
       samengesteldeProducten,
     });
 
-    const fixedCostsTotal = calculateFixedCostsTotal(vasteKosten, currentYear);
+    const fixedCostsTotal = calculateFixedCostsTotal(vasteKosten, breakEvenYear);
     return calculateBreakEvenV2Summary({
-      year: currentYear,
+      year: breakEvenYear,
       fixedCostsTotal,
       fixedCostAdjustment: 0,
       adjustments: [],
@@ -289,8 +306,8 @@ export function OfferteSamenstellenApp({
     });
   }, [
     realizedSales,
-    basis.kanaal,
-    currentYear,
+    breakEvenChannelCode,
+    breakEvenYear,
     channels,
     bieren,
     kostprijsversies,
@@ -306,9 +323,9 @@ export function OfferteSamenstellenApp({
   const breakEvenV2Snapshot = useMemo(() => {
     if (!breakEvenV2Summary) return null;
     return {
-      configId: `be-v2-${currentYear}`,
-      configName: `Break-even v2 ${currentYear}`,
-      year: currentYear,
+      configId: `be-v2-${breakEvenYear}`,
+      configName: `Break-even v2 ${breakEvenYear}`,
+      year: breakEvenYear,
       breakEvenRevenue: breakEvenV2Summary.breakEvenRevenue,
       breakEvenLiters: breakEvenV2Summary.breakEvenLiters,
       weightedSellInPerLiter: breakEvenV2Summary.weightedSellInPerLiter,
@@ -318,7 +335,7 @@ export function OfferteSamenstellenApp({
       mixTotalPct: 100,
       calculatedAt: new Date().toISOString(),
     };
-  }, [breakEvenV2Summary, currentYear]);
+  }, [breakEvenV2Summary, breakEvenYear]);
 
   const currentBreakEvenSnapshot = useMemo(() => {
     if (!activeBreakEvenConfig) return breakEvenV2Snapshot;
