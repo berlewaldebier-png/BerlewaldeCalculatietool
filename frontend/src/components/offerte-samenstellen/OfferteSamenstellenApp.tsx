@@ -320,27 +320,10 @@ export function OfferteSamenstellenApp({
     vasteKosten,
   ]);
 
-  const breakEvenV2Snapshot = useMemo(() => {
-    if (!breakEvenV2Summary) return null;
-    return {
-      configId: `be-v2-${breakEvenYear}`,
-      configName: `Break-even v2 ${breakEvenYear}`,
-      year: breakEvenYear,
-      breakEvenRevenue: breakEvenV2Summary.breakEvenRevenue,
-      breakEvenLiters: breakEvenV2Summary.breakEvenLiters,
-      weightedSellInPerLiter: breakEvenV2Summary.weightedSellInPerLiter,
-      weightedVariableCostPerLiter: breakEvenV2Summary.weightedVariableCostPerLiter,
-      weightedContributionPerLiter: breakEvenV2Summary.weightedContributionPerLiter,
-      contributionMarginPct: breakEvenV2Summary.contributionMarginPct,
-      mixTotalPct: 100,
-      calculatedAt: new Date().toISOString(),
-    };
-  }, [breakEvenV2Summary, breakEvenYear]);
-
   const currentBreakEvenSnapshot = useMemo(() => {
-    if (!activeBreakEvenConfig) return breakEvenV2Snapshot;
+    if (!activeBreakEvenConfig) return null;
     return buildBreakEvenSnapshot(activeBreakEvenConfig, breakEvenResult);
-  }, [activeBreakEvenConfig, breakEvenResult, breakEvenV2Snapshot]);
+  }, [activeBreakEvenConfig, breakEvenResult]);
   const hasFrozenBreakEvenSnapshot = Boolean(savedBreakEvenSnapshot?.configId);
   const effectiveBreakEvenSnapshot = savedBreakEvenSnapshot ?? currentBreakEvenSnapshot;
 
@@ -849,9 +832,7 @@ export function OfferteSamenstellenApp({
                   value={
                     activeBreakEvenConfig
                       ? activeBreakEvenConfig.naam
-                      : breakEvenV2Summary
-                        ? `Break-even v2 ${currentYear}`
-                        : "Geen actieve versie"
+                      : "Geen actieve versie"
                   }
                 />
                 <QuickCell label="Versie" value={String(draftMeta.version)} />
@@ -927,10 +908,10 @@ export function OfferteSamenstellenApp({
           </main>
 
           <aside className="cpq-right">
-            <div className="cpq-right-kicker">Break-even (v2)</div>
+            <div className="cpq-right-kicker">Break-even</div>
             {!breakEvenV2Summary ? (
               <div className="cpq-alert cpq-alert-warn">
-                Break-even v2 niet geladen.
+                Break-even niet geladen.
                 {realizedSalesError ? <div style={{ marginTop: "0.35rem" }}>{realizedSalesError}</div> : null}
               </div>
             ) : (
