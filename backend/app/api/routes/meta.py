@@ -27,6 +27,112 @@ from app.schemas.navigation import DashboardSummary, NavigationItem
 router = APIRouter(prefix="/meta", tags=["meta"], dependencies=[Depends(require_user)])
 
 
+@router.get("/customer-sales-summary")
+def get_customer_sales_summary(
+    company_id: int = Query(..., ge=1, description="Douano company_id"),
+    year: int = Query(..., ge=2000, le=2100),
+) -> dict[str, Any]:
+    """Return a lightweight snapshot of realized sales for a customer (invoice lines).
+
+    Used by the CPQ offer builder to estimate baseline volume before applying actions.
+    Note: liters are only computed for mapped lines with a SKU that references a format article (content_liter).
+    """
+    postgres_storage.ensure_schema()
+    cid = int(company_id or 0)
+    yr = int(year or 0)
+    if cid <= 0 or yr <= 0:
+        raise HTTPException(status_code=400, detail="company_id en year zijn verplicht.")
+
+    since = f"{yr:04d}-01-01"
+    until = f"{yr + 1:04d}-01-01"
+
+    sku_name_by_id: dict[str, str] = {}
+    sku_rows = postgres_storage.load_dataset("skus", [])
+    if isinstance(sku_rows, list):
+        for row in sku_rows:
+            if not isinstance(row, dict):
+                continue
+            sid = str(row.get("id", "") or "").strip()
+            if not sid:
+                continue
+            sku_name_by_id[sid] = str(row.get("name", row.get("naam", "")) or "").strip() or sid
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COUNT(DISTINCT l.sales_invoice_id) AS invoices_count,
+                    COUNT(*) AS lines_count,
+                    COALESCE(SUM(l.net_revenue_ex), 0) AS revenue_ex,
+                    COALESCE(SUM(CASE WHEN m.sku_id IS NULL THEN 0 ELSE l.quantity * COALESCE(a.content_liter, 0) END), 0) AS mapped_liters,
+                    COALESCE(SUM(CASE WHEN m.sku_id IS NULL THEN 0 ELSE 1 END), 0) AS mapped_lines,
+                    COALESCE(SUM(CASE WHEN m.sku_id IS NULL THEN 1 ELSE 0 END), 0) AS unmapped_lines
+                FROM douano_sales_invoice_lines l
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN skus s ON s.id = m.sku_id
+                LEFT JOIN articles a ON a.id = s.format_article_id
+                WHERE l.company_id = %s
+                  AND l.invoice_date >= %s::date
+                  AND l.invoice_date < %s::date
+                """,
+                (cid, since, until),
+            )
+            row = cur.fetchone() or (0, 0, 0, 0, 0, 0)
+            invoices_count, lines_count, revenue_ex, mapped_liters, mapped_lines, unmapped_lines = row
+
+            cur.execute(
+                """
+                SELECT
+                    m.sku_id,
+                    COALESCE(SUM(l.quantity), 0) AS units,
+                    COALESCE(SUM(l.net_revenue_ex), 0) AS revenue_ex,
+                    COALESCE(SUM(l.quantity * COALESCE(a.content_liter, 0)), 0) AS liters
+                FROM douano_sales_invoice_lines l
+                JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN skus s ON s.id = m.sku_id
+                LEFT JOIN articles a ON a.id = s.format_article_id
+                WHERE l.company_id = %s
+                  AND l.invoice_date >= %s::date
+                  AND l.invoice_date < %s::date
+                GROUP BY m.sku_id
+                ORDER BY liters DESC, revenue_ex DESC
+                LIMIT 10
+                """,
+                (cid, since, until),
+            )
+            top_rows = cur.fetchall() or []
+
+    top_skus: list[dict[str, Any]] = []
+    for sku_id, units, revenue, liters in top_rows:
+        sid = str(sku_id or "").strip()
+        if not sid:
+            continue
+        top_skus.append(
+            {
+                "sku_id": sid,
+                "sku_name": sku_name_by_id.get(sid, sid),
+                "units": float(units or 0),
+                "revenue_ex": float(revenue or 0),
+                "liters": float(liters or 0),
+            }
+        )
+
+    return {
+        "result": {
+            "company_id": cid,
+            "year": yr,
+            "invoices_count": int(invoices_count or 0),
+            "lines_count": int(lines_count or 0),
+            "revenue_ex": float(revenue_ex or 0),
+            "mapped_liters": float(mapped_liters or 0),
+            "mapped_lines": int(mapped_lines or 0),
+            "unmapped_lines": int(unmapped_lines or 0),
+            "top_skus": top_skus,
+        }
+    }
+
+
 @router.get("/navigation", response_model=list[NavigationItem])
 def get_navigation() -> list[NavigationItem]:
     return [

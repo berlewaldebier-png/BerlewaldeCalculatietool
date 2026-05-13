@@ -39,6 +39,21 @@ export function getGroothandelFormError(form: QuoteFormState, baseOfferRefs: str
     }
   }
 
+  const upliftLitersRaw = String(form.wholesaleUpliftLiters ?? "").trim();
+  if (upliftLitersRaw) {
+    const upliftLiters = Number(upliftLitersRaw.replace(",", "."));
+    if (!Number.isFinite(upliftLiters) || upliftLiters < 0) {
+      return "Vul een geldige uplift in liters in.";
+    }
+  }
+  const upliftPctRaw = String(form.wholesaleUpliftPct ?? "").trim();
+  if (upliftPctRaw) {
+    const upliftPct = Number(upliftPctRaw.replace(",", "."));
+    if (!Number.isFinite(upliftPct) || upliftPct < 0) {
+      return "Vul een geldige uplift in procenten in.";
+    }
+  }
+
   return "";
 }
 
@@ -91,7 +106,7 @@ export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Prop
       />
 
       <Field
-        label="Verwachte afname (liters)"
+        label="Actie-volume (liters)"
         value={form.wholesaleExpectedLiters}
         onChange={(value) => setForm((prev) => ({ ...prev, wholesaleExpectedLiters: value }))}
         placeholder="Bijv. 10000"
@@ -100,7 +115,43 @@ export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Prop
       />
 
       <Idea text="V1 rekent terug vanaf de huidige horeca-sell-in prijs: groothandelsprijs = horeca prijs / (1 + marge%)." />
-      <Idea text="Vul verwachte afname in om direct te zien wat korting/marge doet met break-even liters (portfolio). Leeg laten = alleen impact op de aantallen in deze offerte." />
+
+      <SelectField
+        label="Actie geldt voor"
+        value={form.wholesaleAppliesToVolume}
+        options={[
+          { label: "Bestaand volume", value: "existing" },
+          { label: "Uplift (extra volume)", value: "uplift" },
+          { label: "Bestaand + uplift", value: "both" },
+        ]}
+        onChange={(value) =>
+          setForm((prev) => ({
+            ...prev,
+            wholesaleAppliesToVolume: value as any,
+          }))
+        }
+      />
+
+      <div className="cpq-form-grid" style={{ marginTop: -8 }}>
+        <Field
+          label="Uplift (liters)"
+          value={form.wholesaleUpliftLiters}
+          onChange={(value) => setForm((prev) => ({ ...prev, wholesaleUpliftLiters: value }))}
+          placeholder="Bijv. 500"
+          type="number"
+          min="0"
+        />
+        <Field
+          label="Uplift (%)"
+          value={form.wholesaleUpliftPct}
+          onChange={(value) => setForm((prev) => ({ ...prev, wholesaleUpliftPct: value }))}
+          placeholder="Bijv. 5"
+          type="number"
+          min="0"
+        />
+      </div>
+
+      <Idea text="Actie-volume = liters waarop de groothandelsprijs van toepassing is. Uplift = extra liters die je verwacht door de deal. Als je een klant selecteert in basisgegevens, tonen we daar baseline liters." />
     </div>
   );
 }

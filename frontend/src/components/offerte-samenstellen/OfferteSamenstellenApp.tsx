@@ -109,6 +109,24 @@ type Props = {
   scenarioId?: string | null;
 };
 
+type CustomerSalesSummary = {
+  company_id: number;
+  year: number;
+  invoices_count: number;
+  lines_count: number;
+  revenue_ex: number;
+  mapped_liters: number;
+  mapped_lines: number;
+  unmapped_lines: number;
+  top_skus: Array<{
+    sku_id: string;
+    sku_name: string;
+    units: number;
+    revenue_ex: number;
+    liters: number;
+  }>;
+};
+
 const toolbarGroups: ToolbarGroup[] = offerteToolbarGroups;
 
 
@@ -147,6 +165,46 @@ export function OfferteSamenstellenApp({
   const [basis, setBasis] = useState<BasisData>(() => createInitialBasisData());
   const [realizedSales, setRealizedSales] = useState<RealizedSalesBySkuPayload | null>(null);
   const [realizedSalesError, setRealizedSalesError] = useState<string | null>(null);
+  const [customerSummary, setCustomerSummary] = useState<CustomerSalesSummary | null>(null);
+  const [customerSummaryError, setCustomerSummaryError] = useState<string | null>(null);
+  const [isCustomerSummaryLoading, setIsCustomerSummaryLoading] = useState(false);
+
+  useEffect(() => {
+    const cid = basis.klantId ?? null;
+    if (!cid) {
+      setCustomerSummary(null);
+      setCustomerSummaryError(null);
+      setIsCustomerSummaryLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    async function loadSummary() {
+      setIsCustomerSummaryLoading(true);
+      setCustomerSummaryError(null);
+      try {
+        const response = await fetch(`/api/meta/customer-sales-summary?company_id=${cid}&year=${currentYear}`, {
+          cache: "no-store",
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = typeof (payload as any)?.detail === "string" ? (payload as any).detail : response.statusText;
+          throw new Error(detail || "Klant snapshot laden faalde.");
+        }
+        const result = (payload as any)?.result as CustomerSalesSummary | undefined;
+        if (!controller.signal.aborted) setCustomerSummary(result ?? null);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setCustomerSummary(null);
+        setCustomerSummaryError(err instanceof Error ? err.message : "Klant snapshot laden faalde.");
+      } finally {
+        if (!controller.signal.aborted) setIsCustomerSummaryLoading(false);
+      }
+    }
+    void loadSummary();
+    return () => controller.abort();
+  }, [basis.klantId, currentYear]);
 
   const appliedScenario = useMemo(() => {
     const id = String(scenarioId ?? "").trim();
@@ -393,29 +451,51 @@ export function OfferteSamenstellenApp({
     const baseline = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: false }).lines;
     const current = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: true }).lines;
 
-    const wholesaleBlock = scenario.blocks.find(
-      (block) =>
-        block.type === "Groothandel" &&
-        (((block.appliesTo ?? "standard") as any) === "standard" ||
-          ((block.appliesTo ?? "standard") as any) === "global")
-    );
-    const wholesaleExpectedLiters = Math.max(
-      0,
-      Number((wholesaleBlock?.payload as any)?.expectedLiters ?? 0)
-    );
-    const wholesaleEligible = Array.isArray((wholesaleBlock?.payload as any)?.eligibleRefs)
-      ? new Set(((wholesaleBlock?.payload as any)?.eligibleRefs as any[]).map(String))
+    const activeStandardPricingBlock = scenario.blocks.find((block) => {
+      const scope = (block.appliesTo ?? "standard") as any;
+      if (scope !== "standard" && scope !== "global") return false;
+      return block.type === "Korting" || block.type === "Groothandel";
+    });
+
+    const pricingPayload = (activeStandardPricingBlock?.payload ?? {}) as any;
+    const appliesToVolume = String(pricingPayload.appliesToVolume ?? "").trim() as
+      | "existing"
+      | "uplift"
+      | "both";
+    const upliftLitersInput = Math.max(0, Number(pricingPayload.upliftLiters ?? 0));
+    const upliftPctInput = Math.max(0, Number(pricingPayload.upliftPct ?? 0));
+    const actionLitersInput =
+      activeStandardPricingBlock?.type === "Groothandel"
+        ? Math.max(0, Number(pricingPayload.expectedLiters ?? 0))
+        : 0;
+
+    const eligibleRefs = Array.isArray(pricingPayload.eligibleRefs)
+      ? new Set((pricingPayload.eligibleRefs as any[]).map(String))
       : new Set<string>();
 
-    const eligibleLitersByRef = new Map<string, number>();
-    if (wholesaleExpectedLiters > 0) {
-      for (const line of current) {
-        if (wholesaleEligible.size > 0 && !wholesaleEligible.has(line.ref)) continue;
-        const liters = Math.max(0, (line.litersPerUnit ?? 0) * (line.qtyPaid ?? 0));
-        if (liters > 0) eligibleLitersByRef.set(line.ref, liters);
-      }
+    const selectionLitersByRef = new Map<string, number>();
+    for (const line of current) {
+      if (eligibleRefs.size > 0 && !eligibleRefs.has(line.ref)) continue;
+      const liters = Math.max(0, (line.litersPerUnit ?? 0) * (line.qtyPaid ?? 0));
+      if (liters > 0) selectionLitersByRef.set(line.ref, liters);
     }
-    const eligibleLitersTotal = Array.from(eligibleLitersByRef.values()).reduce((sum, v) => sum + v, 0);
+    const selectionLitersTotal = Array.from(selectionLitersByRef.values()).reduce((sum, v) => sum + v, 0);
+
+    const customerBaselineLiters = Math.max(0, customerSummary?.mapped_liters ?? 0);
+    const existingLitersTotal = (() => {
+      if (activeStandardPricingBlock?.type === "Groothandel") {
+        if (actionLitersInput > 0) return actionLitersInput;
+        return customerBaselineLiters;
+      }
+      return customerBaselineLiters;
+    })();
+
+    const upliftLitersTotal =
+      upliftLitersInput > 0
+        ? upliftLitersInput
+        : upliftPctInput > 0 && existingLitersTotal > 0
+          ? (existingLitersTotal * upliftPctInput) / 100
+          : 0;
 
     const baselineByRef = new Map(baseline.map((line) => [line.ref, line]));
     const impacts = current
@@ -428,32 +508,47 @@ export function OfferteSamenstellenApp({
 
         const qtyPaid = Math.max(0, line.qtyPaid ?? 0);
         const litersPerUnit = Math.max(0, line.litersPerUnit ?? 0);
-        const eligibleShare =
-          wholesaleExpectedLiters > 0 && eligibleLitersTotal > 0 ? (eligibleLitersByRef.get(line.ref) ?? 0) / eligibleLitersTotal : 0;
-        const expectedLitersForLine = wholesaleExpectedLiters > 0 && eligibleShare > 0 ? wholesaleExpectedLiters * eligibleShare : 0;
-        const qtyPaidForImpact =
-          expectedLitersForLine > 0 && litersPerUnit > 0 ? expectedLitersForLine / litersPerUnit : qtyPaid;
-        const lostContributionEx = Math.max(
-          0,
-          (baseContributionUnit - scenarioContributionUnit) * qtyPaidForImpact
-        );
+        const share = selectionLitersTotal > 0 ? (selectionLitersByRef.get(line.ref) ?? 0) / selectionLitersTotal : 0;
 
-        const needsMore = lostContributionEx > 0.0001;
-        if (!needsMore) return null;
+        const existingLitersForLine = existingLitersTotal > 0 && share > 0 ? existingLitersTotal * share : 0;
+        const upliftLitersForLine = upliftLitersTotal > 0 && share > 0 ? upliftLitersTotal * share : 0;
+
+        const existingQtyForLine = existingLitersForLine > 0 && litersPerUnit > 0 ? existingLitersForLine / litersPerUnit : 0;
+        const upliftQtyForLine = upliftLitersForLine > 0 && litersPerUnit > 0 ? upliftLitersForLine / litersPerUnit : 0;
+
+        const useExisting = appliesToVolume === "existing" || appliesToVolume === "both";
+        const useUplift = appliesToVolume === "uplift" || appliesToVolume === "both";
+
+        const lostContributionEx = useExisting
+          ? Math.max(0, (baseContributionUnit - scenarioContributionUnit) * (existingQtyForLine || qtyPaid))
+          : 0;
+        const gainedContributionEx = useUplift
+          ? Math.max(0, scenarioContributionUnit * upliftQtyForLine)
+          : 0;
+        const netContributionEx = gainedContributionEx - lostContributionEx;
+
+        const shouldRender = Math.abs(lostContributionEx) > 0.0001 || Math.abs(gainedContributionEx) > 0.0001;
+        if (!shouldRender) return null;
 
         const extraUnits =
-          scenarioContributionUnit > 0 ? lostContributionEx / scenarioContributionUnit : Number.POSITIVE_INFINITY;
+          scenarioContributionUnit > 0 && lostContributionEx > 0
+            ? lostContributionEx / scenarioContributionUnit
+            : lostContributionEx > 0
+              ? Number.POSITIVE_INFINITY
+              : 0;
         const extraLiters = litersPerUnit > 0 && Number.isFinite(extraUnits) ? extraUnits * litersPerUnit : null;
 
         const label = labelByRef.get(line.ref) ?? line.ref;
         return {
           ref: line.ref,
           label,
-          qtyPaid: qtyPaidForImpact,
+          qtyPaid: useExisting ? (existingQtyForLine || qtyPaid) : qtyPaid,
           baseUnitPriceEx: base.baseUnitPriceEx,
           offerUnitPriceEx: line.offerUnitPriceEx,
           costPriceEx: line.costPriceEx,
           lostContributionEx,
+          gainedContributionEx,
+          netContributionEx,
           extraUnits,
           extraLiters,
         };
@@ -466,17 +561,23 @@ export function OfferteSamenstellenApp({
       offerUnitPriceEx: number;
       costPriceEx: number;
       lostContributionEx: number;
+      gainedContributionEx: number;
+      netContributionEx: number;
       extraUnits: number;
       extraLiters: number | null;
     }>;
 
     const totalLostContributionEx = impacts.reduce((sum, row) => sum + row.lostContributionEx, 0);
+    const totalGainedContributionEx = impacts.reduce((sum, row) => sum + row.gainedContributionEx, 0);
+    const netContributionEx = totalGainedContributionEx - totalLostContributionEx;
     const weightedContributionPerLiter = breakEvenV2Summary.weightedContributionPerLiter;
     const portfolioExtraLiters =
-      weightedContributionPerLiter > 0 ? totalLostContributionEx / weightedContributionPerLiter : null;
+      weightedContributionPerLiter > 0 && netContributionEx < 0
+        ? Math.abs(netContributionEx) / weightedContributionPerLiter
+        : 0;
 
-    return { impacts, totalLostContributionEx, portfolioExtraLiters };
-  }, [breakEvenV2Summary, scenario, productIndex.options]);
+    return { impacts, totalLostContributionEx, totalGainedContributionEx, netContributionEx, portfolioExtraLiters };
+  }, [breakEvenV2Summary, scenario, productIndex.options, customerSummary]);
 
   function SummaryMetric({ label, value }: { label: string; value: string }) {
     return (
@@ -669,7 +770,11 @@ export function OfferteSamenstellenApp({
     setCurrentYear(Number(snapshot.year || year) || year);
     setDraftMeta(snapshot.meta);
     setSavedBreakEvenSnapshot(snapshot.breakEven ?? null);
-    setBasis(snapshot.basis);
+    setBasis({
+      ...createInitialBasisData(),
+      ...(snapshot.basis ?? {}),
+      klantId: typeof (snapshot.basis as any)?.klantId === "number" ? (snapshot.basis as any).klantId : null,
+    });
     setScenarios(restoreScenarioPresentation(snapshot));
     setStep(snapshot.ui.step);
     setActiveScenario(snapshot.ui.activeScenario);
@@ -916,8 +1021,12 @@ export function OfferteSamenstellenApp({
           <main className="cpq-main">
             {step === "basis" ? (
               <BasisStep
+                year={currentYear}
                 basis={basis}
                 setBasis={setBasis}
+                customerSummary={customerSummary}
+                customerSummaryError={customerSummaryError}
+                isCustomerSummaryLoading={isCustomerSummaryLoading}
                 onNext={() => setStep("builder")}
                 onSave={() => void saveQuoteDraft()}
                 isSaving={isSavingDraft || isLoadingDraft}
@@ -1014,10 +1123,12 @@ export function OfferteSamenstellenApp({
                   <div className="cpq-intro-summary-card">
                     <div className="cpq-intro-summary-grid">
                       <SummaryMetric label="Verlies contributie" value={euro(offerBreakEvenImpact.totalLostContributionEx)} />
+                      <SummaryMetric label="Winst contributie" value={euro(offerBreakEvenImpact.totalGainedContributionEx)} />
+                      <SummaryMetric label="Netto effect" value={euro(offerBreakEvenImpact.netContributionEx)} />
                       <SummaryMetric
-                        label="Extra liters (portfolio)"
+                        label="Extra liters nodig (portfolio)"
                         value={
-                          typeof offerBreakEvenImpact.portfolioExtraLiters === "number"
+                          offerBreakEvenImpact.portfolioExtraLiters > 0
                             ? `${Math.round(offerBreakEvenImpact.portfolioExtraLiters).toLocaleString("nl-NL")} L`
                             : "—"
                         }

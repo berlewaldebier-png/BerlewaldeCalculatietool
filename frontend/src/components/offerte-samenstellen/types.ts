@@ -70,6 +70,7 @@ export type QuoteScenario = {
 };
 
 export type BasisData = {
+  klantId: number | null;
   klantNaam: string;
   contactpersoon: string;
   kanaal: QuoteChannel;
@@ -230,6 +231,9 @@ export type QuoteFormState = {
   introThresholdValue: string;
   introThresholdDiscount: string;
   introNote: string;
+  introAppliesToVolume: "existing" | "uplift" | "both";
+  introUpliftLiters: string;
+  introUpliftPct: string;
   staffelUseBaseOfferProducts: boolean;
   staffelEligibleRefs: string[];
   staffelDiscountMode: StaffelDiscountMode;
@@ -243,10 +247,16 @@ export type QuoteFormState = {
   discountMode: string;
   discountValue: string;
   kortingEligibleRefs: string[];
+  discountAppliesToVolume: "existing" | "uplift" | "both";
+  discountUpliftLiters: string;
+  discountUpliftPct: string;
   wholesaleUseBaseOfferProducts: boolean;
   wholesaleEligibleRefs: string[];
   wholesaleMarginPct: string;
   wholesaleExpectedLiters: string;
+  wholesaleAppliesToVolume: "existing" | "uplift" | "both";
+  wholesaleUpliftLiters: string;
+  wholesaleUpliftPct: string;
   transportDistanceKm: string;
   transportRateEx: string;
   transportDeliveries: string;

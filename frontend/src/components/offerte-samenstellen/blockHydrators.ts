@@ -57,6 +57,9 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         introThresholdValue: String(payload.thresholdValue ?? ""),
         introThresholdDiscount: String(payload.thresholdDiscount ?? ""),
         introNote: String(payload.note ?? ""),
+        introAppliesToVolume: String(payload.appliesToVolume ?? initial.introAppliesToVolume) as QuoteFormState["introAppliesToVolume"],
+        introUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.introUpliftLiters),
+        introUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.introUpliftPct),
       };
 
     case "Staffel":
@@ -101,6 +104,9 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         discountMode: String(payload.discountMode ?? initial.discountMode),
         discountValue: String(payload.discountPct ?? initial.discountValue),
         kortingEligibleRefs: asStringArray(payload.eligibleRefs),
+        discountAppliesToVolume: String(payload.appliesToVolume ?? initial.discountAppliesToVolume) as QuoteFormState["discountAppliesToVolume"],
+        discountUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.discountUpliftLiters),
+        discountUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.discountUpliftPct),
       };
 
     case "Groothandel":
@@ -111,6 +117,9 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         ),
         wholesaleMarginPct: String(payload.marginPct ?? initial.wholesaleMarginPct),
         wholesaleExpectedLiters: String(payload.expectedLiters ?? initial.wholesaleExpectedLiters),
+        wholesaleAppliesToVolume: String(payload.appliesToVolume ?? initial.wholesaleAppliesToVolume) as QuoteFormState["wholesaleAppliesToVolume"],
+        wholesaleUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.wholesaleUpliftLiters),
+        wholesaleUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.wholesaleUpliftPct),
         wholesaleEligibleRefs: asStringArray(payload.eligibleRefs),
       };
 
