@@ -234,8 +234,6 @@ export type QuoteFormState = {
   introAppliesToVolume: "existing" | "uplift" | "both";
   introUpliftLiters: string;
   introUpliftPct: string;
-  introDealType: "new_customer" | "growth" | "retention";
-  introTargetLiters: string;
   staffelUseBaseOfferProducts: boolean;
   staffelEligibleRefs: string[];
   staffelDiscountMode: StaffelDiscountMode;
@@ -252,8 +250,6 @@ export type QuoteFormState = {
   discountAppliesToVolume: "existing" | "uplift" | "both";
   discountUpliftLiters: string;
   discountUpliftPct: string;
-  discountDealType: "new_customer" | "growth" | "retention";
-  discountTargetLiters: string;
   wholesaleUseBaseOfferProducts: boolean;
   wholesaleEligibleRefs: string[];
   wholesaleMarginPct: string;
@@ -261,8 +257,6 @@ export type QuoteFormState = {
   wholesaleAppliesToVolume: "existing" | "uplift" | "both";
   wholesaleUpliftLiters: string;
   wholesaleUpliftPct: string;
-  wholesaleDealType: "new_customer" | "growth" | "retention";
-  wholesaleTargetLiters: string;
   transportDistanceKm: string;
   transportRateEx: string;
   transportDeliveries: string;

@@ -16,7 +16,6 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
   baseOfferRefs: string[];
-  baselineLiters: number;
 };
 
 export function getKortingFormError(form: QuoteFormState, baseOfferRefs: string[] = []) {
@@ -50,7 +49,7 @@ export function getKortingFormError(form: QuoteFormState, baseOfferRefs: string[
   return "";
 }
 
-export function KortingForm({ form, setForm, products, baseOfferRefs, baselineLiters }: Props) {
+export function KortingForm({ form, setForm, products, baseOfferRefs }: Props) {
   const isLineScope = form.discountMode === "Regel";
   const error = getKortingFormError(form, baseOfferRefs);
   const baseOfferCount = baseOfferRefs.length;
@@ -105,50 +104,6 @@ export function KortingForm({ form, setForm, products, baseOfferRefs, baselineLi
         label="Waarde (%)"
         value={form.discountValue}
         onChange={(value) => setForm((prev) => ({ ...prev, discountValue: value }))}
-      />
-
-      <SelectField
-        label="Dealtype"
-        value={form.discountDealType}
-        options={[
-          { label: "Nieuwe klant (baseline = 0)", value: "new_customer" },
-          { label: "Groei bestaande klant", value: "growth" },
-          { label: "Behoud / heronderhandeling", value: "retention" },
-        ]}
-        onChange={(value) =>
-          setForm((prev) => ({
-            ...prev,
-            discountDealType: value as any,
-            discountAppliesToVolume: value === "retention" ? "existing" : prev.discountAppliesToVolume,
-          }))
-        }
-      />
-
-      <div className="cpq-idea">
-        Baseline (klant snapshot):{" "}
-        <strong>
-          {(form.discountDealType === "new_customer" ? 0 : Math.round(baselineLiters)).toLocaleString("nl-NL")} L
-        </strong>
-      </div>
-
-      <Field
-        label="Target (liters na actie)"
-        value={form.discountTargetLiters}
-        onChange={(value) =>
-          setForm((prev) => {
-            const next = { ...prev, discountTargetLiters: value };
-            const base = prev.discountDealType === "new_customer" ? 0 : baselineLiters;
-            const target = Number(String(value ?? "").replace(",", "."));
-            if (Number.isFinite(target) && target >= 0) {
-              const uplift = Math.max(0, target - base);
-              next.discountUpliftLiters = uplift > 0 ? String(Math.round(uplift)) : "";
-            }
-            return next;
-          })
-        }
-        placeholder="Bijv. 1100"
-        type="number"
-        min="0"
       />
 
       <SelectField

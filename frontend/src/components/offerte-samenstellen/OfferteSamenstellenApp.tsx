@@ -448,16 +448,11 @@ export function OfferteSamenstellenApp({
       if (ref && label) labelByRef.set(ref, label);
     });
 
-    const impactPeriod: "standard" | "intro" =
-      scenario.blocks.some((block) => block.type === "Intro") && scenario.intro ? "intro" : "standard";
-    const baseline = calculateQuoteScenarioLines({ scenario, activePeriod: impactPeriod, includeBlocks: false }).lines;
-    const current = calculateQuoteScenarioLines({ scenario, activePeriod: impactPeriod, includeBlocks: true }).lines;
+    const baseline = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: false }).lines;
+    const current = calculateQuoteScenarioLines({ scenario, activePeriod: "standard", includeBlocks: true }).lines;
 
     const activeStandardPricingBlock = scenario.blocks.find((block) => {
       const scope = (block.appliesTo ?? "standard") as any;
-      if (block.type === "Intro") {
-        return scope === "intro";
-      }
       if (scope !== "standard" && scope !== "global") return false;
       return block.type === "Korting" || block.type === "Groothandel";
     });
@@ -469,8 +464,6 @@ export function OfferteSamenstellenApp({
       | "both";
     const upliftLitersInput = Math.max(0, Number(pricingPayload.upliftLiters ?? 0));
     const upliftPctInput = Math.max(0, Number(pricingPayload.upliftPct ?? 0));
-    const dealType = String(pricingPayload.dealType ?? "").trim() as "new_customer" | "growth" | "retention";
-    const targetLitersInput = Math.max(0, Number(pricingPayload.targetLiters ?? 0));
     const actionLitersInput =
       activeStandardPricingBlock?.type === "Groothandel"
         ? Math.max(0, Number(pricingPayload.expectedLiters ?? 0))
@@ -489,24 +482,20 @@ export function OfferteSamenstellenApp({
     const selectionLitersTotal = Array.from(selectionLitersByRef.values()).reduce((sum, v) => sum + v, 0);
 
     const customerBaselineLiters = Math.max(0, customerSummary?.mapped_liters ?? 0);
-    const dealBaselineLiters = dealType === "new_customer" ? 0 : customerBaselineLiters;
-
     const existingLitersTotal = (() => {
       if (activeStandardPricingBlock?.type === "Groothandel") {
         if (actionLitersInput > 0) return actionLitersInput;
-        return dealBaselineLiters;
+        return customerBaselineLiters;
       }
-      return dealBaselineLiters;
+      return customerBaselineLiters;
     })();
 
     const upliftLitersTotal =
-      targetLitersInput > 0
-        ? Math.max(0, targetLitersInput - dealBaselineLiters)
-        : upliftLitersInput > 0
-          ? upliftLitersInput
-          : upliftPctInput > 0 && existingLitersTotal > 0
-            ? (existingLitersTotal * upliftPctInput) / 100
-            : 0;
+      upliftLitersInput > 0
+        ? upliftLitersInput
+        : upliftPctInput > 0 && existingLitersTotal > 0
+          ? (existingLitersTotal * upliftPctInput) / 100
+          : 0;
 
     const baselineByRef = new Map(baseline.map((line) => [line.ref, line]));
     const impacts = current
@@ -1183,7 +1172,6 @@ export function OfferteSamenstellenApp({
             setForm={setForm}
             productOptions={productIndex.options}
             baseOfferRefs={baseOfferRefs}
-            baselineLiters={Math.max(0, customerSummary?.mapped_liters ?? 0)}
             onClose={closeOptionDialog}
             onSave={() => applyOptionToScenario(selectedOption)}
           />
