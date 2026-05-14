@@ -19,6 +19,7 @@ type Props = {
   form: QuoteFormState;
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
+  baselineLiters: number;
 };
 
 function todayIso() {
@@ -213,7 +214,7 @@ function IntroSummaryMetric({
   );
 }
 
-export function IntroForm({ form, setForm, products }: Props) {
+export function IntroForm({ form, setForm, products, baselineLiters }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const today = todayIso();
   const selectedProducts = useMemo(
@@ -711,6 +712,50 @@ export function IntroForm({ form, setForm, products }: Props) {
             </div>
           )}
         </div>
+
+        <SelectField
+          label="Dealtype"
+          value={form.introDealType}
+          options={[
+            { label: "Nieuwe klant (baseline = 0)", value: "new_customer" },
+            { label: "Groei bestaande klant", value: "growth" },
+            { label: "Behoud / heronderhandeling", value: "retention" },
+          ]}
+          onChange={(value) =>
+            setForm((prev) => ({
+              ...prev,
+              introDealType: value as any,
+              introAppliesToVolume: value === "retention" ? "existing" : prev.introAppliesToVolume,
+            }))
+          }
+        />
+
+        <div className="cpq-idea">
+          Baseline (klant snapshot):{" "}
+          <strong>
+            {(form.introDealType === "new_customer" ? 0 : Math.round(baselineLiters)).toLocaleString("nl-NL")} L
+          </strong>
+        </div>
+
+        <Field
+          label="Target (liters na actie)"
+          value={form.introTargetLiters}
+          onChange={(value) =>
+            setForm((prev) => {
+              const next = { ...prev, introTargetLiters: value };
+              const base = prev.introDealType === "new_customer" ? 0 : baselineLiters;
+              const target = Number(String(value ?? "").replace(",", "."));
+              if (Number.isFinite(target) && target >= 0) {
+                const uplift = Math.max(0, target - base);
+                next.introUpliftLiters = uplift > 0 ? String(Math.round(uplift)) : "";
+              }
+              return next;
+            })
+          }
+          placeholder="Bijv. 1100"
+          type="number"
+          min="0"
+        />
 
         <SelectField
           label="Actie geldt voor"

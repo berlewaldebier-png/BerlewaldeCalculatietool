@@ -62,6 +62,8 @@ export function buildBlockFromForm({
       const upliftLiters = clampNumber(form.introUpliftLiters, 0);
       const upliftPct = clampNumber(form.introUpliftPct, 0);
       const appliesToVolume = form.introAppliesToVolume;
+      const dealType = form.introDealType;
+      const targetLiters = clampNumber(form.introTargetLiters, 0);
 
       return {
         id: blockId,
@@ -104,6 +106,8 @@ export function buildBlockFromForm({
           appliesToVolume,
           upliftLiters,
           upliftPct,
+          dealType,
+          targetLiters,
         },
       };
     }
@@ -202,6 +206,8 @@ export function buildBlockFromForm({
       const upliftLiters = clampNumber(form.discountUpliftLiters, 0);
       const upliftPct = clampNumber(form.discountUpliftPct, 0);
       const appliesToVolume = form.discountAppliesToVolume;
+      const dealType = form.discountDealType;
+      const targetLiters = clampNumber(form.discountTargetLiters, 0);
 
       return {
         id: blockId,
@@ -229,6 +235,8 @@ export function buildBlockFromForm({
           appliesToVolume,
           upliftLiters,
           upliftPct,
+          dealType,
+          targetLiters,
         },
       };
     }
@@ -245,6 +253,8 @@ export function buildBlockFromForm({
       const upliftLiters = clampNumber(form.wholesaleUpliftLiters, 0);
       const upliftPct = clampNumber(form.wholesaleUpliftPct, 0);
       const appliesToVolume = form.wholesaleAppliesToVolume;
+      const dealType = form.wholesaleDealType;
+      const targetLiters = clampNumber(form.wholesaleTargetLiters, 0);
 
       return {
         id: blockId,
@@ -269,6 +279,8 @@ export function buildBlockFromForm({
           appliesToVolume,
           upliftLiters,
           upliftPct,
+          dealType,
+          targetLiters,
           eligibleRefs,
           productLabels,
         },

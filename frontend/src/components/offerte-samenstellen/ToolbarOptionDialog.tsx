@@ -25,6 +25,7 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   productOptions: ProductOption[];
   baseOfferRefs: string[];
+  baselineLiters: number;
   onClose: () => void;
   onSave: () => void;
 };
@@ -48,6 +49,7 @@ export function ToolbarOptionDialog({
   setForm,
   productOptions,
   baseOfferRefs,
+  baselineLiters,
   onClose,
   onSave,
 }: Props) {
@@ -101,7 +103,7 @@ export function ToolbarOptionDialog({
           ) : null}
 
           {selectedOption === "Intro" ? (
-            <IntroForm form={form} setForm={setForm} products={productOptions} />
+            <IntroForm form={form} setForm={setForm} products={productOptions} baselineLiters={baselineLiters} />
           ) : null}
           {selectedOption === "Staffel" ? (
             <StaffelForm
@@ -120,6 +122,7 @@ export function ToolbarOptionDialog({
               setForm={setForm}
               products={productOptions}
               baseOfferRefs={baseOfferRefs}
+              baselineLiters={baselineLiters}
             />
           ) : null}
           {selectedOption === "Groothandel" ? (
@@ -128,6 +131,7 @@ export function ToolbarOptionDialog({
               setForm={setForm}
               products={productOptions}
               baseOfferRefs={baseOfferRefs}
+              baselineLiters={baselineLiters}
             />
           ) : null}
           {selectedOption === "Transport" ? (

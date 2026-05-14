@@ -60,6 +60,8 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         introAppliesToVolume: String(payload.appliesToVolume ?? initial.introAppliesToVolume) as QuoteFormState["introAppliesToVolume"],
         introUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.introUpliftLiters),
         introUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.introUpliftPct),
+        introDealType: String(payload.dealType ?? initial.introDealType) as QuoteFormState["introDealType"],
+        introTargetLiters: asDutchNumberString(payload.targetLiters ?? initial.introTargetLiters),
       };
 
     case "Staffel":
@@ -107,6 +109,8 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         discountAppliesToVolume: String(payload.appliesToVolume ?? initial.discountAppliesToVolume) as QuoteFormState["discountAppliesToVolume"],
         discountUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.discountUpliftLiters),
         discountUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.discountUpliftPct),
+        discountDealType: String(payload.dealType ?? initial.discountDealType) as QuoteFormState["discountDealType"],
+        discountTargetLiters: asDutchNumberString(payload.targetLiters ?? initial.discountTargetLiters),
       };
 
     case "Groothandel":
@@ -120,6 +124,8 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         wholesaleAppliesToVolume: String(payload.appliesToVolume ?? initial.wholesaleAppliesToVolume) as QuoteFormState["wholesaleAppliesToVolume"],
         wholesaleUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.wholesaleUpliftLiters),
         wholesaleUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.wholesaleUpliftPct),
+        wholesaleDealType: String(payload.dealType ?? initial.wholesaleDealType) as QuoteFormState["wholesaleDealType"],
+        wholesaleTargetLiters: asDutchNumberString(payload.targetLiters ?? initial.wholesaleTargetLiters),
         wholesaleEligibleRefs: asStringArray(payload.eligibleRefs),
       };
 

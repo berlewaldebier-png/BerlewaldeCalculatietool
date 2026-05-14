@@ -16,6 +16,7 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
   baseOfferRefs: string[];
+  baselineLiters: number;
 };
 
 export function getGroothandelFormError(form: QuoteFormState, baseOfferRefs: string[] = []) {
@@ -58,7 +59,7 @@ export function getGroothandelFormError(form: QuoteFormState, baseOfferRefs: str
   return "";
 }
 
-export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Props) {
+export function GroothandelForm({ form, setForm, products, baseOfferRefs, baselineLiters }: Props) {
   const error = getGroothandelFormError(form, baseOfferRefs);
   const baseOfferCount = baseOfferRefs.length;
 
@@ -151,6 +152,50 @@ export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Prop
           min="0"
         />
       </div>
+
+      <SelectField
+        label="Dealtype"
+        value={form.wholesaleDealType}
+        options={[
+          { label: "Nieuwe klant (baseline = 0)", value: "new_customer" },
+          { label: "Groei bestaande klant", value: "growth" },
+          { label: "Behoud / heronderhandeling", value: "retention" },
+        ]}
+        onChange={(value) =>
+          setForm((prev) => ({
+            ...prev,
+            wholesaleDealType: value as any,
+            wholesaleAppliesToVolume: value === "retention" ? "existing" : prev.wholesaleAppliesToVolume,
+          }))
+        }
+      />
+
+      <div className="cpq-idea">
+        Baseline (klant snapshot):{" "}
+        <strong>
+          {(form.wholesaleDealType === "new_customer" ? 0 : Math.round(baselineLiters)).toLocaleString("nl-NL")} L
+        </strong>
+      </div>
+
+      <Field
+        label="Target (liters na actie)"
+        value={form.wholesaleTargetLiters}
+        onChange={(value) =>
+          setForm((prev) => {
+            const next = { ...prev, wholesaleTargetLiters: value };
+            const base = prev.wholesaleDealType === "new_customer" ? 0 : baselineLiters;
+            const target = Number(String(value ?? "").replace(",", "."));
+            if (Number.isFinite(target) && target >= 0) {
+              const uplift = Math.max(0, target - base);
+              next.wholesaleUpliftLiters = uplift > 0 ? String(Math.round(uplift)) : "";
+            }
+            return next;
+          })
+        }
+        placeholder="Bijv. 3000"
+        type="number"
+        min="0"
+      />
 
       <Idea text="Actie-volume = liters waarop de groothandelsprijs van toepassing is. Uplift = extra liters die je verwacht door de deal. Als je een klant selecteert in basisgegevens, tonen we daar baseline liters." />
     </div>
