@@ -26,6 +26,7 @@ export type ProductFact = {
   fixedCostAllocationEx: number;
   variableCostEx: number;
   sellInEx: number;
+  sellInYear: number;
   vatRatePct: number;
   warnings: string[];
 };
@@ -122,9 +123,63 @@ export function buildProductFacts(params: BuildProductFactsParams) {
   const facts: ProductFact[] = [];
   const seen = new Set<string>();
 
-  params.kostprijsproductactiveringen
-    .filter((row) => toNumber((row as any).jaar, 0) === params.year)
+  const yearActivations = (Array.isArray(params.kostprijsproductactiveringen) ? params.kostprijsproductactiveringen : [])
+    .filter((row) => toNumber((row as any).jaar, 0) === params.year);
+
+  // Deterministic activation selection: if there are multiple activations per SKU/year,
+  // pick the latest by effectief_vanaf (then updated_at). API ordering is not stable.
+  const selectedActivations: GenericRecord[] = [];
+  const activationBySku = new Map<string, GenericRecord>();
+  const duplicates: Array<{ skuId: string; picked: string; skipped: string }> = [];
+
+  const parseIso = (value: unknown) => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return 0;
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  yearActivations
+    .slice()
+    .sort((a, b) => {
+      const skuA = text((a as any).sku_id);
+      const skuB = text((b as any).sku_id);
+      if (skuA !== skuB) return skuA.localeCompare(skuB);
+      const effA = parseIso((a as any).effectief_vanaf);
+      const effB = parseIso((b as any).effectief_vanaf);
+      if (effA !== effB) return effB - effA;
+      const updA = parseIso((a as any).updated_at) || parseIso((a as any).aangepast_op);
+      const updB = parseIso((b as any).updated_at) || parseIso((b as any).aangepast_op);
+      if (updA !== updB) return updB - updA;
+      return text((b as any).id).localeCompare(text((a as any).id));
+    })
     .forEach((activation) => {
+      const skuId = text((activation as any).sku_id);
+      if (!skuId) {
+        selectedActivations.push(activation);
+        return;
+      }
+      const existing = activationBySku.get(skuId) ?? null;
+      if (!existing) {
+        activationBySku.set(skuId, activation);
+        selectedActivations.push(activation);
+        return;
+      }
+      duplicates.push({
+        skuId,
+        picked: text((existing as any).id),
+        skipped: text((activation as any).id),
+      });
+    });
+
+  if (duplicates.length > 0) {
+    const preview = duplicates.slice(0, 3).map((d) => `${d.skuId} (${d.picked})`).join(", ");
+    warnings.push(
+      `Meerdere kostprijsactivaties gevonden voor hetzelfde SKU (jaar ${params.year}). Laatste effectief_vanaf wordt gebruikt. Voorbeelden: ${preview}${duplicates.length > 3 ? "…" : ""}.`
+    );
+  }
+
+  selectedActivations.forEach((activation) => {
       const skuId = text((activation as any).sku_id);
       const skuRow = skuId ? skuById.get(skuId) ?? null : null;
       const skuKind = text((skuRow as any)?.kind).toLowerCase();
@@ -230,7 +285,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
 
       let sellInEx = 0;
       if (params.channelCode) {
-        sellInEx = resolveSellInPriceEx({
+        const resolved = resolveSellInPriceEx({
           skuId,
           bierId,
           productId,
@@ -238,7 +293,13 @@ export function buildProductFacts(params: BuildProductFactsParams) {
           channelCode: params.channelCode,
           lookup: sellInLookup,
           channelDefaultOpslag,
-        }).sellInEx;
+        });
+        sellInEx = resolved.sellInEx;
+        if (sellInLookup.resolvedYear !== params.year) {
+          warningsForFact.push(
+            `Sell-in prijs komt uit ${sellInLookup.resolvedYear} (fallback; offertejaar ${params.year}).`
+          );
+        }
         if (sellInEx <= 0) warningsForFact.push("Sell-in prijs ontbreekt.");
       }
 
@@ -278,6 +339,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         fixedCostAllocationEx: effectiveFixedCostAllocationEx,
         variableCostEx: effectiveVariableCostEx,
         sellInEx,
+        sellInYear: sellInLookup.resolvedYear,
         vatRatePct,
         warnings: warningsForFact,
       });

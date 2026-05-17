@@ -6,12 +6,35 @@ type GenericRecord = Record<string, unknown>;
 
 export function stripInternal(row: StrategyRow) {
   const { _uiId, sell_in_margins, sell_in_prices, ...rest } = row;
+
+  const stripEmpty = (src: Record<string, number | ""> | undefined) => {
+    const out: Record<string, number> = {};
+    Object.entries(src ?? {}).forEach(([key, value]) => {
+      if (value === "" || value === null || value === undefined) return;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return;
+      out[key] = parsed;
+    });
+    return out;
+  };
+
+  const cleanedMargins = stripEmpty(sell_in_margins as any);
+  const cleanedPrices = (() => {
+    const out: Record<string, number | ""> = {};
+    Object.entries(sell_in_prices ?? {}).forEach(([key, value]) => {
+      if (value === "" || value === null || value === undefined) return;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return;
+      out[key] = parsed;
+    });
+    return out;
+  })();
   return {
     ...rest,
-    kanaalmarges: sell_in_margins,
-    sell_in_margins,
-    kanaalprijzen: sell_in_prices,
-    sell_in_prices
+    kanaalmarges: cleanedMargins,
+    sell_in_margins: cleanedMargins,
+    kanaalprijzen: cleanedPrices,
+    sell_in_prices: cleanedPrices
   };
 }
 

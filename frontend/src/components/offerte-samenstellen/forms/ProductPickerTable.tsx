@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { EmptyHint } from "@/components/offerte-samenstellen/forms/FormControls";
 import { euro } from "@/components/offerte-samenstellen/quoteUtils";
 import type { ProductOption } from "@/components/offerte-samenstellen/types";
+import { WarningIcon } from "@/components/kostprijsbeheer/KostprijsBeheerParts";
 
 type Props = {
   products: ProductOption[];
@@ -10,6 +11,7 @@ type Props = {
   onChange: (nextRefs: string[]) => void;
   strictCompatibility?: boolean;
   emptyHint?: string;
+  quoteYear?: number;
 };
 
 function buildStyleOptions(products: ProductOption[], selectedRefs: string[]) {
@@ -104,6 +106,7 @@ export function ProductPickerTable({
   onChange,
   strictCompatibility = false,
   emptyHint = "Voeg eerst een bierstijl en verpakking toe.",
+  quoteYear,
 }: Props) {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [pendingStyleId, setPendingStyleId] = useState("");
@@ -225,8 +228,16 @@ export function ProductPickerTable({
                 </div>
                 <div className="cpq-product-picker-cell">
                   <div className="cpq-product-picker-heading">Verkoopprijs</div>
-                  <div className="cpq-product-picker-value">
+                  <div className="cpq-product-picker-value" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {euro(product.standardPriceEx)}
+                    {quoteYear && product.standardPriceYear && product.standardPriceYear !== quoteYear ? (
+                      <span
+                        title={`Prijs komt uit ${product.standardPriceYear} (fallback; offertejaar ${quoteYear}).`}
+                        style={{ color: "#d97706", display: "inline-flex", alignItems: "center" }}
+                      >
+                        <WarningIcon />
+                      </span>
+                    ) : null}
                   </div>
                 </div>
                 <div className="cpq-product-picker-cell">

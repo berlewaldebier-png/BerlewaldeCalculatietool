@@ -19,6 +19,7 @@ type Props = {
   form: QuoteFormState;
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
+  quoteYear?: number;
 };
 
 function todayIso() {
@@ -198,7 +199,7 @@ function IntroSummaryMetric({
   );
 }
 
-export function IntroForm({ form, setForm, products }: Props) {
+export function IntroForm({ form, setForm, products, quoteYear }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const today = todayIso();
   const selectedProducts = useMemo(
@@ -262,6 +263,7 @@ export function IntroForm({ form, setForm, products }: Props) {
             products={products}
             selectedRefs={form.introEligibleRefs}
             emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze introductie."
+            quoteYear={quoteYear}
             onChange={(nextEligibleRefs) => {
               setForm((prev) => {
                 const nextDiscountsByProduct = Object.fromEntries(

@@ -1,5 +1,6 @@
 import type {
   GenericRecord,
+  ProductOption,
   ProductIndexResult,
   QuoteChannel,
 } from "@/components/offerte-samenstellen/types";
@@ -70,7 +71,7 @@ export function buildQuoteableProductOptions(
     onlyReady: true,
   });
 
-  const options = factsIndex.facts.map((fact) => {
+  const options: ProductOption[] = factsIndex.facts.map((fact) => {
     const staffelCompatibility = buildStaffelCompatibility(
       fact.packLabel,
       fact.litersPerUnit
@@ -93,6 +94,7 @@ export function buildQuoteableProductOptions(
       staffelCompatibilityLabel: staffelCompatibility.label,
       costPriceEx: fact.costPriceEx,
       standardPriceEx: fact.sellInEx,
+      standardPriceYear: fact.sellInYear,
       vatRatePct: fact.vatRatePct,
       kostprijsversieId: fact.kostprijsversieId,
     };

@@ -26,6 +26,7 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   productOptions: ProductOption[];
   baseOfferRefs: string[];
+  quoteYear: number;
   onClose: () => void;
   onSave: () => void;
 };
@@ -49,6 +50,7 @@ export function ToolbarOptionDialog({
   setForm,
   productOptions,
   baseOfferRefs,
+  quoteYear,
   onClose,
   onSave,
 }: Props) {
@@ -105,7 +107,7 @@ export function ToolbarOptionDialog({
           ) : null}
 
           {selectedOption === "Intro" ? (
-            <IntroForm form={form} setForm={setForm} products={productOptions} />
+            <IntroForm form={form} setForm={setForm} products={productOptions} quoteYear={quoteYear} />
           ) : null}
           {selectedOption === "Staffel" ? (
             <StaffelForm
@@ -113,10 +115,11 @@ export function ToolbarOptionDialog({
               setForm={setForm}
               products={productOptions}
               baseOfferRefs={baseOfferRefs}
+              quoteYear={quoteYear}
             />
           ) : null}
           {selectedOption === "Mix" ? (
-            <MixDealForm form={form} setForm={setForm} products={productOptions} />
+            <MixDealForm form={form} setForm={setForm} products={productOptions} quoteYear={quoteYear} />
           ) : null}
           {selectedOption === "Korting" ? (
             <KortingForm
@@ -124,6 +127,7 @@ export function ToolbarOptionDialog({
               setForm={setForm}
               products={productOptions}
               baseOfferRefs={baseOfferRefs}
+              quoteYear={quoteYear}
             />
           ) : null}
           {selectedOption === "Groothandel" ? (
@@ -132,6 +136,7 @@ export function ToolbarOptionDialog({
               setForm={setForm}
               products={productOptions}
               baseOfferRefs={baseOfferRefs}
+              quoteYear={quoteYear}
             />
           ) : null}
           {selectedOption === "Palletopbouw" ? (

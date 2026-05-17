@@ -8,9 +8,10 @@ type Props = {
   form: QuoteFormState;
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
+  quoteYear?: number;
 };
 
-export function MixDealForm({ form, setForm, products }: Props) {
+export function MixDealForm({ form, setForm, products, quoteYear }: Props) {
   return (
     <div className="space-y-5">
       <Field
@@ -31,6 +32,7 @@ export function MixDealForm({ form, setForm, products }: Props) {
           products={products}
           selectedRefs={form.mixEligibleRefs}
           emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze mixdeal."
+          quoteYear={quoteYear}
           onChange={(nextRefs) =>
             setForm((prev) => ({
               ...prev,

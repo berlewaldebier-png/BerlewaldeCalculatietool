@@ -15,6 +15,7 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
   baseOfferRefs: string[];
+  quoteYear?: number;
 };
 
 export function getGroothandelFormError(form: QuoteFormState, baseOfferRefs: string[] = []) {
@@ -37,7 +38,7 @@ export function getGroothandelFormError(form: QuoteFormState, baseOfferRefs: str
   return "";
 }
 
-export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Props) {
+export function GroothandelForm({ form, setForm, products, baseOfferRefs, quoteYear }: Props) {
   const error = getGroothandelFormError(form, baseOfferRefs);
   const baseOfferCount = baseOfferRefs.length;
 
@@ -65,6 +66,7 @@ export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Prop
             products={products}
             selectedRefs={form.wholesaleEligibleRefs}
             emptyHint="Voeg eerst producten toe aan je voorstel om een groothandelsmarge te kunnen toepassen."
+            quoteYear={quoteYear}
             onChange={(nextRefs) =>
               setForm((prev) => ({
                 ...prev,
