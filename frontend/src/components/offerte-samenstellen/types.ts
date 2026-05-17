@@ -33,6 +33,7 @@ export type QuoteProduct = {
   contributesToLiters?: boolean;
   contributesToMargin?: boolean;
   standardPriceEx: number;
+  standardPriceYear?: number;
   costPriceEx: number;
   vatRatePct: number;
   source?: QuoteProductSource;
@@ -190,6 +191,7 @@ export type ProductOption = {
   staffelCompatibilityLabel: string;
   costPriceEx: number;
   standardPriceEx: number;
+  standardPriceYear?: number;
   vatRatePct: number;
   kostprijsversieId: string;
 };

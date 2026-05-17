@@ -21,7 +21,8 @@ export type StrategyRow = {
   verpakking: string;
   strategie_type: string;
   kostprijs: number;
-  sell_in_margins: Record<string, number>;
+  // Empty string means "inherit defaults" (do not persist as 0).
+  sell_in_margins: Record<string, number | "">;
   sell_in_prices: Record<string, number | "">;
   _uiId: string;
 };
@@ -171,14 +172,13 @@ export function normalizeStrategyRow(row: GenericRecord, channelCodes: string[])
     kostprijs: Number((row as any).kostprijs ?? 0),
     sell_in_margins: (() => {
       const allowed = new Set(channelCodes);
-      const out: Record<string, number> = {};
+      const out: Record<string, number | ""> = {};
       Object.entries(marginsSrc).forEach(([key, value]) => {
         if (!allowed.has(key)) return;
+        if (value === "" || value === null || value === undefined) return;
         const parsed = Number(value);
-        out[key] = Number.isFinite(parsed) ? parsed : 0;
-      });
-      channelCodes.forEach((code) => {
-        if (!(code in out)) out[code] = 0;
+        if (!Number.isFinite(parsed)) return;
+        out[key] = parsed;
       });
       return out;
     })(),
@@ -190,9 +190,6 @@ export function normalizeStrategyRow(row: GenericRecord, channelCodes: string[])
         if (value === "" || value === null || value === undefined) return;
         const parsed = Number(value);
         out[key] = Number.isFinite(parsed) ? parsed : "";
-      });
-      channelCodes.forEach((code) => {
-        if (!(code in out)) out[code] = "";
       });
       return out;
     })(),

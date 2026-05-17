@@ -29,6 +29,7 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
   baseOfferRefs: string[];
+  quoteYear?: number;
 };
 
 function updateRows(
@@ -180,7 +181,7 @@ function StaffelModeButton({
   );
 }
 
-export function StaffelForm({ form, setForm, products, baseOfferRefs }: Props) {
+export function StaffelForm({ form, setForm, products, baseOfferRefs, quoteYear }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const effectiveRefs = form.staffelUseBaseOfferProducts ? baseOfferRefs : form.staffelEligibleRefs;
 
@@ -236,6 +237,7 @@ export function StaffelForm({ form, setForm, products, baseOfferRefs }: Props) {
               selectedRefs={form.staffelEligibleRefs}
               strictCompatibility
               emptyHint="Voeg eerst een bierstijl en verpakking toe om de staffel te starten."
+              quoteYear={quoteYear}
               onChange={(nextRefs) =>
                 setForm((prev) => updateSelectedProducts(prev, nextRefs, products))
               }

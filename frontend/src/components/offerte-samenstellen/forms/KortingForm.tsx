@@ -16,6 +16,7 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
   baseOfferRefs: string[];
+  quoteYear?: number;
 };
 
 export function getKortingFormError(form: QuoteFormState, baseOfferRefs: string[] = []) {
@@ -34,7 +35,7 @@ export function getKortingFormError(form: QuoteFormState, baseOfferRefs: string[
   return "";
 }
 
-export function KortingForm({ form, setForm, products, baseOfferRefs }: Props) {
+export function KortingForm({ form, setForm, products, baseOfferRefs, quoteYear }: Props) {
   const isLineScope = form.discountMode === "Regel";
   const error = getKortingFormError(form, baseOfferRefs);
   const baseOfferCount = baseOfferRefs.length;
@@ -73,6 +74,7 @@ export function KortingForm({ form, setForm, products, baseOfferRefs }: Props) {
             products={products}
             selectedRefs={form.kortingEligibleRefs}
             emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze korting."
+            quoteYear={quoteYear}
             onChange={(nextRefs) =>
               setForm((prev) => ({
                 ...prev,

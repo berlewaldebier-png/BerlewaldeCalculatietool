@@ -753,6 +753,7 @@ export function OfferteSamenstellenApp({
       contributesToLiters: option.contributesToLiters ?? undefined,
       contributesToMargin: option.contributesToMargin ?? undefined,
       standardPriceEx: option.standardPriceEx,
+      standardPriceYear: option.standardPriceYear,
       costPriceEx: option.costPriceEx,
       vatRatePct: option.vatRatePct,
       source: {
@@ -1219,6 +1220,7 @@ export function OfferteSamenstellenApp({
             setForm={setForm}
             productOptions={productIndex.options}
             baseOfferRefs={baseOfferRefs}
+            quoteYear={currentYear}
             onClose={closeOptionDialog}
             onSave={() => applyOptionToScenario(selectedOption)}
           />

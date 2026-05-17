@@ -47,28 +47,53 @@ function getChannelSellInPriceOverride(
 
 export type SellInLookup = {
   yearStrategy: GenericRecord | null;
+  resolvedYear: number;
   packagingOverrideByProduct: Map<string, GenericRecord>;
   packagingOverrideBySkuId: Map<string, GenericRecord>;
   productOverrideByScope: Map<string, GenericRecord>;
   productOverrideBySkuId: Map<string, GenericRecord>;
 };
 
-export function buildSellInLookup(
-  verkoopprijzenRows: GenericRecord[],
-  year: number
-): SellInLookup {
-  const lookup: SellInLookup = {
+function initLookup(resolvedYear: number): SellInLookup {
+  return {
     yearStrategy: null,
+    resolvedYear,
     packagingOverrideByProduct: new Map<string, GenericRecord>(),
     packagingOverrideBySkuId: new Map<string, GenericRecord>(),
     productOverrideByScope: new Map<string, GenericRecord>(),
     productOverrideBySkuId: new Map<string, GenericRecord>(),
   };
+}
 
-  verkoopprijzenRows.forEach((row) => {
+function hasAnyRowsForYear(rows: GenericRecord[], year: number) {
+  return rows.some((row) => Number((row as any).jaar ?? 0) === year);
+}
+
+export function buildSellInLookupWithFallback(
+  verkoopprijzenRows: GenericRecord[],
+  year: number,
+  opts?: { maxLookbackYears?: number }
+): SellInLookup {
+  const maxLookbackYears = Math.max(0, Number(opts?.maxLookbackYears ?? 3));
+  const rows = Array.isArray(verkoopprijzenRows) ? verkoopprijzenRows : [];
+
+  let resolvedYear = year;
+  if (!hasAnyRowsForYear(rows, resolvedYear)) {
+    for (let step = 1; step <= maxLookbackYears; step += 1) {
+      const candidate = year - step;
+      if (hasAnyRowsForYear(rows, candidate)) {
+        resolvedYear = candidate;
+        break;
+      }
+    }
+  }
+
+  const lookup = initLookup(resolvedYear);
+
+  rows.forEach((row) => {
     const recordType = String((row as any).record_type ?? "").trim().toLowerCase();
     const rowYear = Number((row as any).jaar ?? 0);
-    if (rowYear !== year) return;
+    if (rowYear !== resolvedYear) return;
 
     if (recordType === "jaarstrategie") {
       lookup.yearStrategy = row;
@@ -101,6 +126,11 @@ export function buildSellInLookup(
   });
 
   return lookup;
+}
+
+// Backward compatible default: allow fallback up to 3 years.
+export function buildSellInLookup(verkoopprijzenRows: GenericRecord[], year: number): SellInLookup {
+  return buildSellInLookupWithFallback(verkoopprijzenRows, year, { maxLookbackYears: 3 });
 }
 
 export function buildChannelDefaultOpslagMap(channels: GenericRecord[]) {
