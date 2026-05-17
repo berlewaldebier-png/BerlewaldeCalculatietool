@@ -5,6 +5,7 @@ import React, { useMemo } from "react";
 import {
   getProductRef,
 } from "@/components/offerte-samenstellen/quoteUtils";
+import { normalizeQuantity } from "@/lib/quantityNormalization";
 import type {
   BuilderBlock,
   OptionType,
@@ -36,12 +37,25 @@ function usesBaseOfferProducts(block: BuilderBlock | undefined) {
   return Boolean(block?.payload?.useBaseOfferProducts ?? true);
 }
 
+function readNumber(value: unknown, fallback: number) {
+  const parsed = Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function stepForRoundingMode(mode: string, unitsPerLayer: number | null, unitsPerPallet: number | null) {
+  if (mode === "full_pallets" && unitsPerPallet && unitsPerPallet > 0) return unitsPerPallet;
+  if (mode === "full_layers" && unitsPerLayer && unitsPerLayer > 0) return unitsPerLayer;
+  return 1;
+}
+
 export function BuilderStep({
   unitMode,
   vatMode,
   hasIntro,
   scenario,
   metrics,
+  mixLiters,
+  onChangeMixLiters,
   activeScenario,
   setActiveScenario,
   updateProduct,
@@ -65,6 +79,8 @@ export function BuilderStep({
   hasIntro: boolean;
   scenario: Scenario;
   metrics: ScenarioMetrics;
+  mixLiters: number;
+  onChangeMixLiters: (liters: number) => void;
   activeScenario: ScenarioId;
   setActiveScenario: (id: ScenarioId) => void;
   updateProduct: (productId: string, patch: Partial<QuoteProduct>) => void;
@@ -93,24 +109,23 @@ export function BuilderStep({
   const standardPricingBlock = standardBlocks.find((block) => isPricingActionBlock(block));
   const basisOfferteActive = !standardPricingBlock || usesBaseOfferProducts(standardPricingBlock);
 
+  const palletDefaults = useMemo(() => {
+    const block = globalBlocks.find((b) => b.type === "Palletopbouw");
+    const payload = (block?.payload ?? {}) as Record<string, unknown>;
+    return {
+      doosUnitsPerLayer: readNumber(payload.doosUnitsPerLayer, 12),
+      doosUnitsPerPallet: readNumber(payload.doosUnitsPerPallet, 72),
+      fustUnitsPerLayer: readNumber(payload.fustUnitsPerLayer, 20),
+      fustUnitsPerPallet: readNumber(payload.fustUnitsPerPallet, 40),
+    };
+  }, [globalBlocks]);
+
   return (
     <div className="cpq-stack">
       <div className="cpq-builder-header">
         <div>
           <h2 className="cpq-card-title">Offerte maken</h2>
           <p className="cpq-card-subtitle">Start simpel met producten en breid uit met blokken via de toolbar.</p>
-        </div>
-        <div className="cpq-toggle-strip" role="group" aria-label="Voorstel">
-          {(["A", "B", "C"] as ScenarioId[]).map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveScenario(id)}
-              className={`cpq-toggle${activeScenario === id ? " active" : ""}`}
-            >
-              Voorstel {id}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -163,9 +178,21 @@ export function BuilderStep({
               <h3 className="cpq-card-title">Basisofferte</h3>
               <p className="cpq-card-subtitle">Basisprijs komt uit verkoopstrategie (sell-in, ex). BTW-toggle is alleen weergave.</p>
             </div>
-            <button onClick={addProductRow} className="cpq-button cpq-button-secondary" type="button">
-              + Product toevoegen
-            </button>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              {mixLiters <= 0 ? (
+                <button
+                  type="button"
+                  className="cpq-button cpq-button-secondary"
+                  onClick={() => onChangeMixLiters(1)}
+                  title="Voeg een regel toe om totale liters (mix) op te geven zonder productselectie."
+                >
+                  + Liters toevoegen
+                </button>
+              ) : null}
+              <button onClick={addProductRow} className="cpq-button cpq-button-secondary" type="button">
+                + Product toevoegen
+              </button>
+            </div>
           </div>
 
           <div className="cpq-table-wrap">
@@ -174,6 +201,7 @@ export function BuilderStep({
                 <tr>
                   <th>Bier</th>
                   <th>Aantal</th>
+                  <th>Afronden</th>
                   <th>Weergave</th>
                   <th>Kostprijs</th>
                   <th>Verkoopprijs</th>
@@ -198,11 +226,59 @@ export function BuilderStep({
                   const baseUnitPrice = baseUnitPriceEx * vatFactor;
                   const offerUnitPrice = offerUnitPriceEx * vatFactor;
                   const totalPrice = product.qty * offerUnitPriceEx * vatFactor;
-                  const qtyInputValue = unitMode === "liters" ? product.qty * product.litersPerUnit : product.qty;
+                  const isMixLiters = Boolean((product as any).isMixLiters);
+                  const qtyInputValue = isMixLiters
+                    ? product.qty
+                    : unitMode === "liters"
+                      ? product.qty * product.litersPerUnit
+                      : product.qty;
+                  const roundingModeForRow = String((product as any).roundingMode ?? "none");
+                  const unitLabelForRow = String(product.unit ?? "stuk");
+                  const unitsPerLayerForRow =
+                    unitLabelForRow === "doos"
+                      ? palletDefaults.doosUnitsPerLayer
+                      : unitLabelForRow === "fust"
+                        ? palletDefaults.fustUnitsPerLayer
+                        : (typeof (product as any).unitsPerLayer === "number" ? (product as any).unitsPerLayer : null);
+                  const unitsPerPalletForRow =
+                    unitLabelForRow === "doos"
+                      ? palletDefaults.doosUnitsPerPallet
+                      : unitLabelForRow === "fust"
+                        ? palletDefaults.fustUnitsPerPallet
+                        : (typeof (product as any).unitsPerPallet === "number" ? (product as any).unitsPerPallet : null);
+                  const stepUnits = stepForRoundingMode(roundingModeForRow, unitsPerLayerForRow, unitsPerPalletForRow);
+                  const stepValue = (() => {
+                    if (unitMode !== "liters") return stepUnits;
+                    if (isMixLiters) {
+                      const packUnit = String((product as any).mixPackUnit ?? "doos");
+                      const litersPerUnit = packUnit === "fust" ? 20 : 7.92;
+                      const unitsPerLayer = packUnit === "fust" ? palletDefaults.fustUnitsPerLayer : palletDefaults.doosUnitsPerLayer;
+                      const unitsPerPallet = packUnit === "fust" ? palletDefaults.fustUnitsPerPallet : palletDefaults.doosUnitsPerPallet;
+                      const stepUnitsForMix = stepForRoundingMode(roundingModeForRow, unitsPerLayer, unitsPerPallet);
+                      return stepUnitsForMix * litersPerUnit;
+                    }
+                    return stepUnits * Math.max(0, product.litersPerUnit);
+                  })();
 
                   return (
                     <tr key={product.id}>
                       <td>
+                        {isMixLiters ? (
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                            <div className="cpq-muted" style={{ fontWeight: 700 }}>
+                              Totaal liters (mix)
+                            </div>
+                            <select
+                              className="cpq-select"
+                              value={String((product as any).mixPackUnit ?? "doos")}
+                              onChange={(e) => updateProduct(product.id, { mixPackUnit: e.target.value as any })}
+                              title="Gebruik dit alleen voor logistiek (palletopbouw/afronden). Financiële berekening blijft per liter."
+                            >
+                              <option value="doos">Verzenden als: doos</option>
+                              <option value="fust">Verzenden als: fust</option>
+                            </select>
+                          </div>
+                        ) : (
                         <select
                           className="cpq-select"
                           value={productRef || ""}
@@ -220,24 +296,161 @@ export function BuilderStep({
                             </option>
                           ))}
                         </select>
+                        )}
                       </td>
                       <td>
                         <input
                           type="number"
                           min={0}
+                          step={stepValue > 0 ? stepValue : 1}
                           value={Number.isFinite(qtyInputValue) ? qtyInputValue : 0}
                           onChange={(e) => {
                             const raw = Math.max(0, clampNumber(e.target.value, 0));
-                            if (unitMode === "liters") {
-                              const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
-                              const nextQty = litersPerUnit > 0 ? raw / litersPerUnit : 0;
-                              updateProduct(product.id, { qty: nextQty });
+                            if (isMixLiters) {
+                              const packUnit = String((product as any).mixPackUnit ?? "doos");
+                              const assumedLitersPerUnit = packUnit === "fust" ? 20 : 7.92;
+                              const effectiveUnitsPerLayer = packUnit === "fust" ? palletDefaults.fustUnitsPerLayer : palletDefaults.doosUnitsPerLayer;
+                              const effectiveUnitsPerPallet = packUnit === "fust" ? palletDefaults.fustUnitsPerPallet : palletDefaults.doosUnitsPerPallet;
+                              const normalized = normalizeQuantity({
+                                inputValue: raw,
+                                inputUnit: "liters",
+                                roundingMode: roundingModeForRow as any,
+                                salesUnit: {
+                                  salesUnitLabel: packUnit,
+                                  litersPerSalesUnit: assumedLitersPerUnit,
+                                  unitsPerLayer: effectiveUnitsPerLayer,
+                                  unitsPerPallet: effectiveUnitsPerPallet,
+                                  contributesToLiters: true,
+                                },
+                              });
+                              const roundedLiters = (normalized.normalizedUnits ?? 0) * assumedLitersPerUnit;
+                              updateProduct(product.id, { qty: roundedLiters });
                               return;
                             }
-                            updateProduct(product.id, { qty: raw });
+
+                            const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
+                            const roundingMode = roundingModeForRow as any;
+                            const unitLabel = String(product.unit ?? "stuk");
+                            const effectiveUnitsPerLayer =
+                              unitLabel === "doos"
+                                ? palletDefaults.doosUnitsPerLayer
+                                : unitLabel === "fust"
+                                  ? palletDefaults.fustUnitsPerLayer
+                                  : ((product as any).unitsPerLayer ?? null);
+                            const effectiveUnitsPerPallet =
+                              unitLabel === "doos"
+                                ? palletDefaults.doosUnitsPerPallet
+                                : unitLabel === "fust"
+                                  ? palletDefaults.fustUnitsPerPallet
+                                  : ((product as any).unitsPerPallet ?? null);
+
+                            const normalized = normalizeQuantity({
+                              inputValue: raw,
+                              inputUnit: unitMode === "liters" ? "liters" : "sales_units",
+                              roundingMode,
+                              salesUnit: {
+                                salesUnitLabel: unitLabel,
+                                litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+                                unitsPerLayer: effectiveUnitsPerLayer ?? null,
+                                unitsPerPallet: effectiveUnitsPerPallet ?? null,
+                                contributesToLiters: litersPerUnit > 0,
+                              },
+                            });
+
+                            const nextQty = normalized.normalizedUnits ?? 0;
+                            updateProduct(product.id, { qty: nextQty });
                           }}
                           className="cpq-input cpq-input-small"
                         />
+                      </td>
+                      <td>
+                        {isMixLiters ? (
+                          <select
+                            className="cpq-select"
+                            value={String((product as any).roundingMode ?? "none")}
+                            onChange={(e) => {
+                              const nextMode = e.target.value as any;
+                              const packUnit = String((product as any).mixPackUnit ?? "doos");
+                              const assumedLitersPerUnit = packUnit === "fust" ? 20 : 7.92;
+                              const effectiveUnitsPerLayer =
+                                packUnit === "fust"
+                                  ? palletDefaults.fustUnitsPerLayer
+                                  : palletDefaults.doosUnitsPerLayer;
+                              const effectiveUnitsPerPallet =
+                                packUnit === "fust"
+                                  ? palletDefaults.fustUnitsPerPallet
+                                  : palletDefaults.doosUnitsPerPallet;
+                              const normalized = normalizeQuantity({
+                                inputValue: Math.max(0, product.qty ?? 0),
+                                inputUnit: "liters",
+                                roundingMode: nextMode,
+                                salesUnit: {
+                                  salesUnitLabel: packUnit,
+                                  litersPerSalesUnit: assumedLitersPerUnit,
+                                  unitsPerLayer: effectiveUnitsPerLayer,
+                                  unitsPerPallet: effectiveUnitsPerPallet,
+                                  contributesToLiters: true,
+                                },
+                              });
+                              const roundedLiters = (normalized.normalizedUnits ?? 0) * assumedLitersPerUnit;
+                              updateProduct(product.id, { roundingMode: nextMode, qty: roundedLiters });
+                            }}
+                          >
+                            <option value="none">Niet afronden</option>
+                            <option value="exact_units">Exacte eenheden</option>
+                            <option value="full_layers">Volle lagen</option>
+                            <option value="full_pallets">Volle pallets</option>
+                          </select>
+                        ) : (
+                          <select
+                            className="cpq-select"
+                            value={String((product as any).roundingMode ?? "none")}
+                            onChange={(e) => {
+                              const nextMode = e.target.value as any;
+                              const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
+                              const unitLabel = String(product.unit ?? "stuk");
+                              const effectiveUnitsPerLayer =
+                                unitLabel === "doos"
+                                  ? palletDefaults.doosUnitsPerLayer
+                                  : unitLabel === "fust"
+                                    ? palletDefaults.fustUnitsPerLayer
+                                    : ((product as any).unitsPerLayer ?? null);
+                              const effectiveUnitsPerPallet =
+                                unitLabel === "doos"
+                                  ? palletDefaults.doosUnitsPerPallet
+                                  : unitLabel === "fust"
+                                    ? palletDefaults.fustUnitsPerPallet
+                                    : ((product as any).unitsPerPallet ?? null);
+                              const inputValue =
+                                unitMode === "liters"
+                                  ? Math.max(0, (product.qty ?? 0) * litersPerUnit)
+                                  : Math.max(0, product.qty ?? 0);
+
+                              const normalized = normalizeQuantity({
+                                inputValue,
+                                inputUnit: unitMode === "liters" ? "liters" : "sales_units",
+                                roundingMode: nextMode,
+                                salesUnit: {
+                                  salesUnitLabel: unitLabel,
+                                  litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+                                  unitsPerLayer: effectiveUnitsPerLayer ?? null,
+                                  unitsPerPallet: effectiveUnitsPerPallet ?? null,
+                                  contributesToLiters: litersPerUnit > 0,
+                                },
+                              });
+
+                              updateProduct(product.id, {
+                                roundingMode: nextMode,
+                                qty: normalized.normalizedUnits ?? 0,
+                              });
+                            }}
+                          >
+                            <option value="none">Niet afronden</option>
+                            <option value="exact_units">Exacte eenheden</option>
+                            <option value="full_layers">Volle lagen</option>
+                            <option value="full_pallets">Volle pallets</option>
+                          </select>
+                        )}
                       </td>
                       <td className="cpq-muted">{display}</td>
                       <td>{euro(costUnitPrice)}</td>
@@ -268,6 +481,80 @@ export function BuilderStep({
               </tbody>
             </table>
           </div>
+          {scenario.products.some((p) => !Boolean((p as any).isMixLiters) && String((p as any).roundingMode ?? "none") !== "none") ? (
+          <div style={{ marginTop: 14 }}>
+            <div className="cpq-label" style={{ marginBottom: 8 }}>
+              Levering & palletopbouw
+            </div>
+            <div className="cpq-alert">
+              Afronden werkt per regel (kolom “Afronden”). Gebruik “Volle lagen/pallets” om altijd op logistieke eenheden uit te komen.
+            </div>
+            <div className="cpq-table-wrap" style={{ marginTop: 10 }}>
+              <table className="cpq-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Eenheden</th>
+                    <th>Pallets</th>
+                    <th>Lagen</th>
+                    <th>Los</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenario.products
+                    .filter((product) => product.qty > 0 && !Boolean((product as any).isMixLiters))
+                    .map((product) => {
+                      const label = (product.name || "Product") + (product.pack ? ` · ${product.pack}` : "");
+                      const units = Math.max(0, clampNumber(product.qty, 0));
+                      const unitLabel = String(product.unit ?? "stuk");
+                      const unitsPerPalletRaw = typeof (product as any).unitsPerPallet === "number" ? (product as any).unitsPerPallet : null;
+                      const unitsPerLayerRaw = typeof (product as any).unitsPerLayer === "number" ? (product as any).unitsPerLayer : null;
+                      const unitsPerPallet =
+                        unitLabel === "doos"
+                          ? palletDefaults.doosUnitsPerPallet
+                          : unitLabel === "fust"
+                            ? palletDefaults.fustUnitsPerPallet
+                            : unitsPerPalletRaw;
+                      const unitsPerLayer =
+                        unitLabel === "doos"
+                          ? palletDefaults.doosUnitsPerLayer
+                          : unitLabel === "fust"
+                            ? palletDefaults.fustUnitsPerLayer
+                            : unitsPerLayerRaw;
+
+                      if (!unitsPerPallet || !unitsPerLayer) {
+                        return (
+                          <tr key={`log-${product.id}`}>
+                            <td>{label}</td>
+                            <td>{units.toLocaleString("nl-NL")}</td>
+                            <td colSpan={3} className="cpq-muted">
+                              Geen palletdata voor dit product.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      const palletsExact = unitsPerPallet > 0 ? units / unitsPerPallet : 0;
+                      const palletsFull = Math.floor(palletsExact);
+                      const remainingAfterPallets = units - palletsFull * unitsPerPallet;
+                      const layersFull = unitsPerLayer > 0 ? Math.floor(remainingAfterPallets / unitsPerLayer) : 0;
+                      const looseUnits = Math.round(remainingAfterPallets - layersFull * unitsPerLayer);
+
+                      return (
+                        <tr key={`log-${product.id}`}>
+                          <td>{label}</td>
+                          <td>{units.toLocaleString("nl-NL")}</td>
+                          <td>{palletsFull}</td>
+                          <td>{layersFull}</td>
+                          <td>{looseUnits}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          ) : null}
         </section>
       ) : (
         <section className="cpq-card">
@@ -366,4 +653,3 @@ export function BuilderStep({
     </div>
   );
 }
-

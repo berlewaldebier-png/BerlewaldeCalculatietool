@@ -56,6 +56,7 @@ export function BasisStep({
   onSave: () => void;
   isSaving: boolean;
 }) {
+  const [customerQuery, setCustomerQuery] = useState<string>(() => String(basis.klantNaam ?? ""));
   const [companies, setCompanies] = useState<DouanoCompany[]>([]);
   const [companiesError, setCompaniesError] = useState<string | null>(null);
   const [isCompanyDropdownOpen, setIsCompanyDropdownOpen] = useState(false);
@@ -99,8 +100,14 @@ export function BasisStep({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
+  useEffect(() => {
+    // Keep input value stable while typing; only resync from saved value when dropdown closes.
+    if (isCompanyDropdownOpen) return;
+    setCustomerQuery(String(basis.klantNaam ?? ""));
+  }, [basis.klantNaam, isCompanyDropdownOpen]);
+
   const filteredCompanies = useMemo(() => {
-    const q = String(basis.klantNaam ?? "").trim().toLowerCase();
+    const q = String(customerQuery ?? "").trim().toLowerCase();
     if (!q) return companies.slice(0, 25);
     return companies
       .filter((company) => {
@@ -109,7 +116,7 @@ export function BasisStep({
         return name.includes(q) || pub.includes(q);
       })
       .slice(0, 25);
-  }, [companies, basis.klantNaam]);
+  }, [companies, customerQuery]);
 
   return (
     <section className="cpq-card">
@@ -125,11 +132,12 @@ export function BasisStep({
           <div className="cpq-label">Klant</div>
           <input
             className="cpq-input"
-            value={basis.klantNaam}
+            value={customerQuery}
             placeholder="Zoek klant of vul vrije tekst..."
             onFocus={() => setIsCompanyDropdownOpen(true)}
             onChange={(e) => {
               const value = e.target.value;
+              setCustomerQuery(value);
               setBasis((prev) => ({ ...prev, klantNaam: value, klantId: null }));
               setIsCompanyDropdownOpen(true);
             }}
@@ -172,6 +180,7 @@ export function BasisStep({
                     }}
                     onClick={() => {
                       setBasis((prev) => ({ ...prev, klantNaam: label, klantId: company.company_id }));
+                      setCustomerQuery(label);
                       setIsCompanyDropdownOpen(false);
                     }}
                   >

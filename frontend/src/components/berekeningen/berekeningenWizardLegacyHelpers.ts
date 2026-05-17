@@ -307,7 +307,7 @@ function getLegacySteps(row: GenericRecord): StepDefinition[] {
     { id: "type", label: "Soort berekening", description: "Kies de berekeningsroute" },
     {
       id: "input",
-      label: meaningfulFacturen ? "InitiÃ«le kostprijs" : "Berekening",
+      label: meaningfulFacturen ? "Initiële kostprijs" : "Berekening",
       description: type === "Inkoop" ? "Factuurinvoer en bronkosten" : "Ingredienten en recept"
     }
   ];

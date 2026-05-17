@@ -104,7 +104,7 @@ export function EigenProductieReceptenStep({
           <div key={bierId} className="module-card compact-card" style={{ marginBottom: 14 }}>
             <div className="module-card-title">{bier.biernaam}</div>
             <div className="module-card-text">
-              {bier.stijl ? `${bier.stijl} Â· ` : ""}bronjaar {sourceYear} (read-only) links, doeljaar {targetYear} rechts.
+              {bier.stijl ? `${bier.stijl} · ` : ""}bronjaar {sourceYear} (read-only) links, doeljaar {targetYear} rechts.
             </div>
 
             <div className="data-table" style={{ marginTop: 12 }}>
@@ -272,7 +272,7 @@ export function EigenProductieReceptenStep({
                   onClick={() => addEigenIngredient(bierId)}
                   disabled={isRunning}
                 >
-                  IngrediÃ«nt toevoegen
+                  Ingrediënt toevoegen
                 </button>
               </div>
               <div className="editor-actions-group" />

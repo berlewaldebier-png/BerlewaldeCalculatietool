@@ -254,7 +254,7 @@ export function buildRealizedBreakEvenRows(params: {
       kind === "liter" ? contributionPerLiter * soldLiters : contributionUnitEx * soldUnits;
 
     const label =
-      (fact?.label?.replace(" Â· ", " - ") ||
+      (fact?.label?.replace(" · ", " - ") ||
         String((skuRow as any)?.name ?? (skuRow as any)?.naam ?? "").trim()) ||
       `SKU ${skuId}`;
 

@@ -6,7 +6,6 @@ import {
   ErrorField,
   Field,
   Idea,
-  SelectField,
 } from "@/components/offerte-samenstellen/forms/FormControls";
 import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
 import type { ProductOption, QuoteFormState } from "@/components/offerte-samenstellen/types";
@@ -19,40 +18,20 @@ type Props = {
 };
 
 export function getGroothandelFormError(form: QuoteFormState, baseOfferRefs: string[] = []) {
+  const marginRaw = String(form.wholesaleMarginPct ?? "").trim();
+  const marginValue = Number(marginRaw.replace(",", "."));
+
+  if (!marginRaw) return "Vul een gewenste groothandelsmarge in.";
+  if (!Number.isFinite(marginValue)) return "Groothandelsmarge is geen geldig getal.";
+  if (marginValue <= 0) return "Groothandelsmarge moet groter zijn dan 0%.";
+  if (marginValue >= 80) return "Groothandelsmarge is te hoog (max 80%).";
+
   if (form.wholesaleUseBaseOfferProducts && baseOfferRefs.length === 0) {
-    return "Basisofferte bevat nog geen producten om een groothandelsprijs voor te berekenen.";
+    return "Basisofferte bevat nog geen producten om de groothandelsmarge op toe te passen.";
   }
 
   if (!form.wholesaleUseBaseOfferProducts && form.wholesaleEligibleRefs.length === 0) {
-    return "Selecteer minstens een product voor de groothandelsactie.";
-  }
-
-  const marginPct = Number(String(form.wholesaleMarginPct ?? "").replace(",", "."));
-  if (!Number.isFinite(marginPct) || marginPct < 0) {
-    return "Vul een geldige groothandelsmarge in.";
-  }
-
-  const expectedLitersRaw = String(form.wholesaleExpectedLiters ?? "").trim();
-  if (expectedLitersRaw) {
-    const expectedLiters = Number(expectedLitersRaw.replace(",", "."));
-    if (!Number.isFinite(expectedLiters) || expectedLiters < 0) {
-      return "Vul een geldige verwachte afname in liters in.";
-    }
-  }
-
-  const upliftLitersRaw = String(form.wholesaleUpliftLiters ?? "").trim();
-  if (upliftLitersRaw) {
-    const upliftLiters = Number(upliftLitersRaw.replace(",", "."));
-    if (!Number.isFinite(upliftLiters) || upliftLiters < 0) {
-      return "Vul een geldige uplift in liters in.";
-    }
-  }
-  const upliftPctRaw = String(form.wholesaleUpliftPct ?? "").trim();
-  if (upliftPctRaw) {
-    const upliftPct = Number(upliftPctRaw.replace(",", "."));
-    if (!Number.isFinite(upliftPct) || upliftPct < 0) {
-      return "Vul een geldige uplift in procenten in.";
-    }
+    return "Selecteer minstens een product om de groothandelsmarge op toe te passen.";
   }
 
   return "";
@@ -78,14 +57,14 @@ export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Prop
       />
 
       {form.wholesaleUseBaseOfferProducts ? (
-        <Idea text="De groothandelsprijs wordt berekend op de producten uit de basisofferte." />
+        <Idea text="De groothandelsmarge wordt toegepast op de producten uit de basisofferte." />
       ) : (
         <div className="cpq-field">
           <div className="cpq-label">Producten</div>
           <ProductPickerTable
             products={products}
             selectedRefs={form.wholesaleEligibleRefs}
-            emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze groothandelsactie."
+            emptyHint="Voeg eerst producten toe aan je voorstel om een groothandelsmarge te kunnen toepassen."
             onChange={(nextRefs) =>
               setForm((prev) => ({
                 ...prev,
@@ -96,63 +75,14 @@ export function GroothandelForm({ form, setForm, products, baseOfferRefs }: Prop
         </div>
       )}
 
-      {!form.wholesaleUseBaseOfferProducts && form.wholesaleEligibleRefs.length === 0 ? (
-        <EmptyHint text="Selecteer de producten waarvoor je een groothandelsprijs wilt tonen." />
-      ) : null}
-
       <Field
-        label="Gewenste marge groothandel (%)"
+        label="Gewenste groothandelsmarge (%)"
         value={form.wholesaleMarginPct}
         onChange={(value) => setForm((prev) => ({ ...prev, wholesaleMarginPct: value }))}
       />
 
-      <Field
-        label="Actie-volume (liters)"
-        value={form.wholesaleExpectedLiters}
-        onChange={(value) => setForm((prev) => ({ ...prev, wholesaleExpectedLiters: value }))}
-        placeholder="Bijv. 10000"
-        type="number"
-        min="0"
-      />
-
-      <Idea text="V1 rekent terug vanaf de huidige horeca-sell-in prijs: groothandelsprijs = horeca prijs / (1 + marge%)." />
-
-      <SelectField
-        label="Actie geldt voor"
-        value={form.wholesaleAppliesToVolume}
-        options={[
-          { label: "Bestaand volume", value: "existing" },
-          { label: "Uplift (extra volume)", value: "uplift" },
-          { label: "Bestaand + uplift", value: "both" },
-        ]}
-        onChange={(value) =>
-          setForm((prev) => ({
-            ...prev,
-            wholesaleAppliesToVolume: value as any,
-          }))
-        }
-      />
-
-      <div className="cpq-form-grid" style={{ marginTop: -8 }}>
-        <Field
-          label="Uplift (liters)"
-          value={form.wholesaleUpliftLiters}
-          onChange={(value) => setForm((prev) => ({ ...prev, wholesaleUpliftLiters: value }))}
-          placeholder="Bijv. 500"
-          type="number"
-          min="0"
-        />
-        <Field
-          label="Uplift (%)"
-          value={form.wholesaleUpliftPct}
-          onChange={(value) => setForm((prev) => ({ ...prev, wholesaleUpliftPct: value }))}
-          placeholder="Bijv. 5"
-          type="number"
-          min="0"
-        />
-      </div>
-
-      <Idea text="Actie-volume = liters waarop de groothandelsprijs van toepassing is. Uplift = extra liters die je verwacht door de deal. Als je een klant selecteert in basisgegevens, tonen we daar baseline liters." />
+      <EmptyHint text="De groothandelsprijs wordt teruggerekend vanaf de kanaalprijs (sell-in, ex). Verdere kortingen of uplift-velden worden automatisch via het offertevolume bepaald." />
     </div>
   );
 }
+

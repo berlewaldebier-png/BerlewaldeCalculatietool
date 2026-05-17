@@ -1,8 +1,4 @@
 import { clampNumber } from "../components/offerte-samenstellen/quoteUtils";
-import {
-  formatStaffelInput,
-  getDerivedStaffelPrice,
-} from "../components/offerte-samenstellen/staffelUtils";
 import type {
   QuoteBreakEvenSnapshot,
   QuoteScenario,
@@ -12,6 +8,9 @@ import {
   applyDiscountPct,
   computeGratisFreeByRefFromPaidRows,
 } from "./pricingEngine";
+import { calculateTransportImpact } from "./transportImpact";
+import { applyStaffelToLines as applyStaffelBlock } from "./actionBlocks/applyStaffel";
+import { applyMixDealToLines as applyMixDealBlock } from "./actionBlocks/applyMixDeal";
 
 type PeriodKey = "standard" | "intro";
 type CalculationBlock = QuoteScenario["blocks"][number];
@@ -21,6 +20,10 @@ type CalculationLine = {
   qtyPaid: number;
   qtyFree: number;
   litersPerUnit: number;
+  salesUnitLabel: string;
+  unitsPerLayer: number | null;
+  unitsPerPallet: number | null;
+  contributesToLiters: boolean;
   baseUnitPriceEx: number;
   offerUnitPriceEx: number;
   costPriceEx: number;
@@ -70,6 +73,7 @@ export function calculateQuoteScenarioMetrics(
 
   revenueEx = applyReturnImpact(state, revenueEx);
   applyServiceAndTransportBlocks(state, {
+    currentRevenueEx: () => revenueEx,
     addRevenue: (value) => {
       revenueEx += value;
     },
@@ -147,6 +151,18 @@ function buildCalculationLines(scenario: QuoteScenario): CalculationLine[] {
         qtyPaid: Math.max(0, clampNumber(product.qty, 0)),
         qtyFree: 0,
         litersPerUnit: Math.max(0, clampNumber(product.litersPerUnit, 0)),
+        salesUnitLabel: String((product as any).unit ?? "stuk").toLowerCase(),
+        unitsPerLayer:
+          typeof (product as any).unitsPerLayer === "number"
+            ? ((product as any).unitsPerLayer as number)
+            : null,
+        unitsPerPallet:
+          typeof (product as any).unitsPerPallet === "number"
+            ? ((product as any).unitsPerPallet as number)
+            : null,
+        contributesToLiters: Boolean(
+          (product as any).contributesToLiters ?? (product.litersPerUnit > 0)
+        ),
         baseUnitPriceEx: Math.max(0, clampNumber(product.standardPriceEx, 0)),
         offerUnitPriceEx: Math.max(0, clampNumber(product.standardPriceEx, 0)),
         costPriceEx: Math.max(0, clampNumber(product.costPriceEx, 0)),
@@ -325,65 +341,12 @@ function applyStaffelToLines(state: CalculationState) {
   const staffelBlock = findBlock(state.blocks, "Staffel");
   if (!staffelBlock) return;
 
-  const tiersRaw = asArrayOfRecords(staffelBlock.payload?.tiers);
-  const discountMode = String(staffelBlock.payload?.discountMode ?? "absolute");
-  const discountValue = formatStaffelInput(
-    clampNumber(staffelBlock.payload?.discountValue, 0)
-  );
-  const eligibleRefs = resolveEligibleTargetRefs(state.lines, staffelBlock.payload?.eligibleRefs);
-
-  if (tiersRaw.length === 0 || eligibleRefs.size === 0) {
-    state.notes.push("Staffel is actief maar mist tiers of productselectie.");
-    return;
-  }
-
-  state.lines = state.lines.map((line) => {
-    if (!eligibleRefs.has(line.ref)) return line;
-
-    const tierIndex = tiersRaw.findIndex((candidate) => {
-      const from = clampNumber(candidate.from, 0);
-      const to =
-        candidate.to === null ||
-        candidate.to === undefined ||
-        String(candidate.to).trim() === ""
-          ? Number.POSITIVE_INFINITY
-          : clampNumber(candidate.to, Number.POSITIVE_INFINITY);
-
-      return line.qtyPaid >= from && line.qtyPaid <= to;
-    });
-
-    if (tierIndex < 0) return line;
-
-    const tier = tiersRaw[tierIndex];
-    const nextPrice =
-      getDerivedStaffelPrice(
-        {
-          optionId: line.ref,
-          bierId: "",
-          productId: "",
-          label: line.ref,
-          bierName: "",
-          packLabel: "",
-          litersPerUnit: line.litersPerUnit,
-          staffelCompatibilityKey: "",
-          staffelCompatibilityLabel: "",
-          costPriceEx: line.costPriceEx,
-          standardPriceEx: line.baseUnitPriceEx,
-          vatRatePct: 0,
-          kostprijsversieId: "",
-        },
-        tierIndex,
-        {
-          from: String(tier.from ?? ""),
-          to: tier.to === null || tier.to === undefined ? "" : String(tier.to),
-          price: String(tier.priceEx ?? ""),
-        },
-        discountMode as "percent" | "absolute" | "free",
-        discountValue
-      ) ?? 0;
-
-    return nextPrice > 0 ? { ...line, offerUnitPriceEx: nextPrice } : line;
-  });
+  state.lines = applyStaffelBlock({
+    lines: state.lines,
+    payload: (staffelBlock.payload ?? {}) as Record<string, unknown>,
+    resolveEligibleRefs: (value) => resolveEligibleTargetRefs(state.lines, value),
+    notes: state.notes,
+  }) as any;
 }
 
 function applyDiscountToLines(state: CalculationState) {
@@ -458,31 +421,12 @@ function applyMixDealToLines(state: CalculationState) {
   const mixBlock = findBlock(state.blocks, "Mix");
   if (!mixBlock) return;
 
-  const requiredQty = clampNumber(mixBlock.payload?.requiredQty, 0);
-  const freeQty = clampNumber(mixBlock.payload?.freeQty, 0);
-  const eligibleRefs = resolveEligibleTargetRefs(state.lines, mixBlock.payload?.eligibleRefs);
-
-  if (requiredQty <= 0 || freeQty <= 0) {
-    state.notes.push("Mix deal mist een geldige X+Y configuratie.");
-    return;
-  }
-
-  const { freeByRef } = computeGratisFreeByRefFromPaidRows({
-    rows: state.lines.map((line) => ({
-      included: eligibleRefs.has(line.ref),
-      ref: line.ref,
-      qtyPaid: line.qtyPaid,
-      unitPriceEx: line.offerUnitPriceEx,
-    })),
-    requiredQty,
-    freeQty,
-    eligibleRefs: Array.from(eligibleRefs),
-  });
-
-  state.lines = state.lines.map((line) => ({
-    ...line,
-    qtyFree: line.qtyFree + (freeByRef.get(line.ref) ?? 0),
-  }));
+  state.lines = applyMixDealBlock({
+    lines: state.lines,
+    payload: (mixBlock.payload ?? {}) as Record<string, unknown>,
+    resolveEligibleRefs: (value) => resolveEligibleTargetRefs(state.lines, value),
+    notes: state.notes,
+  }) as any;
 }
 
 function finalizeLineTotals(state: CalculationState) {
@@ -507,15 +451,107 @@ function applyReturnImpact(state: CalculationState, revenueEx: number) {
 
 function applyServiceAndTransportBlocks(
   state: CalculationState,
-  handlers: { addRevenue: (value: number) => void }
+  handlers: { addRevenue: (value: number) => void; currentRevenueEx: () => number }
 ) {
   for (const block of state.blocks) {
     if (block.type === "Transport") {
-      const chargedToCustomer = Boolean(block.payload?.chargedToCustomer ?? false);
-      const amountEx = clampNumber(block.payload?.amountEx, 0);
+      const payload = asRecord(block.payload);
+      const thresholdValue = clampNumber(payload.freeShippingThresholdValue, 0);
+      const thresholdUnit = String(payload.freeShippingThresholdUnit ?? "").trim().toLowerCase();
+      const costType = String(payload.transportCostType ?? "fixed").trim().toLowerCase();
+      const transportCostEx = clampNumber(payload.transportCostEx ?? payload.amountEx, 0);
+      const chargedToCustomer = Boolean(payload.chargedToCustomer ?? false);
+      const includeInMargin = Boolean(payload.includeInMargin ?? true);
+
+      const hasNewModelFields =
+        Boolean(thresholdUnit) ||
+        payload.freeShippingThresholdValue !== undefined ||
+        payload.transportCostType !== undefined ||
+        payload.transportCostEx !== undefined ||
+        payload.includeInMargin !== undefined;
+
+      const hasLegacyModelFields =
+        payload.distanceKm !== undefined ||
+        payload.rateEx !== undefined ||
+        payload.deliveries !== undefined ||
+        payload.thresholdKm !== undefined;
+
+      // New model: compute applied transport cost based on quote totals (not per-km).
+      if (hasNewModelFields) {
+        if (!thresholdUnit) {
+          state.notes.push("Transport mist drempeltype; transportimpact wordt genegeerd.");
+          continue;
+        }
+        if (!(transportCostEx > 0 || costType === "manual")) {
+          state.notes.push("Transport staat actief maar bedrag is 0.");
+          continue;
+        }
+
+        const totalsWarnings: string[] = [];
+        const currentRevenueEx = Math.max(0, handlers.currentRevenueEx());
+        const lineUnits = (line: CalculationLine) => Math.max(0, (line.qtyPaid ?? 0) + (line.qtyFree ?? 0));
+
+        let totalLiters = 0;
+        let totalBoxes = 0;
+        let totalLayers = 0;
+        let totalPallets = 0;
+
+        for (const line of state.lines) {
+          const units = lineUnits(line);
+          if (line.contributesToLiters && line.litersPerUnit > 0) {
+            totalLiters += units * line.litersPerUnit;
+          }
+          if (line.salesUnitLabel === "doos") {
+            totalBoxes += units;
+          }
+          if (line.unitsPerLayer && line.unitsPerLayer > 0) {
+            totalLayers += units / line.unitsPerLayer;
+          } else if (thresholdUnit === "layers") {
+            totalsWarnings.push(`Laag-informatie ontbreekt voor '${line.ref}'.`);
+          }
+          if (line.unitsPerPallet && line.unitsPerPallet > 0) {
+            totalPallets += units / line.unitsPerPallet;
+          } else if (thresholdUnit === "pallets") {
+            totalsWarnings.push(`Pallet-informatie ontbreekt voor '${line.ref}'.`);
+          }
+        }
+
+        const impact = calculateTransportImpact({
+          rule: {
+            freeShippingThresholdValue: thresholdValue,
+            freeShippingThresholdUnit: thresholdUnit as any,
+            transportCostType: costType as any,
+            transportCostEx,
+            includeInMargin,
+            chargedToCustomer,
+          },
+          totals: {
+            totalRevenueEx: currentRevenueEx,
+            totalLiters,
+            totalBoxes,
+            totalLayers,
+            totalPallets,
+            warnings: totalsWarnings,
+          },
+        });
+
+        impact.warnings.forEach((w) => state.notes.push(w));
+        if (impact.transportRevenueEx > 0) handlers.addRevenue(impact.transportRevenueEx);
+        if (impact.transportCostInMarginEx > 0) state.transportCostEx += impact.transportCostInMarginEx;
+        continue;
+      }
+
+      // Legacy fallback: keep km-based amountEx behaviour ONLY for old drafts.
+      if (!hasLegacyModelFields) {
+        state.notes.push("Transport block is incompleet; transportimpact wordt genegeerd.");
+        continue;
+      }
+
+      const amountEx = clampNumber(payload.amountEx, 0);
       if (amountEx <= 0) continue;
       if (chargedToCustomer) handlers.addRevenue(amountEx);
-      else state.transportCostEx += amountEx;
+      else if (includeInMargin) state.transportCostEx += amountEx;
+      else state.notes.push("Transport staat actief maar is uitgesloten van marge-impact.");
       continue;
     }
 

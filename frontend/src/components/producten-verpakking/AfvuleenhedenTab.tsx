@@ -26,14 +26,14 @@ export function AfvuleenhedenTab({
       <div className="module-card-header">
         <div className="module-card-title">Afvuleenheden</div>
         <div className="module-card-text">
-          Interne eenheden (formats) die je gebruikt in kostprijsbeheer en bij samenstellingen, zoals â€œFles 33clâ€ of
-          â€œDoos 24Ã—33clâ€. Jaar {activeYearForFormats} volgt productie.
+          Interne eenheden (formats) die je gebruikt in kostprijsbeheer en bij samenstellingen, zoals “Fles 33cl” of
+          “Doos 24×33cl”. Jaar {activeYearForFormats} volgt productie.
         </div>
       </div>
 
       {formatArticles.length === 0 ? (
         <div className="editor-status" style={{ marginTop: 12 }}>
-          Nog geen afvuleenheden gevonden. Maak er Ã©Ã©n aan via â€œNieuw samenstellenâ€.
+          Nog geen afvuleenheden gevonden. Maak er één aan via “Nieuw samenstellen”.
         </div>
       ) : (
         <>

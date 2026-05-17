@@ -3,6 +3,7 @@ import {
   buildSellInLookup,
   resolveSellInPriceEx,
 } from "@/components/offerte-samenstellen/sellInResolver";
+import { getPackagingDefaultsForLabel } from "@/lib/packagingConfig";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -14,6 +15,11 @@ export type ProductFact = {
   bierName: string;
   packLabel: string;
   packType: string;
+  salesUnitLabel: string;
+  unitsPerLayer: number | null;
+  unitsPerPallet: number | null;
+  contributesToLiters: boolean;
+  contributesToMargin: boolean;
   label: string;
   litersPerUnit: number;
   costPriceEx: number;
@@ -46,6 +52,15 @@ type ProductMaster = {
   litersPerUnit: number;
   packType: string;
 };
+
+function inferPackTypeFromFormatId(id: string) {
+  const value = text(id).toLowerCase();
+  if (value.includes("fust") || value.includes("keg")) return "fust";
+  if (value.includes("doos") || value.includes("case")) return "doos";
+  if (value.includes("fles")) return "fles";
+  if (value.includes("blik")) return "blik";
+  return "stuk";
+}
 
 export function buildProductFacts(params: BuildProductFactsParams) {
   const warnings: string[] = [];
@@ -91,7 +106,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
     const packLabel = text((row as any).name || (row as any).naam || id);
     formatById.set(id, {
       packLabel,
-      packType: text((row as any).uom || (row as any).eenheid || inferPackType(packLabel)),
+      packType: text((row as any).uom || (row as any).eenheid || inferPackTypeFromFormatId(id)),
       litersPerUnit: toNumber((row as any).content_liter, 0),
     });
   });
@@ -199,6 +214,20 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         ? params.scenarioLabelSuffix ?? " (scenario)"
         : "";
 
+      const salesUnitLabel = skuPackagingType
+        ? String(skuPackagingType).split("-")[0]?.trim().toLowerCase() ||
+          master?.packType ||
+          "stuk"
+        : master?.packType || "stuk";
+
+      const packagingDefaults = getPackagingDefaultsForLabel(salesUnitLabel);
+      const unitsPerLayer = packagingDefaults.unitsPerLayer;
+      const unitsPerPallet = packagingDefaults.unitsPerPallet;
+
+      const contributesToMargin = true;
+      const contributesToLiters =
+        effectiveLitersPerUnit > 0 && salesUnitLabel !== "stuk";
+
       let sellInEx = 0;
       if (params.channelCode) {
         sellInEx = resolveSellInPriceEx({
@@ -237,7 +266,12 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         kostprijsversieId,
         bierName,
         packLabel,
-        packType: master?.packType || inferPackType(packLabel),
+        packType: master?.packType || salesUnitLabel,
+        salesUnitLabel,
+        unitsPerLayer,
+        unitsPerPallet,
+        contributesToLiters,
+        contributesToMargin,
         label: `${bierName} · ${packLabel}${effectiveLabelSuffix}`,
         litersPerUnit: effectiveLitersPerUnit,
         costPriceEx: effectiveCostPriceEx,
@@ -279,7 +313,7 @@ function buildProductMasterById(
     const packLabel = text((row as any).omschrijving || (row as any).verpakking || id);
     map.set(id, {
       packLabel,
-      packType: inferPackType(packLabel),
+      packType: inferPackTypeFromFormatId(id) || inferPackType(packLabel),
       litersPerUnit: toNumber(
         (row as any).inhoud_per_eenheid_liter ?? (row as any).liters_per_product,
         0
@@ -293,7 +327,7 @@ function buildProductMasterById(
     const packLabel = text((row as any).omschrijving || (row as any).verpakking || id);
     map.set(id, {
       packLabel,
-      packType: inferPackType(packLabel),
+      packType: inferPackTypeFromFormatId(id) || inferPackType(packLabel),
       litersPerUnit: toNumber(
         (row as any).totale_inhoud_liter ??
           (row as any).liters_per_product ??

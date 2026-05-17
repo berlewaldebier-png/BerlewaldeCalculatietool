@@ -8,6 +8,7 @@ export const OPTION_TYPES_ORDER: OptionType[] = [
   "Mix",
   "Korting",
   "Groothandel",
+  "Palletopbouw",
   "Transport",
   "Retour",
   "Proeverij",

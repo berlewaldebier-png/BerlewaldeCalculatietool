@@ -263,7 +263,7 @@ export function VerkoopbareArtikelenWorkspace({
             style={{ width: 320 }}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Zoek op naam (of ID)â€¦"
+            placeholder="Zoek op naam (of ID)…"
           />
         </div>
       </div>
@@ -348,8 +348,8 @@ export function VerkoopbareArtikelenWorkspace({
                     <td style={{ fontWeight: 600 }}>{row.label}</td>
                     <td>{subtypeLabel(row.subtype)}</td>
                     <td>{row.uom}</td>
-                    <td>{row.contentLiter ? row.contentLiter.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "â€”"}</td>
-                    <td>{row.pricingMethod === "cost_plus" ? moneyEUR(row.kostprijsEx) : "â€”"}</td>
+                    <td>{row.contentLiter ? row.contentLiter.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}</td>
+                    <td>{row.pricingMethod === "cost_plus" ? moneyEUR(row.kostprijsEx) : "—"}</td>
                     <td>{status}</td>
                     <td style={{ textAlign: "right" }}>
                       <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
@@ -373,7 +373,7 @@ export function VerkoopbareArtikelenWorkspace({
                             <CalculatorIcon />
                           </Link>
                         ) : (
-                          <span className="muted">â€”</span>
+                          <span className="muted">—</span>
                         )}
                         {canDelete ? (
                           <button

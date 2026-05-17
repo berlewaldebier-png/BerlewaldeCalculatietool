@@ -9,7 +9,7 @@ export type ScenarioId = "A" | "B" | "C";
 export type QuoteChannel = "Horeca" | "Retail" | "Events";
 export type QuoteBlockContext = "intro" | "standard" | "global";
 
-export type QuoteProductUnit = "fust" | "doos" | "fles";
+export type QuoteProductUnit = "fust" | "doos" | "fles" | "stuk" | "liter";
 
 export type QuoteProductSource = {
   sku_id?: string;
@@ -25,6 +25,13 @@ export type QuoteProduct = {
   qty: number;
   litersPerUnit: number;
   unit: QuoteProductUnit;
+  isMixLiters?: boolean;
+  mixPackUnit?: "doos" | "fust";
+  roundingMode?: "none" | "exact_units" | "full_layers" | "full_pallets";
+  unitsPerLayer?: number | null;
+  unitsPerPallet?: number | null;
+  contributesToLiters?: boolean;
+  contributesToMargin?: boolean;
   standardPriceEx: number;
   costPriceEx: number;
   vatRatePct: number;
@@ -37,6 +44,7 @@ export type OptionType =
   | "Mix"
   | "Korting"
   | "Groothandel"
+  | "Palletopbouw"
   | "Transport"
   | "Retour"
   | "Proeverij"
@@ -172,6 +180,11 @@ export type ProductOption = {
   label: string;
   bierName: string;
   packLabel: string;
+  salesUnitLabel: string;
+  unitsPerLayer: number | null;
+  unitsPerPallet: number | null;
+  contributesToLiters: boolean;
+  contributesToMargin: boolean;
   litersPerUnit: number;
   staffelCompatibilityKey: string;
   staffelCompatibilityLabel: string;
@@ -231,9 +244,6 @@ export type QuoteFormState = {
   introThresholdValue: string;
   introThresholdDiscount: string;
   introNote: string;
-  introAppliesToVolume: "existing" | "uplift" | "both";
-  introUpliftLiters: string;
-  introUpliftPct: string;
   staffelUseBaseOfferProducts: boolean;
   staffelEligibleRefs: string[];
   staffelDiscountMode: StaffelDiscountMode;
@@ -247,20 +257,22 @@ export type QuoteFormState = {
   discountMode: string;
   discountValue: string;
   kortingEligibleRefs: string[];
-  discountAppliesToVolume: "existing" | "uplift" | "both";
-  discountUpliftLiters: string;
-  discountUpliftPct: string;
   wholesaleUseBaseOfferProducts: boolean;
   wholesaleEligibleRefs: string[];
   wholesaleMarginPct: string;
-  wholesaleExpectedLiters: string;
-  wholesaleAppliesToVolume: "existing" | "uplift" | "both";
-  wholesaleUpliftLiters: string;
-  wholesaleUpliftPct: string;
+  palletDoosUnitsPerLayer: string;
+  palletDoosUnitsPerPallet: string;
+  palletFustUnitsPerLayer: string;
+  palletFustUnitsPerPallet: string;
   transportDistanceKm: string;
   transportRateEx: string;
   transportDeliveries: string;
   transportThresholdKm: string;
+  transportFreeShippingThresholdValue: string;
+  transportFreeShippingThresholdUnit: "pallets" | "layers" | "boxes" | "liters" | "order_value";
+  transportCostType: "fixed" | "manual";
+  transportCostEx: string;
+  transportIncludeInMargin: boolean;
   transportChargedToCustomer: boolean;
   returnPct: string;
   tastingCondition: string;

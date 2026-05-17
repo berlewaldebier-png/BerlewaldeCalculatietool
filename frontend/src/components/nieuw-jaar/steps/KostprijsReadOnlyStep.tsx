@@ -61,7 +61,7 @@ export function KostprijsReadOnlyStep({
                   <th>Biernaam</th>
                   <th>Soort</th>
                   <th>Verpakkingseenheid</th>
-                  <th>Inkoop/IngrediÃ«nten</th>
+                  <th>Inkoop/Ingrediënten</th>
                   <th>Verpakkingskosten</th>
                   <th>Indirecte/Directe kosten</th>
                   <th>Accijns</th>
