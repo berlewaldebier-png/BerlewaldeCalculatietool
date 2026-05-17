@@ -173,6 +173,14 @@ export function OfferteSamenstellenApp({
   const [mixSource, setMixSource] = useState<QuoteDraft["mixSource"]>(() => createInitialQuoteDraft(year).mixSource);
   const [targetVolumeLiters, setTargetVolumeLiters] = useState<number | null>(() => createInitialQuoteDraft(year).targetVolumeLiters);
   const [agreementVolumeLiters, setAgreementVolumeLiters] = useState<number | null>(() => createInitialQuoteDraft(year).agreementVolumeLiters);
+  const [pendingRequiredVolumeChange, setPendingRequiredVolumeChange] = useState<null | {
+    kind: "update_product" | "remove_product";
+    productId: string;
+    patch?: Partial<QuoteProduct>;
+    nextTotalLiters: number;
+    requiredLiters: number;
+    requiredField: "target" | "agreement";
+  }>(null);
   const [realizedSales, setRealizedSales] = useState<RealizedSalesBySkuPayload | null>(null);
   const [realizedSalesError, setRealizedSalesError] = useState<string | null>(null);
   const [customerSummary, setCustomerSummary] = useState<CustomerSalesSummary | null>(null);
@@ -727,13 +735,41 @@ export function OfferteSamenstellenApp({
   }
 
   function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
-    setScenarios((prev) => ({
-      ...prev,
-      [activeScenario]: {
-        ...prev[activeScenario],
-        products: prev[activeScenario].products.map((p) => (p.id === productId ? { ...p, ...patch } : p)),
-      },
-    }));
+    setScenarios((prev) => {
+      const current = prev[activeScenario];
+      const required = getRequiredTotalLiters();
+      if (!required) {
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...current,
+            products: current.products.map((p) => (p.id === productId ? { ...p, ...patch } : p)),
+          },
+        };
+      }
+
+      const nextProducts = current.products.map((p) => (p.id === productId ? { ...p, ...patch } : p));
+      const nextTotalLiters = calculateScenarioTotalLiters(nextProducts);
+      if (nextTotalLiters + 1e-6 < required.requiredLiters) {
+        setPendingRequiredVolumeChange({
+          kind: "update_product",
+          productId,
+          patch,
+          nextTotalLiters,
+          requiredLiters: required.requiredLiters,
+          requiredField: required.requiredField,
+        });
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...current,
+          products: nextProducts,
+        },
+      };
+    });
   }
 
   function addProductRow() {
@@ -762,13 +798,41 @@ export function OfferteSamenstellenApp({
   }
 
   function removeProductRow(productId: string) {
-    setScenarios((prev) => ({
-      ...prev,
-      [activeScenario]: {
-        ...prev[activeScenario],
-        products: prev[activeScenario].products.filter((product) => product.id !== productId),
-      },
-    }));
+    setScenarios((prev) => {
+      const current = prev[activeScenario];
+      const nextProducts = current.products.filter((product) => product.id !== productId);
+      const required = getRequiredTotalLiters();
+
+      if (!required) {
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...current,
+            products: nextProducts,
+          },
+        };
+      }
+
+      const nextTotalLiters = calculateScenarioTotalLiters(nextProducts);
+      if (nextTotalLiters + 1e-6 < required.requiredLiters) {
+        setPendingRequiredVolumeChange({
+          kind: "remove_product",
+          productId,
+          nextTotalLiters,
+          requiredLiters: required.requiredLiters,
+          requiredField: required.requiredField,
+        });
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...current,
+          products: nextProducts,
+        },
+      };
+    });
   }
 
   function applyOptionToScenario(type: OptionType) {
@@ -886,6 +950,26 @@ export function OfferteSamenstellenApp({
     const costPerLiter = Math.max(0, sellInPerLiter - contributionPerLiter);
     return { sellInPerLiter, costPerLiter };
   }, [breakEvenV2Summary]);
+
+  function calculateScenarioTotalLiters(products: QuoteProduct[]) {
+    return products.reduce((sum, product) => {
+      if (product.contributesToLiters === false) return sum;
+      const litersPerUnit = Math.max(0, product.litersPerUnit ?? 0);
+      const qty = Math.max(0, product.qty ?? 0);
+      if (litersPerUnit <= 0 || qty <= 0) return sum;
+      return sum + litersPerUnit * qty;
+    }, 0);
+  }
+
+  function getRequiredTotalLiters(): { requiredField: "target" | "agreement"; requiredLiters: number } | null {
+    if (dealContext === "growth" && typeof targetVolumeLiters === "number") {
+      return { requiredField: "target", requiredLiters: Math.max(0, targetVolumeLiters) };
+    }
+    if (dealContext === "agreement" && typeof agreementVolumeLiters === "number") {
+      return { requiredField: "agreement", requiredLiters: Math.max(0, agreementVolumeLiters) };
+    }
+    return null;
+  }
 
   function setMixLiters(nextLiters: number) {
     const liters = Math.max(0, clampNumber(nextLiters, 0));
@@ -1116,9 +1200,82 @@ export function OfferteSamenstellenApp({
     }
   }
 
+  function confirmLowerRequiredVolume() {
+    const pending = pendingRequiredVolumeChange;
+    if (!pending) return;
+
+    if (pending.requiredField === "target") {
+      setTargetVolumeLiters(pending.nextTotalLiters);
+    } else {
+      setAgreementVolumeLiters(pending.nextTotalLiters);
+    }
+
+    setScenarios((prev) => {
+      const current = prev[activeScenario];
+      if (pending.kind === "remove_product") {
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...current,
+            products: current.products.filter((product) => product.id !== pending.productId),
+          },
+        };
+      }
+
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...current,
+          products: current.products.map((p) => (p.id === pending.productId ? { ...p, ...(pending.patch ?? {}) } : p)),
+        },
+      };
+    });
+
+    setPendingRequiredVolumeChange(null);
+  }
+
+  function cancelLowerRequiredVolume() {
+    setPendingRequiredVolumeChange(null);
+  }
+
   return (
     <div className="cpq-root">
       <div className="cpq-frame">
+        {pendingRequiredVolumeChange ? (
+          <div className="cpq-modal-backdrop" role="dialog" aria-modal="true">
+            <div className="cpq-modal">
+              <div className="cpq-modal-header">
+                <div>
+                  <div className="cpq-kicker">Controle</div>
+                  <h3 className="cpq-modal-title">Volume aanpassen?</h3>
+                </div>
+                <button onClick={cancelLowerRequiredVolume} className="cpq-icon-button" type="button">
+                  ×
+                </button>
+              </div>
+
+              <div className="cpq-modal-body">
+                <div className="cpq-alert cpq-alert-warn">
+                  De som van het aantal liters in de offerte ({pendingRequiredVolumeChange.nextTotalLiters.toFixed(2)} L) is lager dan het{" "}
+                  {pendingRequiredVolumeChange.requiredField === "target" ? "doelvolume" : "contractvolume"} ({pendingRequiredVolumeChange.requiredLiters.toFixed(2)} L).
+                  <div style={{ marginTop: 8 }}>
+                    Wil je het {pendingRequiredVolumeChange.requiredField === "target" ? "doelvolume" : "contractvolume"} verlagen naar het nieuwe totaal?
+                  </div>
+                </div>
+              </div>
+
+              <div className="cpq-modal-footer">
+                <button type="button" className="cpq-button cpq-button-secondary" onClick={cancelLowerRequiredVolume}>
+                  Annuleren
+                </button>
+                <button type="button" className="cpq-button" onClick={confirmLowerRequiredVolume}>
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="cpq-topbar">
           <div>
             <h1 className="cpq-title">Offerte samenstellen</h1>
