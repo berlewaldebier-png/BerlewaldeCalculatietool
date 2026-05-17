@@ -34,61 +34,37 @@ export function DealContextBar({
   ];
 
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3">
-        <div className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-          Deal-context
-        </div>
+    <div className="cpq-card" style={{ padding: 14 }}>
+      <div className="cpq-label" style={{ marginBottom: 8 }}>
+        Deal-context
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="cpq-toggle-strip" role="group" aria-label="Deal-context" style={{ flexWrap: "wrap" }}>
         {options.map((option) => (
           <button
             key={option.id}
             type="button"
             onClick={() => onChange(option.id)}
-            className={`rounded-2xl border p-4 text-left transition ${
-              value === option.id
-                ? "border-blue-300 bg-blue-50 shadow-sm"
-                : "border-slate-200 bg-white hover:border-blue-200"
-            }`}
+            className={`cpq-toggle${value === option.id ? " active" : ""}`}
+            title={option.meta}
           >
-            <div className="flex items-center gap-3">
-              <span
-                className={`h-3 w-3 rounded-full border ${
-                  value === option.id
-                    ? "border-blue-600 bg-blue-600"
-                    : "border-slate-300 bg-white"
-                }`}
-              />
-
-              <div>
-                <div className="text-sm font-semibold text-slate-900">
-                  {option.title}
-                </div>
-                <div className="mt-0.5 text-xs text-slate-500">{option.meta}</div>
-              </div>
-            </div>
+            {option.title}
           </button>
         ))}
       </div>
 
       {value === "growth" ? (
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <label className="block">
-            <div className="mb-1.5 text-sm font-medium text-slate-700">
-              Doelvolume (L)
-            </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="cpq-field">
+            <div className="cpq-label">Doelvolume (L)</div>
             <input
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="cpq-input"
               inputMode="decimal"
               placeholder="Bijv. 3000"
               value={targetVolumeLiters ?? ""}
-              onChange={(e) =>
-                onChangeTargetVolumeLiters(toNumberOrNull(e.target.value))
-              }
+              onChange={(e) => onChangeTargetVolumeLiters(toNumberOrNull(e.target.value))}
             />
-            <div className="mt-1.5 text-xs text-slate-500">
+            <div className="cpq-muted" style={{ marginTop: 6 }}>
               Nieuwe voorwaarden gelden alleen voor extra liters boven de historische baseline.
             </div>
           </label>
@@ -96,21 +72,17 @@ export function DealContextBar({
       ) : null}
 
       {value === "agreement" ? (
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <label className="block">
-            <div className="mb-1.5 text-sm font-medium text-slate-700">
-              Contractvolume (L)
-            </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="cpq-field">
+            <div className="cpq-label">Contractvolume (L)</div>
             <input
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="cpq-input"
               inputMode="decimal"
               placeholder="Bijv. 5000"
               value={agreementVolumeLiters ?? ""}
-              onChange={(e) =>
-                onChangeAgreementVolumeLiters(toNumberOrNull(e.target.value))
-              }
+              onChange={(e) => onChangeAgreementVolumeLiters(toNumberOrNull(e.target.value))}
             />
-            <div className="mt-1.5 text-xs text-slate-500">
+            <div className="cpq-muted" style={{ marginTop: 6 }}>
               Nieuwe voorwaarden gelden voor het volledige toekomstige contractvolume.
             </div>
           </label>
@@ -118,20 +90,21 @@ export function DealContextBar({
       ) : null}
 
       {value === "growth" && targetVolumeLiters === null ? (
-        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="cpq-alert cpq-alert-warn" style={{ marginTop: 10 }}>
           Doelvolume is leeg. We gebruiken het offertevolume als doelvolume (growth = offertevolume − baseline).
         </div>
       ) : null}
 
       {value === "agreement" && agreementVolumeLiters === null ? (
-        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <div className="cpq-alert cpq-alert-warn" style={{ marginTop: 10 }}>
           Contractvolume is leeg. We gebruiken het offertevolume als contractvolume voor de berekening.
         </div>
       ) : null}
 
-      <div className="mt-3 text-xs text-slate-500">
+      <div className="cpq-muted" style={{ marginTop: 10 }}>
         Let op: we passen nooit prijzen retroactief toe op reeds gefactureerde liters.
       </div>
     </div>
   );
 }
+

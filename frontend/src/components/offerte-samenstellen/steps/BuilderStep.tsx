@@ -187,49 +187,6 @@ export function BuilderStep({
         </div>
       ) : null}
 
-      <div className="cpq-card" style={{ padding: 14 }}>
-        <div className="cpq-label" style={{ marginBottom: 8 }}>
-          Mix voor berekening
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <button
-            type="button"
-            className={`cpq-toggle${mixSource === "quote" ? " active" : ""}`}
-            onClick={() => setMixSource("quote")}
-            title="Gebruik de verdeling van de producten in deze offerte."
-          >
-            Quote-mix
-          </button>
-          <button
-            type="button"
-            className={`cpq-toggle${mixSource === "customer" ? " active" : ""}`}
-            onClick={() => setMixSource("customer")}
-            title={Object.keys(customerMixPctByRef).length > 0 ? "Gebruik de historische klantmix." : "Geen klantmix beschikbaar; valt terug op portfolio."}
-          >
-            Klantmix
-          </button>
-          {mixSource === "customer" && Object.keys(customerMixPctByRef).length === 0 ? (
-            <span
-              title="Geen klantmix beschikbaar; we vallen per product terug op portfolio mix."
-              style={{ color: "#d97706", display: "inline-flex", alignItems: "center" }}
-            >
-              <WarningIcon />
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className={`cpq-toggle${mixSource === "portfolio" ? " active" : ""}`}
-            onClick={() => setMixSource("portfolio")}
-            title="Gebruik de totale portfolio mix (gerealiseerd)."
-          >
-            Portfolio-mix
-          </button>
-          <span className="cpq-muted" style={{ marginLeft: 6 }}>
-            Percentages zijn informatief en sturen de berekening alleen als je geen productspecificatie hebt.
-          </span>
-        </div>
-      </div>
-
       <div className="cpq-toolbar">
         <div className="cpq-toolbar-inner">
           {toolbarGroups.map((group) => (
