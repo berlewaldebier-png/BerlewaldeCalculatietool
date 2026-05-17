@@ -1121,8 +1121,21 @@ export function OfferteSamenstellenApp({
       <div className="cpq-frame">
         <div className="cpq-topbar">
           <div>
-            <div className="cpq-kicker">Offerte wizard</div>
             <h1 className="cpq-title">Offerte samenstellen</h1>
+            <div className="cpq-muted" style={{ marginTop: 2 }}>
+              Bouw offertes op basis van standaardprijzen en breid ze uit met introducties, staffels, mix deals en services.
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <HorizontalStepper
+                steps={steps.map((item) => ({ id: item.id, title: item.title }))}
+                activeId={step}
+                onSelect={(id) => {
+                  const next = steps.find((s) => s.id === id);
+                  if (!next) return;
+                  setStep(next.id);
+                }}
+              />
+            </div>
           </div>
           <div className="cpq-topbar-actions">
             <button
@@ -1144,18 +1157,6 @@ export function OfferteSamenstellenApp({
             </button>
             <span className="pill">{draftMeta.status === "definitief" ? "Definitief" : "Concept"}</span>
           </div>
-        </div>
-
-        <div className="cpq-topbar" style={{ marginTop: 12, paddingTop: 0, borderTop: 0 }}>
-          <HorizontalStepper
-            steps={steps.map((item) => ({ id: item.id, title: item.title }))}
-            activeId={step}
-            onSelect={(id) => {
-              const next = steps.find((s) => s.id === id);
-              if (!next) return;
-              setStep(next.id);
-            }}
-          />
         </div>
 
         <div className="cpq-topbar" style={{ paddingTop: 0, borderTop: 0 }}>
@@ -1212,28 +1213,6 @@ export function OfferteSamenstellenApp({
           </div>
         ) : null}
 
-        {step === "builder" ? (
-          <div
-            style={{
-              marginTop: 14,
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-              gap: 12,
-              alignItems: "start",
-            }}
-          >
-            <DealContextBar
-              value={dealContext}
-              onChange={setDealContext}
-              targetVolumeLiters={targetVolumeLiters}
-              onChangeTargetVolumeLiters={setTargetVolumeLiters}
-              agreementVolumeLiters={agreementVolumeLiters}
-              onChangeAgreementVolumeLiters={setAgreementVolumeLiters}
-            />
-            <MixSourceBar />
-          </div>
-        ) : null}
-
         {/* Layout override: offerte-samenstellen uses 2 columns (main + sidebar). */}
         <div className="cpq-grid cpq-grid-offerte">
           <main className="cpq-main">
@@ -1252,48 +1231,73 @@ export function OfferteSamenstellenApp({
             ) : null}
 
             {step === "builder" ? (
-              <BuilderStep
-                unitMode={unitMode}
-                vatMode={vatMode}
-                hasIntro={hasIntro}
-                quoteYear={currentYear}
-                scenario={scenario}
-                metrics={activeMetrics.standard}
-                dealContext={dealContext}
-                setDealContext={setDealContext}
-                mixSource={mixSource}
-                setMixSource={setMixSource}
-                customerMixPctByRef={customerMixPctByRef}
-                portfolioMixPctByRef={portfolioMixPctByRef}
-                targetVolumeLiters={targetVolumeLiters}
-                setTargetVolumeLiters={setTargetVolumeLiters}
-                agreementVolumeLiters={agreementVolumeLiters}
-                setAgreementVolumeLiters={setAgreementVolumeLiters}
-                mixLiters={
-                  Math.max(
-                    0,
-                    scenario.products.find((p) => Boolean((p as any).isMixLiters))?.qty ?? 0
-                  )
-                }
-                onChangeMixLiters={setMixLiters}
-                activeScenario={activeScenario}
-                setActiveScenario={setActiveScenario}
-                updateProduct={updateProduct}
-                addProductRow={addProductRow}
-                removeProductRow={removeProductRow}
-                removeBlock={removeBlock}
-                toolbarGroups={toolbarGroups}
-                openOption={openNewOption}
-                editOption={openEditOption}
-                optionAvailability={optionAvailability}
-                onNext={() => setStep("vergelijk")}
-                productOptions={productIndex.options}
-                onSelectRowOption={handleSelectOptionForRow}
-                warnings={productIndex.warnings}
-                incompatibilityHints={incompatibilityHints}
-                onSave={() => void saveQuoteDraft()}
-                isSaving={isSavingDraft || isLoadingDraft}
-              />
+              <>
+                <div
+                  style={{
+                    marginBottom: 12,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+                    gap: 12,
+                    alignItems: "stretch",
+                  }}
+                >
+                  <div style={{ height: "100%" }}>
+                    <DealContextBar
+                      value={dealContext}
+                      onChange={setDealContext}
+                      targetVolumeLiters={targetVolumeLiters}
+                      onChangeTargetVolumeLiters={setTargetVolumeLiters}
+                      agreementVolumeLiters={agreementVolumeLiters}
+                      onChangeAgreementVolumeLiters={setAgreementVolumeLiters}
+                    />
+                  </div>
+                  <div style={{ height: "100%" }}>
+                    <MixSourceBar />
+                  </div>
+                </div>
+                <BuilderStep
+                  unitMode={unitMode}
+                  vatMode={vatMode}
+                  hasIntro={hasIntro}
+                  quoteYear={currentYear}
+                  scenario={scenario}
+                  metrics={activeMetrics.standard}
+                  dealContext={dealContext}
+                  setDealContext={setDealContext}
+                  mixSource={mixSource}
+                  setMixSource={setMixSource}
+                  customerMixPctByRef={customerMixPctByRef}
+                  portfolioMixPctByRef={portfolioMixPctByRef}
+                  targetVolumeLiters={targetVolumeLiters}
+                  setTargetVolumeLiters={setTargetVolumeLiters}
+                  agreementVolumeLiters={agreementVolumeLiters}
+                  setAgreementVolumeLiters={setAgreementVolumeLiters}
+                  mixLiters={
+                    Math.max(
+                      0,
+                      scenario.products.find((p) => Boolean((p as any).isMixLiters))?.qty ?? 0
+                    )
+                  }
+                  onChangeMixLiters={setMixLiters}
+                  activeScenario={activeScenario}
+                  setActiveScenario={setActiveScenario}
+                  updateProduct={updateProduct}
+                  addProductRow={addProductRow}
+                  removeProductRow={removeProductRow}
+                  removeBlock={removeBlock}
+                  toolbarGroups={toolbarGroups}
+                  openOption={openNewOption}
+                  editOption={openEditOption}
+                  optionAvailability={optionAvailability}
+                  onNext={() => setStep("vergelijk")}
+                  productOptions={productIndex.options}
+                  onSelectRowOption={handleSelectOptionForRow}
+                  warnings={productIndex.warnings}
+                  incompatibilityHints={incompatibilityHints}
+                  onSave={() => void saveQuoteDraft()}
+                  isSaving={isSavingDraft || isLoadingDraft}
+                />
+              </>
             ) : null}
 
             {step === "vergelijk" ? (
