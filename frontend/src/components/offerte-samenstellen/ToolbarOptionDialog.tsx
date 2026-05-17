@@ -4,6 +4,7 @@ import type { OptionAvailability } from "@/components/offerte-samenstellen/confl
 import { GroothandelForm, getGroothandelFormError } from "@/components/offerte-samenstellen/forms/GroothandelForm";
 import { IntroForm, getIntroFormError } from "@/components/offerte-samenstellen/forms/IntroForm";
 import { KortingForm, getKortingFormError } from "@/components/offerte-samenstellen/forms/KortingForm";
+import { PalletopbouwForm, getPalletopbouwFormError } from "@/components/offerte-samenstellen/forms/PalletopbouwForm";
 import { MixDealForm } from "@/components/offerte-samenstellen/forms/MixDealForm";
 import { ProeverijForm } from "@/components/offerte-samenstellen/forms/ProeverijForm";
 import { RetourForm } from "@/components/offerte-samenstellen/forms/RetourForm";
@@ -58,14 +59,17 @@ export function ToolbarOptionDialog({
     selectedOption === "Korting" ? getKortingFormError(form, baseOfferRefs) : "";
   const groothandelError =
     selectedOption === "Groothandel" ? getGroothandelFormError(form, baseOfferRefs) : "";
+  const palletopbouwError =
+    selectedOption === "Palletopbouw" ? getPalletopbouwFormError(form) : "";
   const saveBlockedReason =
-    introError || staffelError || kortingError || groothandelError || selectedOptionAvailability.reasons[0] || "";
+    introError || staffelError || kortingError || groothandelError || palletopbouwError || selectedOptionAvailability.reasons[0] || "";
   const canSave =
     selectedOptionAvailability.allowed &&
     !introError &&
     !staffelError &&
     !kortingError &&
-    !groothandelError;
+    !groothandelError &&
+    !palletopbouwError;
   const contextLabel = getContextLabel(selectedOption, hasIntro);
 
   return (
@@ -128,6 +132,12 @@ export function ToolbarOptionDialog({
               setForm={setForm}
               products={productOptions}
               baseOfferRefs={baseOfferRefs}
+            />
+          ) : null}
+          {selectedOption === "Palletopbouw" ? (
+            <PalletopbouwForm
+              form={form}
+              setForm={setForm}
             />
           ) : null}
           {selectedOption === "Transport" ? (

@@ -1001,7 +1001,7 @@ export function VerkoopstrategieWorkspace({
               <div className="module-card-title">Dienstverlening (uurtarieven)</div>
               <div className="module-card-text">
                 Diensten hebben een vast tarief (ex) en worden niet via opslag% per kanaal berekend.
-                Pas het tarief aan via Producten &amp; verpakking â†’ Samenstellen.
+                Pas het tarief aan via Producten &amp; verpakking → Samenstellen.
               </div>
               <div className="dataset-editor-scroll" style={{ marginTop: 12, borderRadius: 12 }}>
                 <table className="dataset-editor-table">

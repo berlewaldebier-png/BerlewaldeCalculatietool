@@ -22,6 +22,7 @@ export const offerteToolbarGroups: ToolbarGroup[] = [
   {
     title: "Extra's",
     items: [
+      { icon: icons.Palletopbouw, label: "Palletopbouw" },
       { icon: icons.Proeverij, label: "Proeverij" },
       { icon: icons.Tapverhuur, label: "Tapverhuur" },
     ],

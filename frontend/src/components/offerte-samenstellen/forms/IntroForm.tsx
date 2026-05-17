@@ -1,4 +1,4 @@
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+﻿import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useMemo, useState } from "react";
 
 import {
@@ -88,21 +88,6 @@ export function getIntroFormError(form: QuoteFormState, today: string = todayIso
       !form.introThresholdSingleProductRef.trim()
     ) {
       return "Kies het product waarop de drempelkorting geldt.";
-    }
-  }
-
-  const upliftLitersRaw = String(form.introUpliftLiters ?? "").trim();
-  if (upliftLitersRaw) {
-    const upliftLiters = Number(upliftLitersRaw.replace(",", "."));
-    if (!Number.isFinite(upliftLiters) || upliftLiters < 0) {
-      return "Vul een geldige uplift in liters in.";
-    }
-  }
-  const upliftPctRaw = String(form.introUpliftPct ?? "").trim();
-  if (upliftPctRaw) {
-    const upliftPct = Number(upliftPctRaw.replace(",", "."));
-    if (!Number.isFinite(upliftPct) || upliftPct < 0) {
-      return "Vul een geldige uplift in procenten in.";
     }
   }
 
@@ -712,42 +697,7 @@ export function IntroForm({ form, setForm, products }: Props) {
           )}
         </div>
 
-        <SelectField
-          label="Actie geldt voor"
-          value={form.introAppliesToVolume}
-          options={[
-            { label: "Uplift (extra volume)", value: "uplift" },
-            { label: "Bestaand volume", value: "existing" },
-            { label: "Bestaand + uplift", value: "both" },
-          ]}
-          onChange={(value) =>
-            setForm((prev) => ({
-              ...prev,
-              introAppliesToVolume: value as any,
-            }))
-          }
-        />
-
-        <div className="cpq-form-grid" style={{ marginTop: 10 }}>
-          <Field
-            label="Uplift (liters)"
-            value={form.introUpliftLiters}
-            onChange={(value) => setForm((prev) => ({ ...prev, introUpliftLiters: value }))}
-            placeholder="Bijv. 100"
-            type="number"
-            min="0"
-          />
-          <Field
-            label="Uplift (%)"
-            value={form.introUpliftPct}
-            onChange={(value) => setForm((prev) => ({ ...prev, introUpliftPct: value }))}
-            placeholder="Bijv. 10"
-            type="number"
-            min="0"
-          />
-        </div>
-
-        <Idea text="Uplift is extra volume dat je verwacht door de introductieactie (bovenop baseline). Als je een klant selecteert in basisgegevens, tonen we daar baseline liters." />
+        {/* Volume split is automatic (existing vs growth) based on klantbaseline + offertevolume. */}
         <Idea text="De financiële impact is afgeleid uit de bestaande verkoopprijs, kostprijs, liters per verpakking en de standaard glasmaat. Deze inzichten slaan we niet apart op in de offerte." />
       </div>
     </div>

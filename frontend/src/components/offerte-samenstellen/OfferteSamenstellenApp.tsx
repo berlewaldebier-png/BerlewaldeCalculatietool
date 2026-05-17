@@ -46,6 +46,7 @@ import {
   type BreakEvenConfig,
   type BreakEvenResult,
 } from "@/components/break-even/breakEvenUtils";
+import { calculateBreakEvenProgress } from "@/lib/breakEvenProgress";
 import {
   buildRealizedBreakEvenRows,
   calculateBreakEvenV2Summary,
@@ -68,7 +69,9 @@ import type {
   StepKey,
   ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
-import { WizardSteps } from "@/components/WizardSteps";
+import { HorizontalStepper } from "@/components/offerte-samenstellen/HorizontalStepper";
+import { BreakEvenProgressCard } from "@/components/offerte-samenstellen/sidebar/BreakEvenProgressCard";
+import { QuoteImpactCard } from "@/components/offerte-samenstellen/sidebar/QuoteImpactCard";
 import { buildLitersPerUnitOverrideMap, getScenario as getLocalScenario, getScenarioLabel } from "@/lib/scenarios";
 import { Field, LiveSummaryMetric, Metric, QuickCell } from "@/components/offerte-samenstellen/OfferteSamenstellenParts";
 import { clampNumber, euro, normalizeText } from "@/components/offerte-samenstellen/offerteSamenstellenUi";
@@ -440,6 +443,7 @@ export function OfferteSamenstellenApp({
 
   const offerBreakEvenImpact = useMemo(() => {
     if (!breakEvenV2Summary) return null;
+    if (!scenario) return null;
 
     const labelByRef = new Map<string, string>();
     productIndex.options.forEach((opt) => {
@@ -458,16 +462,6 @@ export function OfferteSamenstellenApp({
     });
 
     const pricingPayload = (activeStandardPricingBlock?.payload ?? {}) as any;
-    const appliesToVolume = String(pricingPayload.appliesToVolume ?? "").trim() as
-      | "existing"
-      | "uplift"
-      | "both";
-    const upliftLitersInput = Math.max(0, Number(pricingPayload.upliftLiters ?? 0));
-    const upliftPctInput = Math.max(0, Number(pricingPayload.upliftPct ?? 0));
-    const actionLitersInput =
-      activeStandardPricingBlock?.type === "Groothandel"
-        ? Math.max(0, Number(pricingPayload.expectedLiters ?? 0))
-        : 0;
 
     const eligibleRefs = Array.isArray(pricingPayload.eligibleRefs)
       ? new Set((pricingPayload.eligibleRefs as any[]).map(String))
@@ -482,20 +476,8 @@ export function OfferteSamenstellenApp({
     const selectionLitersTotal = Array.from(selectionLitersByRef.values()).reduce((sum, v) => sum + v, 0);
 
     const customerBaselineLiters = Math.max(0, customerSummary?.mapped_liters ?? 0);
-    const existingLitersTotal = (() => {
-      if (activeStandardPricingBlock?.type === "Groothandel") {
-        if (actionLitersInput > 0) return actionLitersInput;
-        return customerBaselineLiters;
-      }
-      return customerBaselineLiters;
-    })();
-
-    const upliftLitersTotal =
-      upliftLitersInput > 0
-        ? upliftLitersInput
-        : upliftPctInput > 0 && existingLitersTotal > 0
-          ? (existingLitersTotal * upliftPctInput) / 100
-          : 0;
+    const existingLitersTotal = selectionLitersTotal > 0 ? Math.min(customerBaselineLiters, selectionLitersTotal) : 0;
+    const upliftLitersTotal = selectionLitersTotal > 0 ? Math.max(0, selectionLitersTotal - customerBaselineLiters) : 0;
 
     const baselineByRef = new Map(baseline.map((line) => [line.ref, line]));
     const impacts = current
@@ -516,15 +498,12 @@ export function OfferteSamenstellenApp({
         const existingQtyForLine = existingLitersForLine > 0 && litersPerUnit > 0 ? existingLitersForLine / litersPerUnit : 0;
         const upliftQtyForLine = upliftLitersForLine > 0 && litersPerUnit > 0 ? upliftLitersForLine / litersPerUnit : 0;
 
-        const useExisting = appliesToVolume === "existing" || appliesToVolume === "both";
-        const useUplift = appliesToVolume === "uplift" || appliesToVolume === "both";
-
-        const lostContributionEx = useExisting
-          ? Math.max(0, (baseContributionUnit - scenarioContributionUnit) * (existingQtyForLine || qtyPaid))
-          : 0;
-        const gainedContributionEx = useUplift
-          ? Math.max(0, scenarioContributionUnit * upliftQtyForLine)
-          : 0;
+        const lostContributionEx =
+          existingQtyForLine > 0
+            ? Math.max(0, (baseContributionUnit - scenarioContributionUnit) * existingQtyForLine)
+            : 0;
+        const gainedContributionEx =
+          upliftQtyForLine > 0 ? Math.max(0, scenarioContributionUnit * upliftQtyForLine) : 0;
         const netContributionEx = gainedContributionEx - lostContributionEx;
 
         const shouldRender = Math.abs(lostContributionEx) > 0.0001 || Math.abs(gainedContributionEx) > 0.0001;
@@ -542,7 +521,7 @@ export function OfferteSamenstellenApp({
         return {
           ref: line.ref,
           label,
-          qtyPaid: useExisting ? (existingQtyForLine || qtyPaid) : qtyPaid,
+          qtyPaid,
           baseUnitPriceEx: base.baseUnitPriceEx,
           offerUnitPriceEx: line.offerUnitPriceEx,
           costPriceEx: line.costPriceEx,
@@ -576,8 +555,52 @@ export function OfferteSamenstellenApp({
         ? Math.abs(netContributionEx) / weightedContributionPerLiter
         : 0;
 
-    return { impacts, totalLostContributionEx, totalGainedContributionEx, netContributionEx, portfolioExtraLiters };
+    const discountEffectLitersEquivalent =
+      breakEvenV2Summary.weightedContributionPerLiter > 0
+        ? totalLostContributionEx / breakEvenV2Summary.weightedContributionPerLiter
+        : 0;
+
+    const growthFromDealLiters = upliftLitersTotal;
+
+    return {
+      impacts,
+      totalLostContributionEx,
+      totalGainedContributionEx,
+      netContributionEx,
+      portfolioExtraLiters,
+      discountEffectLitersEquivalent,
+      growthFromDealLiters,
+      existingLitersTotal,
+      upliftLitersTotal,
+    };
   }, [breakEvenV2Summary, scenario, productIndex.options, customerSummary]);
+
+  const breakEvenProgress = useMemo(() => {
+    if (!breakEvenV2Summary) return null;
+
+    const growthFromDealLiters = Math.max(0, offerBreakEvenImpact?.growthFromDealLiters ?? 0);
+    const discountEffectLitersEquivalent = Math.max(
+      0,
+      offerBreakEvenImpact?.discountEffectLitersEquivalent ?? 0
+    );
+    const transportCostEx = Math.max(
+      0,
+      scenarioMetrics[activeScenario]?.standard?.transportCostEx ?? 0
+    );
+    const transportEffectLitersEquivalent =
+      breakEvenV2Summary.weightedContributionPerLiter > 0
+        ? transportCostEx / breakEvenV2Summary.weightedContributionPerLiter
+        : 0;
+
+    return calculateBreakEvenProgress({
+      breakEvenTargetLiters: breakEvenV2Summary.breakEvenLiters,
+      alreadySoldLitersYtd: breakEvenV2Summary.totalSoldLiters,
+      customerAlreadyBoughtLiters: customerSummary?.mapped_liters ?? null,
+      growthFromDealLiters,
+      discountEffectLitersEquivalent,
+      transportEffectLitersEquivalent,
+    });
+  }, [breakEvenV2Summary, offerBreakEvenImpact, customerSummary, scenarioMetrics, activeScenario]);
 
   function SummaryMetric({ label, value }: { label: string; value: string }) {
     return (
@@ -613,6 +636,7 @@ export function OfferteSamenstellenApp({
             qty: 1,
             litersPerUnit: 0,
             unit: "doos",
+            roundingMode: "none",
             standardPriceEx: 0,
             costPriceEx: 0,
             vatRatePct: 0,
@@ -715,11 +739,19 @@ export function OfferteSamenstellenApp({
   function handleSelectOptionForRow(rowId: string, optionId: string) {
     const option = productIndex.options.find((o) => o.optionId === optionId);
     if (!option) return;
+    const resolvedUnit =
+      option.salesUnitLabel === "doos" || option.salesUnitLabel === "fust" || option.salesUnitLabel === "fles" || option.salesUnitLabel === "stuk"
+        ? option.salesUnitLabel
+        : inferUnitFromPack(option.packLabel);
     updateProduct(rowId, {
       name: option.bierName,
       pack: option.packLabel,
       litersPerUnit: option.litersPerUnit,
-      unit: inferUnitFromPack(option.packLabel),
+      unit: resolvedUnit,
+      unitsPerLayer: option.unitsPerLayer ?? null,
+      unitsPerPallet: option.unitsPerPallet ?? null,
+      contributesToLiters: option.contributesToLiters ?? undefined,
+      contributesToMargin: option.contributesToMargin ?? undefined,
       standardPriceEx: option.standardPriceEx,
       costPriceEx: option.costPriceEx,
       vatRatePct: option.vatRatePct,
@@ -729,6 +761,55 @@ export function OfferteSamenstellenApp({
         product_id: option.productId,
         kostprijsversie_id: option.kostprijsversieId,
       },
+    });
+  }
+
+  const mixPricing = useMemo(() => {
+    const sellInPerLiter = Math.max(0, breakEvenV2Summary?.weightedSellInPerLiter ?? 0);
+    const contributionPerLiter = Math.max(0, breakEvenV2Summary?.weightedContributionPerLiter ?? 0);
+    const costPerLiter = Math.max(0, sellInPerLiter - contributionPerLiter);
+    return { sellInPerLiter, costPerLiter };
+  }, [breakEvenV2Summary]);
+
+  function setMixLiters(nextLiters: number) {
+    const liters = Math.max(0, clampNumber(nextLiters, 0));
+    setScenarios((prev) => {
+      const current = prev[activeScenario];
+      const existing = current.products.find((p) => Boolean((p as any).isMixLiters));
+      const withoutMix = current.products.filter((p) => !Boolean((p as any).isMixLiters));
+
+      if (liters <= 0) {
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...current,
+            products: withoutMix,
+          },
+        };
+      }
+
+      const mixProduct = {
+        id: existing?.id ?? "mix-liters",
+        name: "Bier (mix)",
+        pack: "Totaal liters",
+        qty: liters,
+        litersPerUnit: 1,
+        unit: "liter" as any,
+        isMixLiters: true,
+        mixPackUnit: (existing as any)?.mixPackUnit ?? "doos",
+        roundingMode: "none" as const,
+        standardPriceEx: mixPricing.sellInPerLiter,
+        costPriceEx: mixPricing.costPerLiter,
+        vatRatePct: 21,
+      };
+
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...current,
+          products: [mixProduct as any, ...withoutMix],
+        },
+      };
     });
   }
 
@@ -942,8 +1023,32 @@ export function OfferteSamenstellenApp({
         </div>
 
         <div className="cpq-topbar" style={{ marginTop: 12, paddingTop: 0, borderTop: 0 }}>
+          <HorizontalStepper
+            steps={steps.map((item) => ({ id: item.id, title: item.title }))}
+            activeId={step}
+            onSelect={(id) => {
+              const next = steps.find((s) => s.id === id);
+              if (!next) return;
+              setStep(next.id);
+            }}
+          />
+        </div>
+
+        <div className="cpq-topbar" style={{ paddingTop: 0, borderTop: 0 }}>
           <div />
           <div className="cpq-topbar-actions">
+            <div className="cpq-toggle-strip" role="group" aria-label="Voorstel">
+              {(["A", "B", "C"] as const).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setActiveScenario(id)}
+                  className={`cpq-toggle${activeScenario === id ? " active" : ""}`}
+                >
+                  Voorstel {id}
+                </button>
+              ))}
+            </div>
             <div className="cpq-toggle-strip" role="group" aria-label="Eenheden">
               <button
                 onClick={() => setUnitMode("producten")}
@@ -983,41 +1088,8 @@ export function OfferteSamenstellenApp({
           </div>
         ) : null}
 
-        <div className="cpq-grid">
-          <aside className="cpq-left">
-            <WizardSteps
-              title="Stappen"
-              steps={steps.map((item) => ({ id: item.id, title: item.title, description: item.desc }))}
-              activeIndex={steps.findIndex((item) => item.id === step)}
-              onSelect={(index) => {
-                const next = steps[index];
-                if (!next) return;
-                setStep(next.id);
-              }}
-            />
-
-            <div className="cpq-quick">
-              <div className="cpq-quick-title">Quick view</div>
-              <div className="cpq-quick-grid">
-                <QuickCell label="Klant" value={basis.klantNaam || "—"} />
-                <QuickCell label="Kanaal" value={basis.kanaal} />
-                <QuickCell label="Status" value={draftMeta.status === "definitief" ? "Definitief" : "Concept"} />
-                <QuickCell label="Voorstel" value={activeScenario} />
-                <QuickCell label="Jaar" value={String(year)} />
-                <QuickCell
-                  label="Break-even"
-                  value={
-                    activeBreakEvenConfig
-                      ? activeBreakEvenConfig.naam
-                      : "Geen actieve versie"
-                  }
-                />
-                <QuickCell label="Versie" value={String(draftMeta.version)} />
-                <QuickCell label="Bewaard" value={draftMeta.updatedAt ? new Date(draftMeta.updatedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }) : "Nog niet"} />
-              </div>
-            </div>
-          </aside>
-
+        {/* Layout override: offerte-samenstellen uses 2 columns (main + sidebar). */}
+        <div className="cpq-grid cpq-grid-offerte">
           <main className="cpq-main">
             {step === "basis" ? (
               <BasisStep
@@ -1040,6 +1112,13 @@ export function OfferteSamenstellenApp({
                 hasIntro={hasIntro}
                 scenario={scenario}
                 metrics={activeMetrics.standard}
+                mixLiters={
+                  Math.max(
+                    0,
+                    scenario.products.find((p) => Boolean((p as any).isMixLiters))?.qty ?? 0
+                  )
+                }
+                onChangeMixLiters={setMixLiters}
                 activeScenario={activeScenario}
                 setActiveScenario={setActiveScenario}
                 updateProduct={updateProduct}
@@ -1089,75 +1168,43 @@ export function OfferteSamenstellenApp({
           </main>
 
           <aside className="cpq-right">
-            <div className="cpq-right-kicker">Break-even</div>
-            {!breakEvenV2Summary ? (
+            {!breakEvenV2Summary || !breakEvenProgress ? (
               <div className="cpq-alert cpq-alert-warn">
                 Break-even niet geladen.
                 {realizedSalesError ? <div style={{ marginTop: "0.35rem" }}>{realizedSalesError}</div> : null}
               </div>
             ) : (
-              <div className="cpq-intro-summary-card">
-                <div className="cpq-intro-summary-grid">
-                  <SummaryMetric label="Vaste kosten" value={euro(breakEvenV2Summary.adjustedFixedCostsTotal)} />
-                  <SummaryMetric label="Gewogen contributie/L" value={euro(breakEvenV2Summary.weightedContributionPerLiter)} />
-                  <SummaryMetric label="Break-even liters" value={`${Math.round(breakEvenV2Summary.breakEvenLiters).toLocaleString("nl-NL")} L`} />
-                  <SummaryMetric label="Break-even omzet (bier)" value={euro(breakEvenV2Summary.breakEvenRevenue)} />
-                  <SummaryMetric label="Margin of safety" value={euro(breakEvenV2Summary.marginOfSafetyEx)} />
-                  <SummaryMetric label="Verkochte liters" value={`${Math.round(breakEvenV2Summary.totalSoldLiters).toLocaleString("nl-NL")} L`} />
-                </div>
-              </div>
+              <BreakEvenProgressCard
+                breakEvenTargetLiters={breakEvenV2Summary.breakEvenLiters}
+                alreadySoldLitersYtd={breakEvenV2Summary.totalSoldLiters}
+                customerAlreadyBoughtLiters={Math.max(0, customerSummary?.mapped_liters ?? 0)}
+                growthFromDealLiters={Math.max(0, offerBreakEvenImpact?.growthFromDealLiters ?? 0)}
+                discountEffectLitersEquivalent={Math.max(0, offerBreakEvenImpact?.discountEffectLitersEquivalent ?? 0)}
+                transportEffectLitersEquivalent={
+                  breakEvenV2Summary.weightedContributionPerLiter > 0
+                    ? Math.max(0, activeMetrics.standard.transportCostEx ?? 0) / breakEvenV2Summary.weightedContributionPerLiter
+                    : 0
+                }
+                progressPct={breakEvenProgress.progressPct}
+                newTotalProgressLiters={breakEvenProgress.newTotalProgressLiters}
+                remainingLitersToBreakEven={breakEvenProgress.remainingLitersToBreakEven}
+                theoreticalCurrentLiters={breakEvenV2Summary.breakEvenLiters}
+                theoreticalDealLiters={null}
+                theoreticalDeltaLiters={null}
+              />
             )}
 
-            <div style={{ marginTop: "1rem" }}>
-              <div className="cpq-right-kicker">Impact offerte</div>
-              {!offerBreakEvenImpact ? (
-                <div className="cpq-intro-summary-card">
-                  <div className="cpq-muted">Selecteer producten om impact te zien.</div>
-                </div>
-              ) : offerBreakEvenImpact.impacts.length === 0 ? (
-                <div className="cpq-intro-summary-card">
-                  <div className="cpq-muted">Geen korting/toeslag impact t.o.v. standaardprijzen.</div>
-                </div>
-              ) : (
-                <>
-                  <div className="cpq-intro-summary-card">
-                    <div className="cpq-intro-summary-grid">
-                      <SummaryMetric label="Verlies contributie" value={euro(offerBreakEvenImpact.totalLostContributionEx)} />
-                      <SummaryMetric label="Winst contributie" value={euro(offerBreakEvenImpact.totalGainedContributionEx)} />
-                      <SummaryMetric label="Netto effect" value={euro(offerBreakEvenImpact.netContributionEx)} />
-                      <SummaryMetric
-                        label="Extra liters nodig (portfolio)"
-                        value={
-                          offerBreakEvenImpact.portfolioExtraLiters > 0
-                            ? `${Math.round(offerBreakEvenImpact.portfolioExtraLiters).toLocaleString("nl-NL")} L`
-                            : "—"
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div className="cpq-intro-summary-card" style={{ marginTop: "0.8rem" }}>
-                    <div className="cpq-intro-card-title">Extra volume per product</div>
-                    <div style={{ marginTop: "0.75rem" }}>
-                      {offerBreakEvenImpact.impacts.map((row) => (
-                        <div key={row.ref} className="cpq-impact-row">
-                          <div className="cpq-impact-title">{row.label}</div>
-                          <div className="cpq-impact-meta">
-                            {row.extraUnits === Number.POSITIVE_INFINITY ? (
-                              <span>Contributie per eenheid ≤ 0 bij actieprijs.</span>
-                            ) : (
-                              <span>
-                                Extra nodig: {Math.ceil(row.extraUnits).toLocaleString("nl-NL")}
-                                {row.extraLiters !== null ? ` (${Math.round(row.extraLiters).toLocaleString("nl-NL")} L)` : ""}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
+            <div style={{ marginTop: 14 }}>
+              <QuoteImpactCard
+                lostExistingEx={offerBreakEvenImpact?.totalLostContributionEx ?? 0}
+                gainedGrowthEx={offerBreakEvenImpact?.totalGainedContributionEx ?? 0}
+                transportEx={Math.max(0, activeMetrics.standard.transportCostEx ?? 0)}
+                netEffectEx={
+                  (offerBreakEvenImpact?.netContributionEx ?? 0) -
+                  Math.max(0, activeMetrics.standard.transportCostEx ?? 0)
+                }
+                extraLitersNeeded={Math.max(0, offerBreakEvenImpact?.portfolioExtraLiters ?? 0)}
+              />
             </div>
           </aside>
         </div>

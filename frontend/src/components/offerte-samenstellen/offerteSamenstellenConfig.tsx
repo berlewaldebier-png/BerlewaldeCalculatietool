@@ -10,6 +10,7 @@ export const tones: Record<OptionType, string> = {
   Mix: "cpq-tone-mix",
   Korting: "cpq-tone-korting",
   Groothandel: "cpq-tone-korting",
+  Palletopbouw: "cpq-tone-transport",
   Transport: "cpq-tone-transport",
   Retour: "cpq-tone-retour",
   Proeverij: "cpq-tone-proeverij",
@@ -22,6 +23,7 @@ export const icons: Record<OptionType, React.ReactNode> = {
   Mix: <IconShuffle />,
   Korting: <IconTag />,
   Groothandel: <IconStorefront />,
+  Palletopbouw: <IconPallet />,
   Transport: <IconTruck />,
   Retour: <IconReturn />,
   Proeverij: <IconBeer />,
@@ -98,6 +100,34 @@ function IconStorefront() {
         strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
+      />
+    </BaseIcon>
+  );
+}
+
+function IconPallet() {
+  return (
+    <BaseIcon title="Palletopbouw">
+      <path
+        d="M6.2 10.2h11.6M6.2 13.2h11.6M6.2 16.2h11.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M5.8 8.4c0-.55.45-1 1-1h10.4c.55 0 1 .45 1 1v9.2c0 .55-.45 1-1 1H6.8c-.55 0-1-.45-1-1V8.4z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.5 19.5h9.0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
       />
     </BaseIcon>
   );

@@ -57,9 +57,6 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         introThresholdValue: String(payload.thresholdValue ?? ""),
         introThresholdDiscount: String(payload.thresholdDiscount ?? ""),
         introNote: String(payload.note ?? ""),
-        introAppliesToVolume: String(payload.appliesToVolume ?? initial.introAppliesToVolume) as QuoteFormState["introAppliesToVolume"],
-        introUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.introUpliftLiters),
-        introUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.introUpliftPct),
       };
 
     case "Staffel":
@@ -104,9 +101,6 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         discountMode: String(payload.discountMode ?? initial.discountMode),
         discountValue: String(payload.discountPct ?? initial.discountValue),
         kortingEligibleRefs: asStringArray(payload.eligibleRefs),
-        discountAppliesToVolume: String(payload.appliesToVolume ?? initial.discountAppliesToVolume) as QuoteFormState["discountAppliesToVolume"],
-        discountUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.discountUpliftLiters),
-        discountUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.discountUpliftPct),
       };
 
     case "Groothandel":
@@ -116,10 +110,6 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
           payload.useBaseOfferProducts ?? initial.wholesaleUseBaseOfferProducts
         ),
         wholesaleMarginPct: String(payload.marginPct ?? initial.wholesaleMarginPct),
-        wholesaleExpectedLiters: String(payload.expectedLiters ?? initial.wholesaleExpectedLiters),
-        wholesaleAppliesToVolume: String(payload.appliesToVolume ?? initial.wholesaleAppliesToVolume) as QuoteFormState["wholesaleAppliesToVolume"],
-        wholesaleUpliftLiters: asDutchNumberString(payload.upliftLiters ?? initial.wholesaleUpliftLiters),
-        wholesaleUpliftPct: asDutchNumberString(payload.upliftPct ?? initial.wholesaleUpliftPct),
         wholesaleEligibleRefs: asStringArray(payload.eligibleRefs),
       };
 
@@ -130,6 +120,17 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         transportRateEx: String(payload.rateEx ?? initial.transportRateEx),
         transportDeliveries: String(payload.deliveries ?? initial.transportDeliveries),
         transportThresholdKm: String(payload.thresholdKm ?? initial.transportThresholdKm),
+        transportFreeShippingThresholdValue: String(
+          payload.freeShippingThresholdValue ?? initial.transportFreeShippingThresholdValue
+        ),
+        transportFreeShippingThresholdUnit: String(
+          payload.freeShippingThresholdUnit ?? initial.transportFreeShippingThresholdUnit
+        ) as any,
+        transportCostType: String(payload.transportCostType ?? initial.transportCostType) as any,
+        transportCostEx: String(payload.transportCostEx ?? initial.transportCostEx),
+        transportIncludeInMargin: Boolean(
+          payload.includeInMargin ?? initial.transportIncludeInMargin
+        ),
         transportChargedToCustomer: Boolean(
           payload.chargedToCustomer ?? initial.transportChargedToCustomer
         ),
@@ -157,6 +158,15 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         tapCostEx: String(payload.costEx ?? initial.tapCostEx),
         tapPriceEx: String(payload.priceEx ?? initial.tapPriceEx),
         tapIsFree: Boolean(payload.isFree ?? initial.tapIsFree),
+      };
+
+    case "Palletopbouw":
+      return {
+        ...initial,
+        palletDoosUnitsPerLayer: asDutchNumberString(payload.doosUnitsPerLayer ?? initial.palletDoosUnitsPerLayer),
+        palletDoosUnitsPerPallet: asDutchNumberString(payload.doosUnitsPerPallet ?? initial.palletDoosUnitsPerPallet),
+        palletFustUnitsPerLayer: asDutchNumberString(payload.fustUnitsPerLayer ?? initial.palletFustUnitsPerLayer),
+        palletFustUnitsPerPallet: asDutchNumberString(payload.fustUnitsPerPallet ?? initial.palletFustUnitsPerPallet),
       };
 
     default:

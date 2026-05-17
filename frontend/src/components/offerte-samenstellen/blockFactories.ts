@@ -59,9 +59,6 @@ export function buildBlockFromForm({
         ? form.introEligibleRefs.map(String)
         : [];
       const productLabels = resolveProductLabels(productOptions, eligibleRefs);
-      const upliftLiters = clampNumber(form.introUpliftLiters, 0);
-      const upliftPct = clampNumber(form.introUpliftPct, 0);
-      const appliesToVolume = form.introAppliesToVolume;
 
       return {
         id: blockId,
@@ -72,8 +69,6 @@ export function buildBlockFromForm({
         lines: [
           `Producten: ${productLabels.length > 0 ? productLabels.join(", ") : "-"}`,
           buildIntroPromoLine(form),
-          `Actie geldt voor: ${appliesToVolume === "existing" ? "bestaand volume" : appliesToVolume === "both" ? "bestaand + uplift" : "uplift"}`,
-          `Uplift verwachting: ${upliftLiters > 0 ? `${upliftLiters.toLocaleString("nl-NL")} L` : "-"}${upliftPct > 0 ? ` (${upliftPct.toLocaleString("nl-NL")}%)` : ""}`,
           ...(normalizeText(form.introNote)
             ? [`Toelichting: ${normalizeText(form.introNote)}`]
             : []),
@@ -101,9 +96,6 @@ export function buildBlockFromForm({
           thresholdValue: normalizeText(form.introThresholdValue),
           thresholdDiscount: normalizeText(form.introThresholdDiscount),
           note: normalizeText(form.introNote),
-          appliesToVolume,
-          upliftLiters,
-          upliftPct,
         },
       };
     }
@@ -199,9 +191,6 @@ export function buildBlockFromForm({
         : Array.isArray(form.kortingEligibleRefs)
           ? form.kortingEligibleRefs.map(String)
           : [];
-      const upliftLiters = clampNumber(form.discountUpliftLiters, 0);
-      const upliftPct = clampNumber(form.discountUpliftPct, 0);
-      const appliesToVolume = form.discountAppliesToVolume;
 
       return {
         id: blockId,
@@ -216,8 +205,6 @@ export function buildBlockFromForm({
               ? resolveProductLabels(productOptions, eligibleRefs).join(", ")
               : "Alle producten in dit voorstel"
           }`,
-          `Actie geldt voor: ${appliesToVolume === "existing" ? "bestaand volume" : appliesToVolume === "both" ? "bestaand + uplift" : "uplift"}`,
-          `Uplift verwachting: ${upliftLiters > 0 ? `${upliftLiters.toLocaleString("nl-NL")} L` : "-"}${upliftPct > 0 ? ` (${upliftPct.toLocaleString("nl-NL")}%)` : ""}`,
         ],
         tone: tones[type],
         appliesTo: activePeriod as QuoteBlockContext,
@@ -226,9 +213,6 @@ export function buildBlockFromForm({
           discountMode: normalizeText(form.discountMode || "Totaal"),
           discountPct: clampNumber(form.discountValue, 0),
           eligibleRefs,
-          appliesToVolume,
-          upliftLiters,
-          upliftPct,
         },
       };
     }
@@ -241,10 +225,6 @@ export function buildBlockFromForm({
           : [];
       const productLabels = resolveProductLabels(productOptions, eligibleRefs);
       const marginPct = clampNumber(form.wholesaleMarginPct, 0);
-      const expectedLiters = clampNumber(form.wholesaleExpectedLiters, 0);
-      const upliftLiters = clampNumber(form.wholesaleUpliftLiters, 0);
-      const upliftPct = clampNumber(form.wholesaleUpliftPct, 0);
-      const appliesToVolume = form.wholesaleAppliesToVolume;
 
       return {
         id: blockId,
@@ -255,9 +235,6 @@ export function buildBlockFromForm({
         lines: [
           `Gewenste groothandelsmarge: ${normalizeText(form.wholesaleMarginPct) || "0"}%`,
           `Producten: ${productLabels.length > 0 ? productLabels.join(", ") : "Alle producten in dit voorstel"}`,
-          `Actie-volume (liters): ${expectedLiters > 0 ? expectedLiters.toLocaleString("nl-NL") : "-"}`,
-          `Actie geldt voor: ${appliesToVolume === "existing" ? "bestaand volume" : appliesToVolume === "both" ? "bestaand + uplift" : "uplift"}`,
-          `Uplift verwachting: ${upliftLiters > 0 ? `${upliftLiters.toLocaleString("nl-NL")} L` : "-"}${upliftPct > 0 ? ` (${upliftPct.toLocaleString("nl-NL")}%)` : ""}`,
           "Verkoopprijs aan groothandel wordt teruggerekend vanaf de huidige horeca-sell-in prijs.",
         ],
         tone: tones[type],
@@ -265,10 +242,6 @@ export function buildBlockFromForm({
         payload: {
           useBaseOfferProducts: form.wholesaleUseBaseOfferProducts,
           marginPct,
-          expectedLiters,
-          appliesToVolume,
-          upliftLiters,
-          upliftPct,
           eligibleRefs,
           productLabels,
         },
@@ -276,12 +249,13 @@ export function buildBlockFromForm({
     }
 
     case "Transport": {
-      const distance = clampNumber(form.transportDistanceKm, 0);
-      const rate = clampNumber(form.transportRateEx, 0);
-      const deliveries = Math.max(1, Math.floor(clampNumber(form.transportDeliveries, 1)));
-      const thresholdKm = clampNumber(form.transportThresholdKm, 40);
-      const amountEx = distance > thresholdKm ? distance * 2 * rate * deliveries : 0;
+      const thresholdValue = clampNumber(form.transportFreeShippingThresholdValue, 0);
+      const thresholdUnit = String(form.transportFreeShippingThresholdUnit ?? "pallets");
+      const transportCostEx = clampNumber(form.transportCostEx, 0);
+      const transportCostType = String(form.transportCostType ?? "fixed");
+      const includeInMargin = Boolean(form.transportIncludeInMargin ?? true);
       const chargedToCustomer = Boolean(form.transportChargedToCustomer ?? false);
+      const modeLabel = chargedToCustomer ? "Extern doorbelast" : includeInMargin ? "Intern (marge-impact)" : "Intern (geen marge-impact)";
       return {
         id: blockId,
         type,
@@ -289,21 +263,46 @@ export function buildBlockFromForm({
         title: "Transport",
         subtitle: "Verzending vanaf brouwerij",
         lines: [
-          `${distance} km enkele rit`,
-          `${distance * 2} km retour`,
-          `${deliveries} levering(en)`,
-          `${euro(rate)} per km -> ${euro(amountEx)}`,
-          chargedToCustomer ? "Extern doorbelast" : "Intern (marge-impact)",
+          `Gratis vanaf: ${thresholdValue} ${thresholdUnit}`,
+          `Transportkosten: ${euro(transportCostEx)} (${transportCostType})`,
+          modeLabel,
         ],
         tone: tones[type],
         appliesTo: "global",
         payload: {
-          distanceKm: distance,
-          rateEx: rate,
-          deliveries,
-          thresholdKm,
-          amountEx,
+          freeShippingThresholdValue: thresholdValue,
+          freeShippingThresholdUnit: thresholdUnit,
+          transportCostType,
+          transportCostEx,
+          includeInMargin,
           chargedToCustomer,
+        },
+      };
+    }
+
+    case "Palletopbouw": {
+      const doosUnitsPerLayer = clampNumber(form.palletDoosUnitsPerLayer, 0);
+      const doosUnitsPerPallet = clampNumber(form.palletDoosUnitsPerPallet, 0);
+      const fustUnitsPerLayer = clampNumber(form.palletFustUnitsPerLayer, 0);
+      const fustUnitsPerPallet = clampNumber(form.palletFustUnitsPerPallet, 0);
+
+      return {
+        id: blockId,
+        type,
+        icon: icons[type],
+        title: "Palletopbouw",
+        subtitle: "Defaults voor afronden",
+        lines: [
+          `Doos: ${doosUnitsPerLayer} per laag, ${doosUnitsPerPallet} per pallet`,
+          `Fust: ${fustUnitsPerLayer} per laag, ${fustUnitsPerPallet} per pallet`,
+        ],
+        tone: tones[type],
+        appliesTo: "global",
+        payload: {
+          doosUnitsPerLayer,
+          doosUnitsPerPallet,
+          fustUnitsPerLayer,
+          fustUnitsPerPallet,
         },
       };
     }

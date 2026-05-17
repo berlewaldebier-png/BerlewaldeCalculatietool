@@ -16,24 +16,40 @@ export function TransportForm({ form, setForm }: Props) {
   return (
     <div className="space-y-5">
       <Field
-        label="Afstand (km enkele rit)"
-        value={form.transportDistanceKm}
-        onChange={(value) => setForm((prev) => ({ ...prev, transportDistanceKm: value }))}
+        label="Gratis verzending vanaf"
+        value={form.transportFreeShippingThresholdValue}
+        onChange={(value) =>
+          setForm((prev) => ({ ...prev, transportFreeShippingThresholdValue: value }))
+        }
       />
       <Field
-        label="Kosten per km (ex)"
-        value={form.transportRateEx}
-        onChange={(value) => setForm((prev) => ({ ...prev, transportRateEx: value }))}
+        label="Drempeltype"
+        value={form.transportFreeShippingThresholdUnit}
+        onChange={(value) =>
+          setForm((prev) => ({
+            ...prev,
+            transportFreeShippingThresholdUnit: value as any,
+          }))
+        }
       />
       <Field
-        label="Aantal leveringen"
-        value={form.transportDeliveries}
-        onChange={(value) => setForm((prev) => ({ ...prev, transportDeliveries: value }))}
+        label="Transportkosten (ex)"
+        value={form.transportCostEx}
+        onChange={(value) => setForm((prev) => ({ ...prev, transportCostEx: value }))}
       />
       <Field
-        label="Drempel km"
-        value={form.transportThresholdKm}
-        onChange={(value) => setForm((prev) => ({ ...prev, transportThresholdKm: value }))}
+        label="Kostentype"
+        value={form.transportCostType}
+        onChange={(value) =>
+          setForm((prev) => ({ ...prev, transportCostType: value as any }))
+        }
+      />
+      <BooleanField
+        label="Meenemen in marge"
+        checked={form.transportIncludeInMargin}
+        onChange={(checked) =>
+          setForm((prev) => ({ ...prev, transportIncludeInMargin: checked }))
+        }
       />
       <BooleanField
         label="Doorbelasten aan klant"
@@ -42,7 +58,7 @@ export function TransportForm({ form, setForm }: Props) {
           setForm((prev) => ({ ...prev, transportChargedToCustomer: checked }))
         }
       />
-      <Idea text="Bij meer dan de ingestelde drempel rekenen we transportkosten. Als je niet doorbelast, blijft de marge-impact intern zichtbaar." />
+      <Idea text="Transport is een aparte actie. Als je doorbelast, telt het als omzet en heeft het geen negatieve marge-impact. Als je niet doorbelast, kun je aangeven of het meetelt in marge/break-even." />
     </div>
   );
 }

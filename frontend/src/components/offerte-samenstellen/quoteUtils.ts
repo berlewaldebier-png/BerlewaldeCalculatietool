@@ -13,6 +13,7 @@ export { euro, clampNumber, normalizeText } from "./offerteSamenstellenUi";
 
 export function inferUnitFromPack(pack: string): QuoteProductUnit {
   const text = pack.toLowerCase();
+  if (text.includes("liter") || text === "l") return "liter";
   if (text.includes("fust")) return "fust";
   if (text.includes("doos")) return "doos";
   return "fles";
@@ -80,9 +81,6 @@ export function createInitialQuoteFormState(): QuoteFormState {
     introThresholdValue: "",
     introThresholdDiscount: "",
     introNote: "",
-    introAppliesToVolume: "uplift",
-    introUpliftLiters: "",
-    introUpliftPct: "",
     staffelUseBaseOfferProducts: true,
     staffelEligibleRefs: [],
     staffelDiscountMode: "absolute",
@@ -99,20 +97,22 @@ export function createInitialQuoteFormState(): QuoteFormState {
     discountMode: "Totaal",
     discountValue: "5",
     kortingEligibleRefs: [],
-    discountAppliesToVolume: "uplift",
-    discountUpliftLiters: "",
-    discountUpliftPct: "",
     wholesaleUseBaseOfferProducts: true,
     wholesaleEligibleRefs: [],
     wholesaleMarginPct: "18",
-    wholesaleExpectedLiters: "",
-    wholesaleAppliesToVolume: "existing",
-    wholesaleUpliftLiters: "",
-    wholesaleUpliftPct: "",
+    palletDoosUnitsPerLayer: "12",
+    palletDoosUnitsPerPallet: "72",
+    palletFustUnitsPerLayer: "20",
+    palletFustUnitsPerPallet: "40",
     transportDistanceKm: "42",
     transportRateEx: "0,50",
     transportDeliveries: "1",
     transportThresholdKm: "40",
+    transportFreeShippingThresholdValue: "1",
+    transportFreeShippingThresholdUnit: "pallets",
+    transportCostType: "fixed",
+    transportCostEx: "85",
+    transportIncludeInMargin: true,
     transportChargedToCustomer: true,
     returnPct: "10",
     tastingCondition: "Gratis bij >= 10 fusten",

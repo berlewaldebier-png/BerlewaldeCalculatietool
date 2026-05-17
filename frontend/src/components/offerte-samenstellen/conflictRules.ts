@@ -25,7 +25,13 @@ function isPricingRule(type: OptionType) {
 
 function getContextForOption(type: OptionType): QuoteBlockContext {
   if (type === "Intro") return "intro";
-  if (type === "Transport" || type === "Retour" || type === "Proeverij" || type === "Tapverhuur") {
+  if (
+    type === "Transport" ||
+    type === "Retour" ||
+    type === "Proeverij" ||
+    type === "Tapverhuur" ||
+    type === "Palletopbouw"
+  ) {
     return "global";
   }
   return "standard";
