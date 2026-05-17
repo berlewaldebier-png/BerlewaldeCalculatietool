@@ -17,6 +17,10 @@ type BuildQuoteDraftSnapshotParams = {
   meta: QuoteDraftMeta;
   year: number;
   basis: BasisData;
+  dealContext: "growth" | "agreement" | "one_off";
+  mixSource: "quote" | "customer" | "portfolio";
+  targetVolumeLiters: number | null;
+  agreementVolumeLiters: number | null;
   scenarios: Record<ScenarioId, QuoteScenario>;
   breakEven: QuoteBreakEvenSnapshot | null;
   ui: QuoteBuilderUiState;
@@ -26,6 +30,10 @@ export function buildQuoteDraftSnapshot({
   meta,
   year,
   basis,
+  dealContext,
+  mixSource,
+  targetVolumeLiters,
+  agreementVolumeLiters,
   scenarios,
   breakEven,
   ui,
@@ -34,6 +42,10 @@ export function buildQuoteDraftSnapshot({
     meta,
     year,
     basis,
+    dealContext,
+    mixSource,
+    targetVolumeLiters,
+    agreementVolumeLiters,
     scenarios,
     breakEven,
     ui,

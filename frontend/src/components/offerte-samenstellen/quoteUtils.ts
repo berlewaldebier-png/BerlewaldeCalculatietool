@@ -53,6 +53,10 @@ export function createInitialQuoteDraft(year: number): QuoteDraft {
     },
     year,
     basis: createInitialBasisData(),
+    dealContext: "one_off",
+    mixSource: "quote",
+    targetVolumeLiters: null,
+    agreementVolumeLiters: null,
     scenarios: {
       A: createEmptyScenario("A"),
       B: createEmptyScenario("B"),

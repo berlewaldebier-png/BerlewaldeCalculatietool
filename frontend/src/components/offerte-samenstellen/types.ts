@@ -88,6 +88,9 @@ export type BasisData = {
   opmerking: string;
 };
 
+export type DealContext = "growth" | "agreement" | "one_off";
+export type MixSource = "quote" | "customer" | "portfolio";
+
 export type QuoteDraftStatus = "concept" | "definitief";
 
 export type QuoteDraftMeta = {
@@ -102,6 +105,10 @@ export type QuoteDraft = {
   meta: QuoteDraftMeta;
   year: number;
   basis: BasisData;
+  dealContext: DealContext;
+  mixSource: MixSource;
+  targetVolumeLiters: number | null;
+  agreementVolumeLiters: number | null;
   scenarios: Record<ScenarioId, QuoteScenario>;
   breakEven: QuoteBreakEvenSnapshot | null;
 };

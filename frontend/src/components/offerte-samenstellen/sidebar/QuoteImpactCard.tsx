@@ -18,12 +18,16 @@ export function QuoteImpactCard({
   transportEx,
   netEffectEx,
   extraLitersNeeded,
+  dealContext,
+  pricePressureVsReferenceEx,
 }: {
   lostExistingEx: number;
   gainedGrowthEx: number;
   transportEx: number;
   netEffectEx: number;
   extraLitersNeeded: number;
+  dealContext?: "growth" | "agreement" | "one_off";
+  pricePressureVsReferenceEx?: number;
 }) {
   const isEmpty =
     Math.abs(lostExistingEx) < 0.0001 &&
@@ -68,6 +72,18 @@ export function QuoteImpactCard({
               <span>Transport</span>
               <span className="cpq-side-neg">-{euro(transportEx)}</span>
             </div>
+            {dealContext === "agreement" && Math.abs(pricePressureVsReferenceEx ?? 0) > 0.0001 ? (
+              <div
+                className="cpq-side-list-row"
+                title="Vergelijking met standaard kanaalprijs; geen herprijzing van historische liters."
+              >
+                <span>Prijsdruk t.o.v. standaard</span>
+                <span className={(pricePressureVsReferenceEx ?? 0) >= 0 ? "cpq-side-neg" : "cpq-side-pos"}>
+                  {(pricePressureVsReferenceEx ?? 0) >= 0 ? "-" : "+"}
+                  {euro(Math.abs(pricePressureVsReferenceEx ?? 0))}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           <div className="cpq-side-divider" />

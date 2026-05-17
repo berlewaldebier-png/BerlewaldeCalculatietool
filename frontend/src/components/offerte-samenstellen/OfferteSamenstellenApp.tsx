@@ -70,6 +70,7 @@ import type {
   ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
 import { HorizontalStepper } from "@/components/offerte-samenstellen/HorizontalStepper";
+import { DealContextBar } from "@/components/offerte-samenstellen/DealContextBar";
 import { BreakEvenProgressCard } from "@/components/offerte-samenstellen/sidebar/BreakEvenProgressCard";
 import { QuoteImpactCard } from "@/components/offerte-samenstellen/sidebar/QuoteImpactCard";
 import { buildLitersPerUnitOverrideMap, getScenario as getLocalScenario, getScenarioLabel } from "@/lib/scenarios";
@@ -166,6 +167,10 @@ export function OfferteSamenstellenApp({
   const [draftError, setDraftError] = useState<string | null>(null);
 
   const [basis, setBasis] = useState<BasisData>(() => createInitialBasisData());
+  const [dealContext, setDealContext] = useState<QuoteDraft["dealContext"]>(() => createInitialQuoteDraft(year).dealContext);
+  const [mixSource, setMixSource] = useState<QuoteDraft["mixSource"]>(() => createInitialQuoteDraft(year).mixSource);
+  const [targetVolumeLiters, setTargetVolumeLiters] = useState<number | null>(() => createInitialQuoteDraft(year).targetVolumeLiters);
+  const [agreementVolumeLiters, setAgreementVolumeLiters] = useState<number | null>(() => createInitialQuoteDraft(year).agreementVolumeLiters);
   const [realizedSales, setRealizedSales] = useState<RealizedSalesBySkuPayload | null>(null);
   const [realizedSalesError, setRealizedSalesError] = useState<string | null>(null);
   const [customerSummary, setCustomerSummary] = useState<CustomerSalesSummary | null>(null);
@@ -340,10 +345,10 @@ export function OfferteSamenstellenApp({
     };
   }, [breakEvenYear, activeBreakEvenConfig?.basis]);
 
-  const breakEvenV2Summary = useMemo<BreakEvenV2Summary | null>(() => {
+  const realizedBreakEvenRows = useMemo(() => {
     if (!realizedSales) return null;
     const channelCode = breakEvenChannelCode || "horeca";
-    const realized = buildRealizedBreakEvenRows({
+    return buildRealizedBreakEvenRows({
       year: breakEvenYear,
       channelCode,
       sales: realizedSales,
@@ -356,16 +361,6 @@ export function OfferteSamenstellenApp({
       articles,
       basisproducten,
       samengesteldeProducten,
-    });
-
-    const fixedCostsTotal = calculateFixedCostsTotal(vasteKosten, breakEvenYear);
-    return calculateBreakEvenV2Summary({
-      year: breakEvenYear,
-      fixedCostsTotal,
-      fixedCostAdjustment: 0,
-      adjustments: [],
-      rows: realized.rows,
-      totalSoldLiters: realized.totalSoldLiters,
     });
   }, [
     realizedSales,
@@ -380,8 +375,51 @@ export function OfferteSamenstellenApp({
     articles,
     basisproducten,
     samengesteldeProducten,
+  ]);
+
+  const breakEvenV2Summary = useMemo<BreakEvenV2Summary | null>(() => {
+    if (!realizedBreakEvenRows) return null;
+
+    const fixedCostsTotal = calculateFixedCostsTotal(vasteKosten, breakEvenYear);
+    return calculateBreakEvenV2Summary({
+      year: breakEvenYear,
+      fixedCostsTotal,
+      fixedCostAdjustment: 0,
+      adjustments: [],
+      rows: realizedBreakEvenRows.rows,
+      totalSoldLiters: realizedBreakEvenRows.totalSoldLiters,
+    });
+  }, [
+    realizedBreakEvenRows,
+    breakEvenYear,
     vasteKosten,
   ]);
+
+  const portfolioMixPctByRef = useMemo(() => {
+    const out: Record<string, number> = {};
+    (realizedBreakEvenRows?.rows ?? []).forEach((row) => {
+      const skuId = String(row.skuId ?? "").trim();
+      if (!skuId) return;
+      if (row.kind !== "liter") return;
+      out[`sku:${skuId}`] = Number.isFinite(row.mixPct) ? row.mixPct : 0;
+    });
+    return out;
+  }, [realizedBreakEvenRows]);
+
+  const customerMixPctByRef = useMemo(() => {
+    const out: Record<string, number> = {};
+    const top = customerSummary?.top_skus ?? [];
+    const total = top.reduce((sum, row) => sum + (Number(row.liters ?? 0) || 0), 0);
+    if (total <= 0) return out;
+    top.forEach((row) => {
+      const skuId = String(row.sku_id ?? "").trim();
+      if (!skuId) return;
+      const liters = Number(row.liters ?? 0) || 0;
+      if (liters <= 0) return;
+      out[`sku:${skuId}`] = (liters / total) * 100;
+    });
+    return out;
+  }, [customerSummary]);
 
   const currentBreakEvenSnapshot = useMemo(() => {
     if (!activeBreakEvenConfig) return null;
@@ -476,10 +514,33 @@ export function OfferteSamenstellenApp({
     const selectionLitersTotal = Array.from(selectionLitersByRef.values()).reduce((sum, v) => sum + v, 0);
 
     const customerBaselineLiters = Math.max(0, customerSummary?.mapped_liters ?? 0);
-    const existingLitersTotal = selectionLitersTotal > 0 ? Math.min(customerBaselineLiters, selectionLitersTotal) : 0;
-    const upliftLitersTotal = selectionLitersTotal > 0 ? Math.max(0, selectionLitersTotal - customerBaselineLiters) : 0;
+
+    const resolvePricedLitersTotal = () => {
+      if (selectionLitersTotal <= 0) return 0;
+      if (dealContext === "growth") {
+        const target = typeof targetVolumeLiters === "number" ? targetVolumeLiters : null;
+        if (target !== null) return Math.max(0, target - customerBaselineLiters);
+        return Math.max(0, selectionLitersTotal - customerBaselineLiters);
+      }
+      if (dealContext === "agreement") {
+        const agreement = typeof agreementVolumeLiters === "number" ? agreementVolumeLiters : null;
+        return Math.max(0, agreement ?? selectionLitersTotal);
+      }
+      return selectionLitersTotal;
+    };
+
+    const pricedLitersTotal = resolvePricedLitersTotal();
+    const existingLitersTotal =
+      selectionLitersTotal > 0 && dealContext === "one_off"
+        ? Math.min(customerBaselineLiters, selectionLitersTotal)
+        : 0;
+    const upliftLitersTotal =
+      selectionLitersTotal > 0 && dealContext === "one_off"
+        ? Math.max(0, selectionLitersTotal - customerBaselineLiters)
+        : 0;
 
     const baselineByRef = new Map(baseline.map((line) => [line.ref, line]));
+    let pricePressureVsReferenceEx = 0;
     const impacts = current
       .map((line) => {
         const base = baselineByRef.get(line.ref);
@@ -494,17 +555,22 @@ export function OfferteSamenstellenApp({
 
         const existingLitersForLine = existingLitersTotal > 0 && share > 0 ? existingLitersTotal * share : 0;
         const upliftLitersForLine = upliftLitersTotal > 0 && share > 0 ? upliftLitersTotal * share : 0;
+        const pricedLitersForLine = pricedLitersTotal > 0 && share > 0 ? pricedLitersTotal * share : 0;
 
         const existingQtyForLine = existingLitersForLine > 0 && litersPerUnit > 0 ? existingLitersForLine / litersPerUnit : 0;
         const upliftQtyForLine = upliftLitersForLine > 0 && litersPerUnit > 0 ? upliftLitersForLine / litersPerUnit : 0;
+        const pricedQtyForLine = pricedLitersForLine > 0 && litersPerUnit > 0 ? pricedLitersForLine / litersPerUnit : 0;
 
         const lostContributionEx =
           existingQtyForLine > 0
             ? Math.max(0, (baseContributionUnit - scenarioContributionUnit) * existingQtyForLine)
             : 0;
-        const gainedContributionEx =
-          upliftQtyForLine > 0 ? Math.max(0, scenarioContributionUnit * upliftQtyForLine) : 0;
+        const gainedContributionEx = pricedQtyForLine > 0 ? Math.max(0, scenarioContributionUnit * pricedQtyForLine) : 0;
         const netContributionEx = gainedContributionEx - lostContributionEx;
+
+        if (dealContext === "agreement" && pricedQtyForLine > 0) {
+          pricePressureVsReferenceEx += (baseContributionUnit - scenarioContributionUnit) * pricedQtyForLine;
+        }
 
         const shouldRender = Math.abs(lostContributionEx) > 0.0001 || Math.abs(gainedContributionEx) > 0.0001;
         if (!shouldRender) return null;
@@ -560,7 +626,12 @@ export function OfferteSamenstellenApp({
         ? totalLostContributionEx / breakEvenV2Summary.weightedContributionPerLiter
         : 0;
 
-    const growthFromDealLiters = upliftLitersTotal;
+    const growthFromDealLiters =
+      dealContext === "growth"
+        ? Math.max(0, pricedLitersTotal)
+        : dealContext === "agreement"
+          ? Math.max(0, pricedLitersTotal)
+          : Math.max(0, upliftLitersTotal);
 
     return {
       impacts,
@@ -572,8 +643,10 @@ export function OfferteSamenstellenApp({
       growthFromDealLiters,
       existingLitersTotal,
       upliftLitersTotal,
+      pricedLitersTotal,
+      pricePressureVsReferenceEx,
     };
-  }, [breakEvenV2Summary, scenario, productIndex.options, customerSummary]);
+  }, [breakEvenV2Summary, scenario, productIndex.options, customerSummary, dealContext, targetVolumeLiters, agreementVolumeLiters]);
 
   const breakEvenProgress = useMemo(() => {
     if (!breakEvenV2Summary) return null;
@@ -820,6 +893,10 @@ export function OfferteSamenstellenApp({
       meta: nextMeta,
       year: currentYear,
       basis,
+      dealContext,
+      mixSource,
+      targetVolumeLiters,
+      agreementVolumeLiters,
       scenarios,
       breakEven: snapshotBreakEven,
       ui: {
@@ -857,6 +934,10 @@ export function OfferteSamenstellenApp({
       ...(snapshot.basis ?? {}),
       klantId: typeof (snapshot.basis as any)?.klantId === "number" ? (snapshot.basis as any).klantId : null,
     });
+    setDealContext((snapshot as any).dealContext === "growth" || (snapshot as any).dealContext === "agreement" ? (snapshot as any).dealContext : "one_off");
+    setMixSource((snapshot as any).mixSource === "customer" || (snapshot as any).mixSource === "portfolio" ? (snapshot as any).mixSource : "quote");
+    setTargetVolumeLiters(typeof (snapshot as any).targetVolumeLiters === "number" ? (snapshot as any).targetVolumeLiters : null);
+    setAgreementVolumeLiters(typeof (snapshot as any).agreementVolumeLiters === "number" ? (snapshot as any).agreementVolumeLiters : null);
     setScenarios(restoreScenarioPresentation(snapshot));
     setStep(snapshot.ui.step);
     setActiveScenario(snapshot.ui.activeScenario);
@@ -1089,6 +1170,19 @@ export function OfferteSamenstellenApp({
           </div>
         ) : null}
 
+        {step === "builder" ? (
+          <div style={{ marginTop: 14 }}>
+            <DealContextBar
+              value={dealContext}
+              onChange={setDealContext}
+              targetVolumeLiters={targetVolumeLiters}
+              onChangeTargetVolumeLiters={setTargetVolumeLiters}
+              agreementVolumeLiters={agreementVolumeLiters}
+              onChangeAgreementVolumeLiters={setAgreementVolumeLiters}
+            />
+          </div>
+        ) : null}
+
         {/* Layout override: offerte-samenstellen uses 2 columns (main + sidebar). */}
         <div className="cpq-grid cpq-grid-offerte">
           <main className="cpq-main">
@@ -1111,8 +1205,19 @@ export function OfferteSamenstellenApp({
                 unitMode={unitMode}
                 vatMode={vatMode}
                 hasIntro={hasIntro}
+                quoteYear={currentYear}
                 scenario={scenario}
                 metrics={activeMetrics.standard}
+                dealContext={dealContext}
+                setDealContext={setDealContext}
+                mixSource={mixSource}
+                setMixSource={setMixSource}
+                customerMixPctByRef={customerMixPctByRef}
+                portfolioMixPctByRef={portfolioMixPctByRef}
+                targetVolumeLiters={targetVolumeLiters}
+                setTargetVolumeLiters={setTargetVolumeLiters}
+                agreementVolumeLiters={agreementVolumeLiters}
+                setAgreementVolumeLiters={setAgreementVolumeLiters}
                 mixLiters={
                   Math.max(
                     0,
@@ -1205,6 +1310,8 @@ export function OfferteSamenstellenApp({
                   Math.max(0, activeMetrics.standard.transportCostEx ?? 0)
                 }
                 extraLitersNeeded={Math.max(0, offerBreakEvenImpact?.portfolioExtraLiters ?? 0)}
+                dealContext={dealContext}
+                pricePressureVsReferenceEx={offerBreakEvenImpact?.pricePressureVsReferenceEx ?? 0}
               />
             </div>
           </aside>

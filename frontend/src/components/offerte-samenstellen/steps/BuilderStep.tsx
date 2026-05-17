@@ -6,6 +6,7 @@ import {
   getProductRef,
 } from "@/components/offerte-samenstellen/quoteUtils";
 import { normalizeQuantity } from "@/lib/quantityNormalization";
+import type { DealContext, MixSource } from "@/components/offerte-samenstellen/types";
 import type {
   BuilderBlock,
   OptionType,
@@ -18,6 +19,7 @@ import type {
 import { BuilderBlockCard } from "@/components/offerte-samenstellen/steps/BuilderBlockCard";
 import { IconTrash } from "@/components/offerte-samenstellen/offerteSamenstellenConfig";
 import { clampNumber, euro } from "@/components/offerte-samenstellen/offerteSamenstellenUi";
+import { WarningIcon } from "@/components/kostprijsbeheer/KostprijsBeheerParts";
 
 type ScenarioId = "A" | "B" | "C";
 type UnitMode = "producten" | "liters";
@@ -52,8 +54,19 @@ export function BuilderStep({
   unitMode,
   vatMode,
   hasIntro,
+  quoteYear,
   scenario,
   metrics,
+  dealContext,
+  setDealContext,
+  mixSource,
+  setMixSource,
+  customerMixPctByRef,
+  portfolioMixPctByRef,
+  targetVolumeLiters,
+  setTargetVolumeLiters,
+  agreementVolumeLiters,
+  setAgreementVolumeLiters,
   mixLiters,
   onChangeMixLiters,
   activeScenario,
@@ -77,8 +90,19 @@ export function BuilderStep({
   unitMode: UnitMode;
   vatMode: VatMode;
   hasIntro: boolean;
+  quoteYear: number;
   scenario: Scenario;
   metrics: ScenarioMetrics;
+  dealContext: DealContext;
+  setDealContext: (next: DealContext) => void;
+  mixSource: MixSource;
+  setMixSource: (next: MixSource) => void;
+  customerMixPctByRef: Record<string, number>;
+  portfolioMixPctByRef: Record<string, number>;
+  targetVolumeLiters: number | null;
+  setTargetVolumeLiters: (next: number | null) => void;
+  agreementVolumeLiters: number | null;
+  setAgreementVolumeLiters: (next: number | null) => void;
   mixLiters: number;
   onChangeMixLiters: (liters: number) => void;
   activeScenario: ScenarioId;
@@ -120,6 +144,24 @@ export function BuilderStep({
     };
   }, [globalBlocks]);
 
+  const quoteMixPctByRef = useMemo(() => {
+    const out: Record<string, number> = {};
+    const rows = scenario.products.filter((p) => !Boolean((p as any).isMixLiters));
+    const withRef = rows
+      .map((row) => {
+        const ref = getProductRef(row);
+        const liters = Math.max(0, (row.qty ?? 0) * Math.max(0, row.litersPerUnit ?? 0));
+        return { ref, liters };
+      })
+      .filter((row) => Boolean(row.ref) && row.liters > 0) as Array<{ ref: string; liters: number }>;
+    const total = withRef.reduce((sum, row) => sum + row.liters, 0);
+    if (total <= 0) return out;
+    withRef.forEach((row) => {
+      out[row.ref] = (row.liters / total) * 100;
+    });
+    return out;
+  }, [scenario.products]);
+
   return (
     <div className="cpq-stack">
       <div className="cpq-builder-header">
@@ -144,6 +186,41 @@ export function BuilderStep({
           ))}
         </div>
       ) : null}
+
+      <div className="cpq-card" style={{ padding: 14 }}>
+        <div className="cpq-label" style={{ marginBottom: 8 }}>
+          Mix voor berekening
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            className={`cpq-toggle${mixSource === "quote" ? " active" : ""}`}
+            onClick={() => setMixSource("quote")}
+            title="Gebruik de verdeling van de producten in deze offerte."
+          >
+            Quote-mix
+          </button>
+          <button
+            type="button"
+            className={`cpq-toggle${mixSource === "customer" ? " active" : ""}`}
+            onClick={() => setMixSource("customer")}
+            title={Object.keys(customerMixPctByRef).length > 0 ? "Gebruik de historische klantmix." : "Geen klantmix beschikbaar; valt terug op portfolio."}
+          >
+            Klantmix
+          </button>
+          <button
+            type="button"
+            className={`cpq-toggle${mixSource === "portfolio" ? " active" : ""}`}
+            onClick={() => setMixSource("portfolio")}
+            title="Gebruik de totale portfolio mix (gerealiseerd)."
+          >
+            Portfolio-mix
+          </button>
+          <span className="cpq-muted" style={{ marginLeft: 6 }}>
+            Percentages zijn informatief en sturen de berekening alleen als je geen productspecificatie hebt.
+          </span>
+        </div>
+      </div>
 
       <div className="cpq-toolbar">
         <div className="cpq-toolbar-inner">
@@ -215,6 +292,12 @@ export function BuilderStep({
                   const productRef = getProductRef(product);
                   const hasCurrentOption = productRef ? productOptionIds.has(productRef) : false;
                   const pricing = metrics.pricingByRef[productRef];
+                  const mixPct = (() => {
+                    if (!productRef) return null;
+                    if (mixSource === "customer") return customerMixPctByRef[productRef] ?? portfolioMixPctByRef[productRef] ?? null;
+                    if (mixSource === "portfolio") return portfolioMixPctByRef[productRef] ?? null;
+                    return quoteMixPctByRef[productRef] ?? null;
+                  })();
                   const display =
                     unitMode === "liters"
                       ? `${(product.qty * product.litersPerUnit).toFixed(1)} L`
@@ -297,6 +380,23 @@ export function BuilderStep({
                           ))}
                         </select>
                         )}
+                        {!isMixLiters && productRef ? (
+                          <div className="cpq-muted" style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
+                            <span>Mix:</span>
+                            {mixPct === null ? (
+                              <span title="Geen mix-percentage beschikbaar voor dit product.">
+                                —
+                              </span>
+                            ) : (
+                              <span>{mixPct.toFixed(1)}%</span>
+                            )}
+                            {mixSource !== "quote" && mixPct === null ? (
+                              <span title="Mixdata ontbreekt; gebruik quote-mix of portfolio-mix." style={{ color: "#d97706", display: "inline-flex", alignItems: "center" }}>
+                                <WarningIcon />
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </td>
                       <td>
                         <input
