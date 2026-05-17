@@ -31,6 +31,9 @@
     "../src/lib/quoteBuilderGuards.ts",
     "../src/lib/quoteScenarioPricing.ts"
     ,
+    "../src/lib/dealContext.ts",
+    "../src/lib/quoteMix.ts"
+    ,
     "../src/features/sku/centralSkuIndex.ts",
     "../src/components/offerte-samenstellen/dataSources.ts",
     "../src/components/offerte-samenstellen/sellInResolver.ts",

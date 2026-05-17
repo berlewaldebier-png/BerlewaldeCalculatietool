@@ -53,6 +53,7 @@ import {
   type BreakEvenV2Summary,
   type RealizedSalesBySkuPayload,
 } from "@/components/break-even-v2/breakEvenV2Utils";
+import { resolvePricedLitersTotal } from "@/lib/dealContext";
 import type {
   BasisData,
   BuilderBlock,
@@ -515,21 +516,13 @@ export function OfferteSamenstellenApp({
 
     const customerBaselineLiters = Math.max(0, customerSummary?.mapped_liters ?? 0);
 
-    const resolvePricedLitersTotal = () => {
-      if (selectionLitersTotal <= 0) return 0;
-      if (dealContext === "growth") {
-        const target = typeof targetVolumeLiters === "number" ? targetVolumeLiters : null;
-        if (target !== null) return Math.max(0, target - customerBaselineLiters);
-        return Math.max(0, selectionLitersTotal - customerBaselineLiters);
-      }
-      if (dealContext === "agreement") {
-        const agreement = typeof agreementVolumeLiters === "number" ? agreementVolumeLiters : null;
-        return Math.max(0, agreement ?? selectionLitersTotal);
-      }
-      return selectionLitersTotal;
-    };
-
-    const pricedLitersTotal = resolvePricedLitersTotal();
+    const pricedLitersTotal = resolvePricedLitersTotal({
+      dealContext,
+      selectionLitersTotal,
+      customerBaselineLiters,
+      targetVolumeLiters: typeof targetVolumeLiters === "number" ? targetVolumeLiters : null,
+      agreementVolumeLiters: typeof agreementVolumeLiters === "number" ? agreementVolumeLiters : null,
+    });
     const existingLitersTotal =
       selectionLitersTotal > 0 && dealContext === "one_off"
         ? Math.min(customerBaselineLiters, selectionLitersTotal)

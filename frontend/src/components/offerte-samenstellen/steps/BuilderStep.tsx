@@ -208,6 +208,14 @@ export function BuilderStep({
           >
             Klantmix
           </button>
+          {mixSource === "customer" && Object.keys(customerMixPctByRef).length === 0 ? (
+            <span
+              title="Geen klantmix beschikbaar; we vallen per product terug op portfolio mix."
+              style={{ color: "#d97706", display: "inline-flex", alignItems: "center" }}
+            >
+              <WarningIcon />
+            </span>
+          ) : null}
           <button
             type="button"
             className={`cpq-toggle${mixSource === "portfolio" ? " active" : ""}`}

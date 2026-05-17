@@ -1,4 +1,6 @@
 import { calculateQuoteScenarioMetrics } from "../src/lib/quoteScenarioPricing";
+import { resolvePricedLitersTotal } from "../src/lib/dealContext";
+import { resolveMixPctForRef } from "../src/lib/quoteMix";
 import type {
   QuoteBreakEvenSnapshot,
   QuoteScenario,
@@ -242,6 +244,61 @@ function calculate(
     metrics.notes.some((note) => note.includes("Retour-effect")),
     "Expected retour note"
   );
+}
+
+{
+  const priced = resolvePricedLitersTotal({
+    dealContext: "growth",
+    selectionLitersTotal: 1000,
+    customerBaselineLiters: 500,
+    targetVolumeLiters: 1100,
+    agreementVolumeLiters: null,
+  });
+  approxEqual(priced, 600);
+}
+
+{
+  const priced = resolvePricedLitersTotal({
+    dealContext: "growth",
+    selectionLitersTotal: 1000,
+    customerBaselineLiters: 500,
+    targetVolumeLiters: null,
+    agreementVolumeLiters: null,
+  });
+  approxEqual(priced, 500);
+}
+
+{
+  const priced = resolvePricedLitersTotal({
+    dealContext: "agreement",
+    selectionLitersTotal: 1000,
+    customerBaselineLiters: 500,
+    targetVolumeLiters: null,
+    agreementVolumeLiters: 2500,
+  });
+  approxEqual(priced, 2500);
+}
+
+{
+  const priced = resolvePricedLitersTotal({
+    dealContext: "one_off",
+    selectionLitersTotal: 123,
+    customerBaselineLiters: 500,
+    targetVolumeLiters: null,
+    agreementVolumeLiters: null,
+  });
+  approxEqual(priced, 123);
+}
+
+{
+  const pct = resolveMixPctForRef({
+    mixSource: "customer",
+    ref: "beer:1:product:10",
+    quoteMixPctByRef: {},
+    customerMixPctByRef: {},
+    portfolioMixPctByRef: { "beer:1:product:10": 42 },
+  });
+  assert(pct === 42, "Expected customer mix to fall back to portfolio mix");
 }
 
 console.log("quoteScenarioCalculations contracttest OK");

@@ -117,10 +117,21 @@ export function DealContextBar({
         </div>
       ) : null}
 
+      {value === "growth" && targetVolumeLiters === null ? (
+        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Doelvolume is leeg. We gebruiken het offertevolume als doelvolume (growth = offertevolume − baseline).
+        </div>
+      ) : null}
+
+      {value === "agreement" && agreementVolumeLiters === null ? (
+        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Contractvolume is leeg. We gebruiken het offertevolume als contractvolume voor de berekening.
+        </div>
+      ) : null}
+
       <div className="mt-3 text-xs text-slate-500">
         Let op: we passen nooit prijzen retroactief toe op reeds gefactureerde liters.
       </div>
     </div>
   );
 }
-
