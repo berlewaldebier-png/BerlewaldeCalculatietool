@@ -1170,7 +1170,21 @@ export function OfferteSamenstellenApp({
 
     // Auto-allocate quantities by mix when adding 2nd+ product, based on current mixSource.
     // This runs only on product selection (not per keystroke) to keep the UI fast.
-    if (alreadySelectedCount > 0 && (patch.litersPerUnit ?? 0) > 0) {
+    // Rebalance as soon as we have at least 2 eligible products (including the row being selected).
+    // Do not rely on alreadySelectedCount alone, because it may be 0 in transient states.
+    const selectingEligible = (patch.litersPerUnit ?? 0) > 0;
+    const eligibleAfterSelectCount = scenario.products.reduce((sum, p) => {
+      if (p.id === rowId) {
+        return sum + (selectingEligible ? 1 : 0);
+      }
+      if (Boolean((p as any).isMixLiters)) return sum;
+      if (p.contributesToLiters === false) return sum;
+      const hasRef = Boolean((p as any)?.source?.sku_id) || (Boolean((p as any)?.source?.bier_id) && Boolean((p as any)?.source?.product_id));
+      if (!hasRef) return sum;
+      return sum + (Math.max(0, p.litersPerUnit ?? 0) > 0 ? 1 : 0);
+    }, 0);
+
+    if (eligibleAfterSelectCount >= 2 && selectingEligible) {
       setScenarios((prev) => {
         const current = prev[activeScenario];
         const nextProducts = current.products.map((p) => (p.id === rowId ? { ...p, ...patch } : p));
