@@ -1103,6 +1103,13 @@ export function OfferteSamenstellenApp({
       },
     };
 
+    // Ensure a selected product always gets a non-zero quantity by default.
+    // We will rebalance quantities below if needed, but this prevents "0 qty" rows
+    // when allocation is skipped due to transient state.
+    if (typeof patch.qty !== "number") {
+      patch.qty = 1;
+    }
+
     const required = getRequiredTotalLiters();
     const currentRow = scenario.products.find((p) => p.id === rowId);
     const alreadySelectedCount = scenario.products.filter((p) => {

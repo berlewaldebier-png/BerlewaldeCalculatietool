@@ -127,6 +127,31 @@ export function BuilderStep({
 }) {
   const [qtyDraftById, setQtyDraftById] = useState<Record<string, string>>({});
   const pointerDownQtyDraftByIdRef = useRef<Record<string, string>>({});
+  const activeQtyInputIdRef = useRef<string | null>(null);
+
+  // Keep input drafts in sync with programmatic qty changes (e.g. mix rebalance),
+  // but never overwrite while the user is actively editing that row.
+  useEffect(() => {
+    setQtyDraftById((prev) => {
+      const next: Record<string, string> = { ...prev };
+      let changed = false;
+      scenario.products.forEach((product) => {
+        if (Boolean((product as any).isMixLiters)) return;
+        if (activeQtyInputIdRef.current === product.id) return;
+
+        const litersPerUnit = Math.max(0, product.litersPerUnit ?? 0);
+        const qty = Math.max(0, product.qty ?? 0);
+        const displayValue = unitMode === "liters" ? String(qty * litersPerUnit) : String(qty);
+
+        if (next[product.id] !== undefined && next[product.id] !== displayValue) {
+          next[product.id] = displayValue;
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [scenario.products, unitMode]);
 
   useEffect(() => {
     setQtyDraftById((prev) => {
@@ -452,6 +477,9 @@ export function BuilderStep({
                           step={stepValue > 0 ? stepValue : 1}
                           value={qtyDraftValue}
                           onChange={(e) => setQtyDraftById((prev) => ({ ...prev, [product.id]: e.target.value }))}
+                          onFocus={() => {
+                            activeQtyInputIdRef.current = product.id;
+                          }}
                           onPointerDown={(e) => {
                             pointerDownQtyDraftByIdRef.current[product.id] = (e.target as HTMLInputElement).value;
                           }}
@@ -462,7 +490,10 @@ export function BuilderStep({
                               commitQtyDraft(input.value);
                             }
                           }}
-                          onBlur={(e) => commitQtyDraft(e.target.value)}
+                          onBlur={(e) => {
+                            activeQtyInputIdRef.current = null;
+                            commitQtyDraft(e.target.value);
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               commitQtyDraft((e.target as HTMLInputElement).value);
