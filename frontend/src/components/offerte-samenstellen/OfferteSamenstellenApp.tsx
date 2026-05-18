@@ -1022,7 +1022,130 @@ export function OfferteSamenstellenApp({
       return;
     }
 
-    updateProduct(rowId, patch);
+    const applyPatch = () => updateProduct(rowId, patch);
+
+    if (!required || dealContext === "one_off") {
+      applyPatch();
+      return;
+    }
+
+    // Auto-allocate quantities by mix when adding 2nd+ product, based on current mixSource.
+    // This runs only on product selection (not per keystroke) to keep the UI fast.
+    if (mixSource !== "quote" && alreadySelectedCount > 0 && (patch.litersPerUnit ?? 0) > 0) {
+      setScenarios((prev) => {
+        const current = prev[activeScenario];
+        const nextProducts = current.products.map((p) => (p.id === rowId ? { ...p, ...patch } : p));
+
+        const eligible = nextProducts.filter((p) => {
+          if (Boolean((p as any).isMixLiters)) return false;
+          if (p.contributesToLiters === false) return false;
+          const litersPerUnit = Math.max(0, p.litersPerUnit ?? 0);
+          return litersPerUnit > 0;
+        });
+
+        if (eligible.length < 2) {
+          return {
+            ...prev,
+            [activeScenario]: { ...current, products: nextProducts },
+          };
+        }
+
+        const pctById = new Map<string, number>();
+        eligible.forEach((p) => {
+          const skuId = String(p.source?.sku_id ?? "").trim();
+          const bierId = String(p.source?.bier_id ?? "").trim();
+          const productId = String(p.source?.product_id ?? "").trim();
+          const ref = skuId ? `sku:${skuId}` : bierId && productId ? `beer:${bierId}:product:${productId}` : "";
+          const pct = (() => {
+            if (mixSource === "customer") return customerMixPctByRef[ref] ?? portfolioMixPctByRef[ref] ?? null;
+            if (mixSource === "portfolio") return portfolioMixPctByRef[ref] ?? null;
+            return null;
+          })();
+          pctById.set(p.id, typeof pct === "number" && Number.isFinite(pct) ? Math.max(0, pct) : 0);
+        });
+
+        let sumPct = 0;
+        eligible.forEach((p) => (sumPct += pctById.get(p.id) ?? 0));
+        if (sumPct <= 0) {
+          eligible.forEach((p) => pctById.set(p.id, 1));
+          sumPct = eligible.length;
+        }
+
+        const totalRequiredLiters = Math.max(0, required.requiredLiters);
+        const byId = new Map(nextProducts.map((p) => [p.id, p]));
+
+        // First allocate non-last products using normal rounding (Math.round) for roundingMode "none".
+        let allocatedLiters = 0;
+        eligible.forEach((p) => {
+          if (p.id === rowId) return;
+          const litersPerUnit = Math.max(0, p.litersPerUnit ?? 0);
+          const weight = (pctById.get(p.id) ?? 0) / sumPct;
+          const desiredLiters = totalRequiredLiters * weight;
+          const rawUnits = litersPerUnit > 0 ? desiredLiters / litersPerUnit : 0;
+          const roundingMode = String((p as any).roundingMode ?? "none");
+          let qty = 0;
+          if (roundingMode === "none") {
+            qty = Math.round(rawUnits);
+          } else {
+            const normalized = normalizeQuantity({
+              inputValue: desiredLiters,
+              inputUnit: "liters",
+              roundingMode: roundingMode as any,
+              salesUnit: {
+                salesUnitLabel: String(p.unit ?? "stuk"),
+                litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+                unitsPerLayer: typeof (p as any).unitsPerLayer === "number" ? (p as any).unitsPerLayer : null,
+                unitsPerPallet: typeof (p as any).unitsPerPallet === "number" ? (p as any).unitsPerPallet : null,
+                contributesToLiters: true,
+              },
+            });
+            qty = Math.ceil(Math.max(0, normalized.normalizedUnits ?? 0));
+          }
+
+          const safeQty = Math.max(0, qty);
+          byId.set(p.id, { ...(byId.get(p.id) as QuoteProduct), qty: safeQty });
+          allocatedLiters += safeQty * litersPerUnit;
+        });
+
+        // Last-added product gets the remainder; always round UP so total >= required.
+        const last = byId.get(rowId) as QuoteProduct | undefined;
+        if (last) {
+          const litersPerUnit = Math.max(0, last.litersPerUnit ?? 0);
+          const remainingLiters = Math.max(0, totalRequiredLiters - allocatedLiters);
+          const roundingMode = String((last as any).roundingMode ?? "none");
+          let qty = 0;
+          if (litersPerUnit <= 0) {
+            qty = 0;
+          } else if (roundingMode === "none") {
+            qty = Math.ceil(remainingLiters / litersPerUnit);
+          } else {
+            const normalized = normalizeQuantity({
+              inputValue: remainingLiters,
+              inputUnit: "liters",
+              roundingMode: roundingMode as any,
+              salesUnit: {
+                salesUnitLabel: String(last.unit ?? "stuk"),
+                litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+                unitsPerLayer: typeof (last as any).unitsPerLayer === "number" ? (last as any).unitsPerLayer : null,
+                unitsPerPallet: typeof (last as any).unitsPerPallet === "number" ? (last as any).unitsPerPallet : null,
+                contributesToLiters: true,
+              },
+            });
+            qty = Math.ceil(Math.max(0, normalized.normalizedUnits ?? 0));
+          }
+          byId.set(rowId, { ...last, qty: Math.max(0, qty) });
+        }
+
+        const rebalanced = nextProducts.map((p) => byId.get(p.id) ?? p);
+        return {
+          ...prev,
+          [activeScenario]: { ...current, products: rebalanced },
+        };
+      });
+      return;
+    }
+
+    applyPatch();
   }
 
   const mixPricing = useMemo(() => {
