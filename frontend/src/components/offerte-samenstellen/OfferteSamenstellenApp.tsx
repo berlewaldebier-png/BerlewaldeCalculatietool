@@ -1139,7 +1139,7 @@ export function OfferteSamenstellenApp({
 
     // Auto-allocate quantities by mix when adding 2nd+ product, based on current mixSource.
     // This runs only on product selection (not per keystroke) to keep the UI fast.
-    if (mixSource !== "quote" && alreadySelectedCount > 0 && (patch.litersPerUnit ?? 0) > 0) {
+    if (alreadySelectedCount > 0 && (patch.litersPerUnit ?? 0) > 0) {
       setScenarios((prev) => {
         const current = prev[activeScenario];
         const nextProducts = current.products.map((p) => (p.id === rowId ? { ...p, ...patch } : p));
@@ -1165,6 +1165,7 @@ export function OfferteSamenstellenApp({
           const productId = String(p.source?.product_id ?? "").trim();
           const ref = skuId ? `sku:${skuId}` : bierId && productId ? `beer:${bierId}:product:${productId}` : "";
           const pct = (() => {
+            if (mixSource === "quote") return 1;
             if (mixSource === "customer") return customerMixPctByRef[ref] ?? portfolioMixPctByRef[ref] ?? null;
             if (mixSource === "portfolio") return portfolioMixPctByRef[ref] ?? null;
             return null;
