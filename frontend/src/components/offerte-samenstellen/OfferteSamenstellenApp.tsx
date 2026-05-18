@@ -769,6 +769,22 @@ export function OfferteSamenstellenApp({
 
       const nextProducts = current.products.map((p) => (p.id === productId ? { ...p, ...patch } : p));
       const nextTotalLiters = calculateScenarioTotalLiters(nextProducts);
+      // Guardrail: while a row is still "unselected" (no litersPerUnit), changing qty should not
+      // trigger the required-volume modal. This commonly happens on blur when selecting the first product.
+      const hasAnyEligibleProduct = nextProducts.some((p) => {
+        if (Boolean((p as any).isMixLiters)) return false;
+        if (p.contributesToLiters === false) return false;
+        return Math.max(0, p.litersPerUnit ?? 0) > 0;
+      });
+      if (!hasAnyEligibleProduct && nextTotalLiters <= 0) {
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...current,
+            products: nextProducts,
+          },
+        };
+      }
       if (nextTotalLiters + 1e-6 < required.requiredLiters) {
         setPendingRequiredVolumeChange({
           kind: "update_product",
