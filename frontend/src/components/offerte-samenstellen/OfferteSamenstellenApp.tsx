@@ -781,6 +781,14 @@ export function OfferteSamenstellenApp({
         return prev;
       }
 
+      if (nextTotalLiters > required.requiredLiters + 1e-6) {
+        if (required.requiredField === "target") {
+          setTargetVolumeLiters(nextTotalLiters);
+        } else {
+          setAgreementVolumeLiters(nextTotalLiters);
+        }
+      }
+
       return {
         ...prev,
         [activeScenario]: {
