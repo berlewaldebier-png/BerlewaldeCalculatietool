@@ -1146,15 +1146,19 @@ export function OfferteSamenstellenApp({
       const suggestedQty = Math.ceil(Math.max(0, suggestedQtyRaw));
       const suggestedLiters = suggestedQty * litersPerUnit;
 
-      setPendingFirstProductAutofill({
-        productId: rowId,
-        patch,
-        requiredField: required.requiredField,
-        requiredLiters: required.requiredLiters,
-        suggestedQty,
-        suggestedLiters,
-      });
-      return;
+      // If this is not the only row, do not treat it as "first product" autofill.
+      // This prevents accidental full-volume autofill when selecting the 2nd row.
+      if (scenario.products.length === 1) {
+        setPendingFirstProductAutofill({
+          productId: rowId,
+          patch,
+          requiredField: required.requiredField,
+          requiredLiters: required.requiredLiters,
+          suggestedQty,
+          suggestedLiters,
+        });
+        return;
+      }
     }
 
     const applyPatch = () => updateProduct(rowId, patch);
