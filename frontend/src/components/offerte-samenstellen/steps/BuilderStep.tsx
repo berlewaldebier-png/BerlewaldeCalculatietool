@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import {
   getProductRef,
@@ -72,6 +72,7 @@ export function BuilderStep({
   activeScenario,
   setActiveScenario,
   updateProduct,
+  commitProductUpdate,
   addProductRow,
   removeProductRow,
   removeBlock,
@@ -108,6 +109,7 @@ export function BuilderStep({
   activeScenario: ScenarioId;
   setActiveScenario: (id: ScenarioId) => void;
   updateProduct: (productId: string, patch: Partial<QuoteProduct>) => void;
+  commitProductUpdate: (productId: string, patch: Partial<QuoteProduct>) => void;
   addProductRow: () => void;
   removeProductRow: (productId: string) => void;
   removeBlock: (blockId: string) => void;
@@ -123,6 +125,18 @@ export function BuilderStep({
   onSave: () => void;
   isSaving: boolean;
 }) {
+  const [qtyDraftById, setQtyDraftById] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setQtyDraftById((prev) => {
+      const ids = new Set(scenario.products.map((p) => p.id));
+      const next: Record<string, string> = {};
+      Object.entries(prev).forEach(([id, value]) => {
+        if (ids.has(id)) next[id] = value;
+      });
+      return next;
+    });
+  }, [scenario.products]);
   const productOptionIds = useMemo(() => {
     return new Set(productOptions.map((option) => option.optionId));
   }, [productOptions]);
@@ -280,6 +294,11 @@ export function BuilderStep({
                     : unitMode === "liters"
                       ? product.qty * product.litersPerUnit
                       : product.qty;
+                  const qtyDraftRaw = qtyDraftById[product.id];
+                  const qtyDraftValue =
+                    typeof qtyDraftRaw === "string"
+                      ? qtyDraftRaw
+                      : String(Number.isFinite(qtyInputValue) ? qtyInputValue : 0);
                   const roundingModeForRow = String((product as any).roundingMode ?? "none");
                   const unitLabelForRow = String(product.unit ?? "stuk");
                   const unitsPerLayerForRow =
@@ -307,6 +326,68 @@ export function BuilderStep({
                     }
                     return stepUnits * Math.max(0, product.litersPerUnit);
                   })();
+
+                  const commitQtyDraft = (nextRaw: string) => {
+                    const raw = Math.max(0, clampNumber(nextRaw, 0));
+                    if (isMixLiters) {
+                      const packUnit = String((product as any).mixPackUnit ?? "doos");
+                      const assumedLitersPerUnit = packUnit === "fust" ? 20 : 7.92;
+                      const effectiveUnitsPerLayer =
+                        packUnit === "fust" ? palletDefaults.fustUnitsPerLayer : palletDefaults.doosUnitsPerLayer;
+                      const effectiveUnitsPerPallet =
+                        packUnit === "fust" ? palletDefaults.fustUnitsPerPallet : palletDefaults.doosUnitsPerPallet;
+                      const normalized = normalizeQuantity({
+                        inputValue: raw,
+                        inputUnit: "liters",
+                        roundingMode: roundingModeForRow as any,
+                        salesUnit: {
+                          salesUnitLabel: packUnit,
+                          litersPerSalesUnit: assumedLitersPerUnit,
+                          unitsPerLayer: effectiveUnitsPerLayer,
+                          unitsPerPallet: effectiveUnitsPerPallet,
+                          contributesToLiters: true,
+                        },
+                      });
+                      const roundedLiters = (normalized.normalizedUnits ?? 0) * assumedLitersPerUnit;
+                      commitProductUpdate(product.id, { qty: roundedLiters });
+                      setQtyDraftById((prev) => ({ ...prev, [product.id]: String(roundedLiters) }));
+                      return;
+                    }
+
+                    const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
+                    const roundingMode = roundingModeForRow as any;
+                    const unitLabel = String(product.unit ?? "stuk");
+                    const effectiveUnitsPerLayer =
+                      unitLabel === "doos"
+                        ? palletDefaults.doosUnitsPerLayer
+                        : unitLabel === "fust"
+                          ? palletDefaults.fustUnitsPerLayer
+                          : ((product as any).unitsPerLayer ?? null);
+                    const effectiveUnitsPerPallet =
+                      unitLabel === "doos"
+                        ? palletDefaults.doosUnitsPerPallet
+                        : unitLabel === "fust"
+                          ? palletDefaults.fustUnitsPerPallet
+                          : ((product as any).unitsPerPallet ?? null);
+
+                    const normalized = normalizeQuantity({
+                      inputValue: raw,
+                      inputUnit: unitMode === "liters" ? "liters" : "sales_units",
+                      roundingMode,
+                      salesUnit: {
+                        salesUnitLabel: unitLabel,
+                        litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+                        unitsPerLayer: effectiveUnitsPerLayer ?? null,
+                        unitsPerPallet: effectiveUnitsPerPallet ?? null,
+                        contributesToLiters: litersPerUnit > 0,
+                      },
+                    });
+
+                    const nextQty = normalized.normalizedUnits ?? 0;
+                    commitProductUpdate(product.id, { qty: nextQty });
+                    const nextDisplay = unitMode === "liters" ? String(nextQty * litersPerUnit) : String(nextQty);
+                    setQtyDraftById((prev) => ({ ...prev, [product.id]: nextDisplay }));
+                  };
 
                   return (
                     <tr key={product.id}>
@@ -368,62 +449,14 @@ export function BuilderStep({
                           type="number"
                           min={0}
                           step={stepValue > 0 ? stepValue : 1}
-                          value={Number.isFinite(qtyInputValue) ? qtyInputValue : 0}
-                          onChange={(e) => {
-                            const raw = Math.max(0, clampNumber(e.target.value, 0));
-                            if (isMixLiters) {
-                              const packUnit = String((product as any).mixPackUnit ?? "doos");
-                              const assumedLitersPerUnit = packUnit === "fust" ? 20 : 7.92;
-                              const effectiveUnitsPerLayer = packUnit === "fust" ? palletDefaults.fustUnitsPerLayer : palletDefaults.doosUnitsPerLayer;
-                              const effectiveUnitsPerPallet = packUnit === "fust" ? palletDefaults.fustUnitsPerPallet : palletDefaults.doosUnitsPerPallet;
-                              const normalized = normalizeQuantity({
-                                inputValue: raw,
-                                inputUnit: "liters",
-                                roundingMode: roundingModeForRow as any,
-                                salesUnit: {
-                                  salesUnitLabel: packUnit,
-                                  litersPerSalesUnit: assumedLitersPerUnit,
-                                  unitsPerLayer: effectiveUnitsPerLayer,
-                                  unitsPerPallet: effectiveUnitsPerPallet,
-                                  contributesToLiters: true,
-                                },
-                              });
-                              const roundedLiters = (normalized.normalizedUnits ?? 0) * assumedLitersPerUnit;
-                              updateProduct(product.id, { qty: roundedLiters });
-                              return;
+                          value={qtyDraftValue}
+                          onChange={(e) => setQtyDraftById((prev) => ({ ...prev, [product.id]: e.target.value }))}
+                          onBlur={(e) => commitQtyDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              commitQtyDraft((e.target as HTMLInputElement).value);
+                              (e.target as HTMLInputElement).blur();
                             }
-
-                            const litersPerUnit = Math.max(0, clampNumber(product.litersPerUnit, 0));
-                            const roundingMode = roundingModeForRow as any;
-                            const unitLabel = String(product.unit ?? "stuk");
-                            const effectiveUnitsPerLayer =
-                              unitLabel === "doos"
-                                ? palletDefaults.doosUnitsPerLayer
-                                : unitLabel === "fust"
-                                  ? palletDefaults.fustUnitsPerLayer
-                                  : ((product as any).unitsPerLayer ?? null);
-                            const effectiveUnitsPerPallet =
-                              unitLabel === "doos"
-                                ? palletDefaults.doosUnitsPerPallet
-                                : unitLabel === "fust"
-                                  ? palletDefaults.fustUnitsPerPallet
-                                  : ((product as any).unitsPerPallet ?? null);
-
-                            const normalized = normalizeQuantity({
-                              inputValue: raw,
-                              inputUnit: unitMode === "liters" ? "liters" : "sales_units",
-                              roundingMode,
-                              salesUnit: {
-                                salesUnitLabel: unitLabel,
-                                litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
-                                unitsPerLayer: effectiveUnitsPerLayer ?? null,
-                                unitsPerPallet: effectiveUnitsPerPallet ?? null,
-                                contributesToLiters: litersPerUnit > 0,
-                              },
-                            });
-
-                            const nextQty = normalized.normalizedUnits ?? 0;
-                            updateProduct(product.id, { qty: nextQty });
                           }}
                           className="cpq-input cpq-input-small"
                         />

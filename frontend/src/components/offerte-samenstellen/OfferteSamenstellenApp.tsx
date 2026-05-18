@@ -55,6 +55,7 @@ import {
 } from "@/components/break-even-v2/breakEvenV2Utils";
 import { resolvePricedLitersTotal } from "@/lib/dealContext";
 import { WarningIcon } from "@/components/kostprijsbeheer/KostprijsBeheerParts";
+import { normalizeQuantity } from "@/lib/quantityNormalization";
 import type {
   BasisData,
   BuilderBlock,
@@ -735,6 +736,16 @@ export function OfferteSamenstellenApp({
   }
 
   function updateProduct(productId: string, patch: Partial<QuoteProduct>) {
+    setScenarios((prev) => ({
+      ...prev,
+      [activeScenario]: {
+        ...prev[activeScenario],
+        products: prev[activeScenario].products.map((p) => (p.id === productId ? { ...p, ...patch } : p)),
+      },
+    }));
+  }
+
+  function commitProductUpdate(productId: string, patch: Partial<QuoteProduct>) {
     setScenarios((prev) => {
       const current = prev[activeScenario];
       const required = getRequiredTotalLiters();
@@ -1439,6 +1450,7 @@ export function OfferteSamenstellenApp({
                   activeScenario={activeScenario}
                   setActiveScenario={setActiveScenario}
                   updateProduct={updateProduct}
+                  commitProductUpdate={commitProductUpdate}
                   addProductRow={addProductRow}
                   removeProductRow={removeProductRow}
                   removeBlock={removeBlock}
