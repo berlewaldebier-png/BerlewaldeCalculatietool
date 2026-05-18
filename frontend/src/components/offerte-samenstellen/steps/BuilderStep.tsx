@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getProductRef,
@@ -126,6 +126,7 @@ export function BuilderStep({
   isSaving: boolean;
 }) {
   const [qtyDraftById, setQtyDraftById] = useState<Record<string, string>>({});
+  const pointerDownQtyDraftByIdRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     setQtyDraftById((prev) => {
@@ -451,6 +452,16 @@ export function BuilderStep({
                           step={stepValue > 0 ? stepValue : 1}
                           value={qtyDraftValue}
                           onChange={(e) => setQtyDraftById((prev) => ({ ...prev, [product.id]: e.target.value }))}
+                          onPointerDown={(e) => {
+                            pointerDownQtyDraftByIdRef.current[product.id] = (e.target as HTMLInputElement).value;
+                          }}
+                          onPointerUp={(e) => {
+                            const input = e.target as HTMLInputElement;
+                            const before = pointerDownQtyDraftByIdRef.current[product.id];
+                            if (typeof before === "string" && before !== input.value) {
+                              commitQtyDraft(input.value);
+                            }
+                          }}
                           onBlur={(e) => commitQtyDraft(e.target.value)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {

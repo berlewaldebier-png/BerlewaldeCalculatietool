@@ -1007,7 +1007,8 @@ export function OfferteSamenstellenApp({
       });
       const suggestedQtyFromNormalization = Math.max(0, normalized.normalizedUnits ?? 0);
       const suggestedQtyFallback = litersPerUnit > 0 ? Math.ceil(required.requiredLiters / litersPerUnit) : 0;
-      const suggestedQty = suggestedQtyFromNormalization > 0 ? suggestedQtyFromNormalization : suggestedQtyFallback;
+      const suggestedQtyRaw = suggestedQtyFromNormalization > 0 ? suggestedQtyFromNormalization : suggestedQtyFallback;
+      const suggestedQty = Math.ceil(Math.max(0, suggestedQtyRaw));
       const suggestedLiters = suggestedQty * litersPerUnit;
 
       setPendingFirstProductAutofill({
