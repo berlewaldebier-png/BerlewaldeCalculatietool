@@ -1114,8 +1114,16 @@ export function OfferteSamenstellenApp({
       if (!hasRef) return false;
       return (p.litersPerUnit ?? 0) > 0;
     }).length;
+    const hasAnySelectedEligibleProduct = scenario.products.some((p) => {
+      if (p.id === rowId) return false;
+      if (Boolean((p as any).isMixLiters)) return false;
+      if (p.contributesToLiters === false) return false;
+      const hasRef = Boolean((p as any)?.source?.sku_id) || (Boolean((p as any)?.source?.bier_id) && Boolean((p as any)?.source?.product_id));
+      if (!hasRef) return false;
+      return (p.litersPerUnit ?? 0) > 0 && Math.max(0, p.qty ?? 0) > 0;
+    });
 
-    if (required && alreadySelectedCount === 0 && (patch.litersPerUnit ?? 0) > 0) {
+    if (required && !hasAnySelectedEligibleProduct && alreadySelectedCount === 0 && (patch.litersPerUnit ?? 0) > 0) {
       const litersPerUnit = Math.max(0, patch.litersPerUnit ?? 0);
       const roundingMode = String((currentRow as any)?.roundingMode ?? "none");
       const unitsPerLayer = typeof patch.unitsPerLayer === "number" ? patch.unitsPerLayer : null;
