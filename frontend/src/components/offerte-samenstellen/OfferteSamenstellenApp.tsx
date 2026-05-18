@@ -935,7 +935,7 @@ export function OfferteSamenstellenApp({
             id,
             name: "",
             pack: "",
-            qty: 1,
+            qty: 0,
             litersPerUnit: 0,
             unit: "doos",
             roundingMode: "none",
@@ -1109,6 +1109,9 @@ export function OfferteSamenstellenApp({
       if (p.id === rowId) return false;
       if (Boolean((p as any).isMixLiters)) return false;
       if (p.contributesToLiters === false) return false;
+      // Only count fully selected rows (have a sku/product ref) to avoid treating half-filled rows as "selected".
+      const hasRef = Boolean((p as any)?.source?.sku_id) || (Boolean((p as any)?.source?.bier_id) && Boolean((p as any)?.source?.product_id));
+      if (!hasRef) return false;
       return (p.litersPerUnit ?? 0) > 0;
     }).length;
 
