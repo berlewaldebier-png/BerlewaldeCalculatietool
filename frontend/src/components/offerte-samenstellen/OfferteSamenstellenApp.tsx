@@ -1168,23 +1168,11 @@ export function OfferteSamenstellenApp({
       return;
     }
 
-    // Auto-allocate quantities by mix when adding 2nd+ product, based on current mixSource.
-    // This runs only on product selection (not per keystroke) to keep the UI fast.
-    // Rebalance as soon as we have at least 2 eligible products (including the row being selected).
-    // Do not rely on alreadySelectedCount alone, because it may be 0 in transient states.
+    // Deterministic auto-allocation on product selection:
+    // - 1 eligible product: fill to required (ceil, respecting rounding mode if present)
+    // - 2+ eligible products: rebalance by mixSource (quote=equal split), last-selected is remainder corrector.
     const selectingEligible = (patch.litersPerUnit ?? 0) > 0;
-    const eligibleAfterSelectCount = scenario.products.reduce((sum, p) => {
-      if (p.id === rowId) {
-        return sum + (selectingEligible ? 1 : 0);
-      }
-      if (Boolean((p as any).isMixLiters)) return sum;
-      if (p.contributesToLiters === false) return sum;
-      const hasRef = Boolean((p as any)?.source?.sku_id) || (Boolean((p as any)?.source?.bier_id) && Boolean((p as any)?.source?.product_id));
-      if (!hasRef) return sum;
-      return sum + (Math.max(0, p.litersPerUnit ?? 0) > 0 ? 1 : 0);
-    }, 0);
-
-    if (eligibleAfterSelectCount >= 2 && selectingEligible) {
+    if (selectingEligible) {
       setScenarios((prev) => {
         const current = prev[activeScenario];
         const nextProducts = current.products.map((p) => (p.id === rowId ? { ...p, ...patch } : p));
@@ -1196,11 +1184,8 @@ export function OfferteSamenstellenApp({
           return litersPerUnit > 0;
         });
 
-        if (eligible.length < 2) {
-          return {
-            ...prev,
-            [activeScenario]: { ...current, products: nextProducts },
-          };
+        if (eligible.length < 1) {
+          return { ...prev, [activeScenario]: { ...current, products: nextProducts } };
         }
 
         const pctById = new Map<string, number>();
@@ -1228,7 +1213,35 @@ export function OfferteSamenstellenApp({
         const totalRequiredLiters = Math.max(0, required.requiredLiters);
         const byId = new Map(nextProducts.map((p) => [p.id, p]));
 
-        // First allocate non-last products using normal rounding (Math.round) for roundingMode "none".
+        if (eligible.length === 1) {
+          const only = eligible[0];
+          const litersPerUnit = Math.max(0, only.litersPerUnit ?? 0);
+          const roundingMode = String((only as any).roundingMode ?? "none");
+          let qty = 0;
+          if (litersPerUnit > 0) {
+            if (roundingMode === "none") qty = Math.ceil(totalRequiredLiters / litersPerUnit);
+            else {
+              const normalized = normalizeQuantity({
+                inputValue: totalRequiredLiters,
+                inputUnit: "liters",
+                roundingMode: roundingMode as any,
+                salesUnit: {
+                  salesUnitLabel: String(only.unit ?? "stuk"),
+                  litersPerSalesUnit: litersPerUnit,
+                  unitsPerLayer: typeof (only as any).unitsPerLayer === "number" ? (only as any).unitsPerLayer : null,
+                  unitsPerPallet: typeof (only as any).unitsPerPallet === "number" ? (only as any).unitsPerPallet : null,
+                  contributesToLiters: true,
+                },
+              });
+              qty = Math.ceil(Math.max(0, normalized.normalizedUnits ?? 0));
+            }
+          }
+          byId.set(only.id, { ...(byId.get(only.id) as QuoteProduct), qty: Math.max(0, qty) });
+          const rebalanced = nextProducts.map((p) => byId.get(p.id) ?? p);
+          return { ...prev, [activeScenario]: { ...current, products: rebalanced } };
+        }
+
+        // 2+ eligible products: allocate non-last products using normal rounding (Math.round) for roundingMode "none".
         let allocatedLiters = 0;
         eligible.forEach((p) => {
           if (p.id === rowId) return;
