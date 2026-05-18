@@ -182,6 +182,14 @@ export function OfferteSamenstellenApp({
     requiredLiters: number;
     requiredField: "target" | "agreement";
   }>(null);
+  const [pendingFirstProductAutofill, setPendingFirstProductAutofill] = useState<null | {
+    productId: string;
+    patch: Partial<QuoteProduct>;
+    requiredField: "target" | "agreement";
+    requiredLiters: number;
+    suggestedQty: number;
+    suggestedLiters: number;
+  }>(null);
   const [realizedSales, setRealizedSales] = useState<RealizedSalesBySkuPayload | null>(null);
   const [realizedSalesError, setRealizedSalesError] = useState<string | null>(null);
   const [customerSummary, setCustomerSummary] = useState<CustomerSalesSummary | null>(null);
@@ -825,6 +833,15 @@ export function OfferteSamenstellenApp({
       }
 
       const nextTotalLiters = calculateScenarioTotalLiters(nextProducts);
+      if (nextTotalLiters <= 0) {
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...current,
+            products: nextProducts,
+          },
+        };
+      }
       if (nextTotalLiters + 1e-6 < required.requiredLiters) {
         setPendingRequiredVolumeChange({
           kind: "remove_product",
@@ -933,7 +950,7 @@ export function OfferteSamenstellenApp({
       option.salesUnitLabel === "doos" || option.salesUnitLabel === "fust" || option.salesUnitLabel === "fles" || option.salesUnitLabel === "stuk"
         ? option.salesUnitLabel
         : inferUnitFromPack(option.packLabel);
-    updateProduct(rowId, {
+    const patch: Partial<QuoteProduct> = {
       name: option.bierName,
       pack: option.packLabel,
       litersPerUnit: option.litersPerUnit,
@@ -952,7 +969,51 @@ export function OfferteSamenstellenApp({
         product_id: option.productId,
         kostprijsversie_id: option.kostprijsversieId,
       },
-    });
+    };
+
+    const required = getRequiredTotalLiters();
+    const currentRow = scenario.products.find((p) => p.id === rowId);
+    const alreadySelectedCount = scenario.products.filter((p) => {
+      if (p.id === rowId) return false;
+      if (Boolean((p as any).isMixLiters)) return false;
+      if (p.contributesToLiters === false) return false;
+      return (p.litersPerUnit ?? 0) > 0;
+    }).length;
+
+    if (required && alreadySelectedCount === 0 && (patch.litersPerUnit ?? 0) > 0) {
+      const litersPerUnit = Math.max(0, patch.litersPerUnit ?? 0);
+      const roundingMode = String((currentRow as any)?.roundingMode ?? "none");
+      const unitsPerLayer = typeof patch.unitsPerLayer === "number" ? patch.unitsPerLayer : null;
+      const unitsPerPallet = typeof patch.unitsPerPallet === "number" ? patch.unitsPerPallet : null;
+      const normalized = normalizeQuantity({
+        inputValue: required.requiredLiters,
+        inputUnit: "liters",
+        roundingMode: roundingMode as any,
+        salesUnit: {
+          salesUnitLabel: resolvedUnit,
+          litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+          unitsPerLayer,
+          unitsPerPallet,
+          contributesToLiters: true,
+        },
+      });
+      const suggestedQtyFromNormalization = Math.max(0, normalized.normalizedUnits ?? 0);
+      const suggestedQtyFallback = litersPerUnit > 0 ? Math.ceil(required.requiredLiters / litersPerUnit) : 0;
+      const suggestedQty = suggestedQtyFromNormalization > 0 ? suggestedQtyFromNormalization : suggestedQtyFallback;
+      const suggestedLiters = suggestedQty * litersPerUnit;
+
+      setPendingFirstProductAutofill({
+        productId: rowId,
+        patch,
+        requiredField: required.requiredField,
+        requiredLiters: required.requiredLiters,
+        suggestedQty,
+        suggestedLiters,
+      });
+      return;
+    }
+
+    updateProduct(rowId, patch);
   }
 
   const mixPricing = useMemo(() => {
@@ -1249,6 +1310,27 @@ export function OfferteSamenstellenApp({
     setPendingRequiredVolumeChange(null);
   }
 
+  function confirmFirstProductAutofill() {
+    const pending = pendingFirstProductAutofill;
+    if (!pending) return;
+
+    if (pending.requiredField === "target") {
+      setTargetVolumeLiters(pending.suggestedLiters);
+    } else {
+      setAgreementVolumeLiters(pending.suggestedLiters);
+    }
+
+    commitProductUpdate(pending.productId, { ...pending.patch, qty: pending.suggestedQty });
+    setPendingFirstProductAutofill(null);
+  }
+
+  function cancelFirstProductAutofill() {
+    const pending = pendingFirstProductAutofill;
+    if (!pending) return;
+    updateProduct(pending.productId, pending.patch);
+    setPendingFirstProductAutofill(null);
+  }
+
   return (
     <div className="cpq-root">
       <div className="cpq-frame">
@@ -1280,6 +1362,44 @@ export function OfferteSamenstellenApp({
                   Annuleren
                 </button>
                 <button type="button" className="cpq-button" onClick={confirmLowerRequiredVolume}>
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {pendingFirstProductAutofill ? (
+          <div className="cpq-modal-backdrop" role="dialog" aria-modal="true">
+            <div className="cpq-modal">
+              <div className="cpq-modal-header">
+                <div>
+                  <div className="cpq-kicker">Offerte</div>
+                  <h3 className="cpq-modal-title">Hoeveelheid automatisch invullen?</h3>
+                </div>
+                <button onClick={cancelFirstProductAutofill} className="cpq-icon-button" type="button">
+                  ×
+                </button>
+              </div>
+
+              <div className="cpq-modal-body">
+                <div className="cpq-alert">
+                  Op basis van het ingestelde {pendingFirstProductAutofill.requiredField === "target" ? "doelvolume" : "contractvolume"} zetten we de hoeveelheid automatisch zodat dit volume gehaald wordt (naar boven afgerond).
+                  <div style={{ marginTop: 8 }}>
+                    Invoer: <strong>{pendingFirstProductAutofill.requiredLiters.toFixed(2)} L</strong> → voorstel:{" "}
+                    <strong>{pendingFirstProductAutofill.suggestedQty} eenheden</strong> ({pendingFirstProductAutofill.suggestedLiters.toFixed(2)} L).
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    Bij OK passen we ook het {pendingFirstProductAutofill.requiredField === "target" ? "doelvolume" : "contractvolume"} aan naar {pendingFirstProductAutofill.suggestedLiters.toFixed(2)} L.
+                  </div>
+                </div>
+              </div>
+
+              <div className="cpq-modal-footer">
+                <button type="button" className="cpq-button cpq-button-secondary" onClick={cancelFirstProductAutofill}>
+                  Annuleren
+                </button>
+                <button type="button" className="cpq-button" onClick={confirmFirstProductAutofill}>
                   OK
                 </button>
               </div>
