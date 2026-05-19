@@ -273,8 +273,9 @@ export function OfferteSamenstellenApp({
     basisproducten,
     samengesteldeProducten,
     litersPerUnitOverrides,
-    appliedScenarioLabel,
+      appliedScenarioLabel,
   ]);
+
 
   const breakEvenConfigs = useMemo(
     () => normalizeConfigList(breakEvenConfiguraties, currentYear),
@@ -697,6 +698,120 @@ export function OfferteSamenstellenApp({
 
   function MixSourceBar() {
     const hasCustomerMix = Object.keys(customerMixPctByRef).length > 0;
+
+    function rebalanceScenarioProducts() {
+      const required = getRequiredTotalLiters();
+      if (!required) return;
+      if (dealContext === "one_off") return;
+
+      setScenarios((prev) => {
+        const current = prev[activeScenario];
+        const totalRequiredLiters = Math.max(0, required.requiredLiters);
+        const nextProducts = current.products.slice();
+
+        const eligible = nextProducts.filter((p) => {
+          if (Boolean((p as any).isMixLiters)) return false;
+          if (p.contributesToLiters === false) return false;
+          return Math.max(0, p.litersPerUnit ?? 0) > 0;
+        });
+
+        if (eligible.length < 2) return prev;
+
+        const pctById = new Map<string, number>();
+        eligible.forEach((p) => {
+          const skuId = String(p.source?.sku_id ?? "").trim();
+          const bierId = String(p.source?.bier_id ?? "").trim();
+          const prodId = String(p.source?.product_id ?? "").trim();
+          const ref = skuId ? `sku:${skuId}` : bierId && prodId ? `beer:${bierId}:product:${prodId}` : "";
+          const pct = (() => {
+            if (mixSource === "quote") return 1;
+            if (mixSource === "customer") return customerMixPctByRef[ref] ?? portfolioMixPctByRef[ref] ?? null;
+            if (mixSource === "portfolio") return portfolioMixPctByRef[ref] ?? null;
+            return null;
+          })();
+          pctById.set(p.id, typeof pct === "number" && Number.isFinite(pct) ? Math.max(0, pct) : 0);
+        });
+
+        let sumPct = 0;
+        eligible.forEach((p) => (sumPct += pctById.get(p.id) ?? 0));
+        if (sumPct <= 0) {
+          eligible.forEach((p) => pctById.set(p.id, 1));
+          sumPct = eligible.length;
+        }
+
+        const byId = new Map(nextProducts.map((p) => [p.id, p]));
+        const lastTouchedId = eligible[eligible.length - 1]?.id ?? eligible[0]?.id;
+
+        let allocatedLiters = 0;
+        eligible.forEach((p) => {
+          if (p.id === lastTouchedId) return;
+          const litersPerUnit = Math.max(0, p.litersPerUnit ?? 0);
+          const weight = (pctById.get(p.id) ?? 0) / sumPct;
+          const desiredLiters = totalRequiredLiters * weight;
+          const rawUnits = litersPerUnit > 0 ? desiredLiters / litersPerUnit : 0;
+          const roundingMode = String((p as any).roundingMode ?? "none");
+
+          let qty = 0;
+          if (roundingMode === "none") {
+            qty = Math.round(rawUnits);
+          } else {
+            const normalized = normalizeQuantity({
+              inputValue: desiredLiters,
+              inputUnit: "liters",
+              roundingMode: roundingMode as any,
+              salesUnit: {
+                salesUnitLabel: String(p.unit ?? "stuk"),
+                litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+                unitsPerLayer: typeof (p as any).unitsPerLayer === "number" ? (p as any).unitsPerLayer : null,
+                unitsPerPallet: typeof (p as any).unitsPerPallet === "number" ? (p as any).unitsPerPallet : null,
+                contributesToLiters: true,
+              },
+            });
+            qty = Math.ceil(Math.max(0, normalized.normalizedUnits ?? 0));
+          }
+
+          const safeQty = Math.max(0, qty);
+          byId.set(p.id, { ...(byId.get(p.id) as QuoteProduct), qty: safeQty });
+          allocatedLiters += safeQty * litersPerUnit;
+        });
+
+        const last = byId.get(lastTouchedId) as QuoteProduct | undefined;
+        if (last) {
+          const litersPerUnit = Math.max(0, last.litersPerUnit ?? 0);
+          const remainingLiters = Math.max(0, totalRequiredLiters - allocatedLiters);
+          const roundingMode = String((last as any).roundingMode ?? "none");
+          let qty = 0;
+          if (litersPerUnit <= 0) qty = 0;
+          else if (roundingMode === "none") qty = Math.ceil(remainingLiters / litersPerUnit);
+          else {
+            const normalized = normalizeQuantity({
+              inputValue: remainingLiters,
+              inputUnit: "liters",
+              roundingMode: roundingMode as any,
+              salesUnit: {
+                salesUnitLabel: String(last.unit ?? "stuk"),
+                litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
+                unitsPerLayer: typeof (last as any).unitsPerLayer === "number" ? (last as any).unitsPerLayer : null,
+                unitsPerPallet: typeof (last as any).unitsPerPallet === "number" ? (last as any).unitsPerPallet : null,
+                contributesToLiters: true,
+              },
+            });
+            qty = Math.ceil(Math.max(0, normalized.normalizedUnits ?? 0));
+          }
+          byId.set(lastTouchedId, { ...last, qty: Math.max(0, qty) });
+        }
+
+        const rebalanced = nextProducts.map((p) => byId.get(p.id) ?? p);
+        return {
+          ...prev,
+          [activeScenario]: {
+            ...current,
+            products: rebalanced,
+          },
+        };
+      });
+    }
+
     return (
       <div className="cpq-card" style={{ padding: 14 }}>
         <div className="cpq-label" style={{ marginBottom: 8 }}>
@@ -738,6 +853,16 @@ export function OfferteSamenstellenApp({
           <span className="cpq-muted" style={{ marginLeft: 6 }}>
             Percentages zijn informatief en sturen de berekening alleen als je geen productspecificatie hebt.
           </span>
+          <button
+            type="button"
+            className="cpq-button cpq-button-secondary"
+            onClick={rebalanceScenarioProducts}
+            disabled={dealContext === "one_off" || !getRequiredTotalLiters()}
+            title="Herbereken de aantallen van alle regels op basis van de gekozen mix zodat het doel/contractvolume gehaald wordt."
+            style={{ marginLeft: "auto" }}
+          >
+            Herbereken aantallen
+          </button>
         </div>
       </div>
     );
@@ -802,115 +927,6 @@ export function OfferteSamenstellenApp({
       if (nextRequiredLiters > required.requiredLiters + 1e-6) {
         if (required.requiredField === "target") setTargetVolumeLiters(nextRequiredLiters);
         else setAgreementVolumeLiters(nextRequiredLiters);
-      }
-
-      // If we have 2+ eligible products, rebalance quantities to the chosen mixSource.
-      // This keeps the "principle" consistent across all products after qty edits.
-      if (dealContext !== "one_off") {
-        const eligible = nextProducts.filter((p) => {
-          if (Boolean((p as any).isMixLiters)) return false;
-          if (p.contributesToLiters === false) return false;
-          const litersPerUnit = Math.max(0, p.litersPerUnit ?? 0);
-          return litersPerUnit > 0;
-        });
-
-        if (eligible.length >= 2) {
-          const pctById = new Map<string, number>();
-          eligible.forEach((p) => {
-            const skuId = String(p.source?.sku_id ?? "").trim();
-            const bierId = String(p.source?.bier_id ?? "").trim();
-            const prodId = String(p.source?.product_id ?? "").trim();
-            const ref = skuId ? `sku:${skuId}` : bierId && prodId ? `beer:${bierId}:product:${prodId}` : "";
-
-            let pct: number | null = null;
-            if (mixSource === "customer") pct = customerMixPctByRef[ref] ?? portfolioMixPctByRef[ref] ?? null;
-            else if (mixSource === "portfolio") pct = portfolioMixPctByRef[ref] ?? null;
-            else if (mixSource === "quote") pct = null;
-
-            pctById.set(p.id, typeof pct === "number" && Number.isFinite(pct) ? Math.max(0, pct) : 0);
-          });
-
-          let sumPct = 0;
-          eligible.forEach((p) => (sumPct += pctById.get(p.id) ?? 0));
-          if (sumPct <= 0) {
-            // quote-mix (or missing data): equal split.
-            eligible.forEach((p) => pctById.set(p.id, 1));
-            sumPct = eligible.length;
-          }
-
-          const byId = new Map(nextProducts.map((p) => [p.id, p]));
-
-          // Choose the last touched product as remainder corrector.
-          const lastTouchedId = productId;
-
-          let allocatedLiters = 0;
-          eligible.forEach((p) => {
-            if (p.id === lastTouchedId) return;
-            const litersPerUnit = Math.max(0, p.litersPerUnit ?? 0);
-            const weight = (pctById.get(p.id) ?? 0) / sumPct;
-            const desiredLiters = nextRequiredLiters * weight;
-            const rawUnits = litersPerUnit > 0 ? desiredLiters / litersPerUnit : 0;
-            const roundingMode = String((p as any).roundingMode ?? "none");
-
-            let qty = 0;
-            if (roundingMode === "none") {
-              qty = Math.round(rawUnits);
-            } else {
-              const normalized = normalizeQuantity({
-                inputValue: desiredLiters,
-                inputUnit: "liters",
-                roundingMode: roundingMode as any,
-                salesUnit: {
-                  salesUnitLabel: String(p.unit ?? "stuk"),
-                  litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
-                  unitsPerLayer: typeof (p as any).unitsPerLayer === "number" ? (p as any).unitsPerLayer : null,
-                  unitsPerPallet: typeof (p as any).unitsPerPallet === "number" ? (p as any).unitsPerPallet : null,
-                  contributesToLiters: true,
-                },
-              });
-              qty = Math.ceil(Math.max(0, normalized.normalizedUnits ?? 0));
-            }
-
-            const safeQty = Math.max(0, qty);
-            byId.set(p.id, { ...(byId.get(p.id) as QuoteProduct), qty: safeQty });
-            allocatedLiters += safeQty * litersPerUnit;
-          });
-
-          const last = byId.get(lastTouchedId) as QuoteProduct | undefined;
-          if (last) {
-            const litersPerUnit = Math.max(0, last.litersPerUnit ?? 0);
-            const remainingLiters = Math.max(0, nextRequiredLiters - allocatedLiters);
-            const roundingMode = String((last as any).roundingMode ?? "none");
-            let qty = 0;
-            if (litersPerUnit <= 0) qty = 0;
-            else if (roundingMode === "none") qty = Math.ceil(remainingLiters / litersPerUnit);
-            else {
-              const normalized = normalizeQuantity({
-                inputValue: remainingLiters,
-                inputUnit: "liters",
-                roundingMode: roundingMode as any,
-                salesUnit: {
-                  salesUnitLabel: String(last.unit ?? "stuk"),
-                  litersPerSalesUnit: litersPerUnit > 0 ? litersPerUnit : null,
-                  unitsPerLayer: typeof (last as any).unitsPerLayer === "number" ? (last as any).unitsPerLayer : null,
-                  unitsPerPallet: typeof (last as any).unitsPerPallet === "number" ? (last as any).unitsPerPallet : null,
-                  contributesToLiters: true,
-                },
-              });
-              qty = Math.ceil(Math.max(0, normalized.normalizedUnits ?? 0));
-            }
-            byId.set(lastTouchedId, { ...last, qty: Math.max(0, qty) });
-          }
-
-          const rebalanced = nextProducts.map((p) => byId.get(p.id) ?? p);
-          return {
-            ...prev,
-            [activeScenario]: {
-              ...current,
-              products: rebalanced,
-            },
-          };
-        }
       }
 
       return {
@@ -1190,6 +1206,7 @@ export function OfferteSamenstellenApp({
           const litersPerUnit = Math.max(0, p.litersPerUnit ?? 0);
           return litersPerUnit > 0;
         });
+
 
         if (eligible.length < 1) {
           return { ...prev, [activeScenario]: { ...current, products: nextProducts } };

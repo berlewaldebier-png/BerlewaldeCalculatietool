@@ -105,9 +105,17 @@ export function buildProductFacts(params: BuildProductFactsParams) {
     const kind = text((row as any).kind).toLowerCase();
     if (kind !== "format") return;
     const packLabel = text((row as any).name || (row as any).naam || id);
+    const rawUom = text((row as any).uom || (row as any).eenheid).toLowerCase();
+    // In our DB the format rows often have uom/eenheid="stuk". That's a technical UoM, not the logistic pack type.
+    // We therefore only trust uom/eenheid when it is a meaningful pack type; otherwise infer from the format id/name.
+    const inferredPackType = inferPackTypeFromFormatId(id) || inferPackType(packLabel);
+    const packType =
+      rawUom === "doos" || rawUom === "fust" || rawUom === "fles" || rawUom === "blik"
+        ? rawUom
+        : inferredPackType;
     formatById.set(id, {
       packLabel,
-      packType: text((row as any).uom || (row as any).eenheid || inferPackTypeFromFormatId(id)),
+      packType,
       litersPerUnit: toNumber((row as any).content_liter, 0),
     });
   });
@@ -275,13 +283,20 @@ export function buildProductFacts(params: BuildProductFactsParams) {
           "stuk"
         : master?.packType || "stuk";
 
-      const packagingDefaults = getPackagingDefaultsForLabel(salesUnitLabel);
+      // Extra guard: format masters may still resolve to "stuk" (technical uom).
+      // In that case infer the pack type from the format id/name to keep liters-based products eligible.
+      const effectiveSalesUnitLabel =
+        salesUnitLabel === "stuk"
+          ? inferPackTypeFromFormatId(productId) || inferPackType(packLabel) || "stuk"
+          : salesUnitLabel;
+
+      const packagingDefaults = getPackagingDefaultsForLabel(effectiveSalesUnitLabel);
       const unitsPerLayer = packagingDefaults.unitsPerLayer;
       const unitsPerPallet = packagingDefaults.unitsPerPallet;
 
       const contributesToMargin = true;
       const contributesToLiters =
-        effectiveLitersPerUnit > 0 && salesUnitLabel !== "stuk";
+        effectiveLitersPerUnit > 0 && effectiveSalesUnitLabel !== "stuk";
 
       let sellInEx = 0;
       if (params.channelCode) {
@@ -327,8 +342,8 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         kostprijsversieId,
         bierName,
         packLabel,
-        packType: master?.packType || salesUnitLabel,
-        salesUnitLabel,
+        packType: master?.packType || effectiveSalesUnitLabel,
+        salesUnitLabel: effectiveSalesUnitLabel,
         unitsPerLayer,
         unitsPerPallet,
         contributesToLiters,
