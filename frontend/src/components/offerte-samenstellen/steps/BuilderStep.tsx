@@ -35,13 +35,16 @@ function isPricingActionBlock(block: BuilderBlock) {
   );
 }
 
-function usesBaseOfferProducts(block: BuilderBlock | undefined) {
-  return Boolean(block?.payload?.useBaseOfferProducts ?? true);
-}
-
 function readNumber(value: unknown, fallback: number) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string" && value.trim() === "") return fallback;
   const parsed = Number(String(value ?? "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readPositiveNumber(value: unknown, fallback: number) {
+  const parsed = readNumber(value, fallback);
+  return parsed > 0 ? parsed : fallback;
 }
 
 function stepForRoundingMode(mode: string, unitsPerLayer: number | null, unitsPerPallet: number | null) {
@@ -171,16 +174,18 @@ export function BuilderStep({
   const standardBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "standard");
   const globalBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "global");
   const standardPricingBlock = standardBlocks.find((block) => isPricingActionBlock(block));
-  const basisOfferteActive = !standardPricingBlock || usesBaseOfferProducts(standardPricingBlock);
+  // Basisofferte blijft altijd zichtbaar; pricing-acties kunnen scopes/uitsluitingen hebben,
+  // maar dat is geen reden om de basisofferte te verbergen.
+  const basisOfferteActive = true;
 
   const palletDefaults = useMemo(() => {
     const block = globalBlocks.find((b) => b.type === "Palletopbouw");
     const payload = (block?.payload ?? {}) as Record<string, unknown>;
     return {
-      doosUnitsPerLayer: readNumber(payload.doosUnitsPerLayer, 12),
-      doosUnitsPerPallet: readNumber(payload.doosUnitsPerPallet, 72),
-      fustUnitsPerLayer: readNumber(payload.fustUnitsPerLayer, 20),
-      fustUnitsPerPallet: readNumber(payload.fustUnitsPerPallet, 40),
+      doosUnitsPerLayer: readPositiveNumber(payload.doosUnitsPerLayer, 12),
+      doosUnitsPerPallet: readPositiveNumber(payload.doosUnitsPerPallet, 72),
+      fustUnitsPerLayer: readPositiveNumber(payload.fustUnitsPerLayer, 20),
+      fustUnitsPerPallet: readPositiveNumber(payload.fustUnitsPerPallet, 40),
     };
   }, [globalBlocks]);
 
@@ -629,6 +634,64 @@ export function BuilderStep({
             <div className="cpq-alert">
               Afronden werkt per regel (kolom “Afronden”). Gebruik “Volle lagen/pallets” om altijd op logistieke eenheden uit te komen.
             </div>
+            {(() => {
+              const warnings: Array<{ key: string; text: string }> = [];
+              scenario.products
+                .filter((product) => product.qty > 0 && !Boolean((product as any).isMixLiters))
+                .forEach((product) => {
+                  const roundingMode = String((product as any).roundingMode ?? "none");
+                  if (roundingMode === "none") return;
+                  const units = Math.max(0, clampNumber(product.qty, 0));
+                  const unitLabel = String(product.unit ?? "stuk");
+                  const unitsPerPalletRaw =
+                    typeof (product as any).unitsPerPallet === "number" ? (product as any).unitsPerPallet : null;
+                  const unitsPerLayerRaw =
+                    typeof (product as any).unitsPerLayer === "number" ? (product as any).unitsPerLayer : null;
+                  const unitsPerPallet =
+                    unitLabel === "doos"
+                      ? palletDefaults.doosUnitsPerPallet
+                      : unitLabel === "fust"
+                        ? palletDefaults.fustUnitsPerPallet
+                        : unitsPerPalletRaw;
+                  const unitsPerLayer =
+                    unitLabel === "doos"
+                      ? palletDefaults.doosUnitsPerLayer
+                      : unitLabel === "fust"
+                        ? palletDefaults.fustUnitsPerLayer
+                        : unitsPerLayerRaw;
+
+                  if (!unitsPerPallet || !unitsPerLayer) return;
+
+                  const palletsExact = unitsPerPallet > 0 ? units / unitsPerPallet : 0;
+                  const palletsFull = Math.floor(palletsExact);
+                  const remainingAfterPallets = units - palletsFull * unitsPerPallet;
+                  const layersFull = unitsPerLayer > 0 ? Math.floor(remainingAfterPallets / unitsPerLayer) : 0;
+                  const looseUnits = Math.round(remainingAfterPallets - layersFull * unitsPerLayer);
+
+                  const label = (product.name || "Product") + (product.pack ? ` · ${product.pack}` : "");
+                  const hasRestPallet = remainingAfterPallets > 0 && remainingAfterPallets < unitsPerPallet;
+                  if (roundingMode === "full_layers" && hasRestPallet) {
+                    warnings.push({
+                      key: `rest-${product.id}`,
+                      text: `${label}: ${palletsFull} volle pallet(s) + 1 restpallet (${layersFull} laag/lagen, ${looseUnits} los).`,
+                    });
+                  } else if (looseUnits > 0) {
+                    warnings.push({
+                      key: `loose-${product.id}`,
+                      text: `${label}: bevat losse eenheden (${looseUnits} ${unitLabel}).`,
+                    });
+                  }
+                });
+
+              if (warnings.length === 0) return null;
+              return (
+                <div className="cpq-alert cpq-alert-warn" style={{ marginTop: 10 }}>
+                  {warnings.map((w) => (
+                    <div key={w.key}>{w.text}</div>
+                  ))}
+                </div>
+              );
+            })()}
             <div className="cpq-table-wrap" style={{ marginTop: 10 }}>
               <table className="cpq-table">
                 <thead>

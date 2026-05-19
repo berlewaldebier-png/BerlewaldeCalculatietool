@@ -7,7 +7,7 @@ import {
   ErrorField,
   Idea,
 } from "@/components/offerte-samenstellen/forms/FormControls";
-import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
+import { ProductScopeChecklist } from "@/components/offerte-samenstellen/forms/ProductScopeChecklist";
 import { euro } from "@/components/offerte-samenstellen/quoteUtils";
 import {
   calculateProductStaffelMetrics,
@@ -123,7 +123,7 @@ export function getStaffelFormError(
   return getStaffelFormErrorForRefs(
     form,
     products,
-    form.staffelUseBaseOfferProducts ? baseOfferRefs : form.staffelEligibleRefs
+    form.staffelScopeAllProducts ? baseOfferRefs : form.staffelEligibleRefs
   );
 }
 
@@ -132,13 +132,11 @@ export function getStaffelFormErrorForRefs(
   products: ProductOption[] = [],
   refs: string[] = []
 ) {
-  if (form.staffelUseBaseOfferProducts && refs.length === 0) {
+  if (refs.length === 0) {
     return "Basisofferte bevat nog geen producten om een staffel op toe te passen.";
   }
 
-  if (!form.staffelUseBaseOfferProducts && refs.length === 0) {
-    return "Selecteer minstens een product voor de staffel.";
-  }
+  if (!form.staffelScopeAllProducts && refs.length === 0) return "Selecteer minstens een product voor de staffel.";
 
   const compatibility = getStaffelCompatibilityInfo(products, refs);
   if (compatibility.hasMixedCompatibility) {
@@ -183,7 +181,11 @@ function StaffelModeButton({
 
 export function StaffelForm({ form, setForm, products, baseOfferRefs, quoteYear }: Props) {
   const [showHelp, setShowHelp] = useState(false);
-  const effectiveRefs = form.staffelUseBaseOfferProducts ? baseOfferRefs : form.staffelEligibleRefs;
+  const effectiveRefs = form.staffelScopeAllProducts ? baseOfferRefs : form.staffelEligibleRefs;
+  const baseOfferProducts = useMemo(
+    () => products.filter((p) => baseOfferRefs.includes(p.optionId)),
+    [products, baseOfferRefs]
+  );
 
   const selectedProducts = useMemo(
     () => resolveSelectedProducts(products, effectiveRefs),
@@ -220,27 +222,23 @@ export function StaffelForm({ form, setForm, products, baseOfferRefs, quoteYear 
         <div className="cpq-staffel-section cpq-staffel-picker">
           <div className="cpq-label">Producten voor deze staffel</div>
           <BooleanField
-            label={`Gebruik basisofferte-producten${baseOfferRefs.length > 0 ? ` (${baseOfferRefs.length})` : ""}`}
-            checked={form.staffelUseBaseOfferProducts}
+            label={`Geldt staffel voor alle producten?${baseOfferRefs.length > 0 ? ` (${baseOfferRefs.length})` : ""}`}
+            checked={form.staffelScopeAllProducts}
             onChange={(checked) =>
               setForm((prev) => ({
                 ...prev,
-                staffelUseBaseOfferProducts: checked,
+                staffelScopeAllProducts: checked,
               }))
             }
           />
-          {form.staffelUseBaseOfferProducts ? (
-            <Idea text="De staffel gebruikt de producten uit de basisofferte. Pas daar de productscope aan als je andere producten wilt meenemen." />
+          {form.staffelScopeAllProducts ? (
+            <Idea text="De staffel geldt voor alle producten in de basisofferte." />
           ) : (
-            <ProductPickerTable
-              products={products}
+            <ProductScopeChecklist
+              products={baseOfferProducts as any}
               selectedRefs={form.staffelEligibleRefs}
-              strictCompatibility
-              emptyHint="Voeg eerst een bierstijl en verpakking toe om de staffel te starten."
-              quoteYear={quoteYear}
-              onChange={(nextRefs) =>
-                setForm((prev) => updateSelectedProducts(prev, nextRefs, products))
-              }
+              emptyHint="Voeg eerst producten toe aan de basisofferte om een staffel te kunnen maken."
+              onChange={(nextRefs) => setForm((prev) => updateSelectedProducts(prev, nextRefs, products))}
             />
           )}
         </div>

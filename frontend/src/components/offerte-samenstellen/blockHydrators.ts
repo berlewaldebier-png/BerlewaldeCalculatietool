@@ -33,6 +33,9 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         introStart: String(payload.start ?? ""),
         introEnd: String(payload.end ?? ""),
         introEligibleRefs: asStringArray(payload.eligibleRefs),
+        introScopeAllProducts: Boolean(payload.scopeAllProducts ?? initial.introScopeAllProducts ?? true),
+        introContractDurationMonths: String(payload.contractDurationMonths ?? initial.introContractDurationMonths ?? "12"),
+        introContractEndDate: String(payload.contractEndDate ?? initial.introContractEndDate ?? ""),
         introPromoType: String(
           payload.promoType ?? initial.introPromoType
         ) as QuoteFormState["introPromoType"],
@@ -62,9 +65,7 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
     case "Staffel":
       return {
         ...initial,
-        staffelUseBaseOfferProducts: Boolean(
-          payload.useBaseOfferProducts ?? initial.staffelUseBaseOfferProducts
-        ),
+        staffelScopeAllProducts: Boolean(payload.scopeAllProducts ?? initial.staffelScopeAllProducts ?? true),
         staffelEligibleRefs: asStringArray(payload.eligibleRefs),
         staffelDiscountMode: String(
           payload.discountMode ?? initial.staffelDiscountMode
@@ -95,9 +96,7 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
     case "Korting":
       return {
         ...initial,
-        kortingUseBaseOfferProducts: Boolean(
-          payload.useBaseOfferProducts ?? initial.kortingUseBaseOfferProducts
-        ),
+        kortingScopeAllProducts: Boolean(payload.scopeAllProducts ?? initial.kortingScopeAllProducts ?? true),
         discountMode: String(payload.discountMode ?? initial.discountMode),
         discountValue: String(payload.discountPct ?? initial.discountValue),
         kortingEligibleRefs: asStringArray(payload.eligibleRefs),
@@ -106,18 +105,18 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
     case "Groothandel":
       return {
         ...initial,
-        wholesaleUseBaseOfferProducts: Boolean(
-          payload.useBaseOfferProducts ?? initial.wholesaleUseBaseOfferProducts
-        ),
+        wholesaleScopeAllProducts: Boolean(payload.scopeAllProducts ?? initial.wholesaleScopeAllProducts ?? true),
         wholesaleMarginPct: String(payload.marginPct ?? initial.wholesaleMarginPct),
         wholesaleEligibleRefs: asStringArray(payload.eligibleRefs),
+        wholesaleSameMarginAllProducts: Boolean(payload.sameMarginAllProducts ?? initial.wholesaleSameMarginAllProducts ?? true),
+        wholesaleMarginsByRef: asStringRecord(payload.marginsByRef ?? initial.wholesaleMarginsByRef),
       };
 
     case "Transport":
       return {
         ...initial,
         transportDistanceKm: String(payload.distanceKm ?? initial.transportDistanceKm),
-        transportRateEx: String(payload.rateEx ?? initial.transportRateEx),
+        transportRateEx: String(payload.ratePerKmEx ?? payload.rateEx ?? initial.transportRateEx),
         transportDeliveries: String(payload.deliveries ?? initial.transportDeliveries),
         transportThresholdKm: String(payload.thresholdKm ?? initial.transportThresholdKm),
         transportFreeShippingThresholdValue: String(
@@ -167,6 +166,11 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         palletDoosUnitsPerPallet: asDutchNumberString(payload.doosUnitsPerPallet ?? initial.palletDoosUnitsPerPallet),
         palletFustUnitsPerLayer: asDutchNumberString(payload.fustUnitsPerLayer ?? initial.palletFustUnitsPerLayer),
         palletFustUnitsPerPallet: asDutchNumberString(payload.fustUnitsPerPallet ?? initial.palletFustUnitsPerPallet),
+        palletDoosCostPerPallet: asDutchNumberString(payload.doosCostPerPallet ?? initial.palletDoosCostPerPallet),
+        palletDoosPickCostPerExtraSku: asDutchNumberString(payload.doosPickCostPerExtraSku ?? initial.palletDoosPickCostPerExtraSku),
+        palletFustCostPerPallet: asDutchNumberString(payload.fustCostPerPallet ?? initial.palletFustCostPerPallet),
+        palletFustPickCostPerExtraSku: asDutchNumberString(payload.fustPickCostPerExtraSku ?? initial.palletFustPickCostPerExtraSku),
+        palletChargedToCustomer: Boolean(payload.chargedToCustomer ?? initial.palletChargedToCustomer ?? true),
       };
 
     default:

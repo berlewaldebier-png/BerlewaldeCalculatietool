@@ -21,6 +21,7 @@ type CalculationLine = {
   qtyFree: number;
   litersPerUnit: number;
   salesUnitLabel: string;
+  roundingMode: string;
   unitsPerLayer: number | null;
   unitsPerPallet: number | null;
   contributesToLiters: boolean;
@@ -38,6 +39,13 @@ type CalculationState = {
   notes: string[];
   extraCostEx: number;
   transportCostEx: number;
+  transportInternalCostEx: number;
+  transportRevenueEx: number;
+  transportNetEffectEx: number;
+  transportNetEffectIncludedEx: number;
+  transportIncludedInNetEffect: boolean;
+  palletHandlingCostEx: number;
+  palletHandlingRevenueEx: number;
 };
 
 type MetricsBuildParams = {
@@ -48,6 +56,13 @@ type MetricsBuildParams = {
   costEx: number;
   extraCostEx: number;
   transportCostEx: number;
+  transportInternalCostEx: number;
+  transportRevenueEx: number;
+  transportNetEffectEx: number;
+  transportNetEffectIncludedEx: number;
+  transportIncludedInNetEffect: boolean;
+  palletHandlingCostEx: number;
+  palletHandlingRevenueEx: number;
 };
 
 export function calculateQuoteScenarioMetrics(
@@ -80,6 +95,7 @@ export function calculateQuoteScenarioMetrics(
   });
 
   costEx += state.extraCostEx + state.transportCostEx;
+  costEx += state.palletHandlingCostEx;
 
   return buildScenarioMetrics({
     breakEven,
@@ -89,6 +105,13 @@ export function calculateQuoteScenarioMetrics(
     costEx,
     extraCostEx: state.extraCostEx,
     transportCostEx: state.transportCostEx,
+    transportInternalCostEx: state.transportInternalCostEx,
+    transportRevenueEx: state.transportRevenueEx,
+    transportNetEffectEx: state.transportNetEffectEx,
+    transportNetEffectIncludedEx: state.transportNetEffectIncludedEx,
+    transportIncludedInNetEffect: state.transportIncludedInNetEffect,
+    palletHandlingCostEx: state.palletHandlingCostEx,
+    palletHandlingRevenueEx: state.palletHandlingRevenueEx,
   });
 }
 
@@ -133,6 +156,13 @@ function createCalculationState(
     notes: [],
     extraCostEx: 0,
     transportCostEx: 0,
+    transportInternalCostEx: 0,
+    transportRevenueEx: 0,
+    transportNetEffectEx: 0,
+    transportNetEffectIncludedEx: 0,
+    transportIncludedInNetEffect: true,
+    palletHandlingCostEx: 0,
+    palletHandlingRevenueEx: 0,
   };
 }
 
@@ -152,6 +182,7 @@ function buildCalculationLines(scenario: QuoteScenario): CalculationLine[] {
         qtyFree: 0,
         litersPerUnit: Math.max(0, clampNumber(product.litersPerUnit, 0)),
         salesUnitLabel: String((product as any).unit ?? "stuk").toLowerCase(),
+        roundingMode: String((product as any).roundingMode ?? "none"),
         unitsPerLayer:
           typeof (product as any).unitsPerLayer === "number"
             ? ((product as any).unitsPerLayer as number)
@@ -183,6 +214,13 @@ function buildEmptyMetrics(
     costEx: 0,
     extraCostEx: 0,
     transportCostEx: 0,
+    transportInternalCostEx: 0,
+    transportRevenueEx: 0,
+    transportNetEffectEx: 0,
+    transportNetEffectIncludedEx: 0,
+    transportIncludedInNetEffect: true,
+    palletHandlingCostEx: 0,
+    palletHandlingRevenueEx: 0,
     marginPct: 0,
     breakEvenCurrent: breakEven?.breakEvenRevenue ?? null,
     breakEvenProjected:
@@ -387,6 +425,11 @@ function applyWholesaleToLines(state: CalculationState) {
   if (!wholesaleBlock) return;
 
   const wholesaleMarginPct = clampNumber(wholesaleBlock.payload?.marginPct, 0);
+  const sameMarginAllProducts = Boolean(wholesaleBlock.payload?.sameMarginAllProducts ?? true);
+  const marginsByRefRaw =
+    wholesaleBlock.payload?.marginsByRef && typeof wholesaleBlock.payload.marginsByRef === "object"
+      ? (wholesaleBlock.payload.marginsByRef as Record<string, unknown>)
+      : {};
   const hasStaffel = Boolean(findBlock(state.blocks, "Staffel"));
   const hasMix = Boolean(findBlock(state.blocks, "Mix"));
   const discountBlock = findBlock(state.blocks, "Korting");
@@ -398,7 +441,7 @@ function applyWholesaleToLines(state: CalculationState) {
     wholesaleBlock.payload?.eligibleRefs
   );
 
-  if (wholesaleMarginPct <= 0) return;
+  if (sameMarginAllProducts && wholesaleMarginPct <= 0) return;
   if (hasStaffel || hasMix || discountPct > 0) {
     state.notes.push(
       "Groothandel-pricing is genegeerd: deze actie is niet combineerbaar met andere pricingacties in dezelfde periode."
@@ -406,13 +449,18 @@ function applyWholesaleToLines(state: CalculationState) {
     return;
   }
 
-  const factor = 1 + wholesaleMarginPct / 100;
   state.lines = state.lines.map((line) =>
     wholesaleTargets.has(line.ref)
-      ? {
-          ...line,
-          offerUnitPriceEx: factor > 0 ? line.offerUnitPriceEx / factor : line.offerUnitPriceEx,
-        }
+      ? (() => {
+          const perRefMargin = clampNumber(marginsByRefRaw[line.ref], 0);
+          const marginPct = sameMarginAllProducts ? wholesaleMarginPct : (perRefMargin > 0 ? perRefMargin : wholesaleMarginPct);
+          if (!(marginPct > 0)) return line;
+          const factor = 1 + marginPct / 100;
+          return {
+            ...line,
+            offerUnitPriceEx: factor > 0 ? line.offerUnitPriceEx / factor : line.offerUnitPriceEx,
+          };
+        })()
       : line
   );
 }
@@ -453,6 +501,92 @@ function applyServiceAndTransportBlocks(
   state: CalculationState,
   handlers: { addRevenue: (value: number) => void; currentRevenueEx: () => number }
 ) {
+  // Pallet/pick handling costs:
+  // - Use Palletopbouw config when present.
+  // - Otherwise: only apply when the user actually chose rounding to layers/pallets on any line.
+  // Pick cost is modeled as a per-extra-layer cost per pallet (layers beyond the first).
+  {
+    const palletBlock = findBlock(state.blocks, "Palletopbouw");
+    const roundingEnabled = state.lines.some((line) => line.roundingMode !== "none");
+    if (!palletBlock && !roundingEnabled) {
+      // No explicit Palletopbouw config and no rounding selected: do not charge pallet/pick handling.
+      // (Keeps simple quotes simple, and avoids surprising costs in unit tests.)
+    } else {
+    const payload = asRecord(palletBlock?.payload);
+
+    const parseOptNumber = (value: unknown) => {
+      if (value === null || value === undefined) return null;
+      if (typeof value === "string" && value.trim() === "") return null;
+      const parsed = Number(String(value).replace(",", "."));
+      if (!Number.isFinite(parsed)) return null;
+      return Math.max(0, parsed);
+    };
+
+    const doosUnitsPerLayer = (parseOptNumber(payload.doosUnitsPerLayer) ?? 0) > 0 ? clampNumber(payload.doosUnitsPerLayer, 0) : 12;
+    const doosUnitsPerPallet = (parseOptNumber(payload.doosUnitsPerPallet) ?? 0) > 0 ? clampNumber(payload.doosUnitsPerPallet, 0) : 72;
+    const fustUnitsPerLayer = (parseOptNumber(payload.fustUnitsPerLayer) ?? 0) > 0 ? clampNumber(payload.fustUnitsPerLayer, 0) : 20;
+    const fustUnitsPerPallet = (parseOptNumber(payload.fustUnitsPerPallet) ?? 0) > 0 ? clampNumber(payload.fustUnitsPerPallet, 0) : 40;
+
+    // If older drafts stored 0 due to missing form fields, treat 0 as "missing" and fall back.
+    const rawDoosCostPerPallet = parseOptNumber(payload.doosCostPerPallet);
+    const rawDoosPickCostPerExtra = parseOptNumber(payload.doosPickCostPerExtraSku);
+    const rawFustCostPerPallet = parseOptNumber(payload.fustCostPerPallet);
+    const rawFustPickCostPerExtra = parseOptNumber(payload.fustPickCostPerExtraSku);
+    const chargedToCustomer = Boolean(payload.chargedToCustomer ?? true);
+
+    const doosCostPerPallet = (rawDoosCostPerPallet ?? 0) > 0 ? rawDoosCostPerPallet! : 15;
+    const doosPickCostPerExtraLayer = (rawDoosPickCostPerExtra ?? 0) > 0 ? rawDoosPickCostPerExtra! : 5;
+    const fustCostPerPallet = (rawFustCostPerPallet ?? 0) > 0 ? rawFustCostPerPallet! : 15;
+    const fustPickCostPerExtraLayer = (rawFustPickCostPerExtra ?? 0) > 0 ? rawFustPickCostPerExtra! : 5;
+
+    const lineUnits = (line: CalculationLine) => Math.max(0, (line.qtyPaid ?? 0) + (line.qtyFree ?? 0));
+
+    const computeLineCharge = (line: CalculationLine, unitsPerLayer: number, unitsPerPallet: number, palletFee: number, pickFeePerExtraLayer: number) => {
+      const units = lineUnits(line);
+      if (!(units > 0)) return 0;
+      if (!(unitsPerPallet > 0) || !(unitsPerLayer > 0)) return 0;
+
+      // If the user rounds a line to full pallets: pallet fee only (no pick).
+      if (line.roundingMode === "full_pallets") {
+        const pallets = Math.ceil(units / unitsPerPallet);
+        return pallets * Math.max(0, palletFee);
+      }
+
+      // If the user rounds a line to full layers: pallet fee + pick per extra layer (layers beyond the first).
+      if (line.roundingMode === "full_layers") {
+        const pallets = Math.ceil(units / unitsPerPallet);
+        let remaining = units;
+        let pickCost = 0;
+        for (let i = 0; i < pallets; i += 1) {
+          const onPallet = Math.min(unitsPerPallet, remaining);
+          remaining -= onPallet;
+          const layersOnPallet = Math.ceil(onPallet / unitsPerLayer);
+          pickCost += Math.max(0, layersOnPallet - 1) * Math.max(0, pickFeePerExtraLayer);
+        }
+        return pallets * Math.max(0, palletFee) + pickCost;
+      }
+
+      return 0;
+    };
+
+    const linesDoos = state.lines.filter((line) => line.salesUnitLabel === "doos");
+    const linesFust = state.lines.filter((line) => line.salesUnitLabel === "fust");
+
+    const totalCharge =
+      sum(linesDoos.map((line) => computeLineCharge(line, doosUnitsPerLayer, doosUnitsPerPallet, doosCostPerPallet, doosPickCostPerExtraLayer))) +
+      sum(linesFust.map((line) => computeLineCharge(line, fustUnitsPerLayer, fustUnitsPerPallet, fustCostPerPallet, fustPickCostPerExtraLayer)));
+
+    if (totalCharge > 0) {
+      if (chargedToCustomer) {
+        state.palletHandlingRevenueEx += totalCharge;
+        handlers.addRevenue(totalCharge);
+      } else {
+        state.palletHandlingCostEx += totalCharge;
+      }
+    }
+    }
+  }
+
   for (const block of state.blocks) {
     if (block.type === "Transport") {
       const payload = asRecord(block.payload);
@@ -493,6 +627,8 @@ function applyServiceAndTransportBlocks(
 
         let totalLiters = 0;
         let totalBoxes = 0;
+        let totalFust = 0;
+        let totalFles = 0;
         let totalLayers = 0;
         let totalPallets = 0;
 
@@ -503,6 +639,12 @@ function applyServiceAndTransportBlocks(
           }
           if (line.salesUnitLabel === "doos") {
             totalBoxes += units;
+          }
+          if (line.salesUnitLabel === "fust") {
+            totalFust += units;
+          }
+          if (line.salesUnitLabel === "fles") {
+            totalFles += units;
           }
           if (line.unitsPerLayer && line.unitsPerLayer > 0) {
             totalLayers += units / line.unitsPerLayer;
@@ -522,6 +664,8 @@ function applyServiceAndTransportBlocks(
             freeShippingThresholdUnit: thresholdUnit as any,
             transportCostType: costType as any,
             transportCostEx,
+            distanceKm: clampNumber(payload.distanceKm ?? payload.transportDistanceKm ?? 0, 0),
+            ratePerKmEx: clampNumber(payload.ratePerKmEx ?? payload.transportRateEx ?? 0.45, 0),
             includeInMargin,
             chargedToCustomer,
           },
@@ -529,6 +673,8 @@ function applyServiceAndTransportBlocks(
             totalRevenueEx: currentRevenueEx,
             totalLiters,
             totalBoxes,
+            totalFust,
+            totalFles,
             totalLayers,
             totalPallets,
             warnings: totalsWarnings,
@@ -536,8 +682,19 @@ function applyServiceAndTransportBlocks(
         });
 
         impact.warnings.forEach((w) => state.notes.push(w));
-        if (impact.transportRevenueEx > 0) handlers.addRevenue(impact.transportRevenueEx);
-        if (impact.transportCostInMarginEx > 0) state.transportCostEx += impact.transportCostInMarginEx;
+        state.transportIncludedInNetEffect = includeInMargin;
+        state.transportNetEffectEx += impact.netEffectEx;
+        state.transportNetEffectIncludedEx += includeInMargin ? impact.netEffectEx : 0;
+        if (impact.transportRevenueEx > 0) {
+          state.transportRevenueEx += impact.transportRevenueEx;
+          handlers.addRevenue(impact.transportRevenueEx);
+        }
+        if (impact.internalTransportCostEx > 0) {
+          state.transportInternalCostEx += impact.internalTransportCostEx;
+        }
+        if (impact.internalTransportCostInMarginEx > 0) {
+          state.transportCostEx += impact.internalTransportCostInMarginEx;
+        }
         continue;
       }
 
@@ -589,6 +746,13 @@ function buildScenarioMetrics(params: MetricsBuildParams): ScenarioMetrics {
     costEx: Math.max(0, params.costEx),
     extraCostEx: params.extraCostEx,
     transportCostEx: params.transportCostEx,
+    transportInternalCostEx: params.transportInternalCostEx,
+    transportRevenueEx: params.transportRevenueEx,
+    transportNetEffectEx: params.transportNetEffectEx,
+    transportNetEffectIncludedEx: params.transportNetEffectIncludedEx,
+    transportIncludedInNetEffect: params.transportIncludedInNetEffect,
+    palletHandlingCostEx: params.palletHandlingCostEx,
+    palletHandlingRevenueEx: params.palletHandlingRevenueEx,
     marginPct:
       params.revenueEx > 0
         ? ((params.revenueEx - params.costEx) / params.revenueEx) * 100

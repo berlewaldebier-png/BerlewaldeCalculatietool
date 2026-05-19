@@ -15,6 +15,7 @@ import type {
   OptionType,
   ProductOption,
   QuoteFormState,
+  BasisData,
 } from "@/components/offerte-samenstellen/types";
 
 type Props = {
@@ -26,6 +27,7 @@ type Props = {
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   productOptions: ProductOption[];
   baseOfferRefs: string[];
+  basis: BasisData;
   quoteYear: number;
   onClose: () => void;
   onSave: () => void;
@@ -50,11 +52,14 @@ export function ToolbarOptionDialog({
   setForm,
   productOptions,
   baseOfferRefs,
+  basis,
   quoteYear,
   onClose,
   onSave,
 }: Props) {
-  const introError = selectedOption === "Intro" ? getIntroFormError(form) : "";
+  const todayIso = () => new Date().toISOString().split("T")[0] ?? "";
+  const introError =
+    selectedOption === "Intro" ? getIntroFormError(form, baseOfferRefs, todayIso()) : "";
   const staffelError =
     selectedOption === "Staffel" ? getStaffelFormError(form, productOptions, baseOfferRefs) : "";
   const kortingError =
@@ -107,7 +112,13 @@ export function ToolbarOptionDialog({
           ) : null}
 
           {selectedOption === "Intro" ? (
-            <IntroForm form={form} setForm={setForm} products={productOptions} quoteYear={quoteYear} />
+            <IntroForm
+              form={form}
+              setForm={setForm}
+              products={productOptions}
+              baseOfferRefs={baseOfferRefs}
+              quoteYear={quoteYear}
+            />
           ) : null}
           {selectedOption === "Staffel" ? (
             <StaffelForm
@@ -119,7 +130,13 @@ export function ToolbarOptionDialog({
             />
           ) : null}
           {selectedOption === "Mix" ? (
-            <MixDealForm form={form} setForm={setForm} products={productOptions} quoteYear={quoteYear} />
+            <MixDealForm
+              form={form}
+              setForm={setForm}
+              products={productOptions}
+              baseOfferRefs={baseOfferRefs}
+              quoteYear={quoteYear}
+            />
           ) : null}
           {selectedOption === "Korting" ? (
             <KortingForm
@@ -146,7 +163,7 @@ export function ToolbarOptionDialog({
             />
           ) : null}
           {selectedOption === "Transport" ? (
-            <TransportForm form={form} setForm={setForm} />
+            <TransportForm form={form} setForm={setForm} basisAfstandKm={String(basis?.afstandKm ?? "")} />
           ) : null}
           {selectedOption === "Retour" ? (
             <RetourForm form={form} setForm={setForm} />

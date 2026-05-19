@@ -2,13 +2,14 @@
 import { useMemo, useState } from "react";
 
 import {
+  BooleanField,
   EmptyHint,
   ErrorField,
   Field,
   Idea,
   SelectField,
 } from "@/components/offerte-samenstellen/forms/FormControls";
-import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
+import { ProductScopeChecklist } from "@/components/offerte-samenstellen/forms/ProductScopeChecklist";
 import {
   buildIntroFinancialLines,
   buildIntroFinancialSummary,
@@ -19,6 +20,7 @@ type Props = {
   form: QuoteFormState;
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
+  baseOfferRefs: string[];
   quoteYear?: number;
 };
 
@@ -37,7 +39,11 @@ function resolveSelectedProducts(products: ProductOption[], refs: string[]) {
   return products.filter((product) => refs.includes(product.optionId));
 }
 
-export function getIntroFormError(form: QuoteFormState, today: string = todayIso()) {
+export function getIntroFormError(
+  form: QuoteFormState,
+  baseOfferRefs: string[] = [],
+  today: string = todayIso()
+) {
   if (!form.introStart || !form.introEnd) {
     return "Begindatum en einddatum zijn verplicht.";
   }
@@ -53,16 +59,28 @@ export function getIntroFormError(form: QuoteFormState, today: string = todayIso
   if (form.introEnd < form.introStart) {
     return "Einddatum moet na begindatum liggen.";
   }
-  if (form.introEligibleRefs.length === 0) {
+  if (baseOfferRefs.length === 0) {
+    return "Basisofferte bevat nog geen producten om een introductie op toe te passen.";
+  }
+  if (!form.introScopeAllProducts && form.introEligibleRefs.length === 0) {
     return "Selecteer minstens een product voor de introductie.";
   }
+
+  const effectiveEligibleRefs = form.introScopeAllProducts ? baseOfferRefs : form.introEligibleRefs;
+
+  const durationMonthsRaw = String(form.introContractDurationMonths ?? "").trim();
+  const durationMonths = Number(durationMonthsRaw.replace(",", "."));
+  if (!durationMonthsRaw) return "Vul een contractduur in (maanden).";
+  if (!Number.isFinite(durationMonths) || durationMonths <= 0) return "Contractduur is geen geldig getal.";
+  if (!String(form.introContractEndDate ?? "").trim()) return "Vul een contract-einddatum in.";
+  if (String(form.introContractEndDate) < today) return "Contract-einddatum mag niet in het verleden liggen.";
 
   if (form.introPromoType === "discount") {
     if (form.introDiscountMode === "all" && !form.introDiscountPercent.trim()) {
       return "Vul een kortingspercentage in.";
     }
     if (form.introDiscountMode === "per_product") {
-      const missingDiscount = form.introEligibleRefs.some(
+      const missingDiscount = effectiveEligibleRefs.some(
         (ref) => !String(form.introDiscountsByProduct[ref] ?? "").trim()
       );
       if (missingDiscount) {
@@ -199,14 +217,22 @@ function IntroSummaryMetric({
   );
 }
 
-export function IntroForm({ form, setForm, products, quoteYear }: Props) {
+export function IntroForm({ form, setForm, products, baseOfferRefs, quoteYear }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const today = todayIso();
-  const selectedProducts = useMemo(
-    () => resolveSelectedProducts(products, form.introEligibleRefs),
-    [products, form.introEligibleRefs]
+  const baseOfferProducts = useMemo(
+    () => products.filter((p) => baseOfferRefs.includes(p.optionId)),
+    [products, baseOfferRefs]
   );
-  const error = getIntroFormError(form, today);
+  const selectedProducts = useMemo(
+    () =>
+      resolveSelectedProducts(
+        baseOfferProducts,
+        form.introScopeAllProducts ? baseOfferRefs : form.introEligibleRefs
+      ),
+    [baseOfferProducts, baseOfferRefs, form.introEligibleRefs, form.introScopeAllProducts]
+  );
+  const error = getIntroFormError(form, baseOfferRefs, today);
   const previewLines = useMemo(
     () => buildPreviewLines(form, selectedProducts),
     [form, selectedProducts]
@@ -219,6 +245,9 @@ export function IntroForm({ form, setForm, products, quoteYear }: Props) {
     () => buildIntroFinancialSummary(financialLines),
     [financialLines]
   );
+
+  const contractDurationMonths = String(form.introContractDurationMonths ?? "").trim();
+  const contractEndDate = String(form.introContractEndDate ?? "").trim();
 
   return (
     <div className="cpq-intro-layout">
@@ -257,37 +286,79 @@ export function IntroForm({ form, setForm, products, quoteYear }: Props) {
           />
         </div>
 
-        <div className="cpq-intro-section">
-          <div className="cpq-label">Producten die meedoen</div>
-          <ProductPickerTable
-            products={products}
-            selectedRefs={form.introEligibleRefs}
-            emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze introductie."
-            quoteYear={quoteYear}
-            onChange={(nextEligibleRefs) => {
+        <div className="cpq-intro-date-grid">
+          <Field
+            label="Contractduur (maanden)"
+            type="number"
+            min="1"
+            required
+            value={contractDurationMonths}
+            onChange={(value) => {
               setForm((prev) => {
-                const nextDiscountsByProduct = Object.fromEntries(
-                  Object.entries(prev.introDiscountsByProduct).filter(([key]) =>
-                    nextEligibleRefs.includes(key)
-                  )
-                );
-
+                const monthsRaw = String(value ?? "").trim();
+                const months = Number(monthsRaw.replace(",", "."));
+                const safeMonths = Number.isFinite(months) && months > 0 ? Math.round(months) : 12;
+                const base = new Date();
+                base.setMonth(base.getMonth() + safeMonths);
+                const iso = base.toISOString().split("T")[0] ?? "";
                 return {
                   ...prev,
-                  introEligibleRefs: nextEligibleRefs,
-                  introDiscountsByProduct: nextDiscountsByProduct,
-                  introSingleProductRef: nextEligibleRefs.includes(prev.introSingleProductRef)
-                    ? prev.introSingleProductRef
-                    : "",
-                  introThresholdSingleProductRef: nextEligibleRefs.includes(
-                    prev.introThresholdSingleProductRef
-                  )
-                    ? prev.introThresholdSingleProductRef
-                    : "",
+                  introContractDurationMonths: monthsRaw,
+                  introContractEndDate: prev.introContractEndDate ? prev.introContractEndDate : iso,
                 };
               });
             }}
           />
+          <Field
+            label="Contract einddatum"
+            type="date"
+            min={today}
+            required
+            value={contractEndDate}
+            onChange={(value) => setForm((prev) => ({ ...prev, introContractEndDate: value }))}
+          />
+        </div>
+
+        <div className="cpq-intro-section">
+          <div className="cpq-label">Producten die meedoen</div>
+          <BooleanField
+            label={`Geldt introductie voor alle producten?${baseOfferRefs.length > 0 ? ` (${baseOfferRefs.length})` : ""}`}
+            checked={form.introScopeAllProducts}
+            onChange={(checked) => setForm((prev) => ({ ...prev, introScopeAllProducts: checked }))}
+          />
+
+          {!form.introScopeAllProducts ? (
+            <ProductScopeChecklist
+              products={baseOfferProducts as any}
+              selectedRefs={form.introEligibleRefs}
+              emptyHint="Voeg eerst producten toe aan de basisofferte om introductie toe te kunnen passen."
+              onChange={(nextEligibleRefs) => {
+                setForm((prev) => {
+                  const nextDiscountsByProduct = Object.fromEntries(
+                    Object.entries(prev.introDiscountsByProduct).filter(([key]) =>
+                      nextEligibleRefs.includes(key)
+                    )
+                  );
+
+                  return {
+                    ...prev,
+                    introEligibleRefs: nextEligibleRefs,
+                    introDiscountsByProduct: nextDiscountsByProduct,
+                    introSingleProductRef: nextEligibleRefs.includes(prev.introSingleProductRef)
+                      ? prev.introSingleProductRef
+                      : "",
+                    introThresholdSingleProductRef: nextEligibleRefs.includes(
+                      prev.introThresholdSingleProductRef
+                    )
+                      ? prev.introThresholdSingleProductRef
+                      : "",
+                  };
+                });
+              }}
+            />
+          ) : (
+            <Idea text="De introductie geldt voor alle producten in de basisofferte." />
+          )}
         </div>
 
         <div className="cpq-intro-section cpq-intro-promo-stack">
@@ -344,23 +415,89 @@ export function IntroForm({ form, setForm, products, quoteYear }: Props) {
               ) : selectedProducts.length === 0 ? (
                 <EmptyHint text="Selecteer eerst een of meer producten." />
               ) : (
-                <div className="cpq-intro-field-stack">
-                  {selectedProducts.map((product) => (
-                    <Field
-                      key={product.optionId}
-                      label={`${product.label} - korting (%)`}
-                      value={form.introDiscountsByProduct[product.optionId] || ""}
-                      onChange={(value) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          introDiscountsByProduct: {
-                            ...prev.introDiscountsByProduct,
-                            [product.optionId]: value,
-                          },
-                        }))
-                      }
-                    />
-                  ))}
+                <div
+                  style={{
+                    maxHeight: 260, // ~5 items zichtbaar, scrollbaar bij meer
+                    overflow: "auto",
+                    paddingRight: 6,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  {selectedProducts.map((product) => {
+                    const checked = form.introEligibleRefs.includes(product.optionId);
+                    return (
+                      <div
+                        key={product.optionId}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "10px 10px",
+                          borderRadius: 12,
+                          border: checked
+                            ? "1px solid rgba(59,130,246,0.25)"
+                            : "1px solid rgba(15,23,42,0.08)",
+                          background: checked ? "rgba(59,130,246,0.06)" : "transparent",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            const nextEligibleRefs = event.target.checked
+                              ? Array.from(new Set([...form.introEligibleRefs, product.optionId]))
+                              : form.introEligibleRefs.filter((ref) => ref !== product.optionId);
+
+                            setForm((prev) => {
+                              const nextDiscountsByProduct = { ...prev.introDiscountsByProduct };
+                              if (!event.target.checked) {
+                                delete (nextDiscountsByProduct as any)[product.optionId];
+                              }
+
+                              return {
+                                ...prev,
+                                introEligibleRefs: nextEligibleRefs,
+                                introDiscountsByProduct: nextDiscountsByProduct,
+                                introSingleProductRef: nextEligibleRefs.includes(prev.introSingleProductRef)
+                                  ? prev.introSingleProductRef
+                                  : "",
+                                introThresholdSingleProductRef: nextEligibleRefs.includes(
+                                  prev.introThresholdSingleProductRef
+                                )
+                                  ? prev.introThresholdSingleProductRef
+                                  : "",
+                              };
+                            });
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {product.label}
+                          </div>
+                          <div style={{ opacity: 0.7, fontSize: 12 }}>Korting (%)</div>
+                        </div>
+                        <input
+                          className="cpq-input"
+                          style={{ width: 140 }}
+                          disabled={!checked}
+                          value={form.introDiscountsByProduct[product.optionId] || ""}
+                          placeholder="bijv. 5"
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setForm((prev) => ({
+                              ...prev,
+                              introDiscountsByProduct: {
+                                ...prev.introDiscountsByProduct,
+                                [product.optionId]: value,
+                              },
+                            }));
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </IntroPromoCard>

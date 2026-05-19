@@ -499,6 +499,105 @@ export function OfferteSamenstellenApp({
     [effectiveBreakEvenSnapshot, scenarios]
   );
 
+  // Keep transport distance in sync with Basisgegevens so the Transport card summary is correct
+  // without requiring "Bewerken → Opslaan".
+  useEffect(() => {
+    const nextDistance = String((basis as any)?.afstandKm ?? "");
+    setForm((prev) =>
+      prev.transportDistanceKm === nextDistance ? prev : { ...prev, transportDistanceKm: nextDistance }
+    );
+
+    setScenarios((prev) => {
+      const current = prev[activeScenario];
+      const nextDistanceNumber = (() => {
+        const parsed = Number(String(nextDistance).replace(",", "."));
+        return Number.isFinite(parsed) ? parsed : 0;
+      })();
+      const nextBlocks = current.blocks.map((block) => {
+        if (block.type !== "Transport") return block;
+        if ((block.appliesTo ?? "standard") !== "global") return block;
+        const payload = (block.payload ?? {}) as Record<string, unknown>;
+        const thresholdValue = Number(payload.freeShippingThresholdValue ?? 0) || 0;
+        const thresholdUnit = String(payload.freeShippingThresholdUnit ?? "km");
+        const costType = String(payload.transportCostType ?? "per_km");
+        const chargedToCustomer = Boolean(payload.chargedToCustomer ?? true);
+        const includeInMargin = Boolean(payload.includeInMargin ?? true);
+        const ratePerKmEx = Number(payload.ratePerKmEx ?? 0.45) || 0.45;
+
+        const freeLabel =
+          thresholdUnit === "km"
+            ? `Gratis tot: ${thresholdValue} km (enkele reis)`
+            : `Gratis vanaf: ${thresholdValue} ${thresholdUnit}`;
+        const roundTripKm = Math.max(0, nextDistanceNumber) * 2;
+        const internalLabel = `Intern: ${roundTripKm} km × ${new Intl.NumberFormat("nl-NL", {
+          style: "currency",
+          currency: "EUR",
+        }).format(ratePerKmEx)} /km`;
+        const costLabel =
+          costType === "fixed" || costType === "manual"
+            ? `Transportkosten: ${new Intl.NumberFormat("nl-NL", {
+                style: "currency",
+                currency: "EUR",
+              }).format(Number(payload.transportCostEx ?? 0) || 0)} (${costType})`
+            : null;
+        const modeLabel = chargedToCustomer
+          ? "Doorbelast aan klant (als niet gratis)"
+          : "Niet doorbelast (intern)";
+        const marginLabel = includeInMargin
+          ? "Meenemen in netto effect & break-even"
+          : "Niet meenemen in netto effect & break-even";
+        return {
+          ...block,
+          payload: {
+            ...payload,
+            distanceKm: nextDistanceNumber,
+          },
+          // Keep the Transport card readable without requiring an explicit edit/save.
+          lines: [freeLabel, ...(costLabel ? [costLabel] : []), internalLabel, modeLabel, marginLabel],
+        };
+      });
+      if (nextBlocks === current.blocks) return prev;
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...current,
+          blocks: nextBlocks,
+        },
+      };
+    });
+  }, [basis, activeScenario]);
+
+  // Transport is now considered a default (quote-wide) setting: ensure a Transport block exists.
+  useEffect(() => {
+    setScenarios((prev) => {
+      const current = prev[activeScenario];
+      const hasTransport = current.blocks.some(
+        (b) => b.type === "Transport" && (b.appliesTo ?? "standard") === "global"
+      );
+      if (hasTransport) return prev;
+
+      const block = buildBlockFromForm({
+        type: "Transport",
+        form,
+        activePeriod: "standard",
+        tones,
+        icons,
+        productOptions: productIndex.options,
+        baseOfferRefs: resolveScenarioProductRefs(current.products, productIndex.options),
+        existingBlockId: null,
+      });
+
+      return {
+        ...prev,
+        [activeScenario]: {
+          ...current,
+          blocks: [...current.blocks, block],
+        },
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScenario]);
+
   const offerBreakEvenImpact = useMemo(() => {
     if (!breakEvenV2Summary) return null;
     if (!scenario) return null;
@@ -698,6 +797,17 @@ export function OfferteSamenstellenApp({
 
   function MixSourceBar() {
     const hasCustomerMix = Object.keys(customerMixPctByRef).length > 0;
+    const autoRebalanceEnabled = (scenario.autoRebalance ?? true) === true;
+
+    function setAutoRebalanceEnabled(next: boolean) {
+      setScenarios((prev) => ({
+        ...prev,
+        [activeScenario]: {
+          ...prev[activeScenario],
+          autoRebalance: next,
+        },
+      }));
+    }
 
     function rebalanceScenarioProducts() {
       const required = getRequiredTotalLiters();
@@ -855,6 +965,23 @@ export function OfferteSamenstellenApp({
           </span>
           <button
             type="button"
+            className={`cpq-toggle${autoRebalanceEnabled ? " active" : ""}`}
+            onClick={() => setAutoRebalanceEnabled(!autoRebalanceEnabled)}
+            title={
+              autoRebalanceEnabled
+                ? "Auto-verdelen staat aan: bij toevoegen/selecteren kunnen aantallen opnieuw verdeeld worden."
+                : "Auto-verdelen staat uit: aantallen blijven zoals je ze invult (gebruik 'Herbereken aantallen' als je wilt herverdelen)."
+            }
+          >
+            Auto-verdelen
+          </button>
+          {!autoRebalanceEnabled ? (
+            <span className="cpq-muted" style={{ marginLeft: 6 }}>
+              Auto-verdelen is uit: aantallen springen niet meer bij toevoegen.
+            </span>
+          ) : null}
+          <button
+            type="button"
             className="cpq-button cpq-button-secondary"
             onClick={rebalanceScenarioProducts}
             disabled={dealContext === "one_off" || !getRequiredTotalLiters()}
@@ -881,6 +1008,10 @@ export function OfferteSamenstellenApp({
   function commitProductUpdate(productId: string, patch: Partial<QuoteProduct>) {
     setScenarios((prev) => {
       const current = prev[activeScenario];
+      const nextAutoRebalance =
+        "qty" in patch && typeof (patch as any).qty === "number"
+          ? false
+          : (current.autoRebalance ?? true);
       const required = getRequiredTotalLiters();
       if (!required) {
         return {
@@ -888,6 +1019,7 @@ export function OfferteSamenstellenApp({
           [activeScenario]: {
             ...current,
             products: current.products.map((p) => (p.id === productId ? { ...p, ...patch } : p)),
+            autoRebalance: nextAutoRebalance,
           },
         };
       }
@@ -907,6 +1039,7 @@ export function OfferteSamenstellenApp({
           [activeScenario]: {
             ...current,
             products: nextProducts,
+            autoRebalance: nextAutoRebalance,
           },
         };
       }
@@ -934,6 +1067,7 @@ export function OfferteSamenstellenApp({
         [activeScenario]: {
           ...current,
           products: nextProducts,
+          autoRebalance: nextAutoRebalance,
         },
       };
     });
@@ -1094,6 +1228,7 @@ export function OfferteSamenstellenApp({
   function handleSelectOptionForRow(rowId: string, optionId: string) {
     const option = productIndex.options.find((o) => o.optionId === optionId);
     if (!option) return;
+    const autoRebalanceEnabled = (scenario.autoRebalance ?? true) === true;
     const resolvedUnit =
       option.salesUnitLabel === "doos" || option.salesUnitLabel === "fust" || option.salesUnitLabel === "fles" || option.salesUnitLabel === "stuk"
         ? option.salesUnitLabel
@@ -1119,15 +1254,14 @@ export function OfferteSamenstellenApp({
       },
     };
 
-    // Ensure a selected product always gets a non-zero quantity by default.
-    // We will rebalance quantities below if needed, but this prevents "0 qty" rows
-    // when allocation is skipped due to transient state.
-    if (typeof patch.qty !== "number") {
-      patch.qty = 1;
-    }
-
     const required = getRequiredTotalLiters();
     const currentRow = scenario.products.find((p) => p.id === rowId);
+
+    // Ensure a selected product always gets a non-zero quantity by default (only when auto-verdelen is on).
+    // If auto-verdelen is off, keep the row at 0 until the user chooses a quantity.
+    if (typeof patch.qty !== "number") {
+      patch.qty = autoRebalanceEnabled ? 1 : Math.max(0, currentRow?.qty ?? 0);
+    }
     const alreadySelectedCount = scenario.products.filter((p) => {
       if (p.id === rowId) return false;
       if (Boolean((p as any).isMixLiters)) return false;
@@ -1146,7 +1280,7 @@ export function OfferteSamenstellenApp({
       return (p.litersPerUnit ?? 0) > 0 && Math.max(0, p.qty ?? 0) > 0;
     });
 
-    if (required && !hasAnySelectedEligibleProduct && alreadySelectedCount === 0 && (patch.litersPerUnit ?? 0) > 0) {
+    if (autoRebalanceEnabled && required && !hasAnySelectedEligibleProduct && alreadySelectedCount === 0 && (patch.litersPerUnit ?? 0) > 0) {
       const litersPerUnit = Math.max(0, patch.litersPerUnit ?? 0);
       const roundingMode = String((currentRow as any)?.roundingMode ?? "none");
       const unitsPerLayer = typeof patch.unitsPerLayer === "number" ? patch.unitsPerLayer : null;
@@ -1191,11 +1325,11 @@ export function OfferteSamenstellenApp({
       return;
     }
 
-    // Deterministic auto-allocation on product selection:
+    // Deterministic auto-allocation on product selection (only when auto-verdelen is on):
     // - 1 eligible product: fill to required (ceil, respecting rounding mode if present)
     // - 2+ eligible products: rebalance by mixSource (quote=equal split), last-selected is remainder corrector.
     const selectingEligible = (patch.litersPerUnit ?? 0) > 0;
-    if (selectingEligible) {
+    if (autoRebalanceEnabled && selectingEligible) {
       setScenarios((prev) => {
         const current = prev[activeScenario];
         const nextProducts = current.products.map((p) => (p.id === rowId ? { ...p, ...patch } : p));
@@ -1955,7 +2089,13 @@ export function OfferteSamenstellenApp({
                 discountEffectLitersEquivalent={Math.max(0, offerBreakEvenImpact?.discountEffectLitersEquivalent ?? 0)}
                 transportEffectLitersEquivalent={
                   breakEvenV2Summary.weightedContributionPerLiter > 0
-                    ? Math.max(0, activeMetrics.standard.transportCostEx ?? 0) / breakEvenV2Summary.weightedContributionPerLiter
+                    ? (Math.max(0, -(activeMetrics.standard.transportNetEffectIncludedEx ?? 0)) +
+                        Math.max(
+                          0,
+                          (activeMetrics.standard.palletHandlingCostEx ?? 0) -
+                            (activeMetrics.standard.palletHandlingRevenueEx ?? 0)
+                        )) /
+                      breakEvenV2Summary.weightedContributionPerLiter
                     : 0
                 }
                 progressPct={breakEvenProgress.progressPct}
@@ -1971,10 +2111,15 @@ export function OfferteSamenstellenApp({
               <QuoteImpactCard
                 lostExistingEx={offerBreakEvenImpact?.totalLostContributionEx ?? 0}
                 gainedGrowthEx={offerBreakEvenImpact?.totalGainedContributionEx ?? 0}
-                transportEx={Math.max(0, activeMetrics.standard.transportCostEx ?? 0)}
+                transportNetEffectEx={activeMetrics.standard.transportNetEffectEx ?? 0}
+                transportIncludedInNetEffect={Boolean(activeMetrics.standard.transportIncludedInNetEffect ?? true)}
+                palletHandlingEx={Math.max(0, activeMetrics.standard.palletHandlingCostEx ?? 0)}
+                palletHandlingRevenueEx={Math.max(0, activeMetrics.standard.palletHandlingRevenueEx ?? 0)}
                 netEffectEx={
                   (offerBreakEvenImpact?.netContributionEx ?? 0) -
-                  Math.max(0, activeMetrics.standard.transportCostEx ?? 0)
+                  Math.max(0, activeMetrics.standard.palletHandlingCostEx ?? 0) +
+                  Math.max(0, activeMetrics.standard.palletHandlingRevenueEx ?? 0) +
+                  (activeMetrics.standard.transportNetEffectIncludedEx ?? 0)
                 }
                 extraLitersNeeded={Math.max(0, offerBreakEvenImpact?.portfolioExtraLiters ?? 0)}
                 dealContext={dealContext}
@@ -1994,6 +2139,7 @@ export function OfferteSamenstellenApp({
             setForm={setForm}
             productOptions={productIndex.options}
             baseOfferRefs={baseOfferRefs}
+            basis={basis}
             quoteYear={currentYear}
             onClose={closeOptionDialog}
             onSave={() => applyOptionToScenario(selectedOption)}

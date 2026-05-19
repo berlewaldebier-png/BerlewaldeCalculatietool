@@ -15,7 +15,10 @@ function clamp(value: number, min = 0, max = 100) {
 export function QuoteImpactCard({
   lostExistingEx,
   gainedGrowthEx,
-  transportEx,
+  transportNetEffectEx,
+  transportIncludedInNetEffect = true,
+  palletHandlingEx,
+  palletHandlingRevenueEx,
   netEffectEx,
   extraLitersNeeded,
   dealContext,
@@ -23,7 +26,10 @@ export function QuoteImpactCard({
 }: {
   lostExistingEx: number;
   gainedGrowthEx: number;
-  transportEx: number;
+  transportNetEffectEx: number;
+  transportIncludedInNetEffect?: boolean;
+  palletHandlingEx: number;
+  palletHandlingRevenueEx: number;
   netEffectEx: number;
   extraLitersNeeded: number;
   dealContext?: "growth" | "agreement" | "one_off";
@@ -32,13 +38,24 @@ export function QuoteImpactCard({
   const isEmpty =
     Math.abs(lostExistingEx) < 0.0001 &&
     Math.abs(gainedGrowthEx) < 0.0001 &&
-    Math.abs(transportEx) < 0.0001 &&
+    Math.abs(transportNetEffectEx) < 0.0001 &&
+    Math.abs(palletHandlingEx) < 0.0001 &&
+    Math.abs(palletHandlingRevenueEx) < 0.0001 &&
     Math.abs(netEffectEx) < 0.0001;
   const netPositive = netEffectEx >= 0;
-  const maxBar = Math.max(lostExistingEx, gainedGrowthEx, transportEx, 1);
+  const maxBar = Math.max(
+    lostExistingEx,
+    gainedGrowthEx,
+    Math.abs(transportNetEffectEx),
+    palletHandlingEx,
+    palletHandlingRevenueEx,
+    1
+  );
   const lossW = `${clamp((lostExistingEx / maxBar) * 100, 6, 100)}%`;
   const gainW = `${clamp((gainedGrowthEx / maxBar) * 100, 6, 100)}%`;
-  const transportW = `${clamp((transportEx / maxBar) * 100, 6, 100)}%`;
+  const transportW = `${clamp((Math.abs(transportNetEffectEx) / maxBar) * 100, 6, 100)}%`;
+  const palletW = `${clamp((palletHandlingEx / maxBar) * 100, 6, 100)}%`;
+  const palletRevW = `${clamp((palletHandlingRevenueEx / maxBar) * 100, 6, 100)}%`;
 
   return (
     <div className="cpq-side-card">
@@ -70,7 +87,25 @@ export function QuoteImpactCard({
             </div>
             <div className="cpq-side-list-row">
               <span>Transport</span>
-              <span className="cpq-side-neg">-{euro(transportEx)}</span>
+              <span>
+                <span className={transportNetEffectEx >= 0 ? "cpq-side-pos" : "cpq-side-neg"}>
+                  {transportNetEffectEx >= 0 ? "+" : "-"}
+                  {euro(Math.abs(transportNetEffectEx))}
+                </span>
+                {!transportIncludedInNetEffect ? (
+                  <span className="cpq-side-muted" style={{ marginLeft: 6 }}>
+                    (niet meegerekend)
+                  </span>
+                ) : null}
+              </span>
+            </div>
+            <div className="cpq-side-list-row">
+              <span>Pallet/pick</span>
+              {palletHandlingRevenueEx > 0 ? (
+                <span className="cpq-side-pos">+{euro(palletHandlingRevenueEx)}</span>
+              ) : (
+                <span className="cpq-side-neg">-{euro(palletHandlingEx)}</span>
+              )}
             </div>
             {dealContext === "agreement" && Math.abs(pricePressureVsReferenceEx ?? 0) > 0.0001 ? (
               <div
@@ -118,7 +153,31 @@ export function QuoteImpactCard({
             <div className="cpq-side-bar-row">
               <span className="cpq-side-muted">Transport</span>
               <div className="cpq-side-bar">
-                <div className="cpq-side-bar-fill transport" style={{ width: transportW }} />
+                <div
+                  className={`cpq-side-bar-fill ${transportNetEffectEx >= 0 ? "gain" : "loss"}`}
+                  style={{ width: transportW }}
+                />
+              </div>
+            </div>
+            {palletHandlingRevenueEx > 0 ? (
+              <div className="cpq-side-bar-row">
+                <span className="cpq-side-muted">Pallet</span>
+                <div className="cpq-side-bar">
+                  <div className="cpq-side-bar-fill gain" style={{ width: palletRevW }} />
+                </div>
+              </div>
+            ) : (
+              <div className="cpq-side-bar-row">
+                <span className="cpq-side-muted">Pallet</span>
+                <div className="cpq-side-bar">
+                  <div className="cpq-side-bar-fill loss" style={{ width: palletW }} />
+                </div>
+              </div>
+            )}
+            <div className="cpq-side-bar-row">
+              <span className="cpq-side-muted">Pallet/pick</span>
+              <div className="cpq-side-bar">
+                <div className="cpq-side-bar-fill transport" style={{ width: palletW }} />
               </div>
             </div>
           </div>
