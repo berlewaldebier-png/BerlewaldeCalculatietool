@@ -1,19 +1,28 @@
+import { useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import { Field, Idea } from "@/components/offerte-samenstellen/forms/FormControls";
-import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
+import { ProductScopeChecklist } from "@/components/offerte-samenstellen/forms/ProductScopeChecklist";
 import type { ProductOption, QuoteFormState } from "@/components/offerte-samenstellen/types";
 
 type Props = {
   form: QuoteFormState;
   setForm: Dispatch<SetStateAction<QuoteFormState>>;
   products: ProductOption[];
+  baseOfferRefs: string[];
   quoteYear?: number;
 };
 
-export function MixDealForm({ form, setForm, products, quoteYear }: Props) {
+export function MixDealForm({ form, setForm, products, baseOfferRefs }: Props) {
+  const baseOfferProducts = useMemo(
+    () => products.filter((p) => baseOfferRefs.includes(p.optionId)),
+    [products, baseOfferRefs]
+  );
   return (
     <div className="space-y-5">
+      {baseOfferProducts.length === 0 ? (
+        <Idea text="Voeg eerst producten toe aan de basisofferte om een mixdeal te kunnen opzetten." />
+      ) : null}
       <Field
         label="Voorwaarde"
         value={form.mixCondition}
@@ -28,11 +37,10 @@ export function MixDealForm({ form, setForm, products, quoteYear }: Props) {
 
       <div className="cpq-field">
         <div className="cpq-label">Deelnemende producten</div>
-        <ProductPickerTable
-          products={products}
+        <ProductScopeChecklist
+          products={baseOfferProducts as any}
           selectedRefs={form.mixEligibleRefs}
-          emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze mixdeal."
-          quoteYear={quoteYear}
+          emptyHint="Voeg eerst producten toe aan de basisofferte om een mixdeal te kunnen opzetten."
           onChange={(nextRefs) =>
             setForm((prev) => ({
               ...prev,

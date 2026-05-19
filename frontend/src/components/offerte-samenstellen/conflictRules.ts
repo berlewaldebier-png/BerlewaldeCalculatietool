@@ -18,6 +18,8 @@ type EvaluateOptionParams = {
 };
 
 const PRICING_RULE_TYPES: OptionType[] = ["Staffel", "Mix", "Korting", "Groothandel"];
+const BASE_OFFER_REQUIRED_TYPES: OptionType[] = ["Intro", "Staffel", "Mix", "Korting", "Groothandel"];
+const DISALLOW_DUPLICATE_GLOBAL_TYPES: OptionType[] = ["Transport"];
 
 function isPricingRule(type: OptionType) {
   return PRICING_RULE_TYPES.includes(type);
@@ -41,6 +43,18 @@ function getRelevantBlocks(scenario: QuoteScenario, editingBlockId?: string | nu
   return scenario.blocks.filter((block) => block.id !== editingBlockId);
 }
 
+function scenarioHasSelectableBaseOfferProducts(scenario: QuoteScenario) {
+  return scenario.products.some((p) => {
+    if (Boolean((p as any).isMixLiters)) return false;
+    if (p.contributesToLiters === false) return false;
+    const hasRef =
+      Boolean((p as any)?.source?.sku_id) ||
+      (Boolean((p as any)?.source?.bier_id) && Boolean((p as any)?.source?.product_id));
+    if (!hasRef) return false;
+    return Math.max(0, p.litersPerUnit ?? 0) > 0;
+  });
+}
+
 export function evaluateOptionAvailability({
   scenario,
   type,
@@ -52,6 +66,19 @@ export function evaluateOptionAvailability({
   const blocks = getRelevantBlocks(scenario, editingBlockId);
   const blocksInContext = blocks.filter((block) => (block.appliesTo ?? "standard") === context);
   const pricingRulesInContext = blocksInContext.filter((block) => isPricingRule(block.type));
+
+  if (BASE_OFFER_REQUIRED_TYPES.includes(type) && !scenarioHasSelectableBaseOfferProducts(scenario)) {
+    reasons.push("Voeg eerst producten toe aan de basisofferte om deze actie te gebruiken.");
+  }
+
+  if (DISALLOW_DUPLICATE_GLOBAL_TYPES.includes(type) && context === "global") {
+    const hasExisting = blocks.some(
+      (block) => block.type === type && (block.appliesTo ?? "standard") === "global"
+    );
+    if (hasExisting) {
+      reasons.push(`${type} is al toegevoegd. Bewerk de kaart in de offerte.`);
+    }
+  }
 
   if (type === "Intro") {
     const hasStaffelWithoutIntro =

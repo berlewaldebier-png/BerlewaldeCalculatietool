@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 
 import {
+  BooleanField,
   ErrorField,
   Field,
   Idea,
@@ -46,6 +47,12 @@ export function PalletopbouwForm({ form, setForm }: Props) {
   return (
     <div className="space-y-5">
       {error ? <ErrorField text={error} /> : null}
+
+      <BooleanField
+        label="Pallet-/pickkosten doorbelasten aan klant (als omzet)"
+        checked={form.palletChargedToCustomer}
+        onChange={(checked) => setForm((prev) => ({ ...prev, palletChargedToCustomer: checked }))}
+      />
 
       <div className="cpq-grid-2">
         <Field

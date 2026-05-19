@@ -55,6 +55,7 @@ export function buildBlockFromForm({
 
   switch (type) {
     case "Intro": {
+      const scopeAllProducts = Boolean(form.introScopeAllProducts ?? true);
       const eligibleRefs = Array.isArray(form.introEligibleRefs)
         ? form.introEligibleRefs.map(String)
         : [];
@@ -80,8 +81,11 @@ export function buildBlockFromForm({
         payload: {
           start: normalizeText(form.introStart),
           end: normalizeText(form.introEnd),
-          eligibleRefs,
+          scopeAllProducts,
+          eligibleRefs: scopeAllProducts ? [] : eligibleRefs,
           productLabels,
+          contractDurationMonths: normalizeText(form.introContractDurationMonths),
+          contractEndDate: normalizeText(form.introContractEndDate),
           promoType: form.introPromoType,
           discountMode: form.introDiscountMode,
           discountPercent: normalizeText(form.introDiscountPercent),
@@ -101,8 +105,9 @@ export function buildBlockFromForm({
     }
 
     case "Staffel": {
-      const eligibleRefs = form.staffelUseBaseOfferProducts
-        ? baseOfferRefs.map(String)
+      const scopeAllProducts = Boolean(form.staffelScopeAllProducts ?? true);
+      const eligibleRefs = scopeAllProducts
+        ? []
         : Array.isArray(form.staffelEligibleRefs)
           ? form.staffelEligibleRefs.map(String)
           : [];
@@ -135,7 +140,7 @@ export function buildBlockFromForm({
         tone: tones[type],
         appliesTo: "standard",
         payload: {
-          useBaseOfferProducts: form.staffelUseBaseOfferProducts,
+          scopeAllProducts,
           eligibleRefs,
           productLabels,
           discountMode: form.staffelDiscountMode,
@@ -186,18 +191,20 @@ export function buildBlockFromForm({
       };
 
     case "Korting": {
-      const eligibleRefs = form.kortingUseBaseOfferProducts
-        ? baseOfferRefs.map(String)
+      const scopeAllProducts = Boolean(form.kortingScopeAllProducts ?? true);
+      const eligibleRefs = scopeAllProducts
+        ? []
         : Array.isArray(form.kortingEligibleRefs)
           ? form.kortingEligibleRefs.map(String)
           : [];
+      const discountMode = scopeAllProducts ? "Totaal" : "Regel";
 
       return {
         id: blockId,
         type,
         icon: icons[type],
         title: "Korting",
-        subtitle: `${normalizeText(form.discountMode) || "Totaal"} korting`,
+        subtitle: `${discountMode} korting`,
         lines: [
           `${normalizeText(form.discountValue) || "0"}% korting op verkoopprijs`,
           `Producten: ${
@@ -209,8 +216,8 @@ export function buildBlockFromForm({
         tone: tones[type],
         appliesTo: activePeriod as QuoteBlockContext,
         payload: {
-          useBaseOfferProducts: form.kortingUseBaseOfferProducts,
-          discountMode: normalizeText(form.discountMode || "Totaal"),
+          scopeAllProducts,
+          discountMode,
           discountPct: clampNumber(form.discountValue, 0),
           eligibleRefs,
         },
@@ -218,13 +225,15 @@ export function buildBlockFromForm({
     }
 
     case "Groothandel": {
-      const eligibleRefs = form.wholesaleUseBaseOfferProducts
-        ? baseOfferRefs.map(String)
+      const scopeAllProducts = Boolean(form.wholesaleScopeAllProducts ?? true);
+      const eligibleRefs = scopeAllProducts
+        ? []
         : Array.isArray(form.wholesaleEligibleRefs)
           ? form.wholesaleEligibleRefs.map(String)
           : [];
       const productLabels = resolveProductLabels(productOptions, eligibleRefs);
       const marginPct = clampNumber(form.wholesaleMarginPct, 0);
+      const sameMarginAllProducts = Boolean(form.wholesaleSameMarginAllProducts ?? true);
 
       return {
         id: blockId,
@@ -240,10 +249,12 @@ export function buildBlockFromForm({
         tone: tones[type],
         appliesTo: activePeriod as QuoteBlockContext,
         payload: {
-          useBaseOfferProducts: form.wholesaleUseBaseOfferProducts,
+          scopeAllProducts,
           marginPct,
           eligibleRefs,
           productLabels,
+          sameMarginAllProducts,
+          marginsByRef: { ...(form.wholesaleMarginsByRef ?? {}) },
         },
       };
     }
@@ -253,20 +264,38 @@ export function buildBlockFromForm({
       const thresholdUnit = String(form.transportFreeShippingThresholdUnit ?? "pallets");
       const transportCostEx = clampNumber(form.transportCostEx, 0);
       const transportCostType = String(form.transportCostType ?? "fixed");
+      const distanceKm = clampNumber(form.transportDistanceKm, 0);
+      const ratePerKmEx = clampNumber(form.transportRateEx, 0.45);
       const includeInMargin = Boolean(form.transportIncludeInMargin ?? true);
-      const chargedToCustomer = Boolean(form.transportChargedToCustomer ?? false);
-      const modeLabel = chargedToCustomer ? "Extern doorbelast" : includeInMargin ? "Intern (marge-impact)" : "Intern (geen marge-impact)";
+      const chargedToCustomer = Boolean(form.transportChargedToCustomer ?? true);
+
+      const freeLabel =
+        thresholdUnit === "km"
+          ? `Gratis tot: ${thresholdValue} km (enkele reis)`
+          : `Gratis vanaf: ${thresholdValue} ${thresholdUnit}`;
+
+      const roundTripKm = Math.max(0, distanceKm) * 2;
+      const internalLabel = `Intern: ${roundTripKm} km × ${euro(ratePerKmEx)} /km`;
+
+      const costLabel =
+        transportCostType === "fixed" || transportCostType === "manual"
+          ? `Transportkosten: ${euro(transportCostEx)} (${transportCostType})`
+          : null;
+
+      const modeLabel = chargedToCustomer
+        ? "Doorbelast aan klant (als niet gratis)"
+        : "Niet doorbelast (intern)";
+
+      const marginLabel = includeInMargin
+        ? "Meenemen in netto effect & break-even"
+        : "Niet meenemen in netto effect & break-even";
       return {
         id: blockId,
         type,
         icon: icons[type],
         title: "Transport",
         subtitle: "Verzending vanaf brouwerij",
-        lines: [
-          `Gratis vanaf: ${thresholdValue} ${thresholdUnit}`,
-          `Transportkosten: ${euro(transportCostEx)} (${transportCostType})`,
-          modeLabel,
-        ],
+        lines: [freeLabel, ...(costLabel ? [costLabel] : []), internalLabel, modeLabel, marginLabel],
         tone: tones[type],
         appliesTo: "global",
         payload: {
@@ -274,6 +303,8 @@ export function buildBlockFromForm({
           freeShippingThresholdUnit: thresholdUnit,
           transportCostType,
           transportCostEx,
+          distanceKm,
+          ratePerKmEx,
           includeInMargin,
           chargedToCustomer,
         },
@@ -281,14 +312,17 @@ export function buildBlockFromForm({
     }
 
     case "Palletopbouw": {
-      const doosUnitsPerLayer = clampNumber(form.palletDoosUnitsPerLayer, 0);
-      const doosUnitsPerPallet = clampNumber(form.palletDoosUnitsPerPallet, 0);
-      const fustUnitsPerLayer = clampNumber(form.palletFustUnitsPerLayer, 0);
-      const fustUnitsPerPallet = clampNumber(form.palletFustUnitsPerPallet, 0);
-      const doosCostPerPallet = clampNumber(form.palletDoosCostPerPallet, 0);
-      const doosPickCostPerExtraSku = clampNumber(form.palletDoosPickCostPerExtraSku, 0);
-      const fustCostPerPallet = clampNumber(form.palletFustCostPerPallet, 0);
-      const fustPickCostPerExtraSku = clampNumber(form.palletFustPickCostPerExtraSku, 0);
+      // Defaults must be stable and non-zero so rounding & cost calculations keep working,
+      // even when older drafts have missing form fields.
+      const doosUnitsPerLayer = clampNumber(form.palletDoosUnitsPerLayer, 12);
+      const doosUnitsPerPallet = clampNumber(form.palletDoosUnitsPerPallet, 72);
+      const fustUnitsPerLayer = clampNumber(form.palletFustUnitsPerLayer, 20);
+      const fustUnitsPerPallet = clampNumber(form.palletFustUnitsPerPallet, 40);
+      const doosCostPerPallet = clampNumber(form.palletDoosCostPerPallet, 15);
+      const doosPickCostPerExtraSku = clampNumber(form.palletDoosPickCostPerExtraSku, 5);
+      const fustCostPerPallet = clampNumber(form.palletFustCostPerPallet, 15);
+      const fustPickCostPerExtraSku = clampNumber(form.palletFustPickCostPerExtraSku, 5);
+      const chargedToCustomer = Boolean(form.palletChargedToCustomer ?? true);
 
       return {
         id: blockId,
@@ -312,6 +346,7 @@ export function buildBlockFromForm({
           doosPickCostPerExtraSku,
           fustCostPerPallet,
           fustPickCostPerExtraSku,
+          chargedToCustomer,
         },
       };
     }

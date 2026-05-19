@@ -56,6 +56,12 @@ export function BasisStep({
   onSave: () => void;
   isSaving: boolean;
 }) {
+  const distanceKmValue = useMemo(() => {
+    const raw = String((basis as any).afstandKm ?? "").trim();
+    const parsed = Number(raw.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [basis]);
+  const isDistanceKmValid = typeof distanceKmValue === "number" && distanceKmValue > 0;
   const [customerQuery, setCustomerQuery] = useState<string>(() => String(basis.klantNaam ?? ""));
   const [companies, setCompanies] = useState<DouanoCompany[]>([]);
   const [companiesError, setCompaniesError] = useState<string | null>(null);
@@ -197,7 +203,18 @@ export function BasisStep({
         <Field label="Contactpersoon" value={basis.contactpersoon} onChange={(v) => setBasis((prev) => ({ ...prev, contactpersoon: v }))} />
         <Field label="Offertenaam" value={basis.offerteNaam} onChange={(v) => setBasis((prev) => ({ ...prev, offerteNaam: v }))} />
         <Field label="Geldig tot" value={basis.geldigTot} onChange={(v) => setBasis((prev) => ({ ...prev, geldigTot: v }))} />
+        <Field
+          label="Afstand vanaf brouwerij (km)"
+          value={basis.afstandKm}
+          onChange={(v) => setBasis((prev) => ({ ...prev, afstandKm: v }))}
+          placeholder="Bijv. 85"
+        />
       </div>
+      {!isDistanceKmValid ? (
+        <div className="cpq-alert cpq-alert-warn" style={{ marginTop: 10 }}>
+          Vul een geldige afstand in (km) om transportkosten en impact goed te kunnen berekenen.
+        </div>
+      ) : null}
 
       {basis.klantId ? (
         <div style={{ marginTop: 14 }}>
@@ -299,7 +316,7 @@ export function BasisStep({
         <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
           {isSaving ? "Opslaan..." : "Opslaan"}
         </button>
-        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button">
+        <button onClick={onNext} className="cpq-button cpq-button-primary" type="button" disabled={!isDistanceKmValid}>
           Verder naar offerte maken
         </button>
       </div>

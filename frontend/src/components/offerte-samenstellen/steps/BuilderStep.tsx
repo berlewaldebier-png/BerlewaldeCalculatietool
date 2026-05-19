@@ -35,13 +35,16 @@ function isPricingActionBlock(block: BuilderBlock) {
   );
 }
 
-function usesBaseOfferProducts(block: BuilderBlock | undefined) {
-  return Boolean(block?.payload?.useBaseOfferProducts ?? true);
-}
-
 function readNumber(value: unknown, fallback: number) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string" && value.trim() === "") return fallback;
   const parsed = Number(String(value ?? "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readPositiveNumber(value: unknown, fallback: number) {
+  const parsed = readNumber(value, fallback);
+  return parsed > 0 ? parsed : fallback;
 }
 
 function stepForRoundingMode(mode: string, unitsPerLayer: number | null, unitsPerPallet: number | null) {
@@ -171,16 +174,18 @@ export function BuilderStep({
   const standardBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "standard");
   const globalBlocks = scenario.blocks.filter((block) => (block.appliesTo ?? "standard") === "global");
   const standardPricingBlock = standardBlocks.find((block) => isPricingActionBlock(block));
-  const basisOfferteActive = !standardPricingBlock || usesBaseOfferProducts(standardPricingBlock);
+  // Basisofferte blijft altijd zichtbaar; pricing-acties kunnen scopes/uitsluitingen hebben,
+  // maar dat is geen reden om de basisofferte te verbergen.
+  const basisOfferteActive = true;
 
   const palletDefaults = useMemo(() => {
     const block = globalBlocks.find((b) => b.type === "Palletopbouw");
     const payload = (block?.payload ?? {}) as Record<string, unknown>;
     return {
-      doosUnitsPerLayer: readNumber(payload.doosUnitsPerLayer, 12),
-      doosUnitsPerPallet: readNumber(payload.doosUnitsPerPallet, 72),
-      fustUnitsPerLayer: readNumber(payload.fustUnitsPerLayer, 20),
-      fustUnitsPerPallet: readNumber(payload.fustUnitsPerPallet, 40),
+      doosUnitsPerLayer: readPositiveNumber(payload.doosUnitsPerLayer, 12),
+      doosUnitsPerPallet: readPositiveNumber(payload.doosUnitsPerPallet, 72),
+      fustUnitsPerLayer: readPositiveNumber(payload.fustUnitsPerLayer, 20),
+      fustUnitsPerPallet: readPositiveNumber(payload.fustUnitsPerPallet, 40),
     };
   }, [globalBlocks]);
 

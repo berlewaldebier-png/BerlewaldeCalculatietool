@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
 import {
@@ -6,9 +7,8 @@ import {
   ErrorField,
   Field,
   Idea,
-  SelectField,
 } from "@/components/offerte-samenstellen/forms/FormControls";
-import { ProductPickerTable } from "@/components/offerte-samenstellen/forms/ProductPickerTable";
+import { ProductScopeChecklist } from "@/components/offerte-samenstellen/forms/ProductScopeChecklist";
 import type { ProductOption, QuoteFormState } from "@/components/offerte-samenstellen/types";
 
 type Props = {
@@ -20,15 +20,11 @@ type Props = {
 };
 
 export function getKortingFormError(form: QuoteFormState, baseOfferRefs: string[] = []) {
-  if (form.kortingUseBaseOfferProducts && baseOfferRefs.length === 0) {
+  if (baseOfferRefs.length === 0) {
     return "Basisofferte bevat nog geen producten om korting op toe te passen.";
   }
 
-  if (
-    !form.kortingUseBaseOfferProducts &&
-    form.discountMode === "Regel" &&
-    form.kortingEligibleRefs.length === 0
-  ) {
+  if (!form.kortingScopeAllProducts && form.kortingEligibleRefs.length === 0) {
     return "Selecteer minstens een product voor deze regelkorting.";
   }
 
@@ -36,45 +32,35 @@ export function getKortingFormError(form: QuoteFormState, baseOfferRefs: string[
 }
 
 export function KortingForm({ form, setForm, products, baseOfferRefs, quoteYear }: Props) {
-  const isLineScope = form.discountMode === "Regel";
   const error = getKortingFormError(form, baseOfferRefs);
   const baseOfferCount = baseOfferRefs.length;
+  const baseOfferProducts = useMemo(
+    () => products.filter((p) => baseOfferRefs.includes(p.optionId)),
+    [products, baseOfferRefs]
+  );
 
   return (
     <div className="space-y-5">
       {error ? <ErrorField text={error} /> : null}
 
       <BooleanField
-        label={`Gebruik basisofferte-producten${baseOfferCount > 0 ? ` (${baseOfferCount})` : ""}`}
-        checked={form.kortingUseBaseOfferProducts}
+        label={`Geldt korting voor alle producten?${baseOfferCount > 0 ? ` (${baseOfferCount})` : ""}`}
+        checked={form.kortingScopeAllProducts}
         onChange={(checked) =>
           setForm((prev) => ({
             ...prev,
-            kortingUseBaseOfferProducts: checked,
+            kortingScopeAllProducts: checked,
           }))
         }
       />
 
-      <SelectField
-        label="Scope"
-        value={form.discountMode}
-        options={[
-          { label: "Totaal", value: "Totaal" },
-          { label: "Regel", value: "Regel" },
-        ]}
-        onChange={(value) => setForm((prev) => ({ ...prev, discountMode: value }))}
-      />
-
-      {form.kortingUseBaseOfferProducts ? (
-        <Idea text="De korting gebruikt de producten uit de basisofferte. Pas daar de productscope aan als je andere producten wilt meenemen." />
-      ) : isLineScope ? (
+      {!form.kortingScopeAllProducts ? (
         <div className="cpq-field">
           <div className="cpq-label">Producten</div>
-          <ProductPickerTable
-            products={products}
+          <ProductScopeChecklist
+            products={baseOfferProducts as any}
             selectedRefs={form.kortingEligibleRefs}
-            emptyHint="Voeg eerst een bierstijl en verpakking toe voor deze korting."
-            quoteYear={quoteYear}
+            emptyHint="Voeg eerst producten toe aan de basisofferte om korting toe te kunnen passen."
             onChange={(nextRefs) =>
               setForm((prev) => ({
                 ...prev,
