@@ -629,6 +629,64 @@ export function BuilderStep({
             <div className="cpq-alert">
               Afronden werkt per regel (kolom “Afronden”). Gebruik “Volle lagen/pallets” om altijd op logistieke eenheden uit te komen.
             </div>
+            {(() => {
+              const warnings: Array<{ key: string; text: string }> = [];
+              scenario.products
+                .filter((product) => product.qty > 0 && !Boolean((product as any).isMixLiters))
+                .forEach((product) => {
+                  const roundingMode = String((product as any).roundingMode ?? "none");
+                  if (roundingMode === "none") return;
+                  const units = Math.max(0, clampNumber(product.qty, 0));
+                  const unitLabel = String(product.unit ?? "stuk");
+                  const unitsPerPalletRaw =
+                    typeof (product as any).unitsPerPallet === "number" ? (product as any).unitsPerPallet : null;
+                  const unitsPerLayerRaw =
+                    typeof (product as any).unitsPerLayer === "number" ? (product as any).unitsPerLayer : null;
+                  const unitsPerPallet =
+                    unitLabel === "doos"
+                      ? palletDefaults.doosUnitsPerPallet
+                      : unitLabel === "fust"
+                        ? palletDefaults.fustUnitsPerPallet
+                        : unitsPerPalletRaw;
+                  const unitsPerLayer =
+                    unitLabel === "doos"
+                      ? palletDefaults.doosUnitsPerLayer
+                      : unitLabel === "fust"
+                        ? palletDefaults.fustUnitsPerLayer
+                        : unitsPerLayerRaw;
+
+                  if (!unitsPerPallet || !unitsPerLayer) return;
+
+                  const palletsExact = unitsPerPallet > 0 ? units / unitsPerPallet : 0;
+                  const palletsFull = Math.floor(palletsExact);
+                  const remainingAfterPallets = units - palletsFull * unitsPerPallet;
+                  const layersFull = unitsPerLayer > 0 ? Math.floor(remainingAfterPallets / unitsPerLayer) : 0;
+                  const looseUnits = Math.round(remainingAfterPallets - layersFull * unitsPerLayer);
+
+                  const label = (product.name || "Product") + (product.pack ? ` · ${product.pack}` : "");
+                  const hasRestPallet = remainingAfterPallets > 0 && remainingAfterPallets < unitsPerPallet;
+                  if (roundingMode === "full_layers" && hasRestPallet) {
+                    warnings.push({
+                      key: `rest-${product.id}`,
+                      text: `${label}: ${palletsFull} volle pallet(s) + 1 restpallet (${layersFull} laag/lagen, ${looseUnits} los).`,
+                    });
+                  } else if (looseUnits > 0) {
+                    warnings.push({
+                      key: `loose-${product.id}`,
+                      text: `${label}: bevat losse eenheden (${looseUnits} ${unitLabel}).`,
+                    });
+                  }
+                });
+
+              if (warnings.length === 0) return null;
+              return (
+                <div className="cpq-alert cpq-alert-warn" style={{ marginTop: 10 }}>
+                  {warnings.map((w) => (
+                    <div key={w.key}>{w.text}</div>
+                  ))}
+                </div>
+              );
+            })()}
             <div className="cpq-table-wrap" style={{ marginTop: 10 }}>
               <table className="cpq-table">
                 <thead>

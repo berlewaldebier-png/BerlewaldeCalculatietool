@@ -213,6 +213,7 @@ export type ScenarioMetrics = {
   costEx: number;
   extraCostEx: number;
   transportCostEx: number;
+  palletHandlingCostEx: number;
   marginPct: number;
   breakEvenCurrent: number | null;
   breakEvenProjected: number | null;
@@ -273,6 +274,10 @@ export type QuoteFormState = {
   palletDoosUnitsPerPallet: string;
   palletFustUnitsPerLayer: string;
   palletFustUnitsPerPallet: string;
+  palletDoosCostPerPallet: string;
+  palletDoosPickCostPerExtraSku: string;
+  palletFustCostPerPallet: string;
+  palletFustPickCostPerExtraSku: string;
   transportDistanceKm: string;
   transportRateEx: string;
   transportDeliveries: string;

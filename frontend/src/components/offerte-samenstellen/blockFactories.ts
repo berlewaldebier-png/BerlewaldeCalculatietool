@@ -285,6 +285,10 @@ export function buildBlockFromForm({
       const doosUnitsPerPallet = clampNumber(form.palletDoosUnitsPerPallet, 0);
       const fustUnitsPerLayer = clampNumber(form.palletFustUnitsPerLayer, 0);
       const fustUnitsPerPallet = clampNumber(form.palletFustUnitsPerPallet, 0);
+      const doosCostPerPallet = clampNumber(form.palletDoosCostPerPallet, 0);
+      const doosPickCostPerExtraSku = clampNumber(form.palletDoosPickCostPerExtraSku, 0);
+      const fustCostPerPallet = clampNumber(form.palletFustCostPerPallet, 0);
+      const fustPickCostPerExtraSku = clampNumber(form.palletFustPickCostPerExtraSku, 0);
 
       return {
         id: blockId,
@@ -295,6 +299,7 @@ export function buildBlockFromForm({
         lines: [
           `Doos: ${doosUnitsPerLayer} per laag, ${doosUnitsPerPallet} per pallet`,
           `Fust: ${fustUnitsPerLayer} per laag, ${fustUnitsPerPallet} per pallet`,
+          `Kosten: €${doosCostPerPallet}/pallet (doos), €${fustCostPerPallet}/pallet (fust)`,
         ],
         tone: tones[type],
         appliesTo: "global",
@@ -303,6 +308,10 @@ export function buildBlockFromForm({
           doosUnitsPerPallet,
           fustUnitsPerLayer,
           fustUnitsPerPallet,
+          doosCostPerPallet,
+          doosPickCostPerExtraSku,
+          fustCostPerPallet,
+          fustPickCostPerExtraSku,
         },
       };
     }

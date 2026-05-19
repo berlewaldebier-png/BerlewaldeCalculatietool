@@ -1955,7 +1955,9 @@ export function OfferteSamenstellenApp({
                 discountEffectLitersEquivalent={Math.max(0, offerBreakEvenImpact?.discountEffectLitersEquivalent ?? 0)}
                 transportEffectLitersEquivalent={
                   breakEvenV2Summary.weightedContributionPerLiter > 0
-                    ? Math.max(0, activeMetrics.standard.transportCostEx ?? 0) / breakEvenV2Summary.weightedContributionPerLiter
+                    ? (Math.max(0, activeMetrics.standard.transportCostEx ?? 0) +
+                        Math.max(0, activeMetrics.standard.palletHandlingCostEx ?? 0)) /
+                      breakEvenV2Summary.weightedContributionPerLiter
                     : 0
                 }
                 progressPct={breakEvenProgress.progressPct}
@@ -1972,9 +1974,11 @@ export function OfferteSamenstellenApp({
                 lostExistingEx={offerBreakEvenImpact?.totalLostContributionEx ?? 0}
                 gainedGrowthEx={offerBreakEvenImpact?.totalGainedContributionEx ?? 0}
                 transportEx={Math.max(0, activeMetrics.standard.transportCostEx ?? 0)}
+                palletHandlingEx={Math.max(0, activeMetrics.standard.palletHandlingCostEx ?? 0)}
                 netEffectEx={
                   (offerBreakEvenImpact?.netContributionEx ?? 0) -
-                  Math.max(0, activeMetrics.standard.transportCostEx ?? 0)
+                  Math.max(0, activeMetrics.standard.transportCostEx ?? 0) -
+                  Math.max(0, activeMetrics.standard.palletHandlingCostEx ?? 0)
                 }
                 extraLitersNeeded={Math.max(0, offerBreakEvenImpact?.portfolioExtraLiters ?? 0)}
                 dealContext={dealContext}

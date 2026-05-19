@@ -167,6 +167,10 @@ export function hydrateFormFromBlock(block: BuilderBlock): QuoteFormState {
         palletDoosUnitsPerPallet: asDutchNumberString(payload.doosUnitsPerPallet ?? initial.palletDoosUnitsPerPallet),
         palletFustUnitsPerLayer: asDutchNumberString(payload.fustUnitsPerLayer ?? initial.palletFustUnitsPerLayer),
         palletFustUnitsPerPallet: asDutchNumberString(payload.fustUnitsPerPallet ?? initial.palletFustUnitsPerPallet),
+        palletDoosCostPerPallet: asDutchNumberString(payload.doosCostPerPallet ?? initial.palletDoosCostPerPallet),
+        palletDoosPickCostPerExtraSku: asDutchNumberString(payload.doosPickCostPerExtraSku ?? initial.palletDoosPickCostPerExtraSku),
+        palletFustCostPerPallet: asDutchNumberString(payload.fustCostPerPallet ?? initial.palletFustCostPerPallet),
+        palletFustPickCostPerExtraSku: asDutchNumberString(payload.fustPickCostPerExtraSku ?? initial.palletFustPickCostPerExtraSku),
       };
 
     default:

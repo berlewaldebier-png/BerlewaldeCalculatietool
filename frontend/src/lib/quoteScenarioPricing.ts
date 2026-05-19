@@ -38,6 +38,7 @@ type CalculationState = {
   notes: string[];
   extraCostEx: number;
   transportCostEx: number;
+  palletHandlingCostEx: number;
 };
 
 type MetricsBuildParams = {
@@ -48,6 +49,7 @@ type MetricsBuildParams = {
   costEx: number;
   extraCostEx: number;
   transportCostEx: number;
+  palletHandlingCostEx: number;
 };
 
 export function calculateQuoteScenarioMetrics(
@@ -80,6 +82,7 @@ export function calculateQuoteScenarioMetrics(
   });
 
   costEx += state.extraCostEx + state.transportCostEx;
+  costEx += state.palletHandlingCostEx;
 
   return buildScenarioMetrics({
     breakEven,
@@ -89,6 +92,7 @@ export function calculateQuoteScenarioMetrics(
     costEx,
     extraCostEx: state.extraCostEx,
     transportCostEx: state.transportCostEx,
+    palletHandlingCostEx: state.palletHandlingCostEx,
   });
 }
 
@@ -133,6 +137,7 @@ function createCalculationState(
     notes: [],
     extraCostEx: 0,
     transportCostEx: 0,
+    palletHandlingCostEx: 0,
   };
 }
 
@@ -183,6 +188,7 @@ function buildEmptyMetrics(
     costEx: 0,
     extraCostEx: 0,
     transportCostEx: 0,
+    palletHandlingCostEx: 0,
     marginPct: 0,
     breakEvenCurrent: breakEven?.breakEvenRevenue ?? null,
     breakEvenProjected:
@@ -454,6 +460,37 @@ function applyServiceAndTransportBlocks(
   handlers: { addRevenue: (value: number) => void; currentRevenueEx: () => number }
 ) {
   for (const block of state.blocks) {
+    if (block.type === "Palletopbouw") {
+      const payload = asRecord(block.payload);
+      const doosUnitsPerPallet = clampNumber(payload.doosUnitsPerPallet, 0);
+      const fustUnitsPerPallet = clampNumber(payload.fustUnitsPerPallet, 0);
+      const doosCostPerPallet = clampNumber(payload.doosCostPerPallet, 0);
+      const doosPickCostPerExtraSku = clampNumber(payload.doosPickCostPerExtraSku, 0);
+      const fustCostPerPallet = clampNumber(payload.fustCostPerPallet, 0);
+      const fustPickCostPerExtraSku = clampNumber(payload.fustPickCostPerExtraSku, 0);
+
+      const lineUnits = (line: CalculationLine) => Math.max(0, (line.qtyPaid ?? 0) + (line.qtyFree ?? 0));
+
+      const doosLines = state.lines.filter((line) => line.salesUnitLabel === "doos" && lineUnits(line) > 0);
+      const fustLines = state.lines.filter((line) => line.salesUnitLabel === "fust" && lineUnits(line) > 0);
+
+      const computeGroup = (lines: CalculationLine[], unitsPerPallet: number, palletFee: number, pickFee: number) => {
+        if (!lines.length) return 0;
+        if (!(unitsPerPallet > 0)) return 0;
+        const totalUnits = lines.reduce((sum, line) => sum + lineUnits(line), 0);
+        const pallets = Math.ceil(totalUnits / unitsPerPallet);
+        const distinctSkus = new Set(lines.map((l) => l.ref)).size;
+        const pick = pallets * Math.max(0, distinctSkus - 1) * Math.max(0, pickFee);
+        const palletCost = pallets * Math.max(0, palletFee);
+        return pick + palletCost;
+      };
+
+      const costDoos = computeGroup(doosLines, doosUnitsPerPallet, doosCostPerPallet, doosPickCostPerExtraSku);
+      const costFust = computeGroup(fustLines, fustUnitsPerPallet, fustCostPerPallet, fustPickCostPerExtraSku);
+      const total = costDoos + costFust;
+      if (total > 0) state.palletHandlingCostEx += total;
+      continue;
+    }
     if (block.type === "Transport") {
       const payload = asRecord(block.payload);
       const thresholdValue = clampNumber(payload.freeShippingThresholdValue, 0);
@@ -589,6 +626,7 @@ function buildScenarioMetrics(params: MetricsBuildParams): ScenarioMetrics {
     costEx: Math.max(0, params.costEx),
     extraCostEx: params.extraCostEx,
     transportCostEx: params.transportCostEx,
+    palletHandlingCostEx: params.palletHandlingCostEx,
     marginPct:
       params.revenueEx > 0
         ? ((params.revenueEx - params.costEx) / params.revenueEx) * 100
