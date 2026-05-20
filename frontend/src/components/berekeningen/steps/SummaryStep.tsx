@@ -5,16 +5,39 @@ import type { SummaryProductRow } from "@/lib/kostprijsSnapshotEngine";
 type GenericRecord = Record<string, unknown>;
 type BerekeningSubjectType = "bier" | "artikel" | "dienst";
 
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
+      <path d="M3 3l18 18" />
+    </svg>
+  );
+}
+
 export function SummaryStep({
   current,
   buildResultaatSnapshot,
   formatCurrencyDisplay,
   formatDecimalValue,
+  enabledFormatIds,
+  onToggleFormat,
 }: {
   current: GenericRecord;
   buildResultaatSnapshot: (row: GenericRecord) => any;
   formatCurrencyDisplay: (value: unknown) => string;
   formatDecimalValue: (value: number | null | undefined, digits?: number) => string;
+  enabledFormatIds: string[] | null;
+  onToggleFormat: (formatId: string, enabled: boolean) => void;
 }) {
   const snapshot = buildResultaatSnapshot(current);
   const basisproductenRows = snapshot.producten.basisproducten;
@@ -98,6 +121,9 @@ export function SummaryStep({
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: 46 }} title="Meenemen in activatie/offertes">
+                      Zichtbaar
+                    </th>
                     <th>Biernaam</th>
                     <th>Soort</th>
                     <th>Verpakkingseenheid</th>
@@ -111,7 +137,7 @@ export function SummaryStep({
                 <tbody>
                   {records.length === 0 ? (
                     <tr>
-                      <td className="dataset-empty" colSpan={8}>
+                      <td className="dataset-empty" colSpan={9}>
                         {soort === "Inkoop"
                           ? "Er zijn nog geen producten opgebouwd vanuit de huidige inkoopinvoer."
                           : "Er zijn nog geen producten opgebouwd vanuit het huidige recept en de verpakkingselectie."}
@@ -120,6 +146,33 @@ export function SummaryStep({
                   ) : null}
                   {records.map((row, index) => (
                     <tr key={`${String((row as any).verpakkingseenheid ?? index)}-${index}`}>
+                      <td>
+                        {(() => {
+                          const formatId = String((row as any).product_id ?? "").trim();
+                          const isEnabled = enabledFormatIds ? enabledFormatIds.includes(formatId) : true;
+                          const canToggle = Boolean(formatId);
+                          return (
+                            <button
+                              type="button"
+                              className={`visibility-toggle-button ${isEnabled ? "is-included" : "is-excluded"}`}
+                              disabled={!canToggle}
+                              title={
+                                isEnabled
+                                  ? "Wordt geactiveerd en is zichtbaar/selecteerbaar in o.a. offertes."
+                                  : "Krijgt geen kostprijs en is niet selecteerbaar in o.a. offertes."
+                              }
+                              onClick={() => {
+                                if (!formatId) return;
+                                onToggleFormat(formatId, !isEnabled);
+                              }}
+                            >
+                              <span className="visibility-toggle-icon">
+                                {isEnabled ? <EyeIcon /> : <EyeOffIcon />}
+                              </span>
+                            </button>
+                          );
+                        })()}
+                      </td>
                       <td>{String((row as any).biernaam ?? "-")}</td>
                       <td>{String((row as any).soort ?? "-")}</td>
                       <td>{String((row as any).verpakkingseenheid ?? "-")}</td>

@@ -1965,6 +1965,19 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         "finalized_at": finalized_at if status == "definitief" else "",
     }
 
+    # Optional selection scope: enabled format/product refs.
+    #
+    # Backward compat:
+    # - Older records do not have this field. In that case we keep it absent so the UI can
+    #   treat it as "all enabled".
+    # - Newer records (created via the wizard) include `enabled_format_ids: []` and must
+    #   round-trip without being dropped.
+    if "enabled_format_ids" in record:
+        raw_enabled = record.get("enabled_format_ids")
+        if isinstance(raw_enabled, list):
+            cleaned_enabled = [str(v or "").strip() for v in raw_enabled]
+            normalized["enabled_format_ids"] = [v for v in cleaned_enabled if v]
+
     # SKU-aanpak: for definitive inkoop records, derive product snapshot rows from invoice lines.
     #
     # Activation relies on `resultaat_snapshot.producten.*` to know which formats/SKUs to activate.
@@ -8298,6 +8311,24 @@ def activate_kostprijsversie(
     if not target_refs:
         return None
 
+    # Optional: explicit afvuleenheid selection (enabled formats).
+    # When present, activation should only include these product_ids.
+    # When missing (older records), keep backward-compatible behaviour: activate all derived refs.
+    enabled_set: set[str] | None = None
+    enabled_format_ids = target.get("enabled_format_ids")
+    if isinstance(enabled_format_ids, list):
+        enabled_set = {str(v or "").strip() for v in enabled_format_ids if str(v or "").strip()}
+        if not enabled_set:
+            raise ValueError("Selecteer minimaal 1 afvuleenheid voordat je activeert.")
+        target_refs = [
+            ref
+            for ref in target_refs
+            if str(ref.get("product_type", "") or "") not in {"basis", "samengesteld"}
+            or str(ref.get("product_id", "") or "").strip() in enabled_set
+        ]
+        if not target_refs:
+            raise ValueError("Geen afvuleenheden geselecteerd om te activeren.")
+
     # Hard requirement: a definitive version must have canonical per-SKU cost lines for all activated refs.
     # This prevents hidden fallback logic and makes missing data explicit + repairable.
     try:
@@ -8397,6 +8428,8 @@ def activate_kostprijsversie(
                     if not pid or pid not in format_ids:
                         continue
                     for nested_id in sorted(_collect_nested_formats(pid)):
+                        if enabled_set is not None and nested_id not in enabled_set:
+                            continue
                         nested_type = "samengesteld" if _is_composite_format(nested_id) else "basis"
                         key = (nested_type, nested_id)
                         if key in existing:
