@@ -2212,6 +2212,132 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
                 # If derivation fails we keep snapshot empty; downstream activation will fail hard.
                 pass
 
+    # SKU-aanpak: for definitive productie records, derive snapshot product rows from selected formats.
+    #
+    # Production cost versions do not have invoice lines; the wizard selection (enabled_format_ids)
+    # is the source of truth for which formats exist and should be activatable.
+    if status == "definitief" and normalized.get("type") == "productie":
+        snapshot = normalized.get("resultaat_snapshot", {})
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+            normalized["resultaat_snapshot"] = snapshot
+        producten = snapshot.get("producten")
+        if not isinstance(producten, dict):
+            producten = {"basisproducten": [], "samengestelde_producten": []}
+            snapshot["producten"] = producten
+        basis_rows = producten.get("basisproducten")
+        samengesteld_rows = producten.get("samengestelde_producten")
+        if not isinstance(basis_rows, list):
+            basis_rows = []
+        if not isinstance(samengesteld_rows, list):
+            samengesteld_rows = []
+        if not basis_rows and not samengesteld_rows:
+            enabled = normalized.get("enabled_format_ids")
+            enabled_ids = [str(v or "").strip() for v in enabled] if isinstance(enabled, list) else []
+            enabled_ids = [v for v in enabled_ids if v]
+            if enabled_ids:
+                try:
+                    postgres_mod = _get_postgres_storage_module()
+                    articles_rows = (
+                        postgres_mod.load_dataset("articles", [])
+                        if postgres_mod is not None and postgres_mod.uses_postgres()
+                        else []
+                    )
+                    bom_rows = (
+                        postgres_mod.load_dataset("bom-lines", [])
+                        if postgres_mod is not None and postgres_mod.uses_postgres()
+                        else []
+                    )
+                    articles_by_id = {
+                        str(row.get("id", "") or "").strip(): row
+                        for row in (articles_rows if isinstance(articles_rows, list) else [])
+                        if isinstance(row, dict) and str(row.get("id", "") or "").strip()
+                    }
+                    format_ids = {
+                        aid
+                        for aid, a in articles_by_id.items()
+                        if str(a.get("kind", "") or "").strip().lower() == "format"
+                    }
+                    enabled_ids = [fmt_id for fmt_id in enabled_ids if fmt_id in format_ids]
+
+                    lines_by_parent: dict[str, list[dict[str, Any]]] = {}
+                    if isinstance(bom_rows, list):
+                        for row in bom_rows:
+                            if not isinstance(row, dict):
+                                continue
+                            parent = str(row.get("parent_article_id", "") or "").strip()
+                            if not parent or parent not in format_ids:
+                                continue
+                            lines_by_parent.setdefault(parent, []).append(row)
+
+                    def _is_composite_format(fmt_id: str) -> bool:
+                        return any(
+                            str(line.get("component_article_id", "") or "").strip() in format_ids
+                            for line in lines_by_parent.get(fmt_id, [])
+                            if isinstance(line, dict)
+                        )
+
+                    variabel_per_liter = _snapshot_float(snapshot.get("variabele_kosten_per_liter", 0.0))
+                    direct_fixed_per_liter = _snapshot_float(snapshot.get("directe_vaste_kosten_per_liter", 0.0))
+
+                    try:
+                        alcoholpercentage_value = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        alcoholpercentage_value = 0.0
+                    tarief_accijns_value = str(basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS)
+                    belastingsoort_value = str(basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT)
+
+                    out_basis: list[dict[str, Any]] = []
+                    out_samengesteld: list[dict[str, Any]] = []
+                    for fmt_id in enabled_ids:
+                        article_row = articles_by_id.get(fmt_id, {})
+                        unit_name = str(article_row.get("name", article_row.get("naam", "")) or "").strip() or fmt_id
+                        liters_per_unit = _snapshot_float(article_row.get("content_liter", 0.0))
+                        primaire = max(variabel_per_liter, 0.0) * max(liters_per_unit, 0.0)
+                        vaste = max(direct_fixed_per_liter, 0.0) * max(liters_per_unit, 0.0)
+                        accijns = 0.0
+                        if liters_per_unit > 0 and alcoholpercentage_value > 0:
+                            try:
+                                accijns = bereken_accijns_voor_liters(
+                                    year=int(basisgegevens.get("jaar", 0) or 0),
+                                    liters=float(liters_per_unit),
+                                    alcoholpercentage=float(alcoholpercentage_value),
+                                    tarief_accijns=str(tarief_accijns_value),
+                                    belastingsoort=str(belastingsoort_value),
+                                )
+                            except Exception:
+                                accijns = 0.0
+                        kostprijs_total = float(primaire) + float(vaste) + float(accijns)
+                        is_composite = _is_composite_format(fmt_id)
+                        payload = _normalize_resultaat_snapshot_product_row(
+                            {
+                                "biernaam": str(basisgegevens.get("biernaam", "") or ""),
+                                "soort": "Eigen productie",
+                                "product_id": fmt_id,
+                                "product_type": "samengesteld" if is_composite else "basis",
+                                "verpakking": unit_name,
+                                "verpakkingseenheid": unit_name,
+                                "primaire_kosten": primaire,
+                                "variabele_kosten": primaire,
+                                "verpakkingskosten": 0.0,
+                                "vaste_kosten": vaste,
+                                "vaste_directe_kosten": vaste,
+                                "accijns": accijns,
+                                "kostprijs": kostprijs_total,
+                                "liters_per_product": liters_per_unit,
+                            },
+                            product_type_hint="samengesteld" if is_composite else "basis",
+                        )
+                        if is_composite:
+                            out_samengesteld.append(payload)
+                        else:
+                            out_basis.append(payload)
+
+                    producten["basisproducten"] = out_basis
+                    producten["samengestelde_producten"] = out_samengesteld
+                except Exception:
+                    pass
+
     _assert_snapshot_product_refs_complete(normalized)
 
     return normalized
