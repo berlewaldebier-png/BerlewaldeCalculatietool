@@ -2248,6 +2248,11 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
                         if postgres_mod is not None and postgres_mod.uses_postgres()
                         else []
                     )
+                    skus_rows = (
+                        postgres_mod.load_dataset("skus", [])
+                        if postgres_mod is not None and postgres_mod.uses_postgres()
+                        else []
+                    )
                     articles_by_id = {
                         str(row.get("id", "") or "").strip(): row
                         for row in (articles_rows if isinstance(articles_rows, list) else [])
@@ -2259,6 +2264,73 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
                         if str(a.get("kind", "") or "").strip().lower() == "format"
                     }
                     enabled_ids = [fmt_id for fmt_id in enabled_ids if fmt_id in format_ids]
+
+                    # Ensure beer×format SKUs exist before persisting the definitive version,
+                    # so `cost_version_sku_rows` can be built deterministically without repair endpoints.
+                    try:
+                        sku_rows_list = skus_rows if isinstance(skus_rows, list) else []
+                        sku_by_beer_format: set[tuple[str, str]] = set()
+                        for sku_row in sku_rows_list:
+                            if not isinstance(sku_row, dict):
+                                continue
+                            if str(sku_row.get("kind", "") or "").strip().lower() != "beer_format":
+                                continue
+                            bid = str(sku_row.get("beer_id", "") or "").strip()
+                            fid = str(sku_row.get("format_article_id", "") or "").strip()
+                            if bid and fid:
+                                sku_by_beer_format.add((bid, fid))
+
+                        beers_by_id = {
+                            str(row.get("id", "") or ""): row
+                            for row in load_bieren()
+                            if isinstance(row, dict) and str(row.get("id", "") or "")
+                        }
+                        beer_name = (
+                            str(beers_by_id.get(bier_id, {}).get("biernaam", "") or "").strip()
+                            or str(basisgegevens.get("biernaam", "") or "").strip()
+                            or bier_id
+                        )
+
+                        def _slugify(value: str) -> str:
+                            slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "")).strip("-")
+                            while "--" in slug:
+                                slug = slug.replace("--", "-")
+                            return slug or "item"
+
+                        beer_slug = _slugify(beer_name)
+
+                        def _format_slug(fmt: str) -> str:
+                            fmt_text = str(fmt or "").strip()
+                            if fmt_text.startswith("fmt-"):
+                                fmt_text = fmt_text[len("fmt-") :]
+                            return _slugify(fmt_text)
+
+                        changed = False
+                        for fmt_id in enabled_ids:
+                            key = (bier_id, fmt_id)
+                            if key in sku_by_beer_format:
+                                continue
+                            fmt_row = articles_by_id.get(fmt_id, {})
+                            fmt_name = str(fmt_row.get("name", fmt_row.get("naam", "")) or "").strip() or fmt_id
+                            sku_id = f"sku-{beer_slug}-{_format_slug(fmt_id)}"
+                            sku_payload = {
+                                "id": sku_id,
+                                "kind": "beer_format",
+                                "beer_id": bier_id,
+                                "format_article_id": fmt_id,
+                                "article_id": "",
+                                "code": f\"{beer_slug.upper()}-{_format_slug(fmt_id).upper()}\".replace(\"--\", \"-\"),
+                                "name": f\"{beer_name} - {fmt_name}\",
+                                "active": True,
+                            }
+                            sku_rows_list.append(sku_payload)
+                            sku_by_beer_format.add(key)
+                            changed = True
+                        if changed and postgres_mod is not None and postgres_mod.uses_postgres():
+                            postgres_mod.save_dataset("skus", sku_rows_list, overwrite=True)
+                    except Exception:
+                        # If SKU creation fails, we still persist the version; activation will surface the issue.
+                        pass
 
                     lines_by_parent: dict[str, list[dict[str, Any]]] = {}
                     if isinstance(bom_rows, list):
