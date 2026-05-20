@@ -2319,8 +2319,8 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
                                 "beer_id": bier_id,
                                 "format_article_id": fmt_id,
                                 "article_id": "",
-                                "code": f\"{beer_slug.upper()}-{_format_slug(fmt_id).upper()}\".replace(\"--\", \"-\"),
-                                "name": f\"{beer_name} - {fmt_name}\",
+                                "code": f"{beer_slug.upper()}-{_format_slug(fmt_id).upper()}".replace("--", "-"),
+                                "name": f"{beer_name} - {fmt_name}",
                                 "active": True,
                             }
                             sku_rows_list.append(sku_payload)
