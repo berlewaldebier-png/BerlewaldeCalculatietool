@@ -156,6 +156,9 @@ def post_activate_kostprijsversie(
         return {"activated": True, "record": activated}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        # RuntimeErrors from activation are actionable data/model problems; keep message for UI.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:

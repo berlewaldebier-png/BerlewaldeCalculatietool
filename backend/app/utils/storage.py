@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import logging
 from copy import deepcopy
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -30,6 +31,8 @@ SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX = "verpakkingsonderdeel:"
 DEFAULT_BELASTINGSOORT = "Accijns"
 DEFAULT_TARIEF_ACCIJNS = "Hoog"
 DEFAULT_BTW_TARIEF = "21%"
+
+logger = logging.getLogger(__name__)
 
 
 def _get_postgres_storage_module():
@@ -8540,8 +8543,13 @@ def activate_kostprijsversie(
             if changed and postgres_storage is not None and postgres_storage.uses_postgres():
                 # Do not delete unrelated SKUs during activation; this is an incremental upsert.
                 postgres_storage.save_dataset("skus", existing_skus, overwrite=False)
-    except Exception:
-        return None
+    except Exception as exc:
+        # Never swallow activation errors: the UI needs a precise message so users can fix data issues.
+        logger.exception("Activation failed while ensuring beer_format SKUs exist.")
+        raise RuntimeError(
+            "Activatie faalde tijdens het aanmaken/opslaan van beer_format SKU's. "
+            "Controleer of de `articles` en `skus` datasets correct laden en of de database schrijfbaar is."
+        ) from exc
 
     activation_rows: list[dict[str, Any]] = []
     for ref in target_refs:
