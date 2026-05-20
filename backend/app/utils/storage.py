@@ -8141,7 +8141,7 @@ def activate_kostprijsversie(
     if str(target.get("status", "") or "") != "definitief":
         return None
 
-    bier_id = str(target.get("bier_id", "") or "")
+    bier_id = str(target.get("bier_id", "") or "").strip()
     jaar = int(target.get("jaar", 0) or 0)
     # Activation effective date determines from which order/invoice date this cost version applies.
     # Use YYYY-MM-DD so reporting services can parse it deterministically.
@@ -8310,6 +8310,10 @@ def activate_kostprijsversie(
     )
     if not target_refs:
         return None
+
+    # For beer cost versions we need a beer id to resolve (beer×format) SKUs.
+    if record_cost_type not in {"bundle", "article"} and not bier_id:
+        raise ValueError("Bier ontbreekt op de kostprijsversie; kan afvuleenheden niet activeren zonder bier_id.")
 
     # Optional: explicit afvuleenheid selection (enabled formats).
     # When present, activation should only include these product_ids.
@@ -8541,6 +8545,7 @@ def activate_kostprijsversie(
 
     activation_rows: list[dict[str, Any]] = []
     for ref in target_refs:
+        ref_type = str(ref.get("product_type", "") or "").strip()
         product_id = str(ref.get("product_id", "") or "")
         if not product_id:
             continue
@@ -8550,6 +8555,12 @@ def activate_kostprijsversie(
         if not sku_id:
             sku_id = sku_by_article.get(product_id, "")
         if not sku_id:
+            if ref_type in {"basis", "samengesteld"}:
+                raise ValueError(
+                    "Geen SKU gevonden voor afvuleenheid. "
+                    f"(bier_id={bier_id or '-'}, format_id={product_id or '-'}, type={ref_type}). "
+                    "Controleer of er een SKU (beer_format) bestaat voor dit bier+afvuleenheid."
+                )
             continue
         activation_rows.append(
             {
@@ -8567,7 +8578,7 @@ def activate_kostprijsversie(
         )
 
     if not activation_rows:
-        return None
+        raise ValueError("Geen SKU's gevonden om te activeren. Controleer afvuleenheden en SKU-/productkoppelingen.")
 
     # Require canonical per-SKU cost lines for this version for every SKU being activated.
     try:
