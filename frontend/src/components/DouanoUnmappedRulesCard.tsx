@@ -106,6 +106,7 @@ const CATEGORY_PRESETS: Array<{ id: string; label: string; defaults: Partial<Rul
   { id: "Afronding", label: "Afronding", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
   { id: "Emballage/Borg", label: "Emballage/Borg", defaults: { include_revenue: true, include_liters: false, include_break_even: false } },
   { id: "Proeverij/Rondleiding", label: "Proeverij/Rondleiding", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
+  { id: "Voorschot/Aanbetaling", label: "Voorschot/Aanbetaling", defaults: { include_revenue: false, include_liters: false, include_break_even: false } },
   { id: "Eten", label: "Eten", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
   { id: "Service", label: "Service", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
   { id: "Correctie", label: "Correctie", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },

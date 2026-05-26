@@ -14,6 +14,73 @@ from app.domain import (
 Basis = Literal["invoice", "order"]
 Status = Literal["open", "resolved", "all"]
 
+_AUTO_PREPAYMENT_KEYWORDS = ("voorschot", "voorschotnota", "aanbetaling", "vooruitbetaling")
+
+
+def _auto_categorize_prepayments(*, table: str, date_col: str, year_start: str, year_end: str) -> int:
+    """Auto-categorize product0 lines that look like prepayments.
+
+    Rules:
+    - Only for douano_product_id = 0 (diversen/overig)
+    - If line_description contains known keywords -> create/update a rule:
+        category = "Voorschot/Aanbetaling"
+        include_* = False (do not affect omzet/liters/break-even KPIs)
+    - User can override later via UI.
+    """
+    douano_unmapped_rule_storage.ensure_schema()
+    postgres_storage.ensure_schema()
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                WITH candidates AS (
+                    SELECT DISTINCT COALESCE(NULLIF(l.line_description, ''), 'Overig') AS line_description
+                    FROM {table} l
+                    LEFT JOIN douano_unmapped_rules r
+                      ON r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                    WHERE l.douano_product_id = 0
+                      AND l.{date_col} >= %s::date
+                      AND l.{date_col} < %s::date
+                      AND r.rule_id IS NULL
+                      AND (
+                        LOWER(COALESCE(NULLIF(l.line_description, ''), '')) LIKE '%%voorschot%%'
+                        OR LOWER(COALESCE(NULLIF(l.line_description, ''), '')) LIKE '%%aanbetaling%%'
+                        OR LOWER(COALESCE(NULLIF(l.line_description, ''), '')) LIKE '%%vooruitbetaling%%'
+                      )
+                    LIMIT 500
+                )
+                SELECT line_description FROM candidates
+                """,
+                (year_start, year_end),
+            )
+            rows = cur.fetchall() or []
+
+    changed = 0
+    for (desc,) in rows:
+        line_description = str(desc or "").strip()
+        if not line_description:
+            continue
+        # double-check keyword match in Python too (keeps behavior stable if SQL changes)
+        lower = line_description.lower()
+        if not any(k in lower for k in _AUTO_PREPAYMENT_KEYWORDS):
+            continue
+        douano_unmapped_rule_storage.upsert_rule(
+            match_type="product0_description",
+            douano_product_id=0,
+            line_description=line_description,
+            action="categorize",
+            category="Voorschot/Aanbetaling",
+            include_revenue=False,
+            include_liters=False,
+            include_break_even=False,
+            note="auto: prepayment keywords",
+        )
+        changed += 1
+    return changed
+
 
 def _year_range(year: int) -> tuple[str, str]:
     y = int(year or 0)
@@ -68,6 +135,10 @@ def list_unmapped_groups(
         status_clause = "AND r.rule_id IS NULL"
     elif status_norm == "resolved":
         status_clause = "AND r.rule_id IS NOT NULL"
+
+    # P0: Auto-categorize product0 lines that look like prepayments so they don't clutter "unmapped".
+    # This is intentionally lightweight and deterministic; user can override in UI later.
+    _auto_categorize_prepayments(table=table, date_col=date_col, year_start=year_start, year_end=year_end)
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
