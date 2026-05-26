@@ -96,10 +96,7 @@ def list_unmapped_groups(
                     SELECT
                         CASE WHEN b.douano_product_id = 0 THEN 'product0_description' ELSE 'douano_product_id' END AS match_type,
                         CASE WHEN b.douano_product_id = 0 THEN 0 ELSE b.douano_product_id END AS douano_product_id,
-                        CASE
-                            WHEN (CASE WHEN b.douano_product_id = 0 THEN 0 ELSE b.douano_product_id END) = 0 THEN b.line_description
-                            ELSE ''
-                        END AS line_description,
+                        CASE WHEN b.douano_product_id = 0 THEN b.line_description ELSE '' END AS line_description,
                         CASE
                             WHEN (CASE WHEN b.douano_product_id = 0 THEN 0 ELSE b.douano_product_id END) = 0 THEN MAX(b.line_description)
                             ELSE COALESCE(
