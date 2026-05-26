@@ -54,6 +54,13 @@ type SkuRow = {
   beer_id?: string;
 };
 
+type CostCombo = {
+  sku_id: string;
+  label: string;
+  naam?: string;
+  beer_id?: string;
+};
+
 function euro(value: number) {
   if (!Number.isFinite(value)) return "-";
   return formatMoneyEUR(value);
@@ -136,6 +143,7 @@ export function DouanoUnmappedRulesCard() {
   const [limit, setLimit] = useState<number>(200);
   const [items, setItems] = useState<GroupRow[]>([]);
   const [skus, setSkus] = useState<SkuRow[]>([]);
+  const [combos, setCombos] = useState<CostCombo[]>([]);
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
 
@@ -151,33 +159,39 @@ export function DouanoUnmappedRulesCard() {
   const [selectedSkuId, setSelectedSkuId] = useState<string>("");
 
   const availableSkus = useMemo(() => {
-    return skus
-      .filter((s) => s && s.active && (s.kind === "article" || s.kind === "bundle"))
-      .map((s) => ({ id: String(s.id || ""), name: String(s.name || "") }))
+    return combos
+      .map((c) => {
+        const id = String((c as any)?.sku_id ?? "").trim();
+        const name = String((c as any)?.naam ?? "").trim() || String((c as any)?.label ?? "").trim() || id;
+        return { id, name };
+      })
       .filter((s) => s.id)
       .sort((a, b) => a.name.localeCompare(b.name, "nl-NL"));
-  }, [skus]);
+  }, [combos]);
 
   async function refresh() {
     setStatus("Laden…");
     setTone("");
     try {
-      const [groupsPayload, skusPayload] = await Promise.all([
+      const [groupsPayload, skusPayload, combosPayload] = await Promise.all([
         readJson(
           `/api/integrations/douano/unmapped-groups?year=${encodeURIComponent(String(year))}&basis=${encodeURIComponent(
             basis
           )}&status=${encodeURIComponent(statusFilter)}&limit=${encodeURIComponent(String(limit))}`
         ),
         readJson(`/api/data/skus`),
+        readJson(`/api/integrations/douano/cost-combos`),
       ]);
       const rows = (groupsPayload?.result?.items ?? []) as GroupRow[];
       setItems(Array.isArray(rows) ? rows : []);
       setSkus(Array.isArray(skusPayload?.data) ? skusPayload.data : []);
+      setCombos(Array.isArray(combosPayload?.items) ? combosPayload.items : []);
       setStatus("Gereed");
       setTone("success");
     } catch (error) {
       setItems([]);
       setSkus([]);
+      setCombos([]);
       setStatus(error instanceof Error ? error.message : String(error));
       setTone("error");
     }
@@ -229,7 +243,7 @@ export function DouanoUnmappedRulesCard() {
         if (!skuId) throw new Error("Selecteer een SKU.");
 
         if (solveRow.match_type === "douano_product_id") {
-          const sku = skus.find((s: any) => String(s?.id ?? "") === skuId);
+          const sku = combos.find((c: any) => String((c as any)?.sku_id ?? "") === skuId);
           const beerId = String((sku as any)?.beer_id ?? "").trim();
           const productGroup = beerId ? "drank" : "";
 

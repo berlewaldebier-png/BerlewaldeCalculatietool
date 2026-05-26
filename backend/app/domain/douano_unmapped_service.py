@@ -113,6 +113,7 @@ def list_unmapped_groups(
                         match_type,
                         CASE WHEN b.douano_product_id = 0 THEN 0 ELSE b.douano_product_id END,
                         CASE WHEN b.douano_product_id = 0 THEN b.line_description ELSE '' END
+                    HAVING ABS(SUM(b.net_revenue_ex)) > 0.0000001
                 ),
                 with_rules AS (
                     SELECT
