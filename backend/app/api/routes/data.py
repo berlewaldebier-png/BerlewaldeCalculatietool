@@ -123,11 +123,42 @@ def post_activate_kostprijsversie(
             effective_from=effective_from,
         )
         if activated is None:
-            raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden of niet definitief")
+            # Be explicit so the UI can show a useful reason (not found vs not definitive vs other).
+            try:
+                records = dataset_store.load_dataset("kostprijsversies")
+            except Exception:
+                records = []
+            target = next(
+                (
+                    record
+                    for record in (records if isinstance(records, list) else [])
+                    if isinstance(record, dict) and str(record.get("id", "") or "") == str(version_id or "")
+                ),
+                None,
+            )
+            if not isinstance(target, dict):
+                raise HTTPException(status_code=404, detail="Kostprijsversie niet gevonden")
+            status_val = str(target.get("status", "") or "").strip() or "onbekend"
+            if status_val.strip().lower() != "definitief":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Kostprijsversie is niet definitief (status: {status_val}).",
+                )
+            # `activate_cost_version()` can still return None for data issues (e.g. missing SKU mapping/cost lines).
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Activatie mislukt. Kostprijsversie is definitief, maar kon niet worden geactiveerd. "
+                    "Controleer of er geldige kostprijsregels en SKU-/productkoppelingen bestaan."
+                ),
+            )
         logger.info(f"Activated cost version: {version_id}")
         return {"activated": True, "record": activated}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        # RuntimeErrors from activation are actionable data/model problems; keep message for UI.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as exc:

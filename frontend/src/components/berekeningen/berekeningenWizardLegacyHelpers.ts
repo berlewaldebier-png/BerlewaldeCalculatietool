@@ -198,7 +198,10 @@ function createEmptyBerekening(): GenericRecord {
     updated_at: "",
     aangemaakt_op: "",
     aangepast_op: "",
-    finalized_at: ""
+    finalized_at: "",
+    // Explicit afvuleenheid selection for activation/quoting (SKU-first).
+    // When omitted on older records, we treat it as "all enabled" for backward compatibility.
+    enabled_format_ids: []
   });
 }
 

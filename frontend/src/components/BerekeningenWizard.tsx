@@ -288,6 +288,12 @@ export function BerekeningenWizard({
   const processType = getBerekeningProcessType(current);
   const stepsBase = buildWizardSteps(current);
 
+  const enabledFormatIdsForUi = useMemo(() => {
+    const value = (current as any)?.enabled_format_ids;
+    if (!Array.isArray(value)) return null;
+    return value.map((v) => String(v ?? "").trim()).filter(Boolean);
+  }, [current]);
+
   const shouldShowClassificeren = useMemo(() => {
     const basis = (current.basisgegevens as GenericRecord) ?? {};
     const skuType = String((basis as any).sku_type ?? "bier").trim().toLowerCase();
@@ -664,11 +670,25 @@ export function BerekeningenWizard({
 	      const isAlreadyActive = Boolean((updatedCurrent as any)?.is_actief);
 	      if (!isAlreadyActive) {
 	        try {
+	          const enabled = (updatedCurrent as any)?.enabled_format_ids;
+	          if (Array.isArray(enabled) && enabled.map((v: any) => String(v ?? "").trim()).filter(Boolean).length === 0) {
+	            setStatus("Afronden gelukt, maar activeren is overgeslagen: selecteer minimaal 1 afvuleenheid in Samenvatting.");
+	            setStatusTone("error");
+	            return false;
+	          }
+	          const statusValue = String((updatedCurrent as any)?.status ?? "").trim().toLowerCase();
+	          if (statusValue !== "definitief") {
+	            setStatus(
+	              `Afronden gelukt, maar activeren is overgeslagen: status is '${statusValue || "onbekend"}' (verwacht: definitief).`
+	            );
+	            setStatusTone("error");
+	            return false;
+	          }
 	          const year =
 	            Number((updatedCurrent as any)?.jaar ?? (updatedCurrent as any)?.basisgegevens?.jaar ?? 0) ||
 	            new Date().getFullYear();
 	          const effectiveFrom = promptEffectiveFromDate(year);
-	          await activateKostprijsversie(String(current.id ?? ""), effectiveFrom);
+	          await activateKostprijsversie(String((updatedCurrent as any)?.id ?? current.id ?? ""), effectiveFrom);
 	        } catch (error) {
           const detail = tryReadApiDetail(error);
           setStatus(detail ? `Afronden gelukt, activeren mislukt: ${detail}` : "Afronden gelukt, activeren mislukt.");
@@ -801,6 +821,18 @@ export function BerekeningenWizard({
     setStatusTone(null);
     setIsSaving(true);
     try {
+      const enabled = (current as any)?.enabled_format_ids;
+      if (Array.isArray(enabled) && enabled.map((v: any) => String(v ?? "").trim()).filter(Boolean).length === 0) {
+        setStatus("Selecteer minimaal 1 afvuleenheid in Samenvatting voordat je activeert.");
+        setStatusTone("error");
+        return false;
+      }
+      const statusValue = String((current as any)?.status ?? "").trim().toLowerCase();
+      if (statusValue !== "definitief") {
+        setStatus(`Activeren kan alleen voor definitieve kostprijzen (status is '${statusValue || "onbekend"}').`);
+        setStatusTone("error");
+        return false;
+      }
       const year =
         Number((current as any)?.jaar ?? (current as any)?.basisgegevens?.jaar ?? 0) || new Date().getFullYear();
       const effectiveFrom = promptEffectiveFromDate(year);
@@ -815,8 +847,9 @@ export function BerekeningenWizard({
       setStatus("Kostprijsversie geactiveerd.");
       setStatusTone("success");
       return true;
-    } catch {
-      setStatus("Activeren mislukt.");
+    } catch (error) {
+      const detail = tryReadApiDetail(error);
+      setStatus(detail ? `Activeren mislukt: ${detail}` : "Activeren mislukt.");
       setStatusTone("error");
       return false;
     } finally {
@@ -1104,12 +1137,74 @@ export function BerekeningenWizard({
   }
 
   function renderSummaryStep() {
+    const snapshot = buildResultaatSnapshot(current);
+    const basisRows = ((snapshot as any)?.producten?.basisproducten as any[]) ?? [];
+    const compRows = ((snapshot as any)?.producten?.samengestelde_producten as any[]) ?? [];
+    const allFormatIds = [
+      ...basisRows.map((r) => String(r?.product_id ?? "").trim()),
+      ...compRows.map((r) => String(r?.product_id ?? "").trim()),
+    ].filter(Boolean);
+
+    // Build deterministic mapping composite->basis and basis->composite from stamdata.
+    const compositeToBase = new Map<string, string>();
+    const baseToComposite = new Map<string, { id: string; score: number }[]>();
+    (Array.isArray(samengesteldeProducten) ? (samengesteldeProducten as any[]) : []).forEach((row: any) => {
+      const compositeId = String(row?.id ?? "").trim();
+      if (!compositeId) return;
+      const basisList = Array.isArray(row?.basisproducten) ? row.basisproducten : [];
+      let bestBaseId = "";
+      let bestScore = -1;
+      for (const item of basisList) {
+        const basisId = String(item?.basisproduct_id ?? "").trim();
+        if (!basisId || basisId.startsWith("verpakkingsonderdeel:")) continue;
+        const score = Number(item?.aantal ?? 0) || 0;
+        if (score > bestScore) {
+          bestScore = score;
+          bestBaseId = basisId;
+        }
+      }
+      if (!bestBaseId) return;
+      compositeToBase.set(compositeId, bestBaseId);
+      const current = baseToComposite.get(bestBaseId) ?? [];
+      current.push({ id: compositeId, score: bestScore });
+      baseToComposite.set(bestBaseId, current);
+    });
+    const baseToPrimaryComposite = new Map<string, string>();
+    for (const [baseId, items] of baseToComposite.entries()) {
+      const sorted = [...items].sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || String(a.id).localeCompare(String(b.id)));
+      if (sorted[0]?.id) baseToPrimaryComposite.set(baseId, sorted[0].id);
+    }
+
+    const toggleFormat = (formatId: string, enabled: boolean) => {
+      const fallbackAll = allFormatIds;
+      const currentEnabled = enabledFormatIdsForUi ?? fallbackAll;
+      const next = new Set(currentEnabled);
+      const apply = (id: string) => {
+        if (!id) return;
+        if (enabled) next.add(id);
+        else next.delete(id);
+      };
+
+      apply(formatId);
+      // Linked toggles: samengesteld ↔ basis (when relation exists).
+      const baseId = compositeToBase.get(formatId);
+      if (baseId) apply(baseId);
+      const compositeId = baseToPrimaryComposite.get(formatId);
+      if (compositeId) apply(compositeId);
+
+      updateCurrent((draft) => {
+        (draft as any).enabled_format_ids = Array.from(next);
+      });
+    };
+
     return (
       <SummaryStep
         current={current}
         buildResultaatSnapshot={buildResultaatSnapshot}
         formatCurrencyDisplay={formatCurrencyDisplay}
         formatDecimalValue={formatDecimalValue}
+        enabledFormatIds={enabledFormatIdsForUi ?? allFormatIds}
+        onToggleFormat={toggleFormat}
       />
     );
   }

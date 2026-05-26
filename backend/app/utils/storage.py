@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import logging
 from copy import deepcopy
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -30,6 +31,8 @@ SAMENGESTELD_VERPAKKINGSONDERDEEL_PREFIX = "verpakkingsonderdeel:"
 DEFAULT_BELASTINGSOORT = "Accijns"
 DEFAULT_TARIEF_ACCIJNS = "Hoog"
 DEFAULT_BTW_TARIEF = "21%"
+
+logger = logging.getLogger(__name__)
 
 
 def _get_postgres_storage_module():
@@ -1965,6 +1968,19 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         "finalized_at": finalized_at if status == "definitief" else "",
     }
 
+    # Optional selection scope: enabled format/product refs.
+    #
+    # Backward compat:
+    # - Older records do not have this field. In that case we keep it absent so the UI can
+    #   treat it as "all enabled".
+    # - Newer records (created via the wizard) include `enabled_format_ids: []` and must
+    #   round-trip without being dropped.
+    if "enabled_format_ids" in record:
+        raw_enabled = record.get("enabled_format_ids")
+        if isinstance(raw_enabled, list):
+            cleaned_enabled = [str(v or "").strip() for v in raw_enabled]
+            normalized["enabled_format_ids"] = [v for v in cleaned_enabled if v]
+
     # SKU-aanpak: for definitive inkoop records, derive product snapshot rows from invoice lines.
     #
     # Activation relies on `resultaat_snapshot.producten.*` to know which formats/SKUs to activate.
@@ -2195,6 +2211,226 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
             except Exception:
                 # If derivation fails we keep snapshot empty; downstream activation will fail hard.
                 pass
+
+    # SKU-aanpak: for definitive productie records, derive snapshot product rows from selected formats.
+    #
+    # Production cost versions do not have invoice lines; the wizard selection (enabled_format_ids)
+    # is the source of truth for which formats exist and should be activatable.
+    if status == "definitief" and normalized.get("type") == "productie":
+        snapshot = normalized.get("resultaat_snapshot", {})
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+            normalized["resultaat_snapshot"] = snapshot
+        producten = snapshot.get("producten")
+        if not isinstance(producten, dict):
+            producten = {"basisproducten": [], "samengestelde_producten": []}
+            snapshot["producten"] = producten
+        basis_rows = producten.get("basisproducten")
+        samengesteld_rows = producten.get("samengestelde_producten")
+        if not isinstance(basis_rows, list):
+            basis_rows = []
+        if not isinstance(samengesteld_rows, list):
+            samengesteld_rows = []
+        if not basis_rows and not samengesteld_rows:
+            enabled = normalized.get("enabled_format_ids")
+            enabled_ids = [str(v or "").strip() for v in enabled] if isinstance(enabled, list) else []
+            enabled_ids = [v for v in enabled_ids if v]
+            if enabled_ids:
+                try:
+                    postgres_mod = _get_postgres_storage_module()
+                    articles_rows = (
+                        postgres_mod.load_dataset("articles", [])
+                        if postgres_mod is not None and postgres_mod.uses_postgres()
+                        else []
+                    )
+                    bom_rows = (
+                        postgres_mod.load_dataset("bom-lines", [])
+                        if postgres_mod is not None and postgres_mod.uses_postgres()
+                        else []
+                    )
+                    skus_rows = (
+                        postgres_mod.load_dataset("skus", [])
+                        if postgres_mod is not None and postgres_mod.uses_postgres()
+                        else []
+                    )
+                    articles_by_id = {
+                        str(row.get("id", "") or "").strip(): row
+                        for row in (articles_rows if isinstance(articles_rows, list) else [])
+                        if isinstance(row, dict) and str(row.get("id", "") or "").strip()
+                    }
+                    format_ids = {
+                        aid
+                        for aid, a in articles_by_id.items()
+                        if str(a.get("kind", "") or "").strip().lower() == "format"
+                    }
+                    enabled_ids = [fmt_id for fmt_id in enabled_ids if fmt_id in format_ids]
+
+                    # Ensure beer×format SKUs exist before persisting the definitive version,
+                    # so `cost_version_sku_rows` can be built deterministically without repair endpoints.
+                    if not bier_id:
+                        raise RuntimeError("Definitieve productie-kostprijs mist bier_id; kan geen SKUs aanmaken.")
+                    if postgres_mod is None or not postgres_mod.uses_postgres():
+                        raise RuntimeError("PostgreSQL opslag is verplicht om productie-kostprijzen te finaliseren.")
+
+                    sku_rows_list = skus_rows if isinstance(skus_rows, list) else []
+                    existing_pairs: set[tuple[str, str]] = set()
+                    for sku_row in sku_rows_list:
+                        if not isinstance(sku_row, dict):
+                            continue
+                        if str(sku_row.get("kind", "") or "").strip().lower() != "beer_format":
+                            continue
+                        bid = str(sku_row.get("beer_id", "") or "").strip()
+                        fid = str(sku_row.get("format_article_id", "") or "").strip()
+                        if bid and fid:
+                            existing_pairs.add((bid, fid))
+
+                    beers_by_id = {
+                        str(row.get("id", "") or ""): row
+                        for row in load_bieren()
+                        if isinstance(row, dict) and str(row.get("id", "") or "")
+                    }
+                    beer_name = (
+                        str(beers_by_id.get(bier_id, {}).get("biernaam", "") or "").strip()
+                        or str(basisgegevens.get("biernaam", "") or "").strip()
+                        or bier_id
+                    )
+
+                    def _slugify(value: str) -> str:
+                        slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "")).strip("-")
+                        while "--" in slug:
+                            slug = slug.replace("--", "-")
+                        return slug or "item"
+
+                    beer_slug = _slugify(beer_name)
+
+                    def _format_slug(fmt: str) -> str:
+                        fmt_text = str(fmt or "").strip()
+                        if fmt_text.startswith("fmt-"):
+                            fmt_text = fmt_text[len("fmt-") :]
+                        return _slugify(fmt_text)
+
+                    # Collect missing SKUs and upsert them incrementally (overwrite=False).
+                    new_skus: list[dict[str, Any]] = []
+                    fmt_to_sku_id: dict[str, str] = {}
+                    for fmt_id in enabled_ids:
+                        fmt_to_sku_id[fmt_id] = ""
+                        key = (bier_id, fmt_id)
+                        # Try to find an existing sku id for this pair.
+                        if key in existing_pairs:
+                            for sku_row in sku_rows_list:
+                                if not isinstance(sku_row, dict):
+                                    continue
+                                if str(sku_row.get("kind", "") or "").strip().lower() != "beer_format":
+                                    continue
+                                if str(sku_row.get("beer_id", "") or "").strip() != bier_id:
+                                    continue
+                                if str(sku_row.get("format_article_id", "") or "").strip() != fmt_id:
+                                    continue
+                                fmt_to_sku_id[fmt_id] = str(sku_row.get("id", "") or "").strip()
+                                break
+                            continue
+
+                        fmt_row = articles_by_id.get(fmt_id, {})
+                        fmt_name = str(fmt_row.get("name", fmt_row.get("naam", "")) or "").strip() or fmt_id
+                        sku_id = f"sku-{beer_slug}-{_format_slug(fmt_id)}"
+                        fmt_to_sku_id[fmt_id] = sku_id
+                        new_skus.append(
+                            {
+                                "id": sku_id,
+                                "kind": "beer_format",
+                                "beer_id": bier_id,
+                                "format_article_id": fmt_id,
+                                "article_id": "",
+                                "code": f"{beer_slug.upper()}-{_format_slug(fmt_id).upper()}".replace("--", "-"),
+                                "name": f"{beer_name} - {fmt_name}",
+                                "active": True,
+                            }
+                        )
+
+                    if new_skus:
+                        ok = bool(postgres_mod.save_dataset("skus", new_skus, overwrite=False))
+                        if not ok:
+                            raise RuntimeError("Kon beer_format SKUs niet opslaan; activatie kan niet doorgaan.")
+
+                    lines_by_parent: dict[str, list[dict[str, Any]]] = {}
+                    if isinstance(bom_rows, list):
+                        for row in bom_rows:
+                            if not isinstance(row, dict):
+                                continue
+                            parent = str(row.get("parent_article_id", "") or "").strip()
+                            if not parent or parent not in format_ids:
+                                continue
+                            lines_by_parent.setdefault(parent, []).append(row)
+
+                    def _is_composite_format(fmt_id: str) -> bool:
+                        return any(
+                            str(line.get("component_article_id", "") or "").strip() in format_ids
+                            for line in lines_by_parent.get(fmt_id, [])
+                            if isinstance(line, dict)
+                        )
+
+                    variabel_per_liter = _snapshot_float(snapshot.get("variabele_kosten_per_liter", 0.0))
+                    direct_fixed_per_liter = _snapshot_float(snapshot.get("directe_vaste_kosten_per_liter", 0.0))
+
+                    try:
+                        alcoholpercentage_value = float(basisgegevens.get("alcoholpercentage", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        alcoholpercentage_value = 0.0
+                    tarief_accijns_value = str(basisgegevens.get("tarief_accijns", DEFAULT_TARIEF_ACCIJNS) or DEFAULT_TARIEF_ACCIJNS)
+                    belastingsoort_value = str(basisgegevens.get("belastingsoort", DEFAULT_BELASTINGSOORT) or DEFAULT_BELASTINGSOORT)
+
+                    out_basis: list[dict[str, Any]] = []
+                    out_samengesteld: list[dict[str, Any]] = []
+                    for fmt_id in enabled_ids:
+                        resolved_sku_id = fmt_to_sku_id.get(fmt_id, "")
+                        article_row = articles_by_id.get(fmt_id, {})
+                        unit_name = str(article_row.get("name", article_row.get("naam", "")) or "").strip() or fmt_id
+                        liters_per_unit = _snapshot_float(article_row.get("content_liter", 0.0))
+                        primaire = max(variabel_per_liter, 0.0) * max(liters_per_unit, 0.0)
+                        vaste = max(direct_fixed_per_liter, 0.0) * max(liters_per_unit, 0.0)
+                        accijns = 0.0
+                        if liters_per_unit > 0 and alcoholpercentage_value > 0:
+                            try:
+                                accijns = bereken_accijns_voor_liters(
+                                    year=int(basisgegevens.get("jaar", 0) or 0),
+                                    liters=float(liters_per_unit),
+                                    alcoholpercentage=float(alcoholpercentage_value),
+                                    tarief_accijns=str(tarief_accijns_value),
+                                    belastingsoort=str(belastingsoort_value),
+                                )
+                            except Exception:
+                                accijns = 0.0
+                        kostprijs_total = float(primaire) + float(vaste) + float(accijns)
+                        is_composite = _is_composite_format(fmt_id)
+                        payload = _normalize_resultaat_snapshot_product_row(
+                            {
+                                "biernaam": str(basisgegevens.get("biernaam", "") or ""),
+                                "soort": "Eigen productie",
+                                "sku_id": resolved_sku_id,
+                                "product_id": fmt_id,
+                                "product_type": "samengesteld" if is_composite else "basis",
+                                "verpakking": unit_name,
+                                "verpakkingseenheid": unit_name,
+                                "primaire_kosten": primaire,
+                                "variabele_kosten": primaire,
+                                "verpakkingskosten": 0.0,
+                                "vaste_kosten": vaste,
+                                "vaste_directe_kosten": vaste,
+                                "accijns": accijns,
+                                "kostprijs": kostprijs_total,
+                                "liters_per_product": liters_per_unit,
+                            },
+                            product_type_hint="samengesteld" if is_composite else "basis",
+                        )
+                        if is_composite:
+                            out_samengesteld.append(payload)
+                        else:
+                            out_basis.append(payload)
+
+                    producten["basisproducten"] = out_basis
+                    producten["samengestelde_producten"] = out_samengesteld
+                except Exception:
+                    pass
 
     _assert_snapshot_product_refs_complete(normalized)
 
@@ -8128,7 +8364,7 @@ def activate_kostprijsversie(
     if str(target.get("status", "") or "") != "definitief":
         return None
 
-    bier_id = str(target.get("bier_id", "") or "")
+    bier_id = str(target.get("bier_id", "") or "").strip()
     jaar = int(target.get("jaar", 0) or 0)
     # Activation effective date determines from which order/invoice date this cost version applies.
     # Use YYYY-MM-DD so reporting services can parse it deterministically.
@@ -8298,6 +8534,28 @@ def activate_kostprijsversie(
     if not target_refs:
         return None
 
+    # For beer cost versions we need a beer id to resolve (beer×format) SKUs.
+    if record_cost_type not in {"bundle", "article"} and not bier_id:
+        raise ValueError("Bier ontbreekt op de kostprijsversie; kan afvuleenheden niet activeren zonder bier_id.")
+
+    # Optional: explicit afvuleenheid selection (enabled formats).
+    # When present, activation should only include these product_ids.
+    # When missing (older records), keep backward-compatible behaviour: activate all derived refs.
+    enabled_set: set[str] | None = None
+    enabled_format_ids = target.get("enabled_format_ids")
+    if isinstance(enabled_format_ids, list):
+        enabled_set = {str(v or "").strip() for v in enabled_format_ids if str(v or "").strip()}
+        if not enabled_set:
+            raise ValueError("Selecteer minimaal 1 afvuleenheid voordat je activeert.")
+        target_refs = [
+            ref
+            for ref in target_refs
+            if str(ref.get("product_type", "") or "") not in {"basis", "samengesteld"}
+            or str(ref.get("product_id", "") or "").strip() in enabled_set
+        ]
+        if not target_refs:
+            raise ValueError("Geen afvuleenheden geselecteerd om te activeren.")
+
     # Hard requirement: a definitive version must have canonical per-SKU cost lines for all activated refs.
     # This prevents hidden fallback logic and makes missing data explicit + repairable.
     try:
@@ -8397,6 +8655,8 @@ def activate_kostprijsversie(
                     if not pid or pid not in format_ids:
                         continue
                     for nested_id in sorted(_collect_nested_formats(pid)):
+                        if enabled_set is not None and nested_id not in enabled_set:
+                            continue
                         nested_type = "samengesteld" if _is_composite_format(nested_id) else "basis"
                         key = (nested_type, nested_id)
                         if key in existing:
@@ -8503,11 +8763,17 @@ def activate_kostprijsversie(
             if changed and postgres_storage is not None and postgres_storage.uses_postgres():
                 # Do not delete unrelated SKUs during activation; this is an incremental upsert.
                 postgres_storage.save_dataset("skus", existing_skus, overwrite=False)
-    except Exception:
-        return None
+    except Exception as exc:
+        # Never swallow activation errors: the UI needs a precise message so users can fix data issues.
+        logger.exception("Activation failed while ensuring beer_format SKUs exist.")
+        raise RuntimeError(
+            "Activatie faalde tijdens het aanmaken/opslaan van beer_format SKU's. "
+            "Controleer of de `articles` en `skus` datasets correct laden en of de database schrijfbaar is."
+        ) from exc
 
     activation_rows: list[dict[str, Any]] = []
     for ref in target_refs:
+        ref_type = str(ref.get("product_type", "") or "").strip()
         product_id = str(ref.get("product_id", "") or "")
         if not product_id:
             continue
@@ -8517,6 +8783,12 @@ def activate_kostprijsversie(
         if not sku_id:
             sku_id = sku_by_article.get(product_id, "")
         if not sku_id:
+            if ref_type in {"basis", "samengesteld"}:
+                raise ValueError(
+                    "Geen SKU gevonden voor afvuleenheid. "
+                    f"(bier_id={bier_id or '-'}, format_id={product_id or '-'}, type={ref_type}). "
+                    "Controleer of er een SKU (beer_format) bestaat voor dit bier+afvuleenheid."
+                )
             continue
         activation_rows.append(
             {
@@ -8534,7 +8806,7 @@ def activate_kostprijsversie(
         )
 
     if not activation_rows:
-        return None
+        raise ValueError("Geen SKU's gevonden om te activeren. Controleer afvuleenheden en SKU-/productkoppelingen.")
 
     # Require canonical per-SKU cost lines for this version for every SKU being activated.
     try:
