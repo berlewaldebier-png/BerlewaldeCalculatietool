@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+"use client";
+
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import { formatMoneyEUR } from "@/lib/formatters";
 
@@ -101,7 +103,7 @@ function Modal({
   onClose,
 }: {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
   onClose: () => void;
 }) {
   return (
@@ -512,4 +514,3 @@ export function DouanoUnmappedRulesCard() {
     </section>
   );
 }
-
