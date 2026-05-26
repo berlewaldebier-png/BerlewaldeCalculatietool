@@ -94,6 +94,8 @@ type CompanyUnmappedProductRow = {
   lines: number;
   quantity: number;
   net_revenue_ex: number;
+  example_ref?: string;
+  example_date?: string;
 };
 
 async function readJson(path: string) {
@@ -331,6 +333,7 @@ export function OmzetEnMargeKlantDetail({
               <thead>
                 <tr>
                   <th>Product</th>
+                  <th>Voorbeeld</th>
                   <th>SKU</th>
                   <th style={{ textAlign: "right" }}>Regels</th>
                   <th style={{ textAlign: "right" }}>Aantal</th>
@@ -342,6 +345,15 @@ export function OmzetEnMargeKlantDetail({
                 {unmappedProducts.slice(0, 100).map((row) => (
                   <tr key={row.douano_product_id}>
                     <td style={{ fontWeight: 700 }}>{row.name || `Product ${row.douano_product_id}`}</td>
+                    <td>
+                      {row.example_ref ? (
+                        <span title={row.example_date ? `Datum: ${row.example_date}` : ""}>
+                          <code>{row.example_ref}</code>
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                     <td>
                       <code>{row.sku || "-"}</code>
                     </td>

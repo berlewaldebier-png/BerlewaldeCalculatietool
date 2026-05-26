@@ -492,31 +492,54 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
         with conn.cursor() as cur:
             cur.execute(
                 f"""
+                WITH agg AS (
+                    SELECT
+                        l.douano_product_id,
+                        p.name,
+                        p.sku,
+                        p.gtin,
+                        COUNT(*)::int AS lines,
+                        COALESCE(SUM(l.quantity), 0) AS quantity,
+                        COALESCE(SUM(l.net_revenue_ex), 0) AS net_revenue_ex
+                    FROM douano_sales_order_lines l
+                    LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    WHERE l.company_id = %s
+                      AND ig.douano_product_id IS NULL
+                      AND m.douano_product_id IS NULL
+                      {where_since}
+                    GROUP BY l.douano_product_id, p.name, p.sku, p.gtin
+                )
                 SELECT
-                    l.douano_product_id,
-                    p.name,
-                    p.sku,
-                    p.gtin,
-                    COUNT(*)::int AS lines,
-                    COALESCE(SUM(l.quantity), 0) AS quantity,
-                    COALESCE(SUM(l.net_revenue_ex), 0) AS net_revenue_ex
-                FROM douano_sales_order_lines l
-                LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
-                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
-                LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
-                WHERE l.company_id = %s
-                  AND ig.douano_product_id IS NULL
-                  AND m.douano_product_id IS NULL
-                  {where_since}
-                GROUP BY l.douano_product_id, p.name, p.sku, p.gtin
-                ORDER BY net_revenue_ex DESC
+                    agg.douano_product_id,
+                    agg.name,
+                    agg.sku,
+                    agg.gtin,
+                    agg.lines,
+                    agg.quantity,
+                    agg.net_revenue_ex,
+                    ex.transaction_number AS example_ref,
+                    ex.order_date AS example_date
+                FROM agg
+                LEFT JOIN LATERAL (
+                    SELECT o.transaction_number, l.order_date
+                    FROM douano_sales_order_lines l
+                    JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
+                    WHERE l.company_id = %s
+                      AND l.douano_product_id = agg.douano_product_id
+                      {where_since}
+                    ORDER BY l.order_date DESC, l.sales_order_id DESC
+                    LIMIT 1
+                ) ex ON TRUE
+                ORDER BY agg.net_revenue_ex DESC
                 LIMIT %s
                 """,
-                params,
+                (cid, since_text, cid, since_text, lim) if since_text else (cid, cid, lim),
             )
             rows = cur.fetchall() or []
     out: list[dict[str, Any]] = []
-    for douano_product_id, name, sku, gtin, lines, quantity, net_revenue_ex in rows:
+    for douano_product_id, name, sku, gtin, lines, quantity, net_revenue_ex, example_ref, example_date in rows:
         out.append(
             {
                 "douano_product_id": int(douano_product_id or 0),
@@ -526,6 +549,8 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
                 "lines": int(lines or 0),
                 "quantity": float(quantity or 0),
                 "net_revenue_ex": float(net_revenue_ex or 0),
+                "example_ref": str(example_ref or ""),
+                "example_date": example_date.isoformat() if example_date else "",
             }
         )
     return out

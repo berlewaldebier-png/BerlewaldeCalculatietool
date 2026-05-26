@@ -218,18 +218,52 @@ def get_sales_by_sku_summary(
                 )
                 rows = cur.fetchall() or []
 
-        for douano_product_id, qty, net_rev, name, sku in rows:
-            unmapped["total_units"] = float(unmapped["total_units"] or 0.0) + float(qty or 0.0)
-            unmapped["total_net_revenue_ex"] = float(unmapped["total_net_revenue_ex"] or 0.0) + float(net_rev or 0.0)
-            unmapped["items"].append(
-                {
-                    "douano_product_id": int(douano_product_id or 0),
-                    "product_name": str(name or ""),
-                    "product_sku": str(sku or ""),
-                    "units": float(qty or 0.0),
-                    "net_revenue_ex": float(net_rev or 0.0),
-                }
-            )
+        example_query = (
+            """
+            SELECT i.invoice_number, l.invoice_date
+            FROM douano_sales_invoice_lines l
+            JOIN douano_sales_invoices i ON i.sales_invoice_id = l.sales_invoice_id
+            WHERE l.douano_product_id = %s
+              AND l.invoice_date >= %s::date
+              AND l.invoice_date < %s::date
+            ORDER BY l.invoice_date DESC, l.sales_invoice_id DESC
+            LIMIT 1
+            """
+            if basis_norm == "invoice"
+            else """
+            SELECT o.transaction_number, l.order_date
+            FROM douano_sales_order_lines l
+            JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
+            WHERE l.douano_product_id = %s
+              AND l.order_date >= %s::date
+              AND l.order_date < %s::date
+            ORDER BY l.order_date DESC, l.sales_order_id DESC
+            LIMIT 1
+            """
+        )
+
+        with postgres_storage.connect() as conn2:
+            with conn2.cursor() as cur2:
+                for douano_product_id, qty, net_rev, name, sku in rows:
+                    pid = int(douano_product_id or 0)
+                    cur2.execute(example_query, (pid, year_start, year_end))
+                    row2 = cur2.fetchone()
+                    example_ref = str(row2[0] or "") if row2 else ""
+                    example_date = row2[1].isoformat() if row2 and row2[1] else ""
+
+                    unmapped["total_units"] = float(unmapped["total_units"] or 0.0) + float(qty or 0.0)
+                    unmapped["total_net_revenue_ex"] = float(unmapped["total_net_revenue_ex"] or 0.0) + float(net_rev or 0.0)
+                    unmapped["items"].append(
+                        {
+                            "douano_product_id": int(douano_product_id or 0),
+                            "product_name": str(name or ""),
+                            "product_sku": str(sku or ""),
+                            "units": float(qty or 0.0),
+                            "net_revenue_ex": float(net_rev or 0.0),
+                            "example_ref": example_ref,
+                            "example_date": example_date,
+                        }
+                    )
 
     return {
         "year": int(year or 0),

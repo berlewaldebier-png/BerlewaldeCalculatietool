@@ -624,6 +624,7 @@ export function BreakEvenV2Workspace(props: Props) {
                       <thead>
                         <tr>
                           <th>Ongekoppeld product</th>
+                          <th>Voorbeeld</th>
                           <th>Douano SKU</th>
                           <th style={{ textAlign: "right" }}>Stuks</th>
                           <th style={{ textAlign: "right" }}>Omzet (ex)</th>
@@ -634,6 +635,15 @@ export function BreakEvenV2Workspace(props: Props) {
                         {sales.unmapped.items.map((row) => (
                           <tr key={row.douano_product_id}>
                             <td>{row.product_name || `Product ${row.douano_product_id}`}</td>
+                            <td>
+                              {row.example_ref ? (
+                                <span title={row.example_date ? `Datum: ${row.example_date}` : ""}>
+                                  <code>{row.example_ref}</code>
+                                </span>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
                             <td>
                               <code>{row.product_sku || "-"}</code>
                             </td>

@@ -33,6 +33,8 @@ export type RealizedSalesBySkuPayload = {
       product_sku: string;
       units: number;
       net_revenue_ex: number;
+      example_ref?: string;
+      example_date?: string;
     }>;
   };
 };
