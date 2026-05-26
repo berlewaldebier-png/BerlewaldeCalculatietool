@@ -200,7 +200,10 @@ def get_sales_by_sku_summary(
                         l.douano_product_id,
                         SUM(COALESCE(l.quantity, 0)) AS qty,
                         SUM(COALESCE(l.net_revenue_ex, 0)) AS net_revenue_ex,
-                        COALESCE(p.name, '') AS product_name,
+                        CASE
+                            WHEN l.douano_product_id = 0 THEN COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                            ELSE COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), '')
+                        END AS product_name,
                         COALESCE(p.sku, '') AS product_sku
                     FROM {table} l
                     LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
@@ -210,7 +213,7 @@ def get_sales_by_sku_summary(
                       AND m.douano_product_id IS NULL
                       AND l.{date_col} >= %s::date
                       AND l.{date_col} < %s::date
-                    GROUP BY l.douano_product_id, p.name, p.sku
+                    GROUP BY l.douano_product_id, p.sku, product_name
                     ORDER BY net_revenue_ex DESC
                     LIMIT %s
                     """,
@@ -226,6 +229,7 @@ def get_sales_by_sku_summary(
             WHERE l.douano_product_id = %s
               AND l.invoice_date >= %s::date
               AND l.invoice_date < %s::date
+              AND (%s = '' OR COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s)
             ORDER BY l.invoice_date DESC, l.sales_invoice_id DESC
             LIMIT 1
             """
@@ -237,6 +241,7 @@ def get_sales_by_sku_summary(
             WHERE l.douano_product_id = %s
               AND l.order_date >= %s::date
               AND l.order_date < %s::date
+              AND (%s = '' OR COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s)
             ORDER BY l.order_date DESC, l.sales_order_id DESC
             LIMIT 1
             """
@@ -246,7 +251,8 @@ def get_sales_by_sku_summary(
             with conn2.cursor() as cur2:
                 for douano_product_id, qty, net_rev, name, sku in rows:
                     pid = int(douano_product_id or 0)
-                    cur2.execute(example_query, (pid, year_start, year_end))
+                    desc_filter = str(name or "") if pid == 0 else ""
+                    cur2.execute(example_query, (pid, year_start, year_end, desc_filter, desc_filter))
                     row2 = cur2.fetchone()
                     example_ref = str(row2[0] or "") if row2 else ""
                     example_date = row2[1].isoformat() if row2 and row2[1] else ""

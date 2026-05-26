@@ -99,6 +99,8 @@ def ensure_schema() -> None:
                         company_id BIGINT NOT NULL DEFAULT 0,
                         order_date DATE,
                         douano_product_id BIGINT NOT NULL DEFAULT 0,
+                        line_product_name TEXT NOT NULL DEFAULT '',
+                        line_description TEXT NOT NULL DEFAULT '',
                         quantity NUMERIC NOT NULL DEFAULT 0,
                         unit_price_ex NUMERIC NOT NULL DEFAULT 0,
                         discount_ex NUMERIC NOT NULL DEFAULT 0,
@@ -136,6 +138,8 @@ def ensure_schema() -> None:
                         company_id BIGINT NOT NULL DEFAULT 0,
                         invoice_date DATE,
                         douano_product_id BIGINT NOT NULL DEFAULT 0,
+                        line_product_name TEXT NOT NULL DEFAULT '',
+                        line_description TEXT NOT NULL DEFAULT '',
                         quantity NUMERIC NOT NULL DEFAULT 0,
                         unit_price_ex NUMERIC NOT NULL DEFAULT 0,
                         discount_raw NUMERIC NOT NULL DEFAULT 0,
@@ -161,6 +165,18 @@ def ensure_schema() -> None:
                 )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_douano_invoice_lines_product ON douano_sales_invoice_lines(douano_product_id)"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_sales_order_lines ADD COLUMN IF NOT EXISTS line_product_name TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_sales_order_lines ADD COLUMN IF NOT EXISTS line_description TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_sales_invoice_lines ADD COLUMN IF NOT EXISTS line_product_name TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_sales_invoice_lines ADD COLUMN IF NOT EXISTS line_description TEXT NOT NULL DEFAULT ''"
                 )
             if not postgres_storage.in_transaction():
                 conn.commit()
@@ -511,9 +527,15 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                         return
 
                     douano_product_id = 0
+                    line_product_name = ""
                     if not is_misc:
                         product_obj = item.get("product")
-                        douano_product_id = int(product_obj.get("id", 0) or 0) if isinstance(product_obj, dict) else 0
+                        if isinstance(product_obj, dict):
+                            douano_product_id = int(product_obj.get("id", 0) or 0)
+                            line_product_name = str(product_obj.get("name", "") or "").strip()
+                        else:
+                            douano_product_id = 0
+                    line_description = str(item.get("description", "") or "").strip()
 
                     # Douano can encode line direction via list type and/or sign on quantity:
                     # - ordered items should always be positive
@@ -558,6 +580,8 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                             company_id,
                             order_date,
                             douano_product_id,
+                            line_product_name,
+                            line_description,
                             quantity,
                             unit_price_ex,
                             discount_ex,
@@ -568,13 +592,15 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                             net_revenue_ex,
                             updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (line_id)
                         DO UPDATE SET
                             sales_order_id = EXCLUDED.sales_order_id,
                             company_id = EXCLUDED.company_id,
                             order_date = EXCLUDED.order_date,
                             douano_product_id = EXCLUDED.douano_product_id,
+                            line_product_name = EXCLUDED.line_product_name,
+                            line_description = EXCLUDED.line_description,
                             quantity = EXCLUDED.quantity,
                             unit_price_ex = EXCLUDED.unit_price_ex,
                             discount_ex = EXCLUDED.discount_ex,
@@ -591,6 +617,8 @@ def upsert_sales_orders(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                             company_id,
                             order_date,
                             int(douano_product_id or 0),
+                            str(line_product_name or ""),
+                            str(line_description or ""),
                             quantity,
                             unit_price_ex,
                             discount_ex,
@@ -703,6 +731,8 @@ def upsert_sales_invoices(items: Iterable[dict[str, Any]]) -> dict[str, int]:
 
                     product_obj = item.get("product")
                     douano_product_id = int(product_obj.get("id", 0) or 0) if isinstance(product_obj, dict) else 0
+                    line_product_name = str(product_obj.get("name", "") or "").strip() if isinstance(product_obj, dict) else ""
+                    line_description = str(item.get("description", "") or "").strip()
 
                     quantity = _num(item.get("quantity", 0))
                     unit_price_ex = _num(item.get("price", 0))
@@ -747,6 +777,8 @@ def upsert_sales_invoices(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                             company_id,
                             invoice_date,
                             douano_product_id,
+                            line_product_name,
+                            line_description,
                             quantity,
                             unit_price_ex,
                             discount_raw,
@@ -759,13 +791,15 @@ def upsert_sales_invoices(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                             net_revenue_ex,
                             updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (line_id)
                         DO UPDATE SET
                             sales_invoice_id = EXCLUDED.sales_invoice_id,
                             company_id = EXCLUDED.company_id,
                             invoice_date = EXCLUDED.invoice_date,
                             douano_product_id = EXCLUDED.douano_product_id,
+                            line_product_name = EXCLUDED.line_product_name,
+                            line_description = EXCLUDED.line_description,
                             quantity = EXCLUDED.quantity,
                             unit_price_ex = EXCLUDED.unit_price_ex,
                             discount_raw = EXCLUDED.discount_raw,
@@ -784,6 +818,8 @@ def upsert_sales_invoices(items: Iterable[dict[str, Any]]) -> dict[str, int]:
                             company_id,
                             invoice_date,
                             int(douano_product_id or 0),
+                            str(line_product_name or ""),
+                            str(line_description or ""),
                             quantity,
                             unit_price_ex,
                             discount_raw,

@@ -495,9 +495,12 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
                 WITH agg AS (
                     SELECT
                         l.douano_product_id,
-                        p.name,
-                        p.sku,
-                        p.gtin,
+                        CASE
+                            WHEN l.douano_product_id = 0 THEN COALESCE(NULLIF(MAX(NULLIF(l.line_description, '')), ''), 'Overig')
+                            ELSE COALESCE(NULLIF(MAX(NULLIF(p.name, '')), ''), NULLIF(MAX(NULLIF(l.line_product_name, '')), ''), '')
+                        END AS display_name,
+                        COALESCE(p.sku, '') AS sku,
+                        COALESCE(p.gtin, '') AS gtin,
                         COUNT(*)::int AS lines,
                         COALESCE(SUM(l.quantity), 0) AS quantity,
                         COALESCE(SUM(l.net_revenue_ex), 0) AS net_revenue_ex
@@ -509,11 +512,11 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
                       AND ig.douano_product_id IS NULL
                       AND m.douano_product_id IS NULL
                       {where_since}
-                    GROUP BY l.douano_product_id, p.name, p.sku, p.gtin
+                    GROUP BY l.douano_product_id, p.sku, p.gtin
                 )
                 SELECT
                     agg.douano_product_id,
-                    agg.name,
+                    agg.display_name,
                     agg.sku,
                     agg.gtin,
                     agg.lines,
@@ -528,6 +531,7 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
                     JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
                     WHERE l.company_id = %s
                       AND l.douano_product_id = agg.douano_product_id
+                      AND (agg.douano_product_id <> 0 OR COALESCE(NULLIF(l.line_description, ''), 'Overig') = agg.display_name)
                       {where_since}
                     ORDER BY l.order_date DESC, l.sales_order_id DESC
                     LIMIT 1
@@ -1083,7 +1087,7 @@ def list_order_lines(
                     l.company_id,
                     l.order_date,
                     l.douano_product_id,
-                    p.name,
+                    COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
                     p.sku,
                     l.quantity,
                     l.unit_price_ex,
@@ -1238,7 +1242,7 @@ def list_invoice_lines(
                     l.company_id,
                     l.invoice_date,
                     l.douano_product_id,
-                    p.name,
+                    COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
                     p.sku,
                     l.quantity,
                     l.unit_price_ex,
