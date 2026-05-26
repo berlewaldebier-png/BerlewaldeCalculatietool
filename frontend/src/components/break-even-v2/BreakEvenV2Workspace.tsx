@@ -618,6 +618,47 @@ export function BreakEvenV2Workspace(props: Props) {
                     Ongekoppelde omzet: {formatMoney(Number(sales.unmapped.total_net_revenue_ex) || 0)} (koppel in Beheer → productkoppelingen).
                   </div>
                 ) : null}
+                {Array.isArray(sales?.unmapped?.items) && sales.unmapped.items.length > 0 ? (
+                  <div className="data-table" style={{ marginBottom: 16 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Ongekoppeld product</th>
+                          <th>Douano SKU</th>
+                          <th style={{ textAlign: "right" }}>Stuks</th>
+                          <th style={{ textAlign: "right" }}>Omzet (ex)</th>
+                          <th style={{ width: 110 }}>Actie</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sales.unmapped.items.map((row) => (
+                          <tr key={row.douano_product_id}>
+                            <td>{row.product_name || `Product ${row.douano_product_id}`}</td>
+                            <td>
+                              <code>{row.product_sku || "-"}</code>
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              {formatNumber(Number(row.units) || 0, 0)}
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              {formatMoney(Number(row.net_revenue_ex) || 0)}
+                            </td>
+                            <td>
+                              <a
+                                className="cpq-link"
+                                href={`/beheer/productkoppeling?douano_product_id=${encodeURIComponent(
+                                  String(row.douano_product_id || 0)
+                                )}`}
+                              >
+                                Koppelen
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
                 <div className="data-table">
                   <table>
                     <thead>

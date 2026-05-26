@@ -182,7 +182,7 @@ export function DouanoProductMappingCard({
     const byQuery = !q
       ? visible
       : visible.filter((p) => {
-          const hay = `${p.name ?? ""} ${p.sku ?? ""} ${p.gtin ?? ""}`.toLowerCase();
+          const hay = `${p.product_id ?? ""} ${p.name ?? ""} ${p.sku ?? ""} ${p.gtin ?? ""}`.toLowerCase();
           return hay.includes(q);
         });
 
