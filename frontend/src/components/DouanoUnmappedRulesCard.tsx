@@ -9,7 +9,8 @@ type Status = "open" | "resolved" | "all";
 
 type Rule = {
   rule_id: number;
-  action: "categorize" | "ignore";
+  action: "categorize" | "ignore" | "map_to_sku";
+  sku_id?: string;
   category: string;
   include_revenue: boolean;
   include_liters: boolean;
@@ -87,10 +88,17 @@ function defaultYear() {
   return y - 1;
 }
 
+function normalizeCategoryId(value: string) {
+  const v = String(value || "").trim();
+  if (v === "Proeverij") return "Proeverij/Rondleiding";
+  if (v === "Emballage") return "Emballage/Borg";
+  return v || "Overig";
+}
+
 const CATEGORY_PRESETS: Array<{ id: string; label: string; defaults: Partial<Rule> }> = [
   { id: "Afronding", label: "Afronding", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
-  { id: "Emballage", label: "Emballage", defaults: { include_revenue: true, include_liters: false, include_break_even: false } },
-  { id: "Proeverij", label: "Proeverij", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
+  { id: "Emballage/Borg", label: "Emballage/Borg", defaults: { include_revenue: true, include_liters: false, include_break_even: false } },
+  { id: "Proeverij/Rondleiding", label: "Proeverij/Rondleiding", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
   { id: "Eten", label: "Eten", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
   { id: "Service", label: "Service", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
   { id: "Correctie", label: "Correctie", defaults: { include_revenue: true, include_liters: false, include_break_even: true } },
@@ -183,9 +191,10 @@ export function DouanoUnmappedRulesCard() {
   function openSolve(row: GroupRow) {
     setSolveRow(row);
     const isProduct0 = row.match_type === "product0_description";
-    setSolveMode(isProduct0 ? "categorize" : "map");
-    setSelectedSkuId("");
-    const initialCategory = row.rule?.category || "Afronding";
+    const hasSkuRule = row.rule?.action === "map_to_sku";
+    setSolveMode(hasSkuRule ? "map" : isProduct0 ? "categorize" : "map");
+    setSelectedSkuId(String(row.rule?.sku_id || ""));
+    const initialCategory = normalizeCategoryId(row.rule?.category || "Afronding");
     setCategory(initialCategory);
     const preset = CATEGORY_PRESETS.find((p) => p.id === initialCategory);
     const defaults = preset?.defaults ?? {};
@@ -216,22 +225,29 @@ export function DouanoUnmappedRulesCard() {
     if (!solveRow) return;
     try {
       if (solveMode === "map") {
-        if (solveRow.match_type !== "douano_product_id") {
-          throw new Error("Koppelen aan SKU kan alleen voor echte Douano producten.");
-        }
         const skuId = selectedSkuId.trim();
         if (!skuId) throw new Error("Selecteer een SKU.");
 
-        const sku = skus.find((s: any) => String(s?.id ?? "") === skuId);
-        const beerId = String((sku as any)?.beer_id ?? "").trim();
-        const productGroup = beerId ? "drank" : "";
+        if (solveRow.match_type === "douano_product_id") {
+          const sku = skus.find((s: any) => String(s?.id ?? "") === skuId);
+          const beerId = String((sku as any)?.beer_id ?? "").trim();
+          const productGroup = beerId ? "drank" : "";
 
-        await writeJson(`/api/integrations/douano/product-mappings/${solveRow.douano_product_id}`, "PUT", {
-          sku_id: skuId,
-          product_group: productGroup,
-          alcohol_category: "",
-          packaging_type: "",
-        });
+          await writeJson(`/api/integrations/douano/product-mappings/${solveRow.douano_product_id}`, "PUT", {
+            sku_id: skuId,
+            product_group: productGroup,
+            alcohol_category: "",
+            packaging_type: "",
+          });
+        } else {
+          await writeJson(`/api/integrations/douano/unmapped-rules`, "PUT", {
+            match_type: solveRow.match_type,
+            douano_product_id: solveRow.douano_product_id || 0,
+            line_description: solveRow.line_description || "",
+            action: "map_to_sku",
+            sku_id: skuId,
+          });
+        }
       } else if (solveMode === "ignore") {
         await writeJson(`/api/integrations/douano/unmapped-rules`, "PUT", {
           match_type: solveRow.match_type,
@@ -245,7 +261,7 @@ export function DouanoUnmappedRulesCard() {
           douano_product_id: solveRow.douano_product_id || 0,
           line_description: solveRow.line_description || "",
           action: "categorize",
-          category,
+          category: normalizeCategoryId(category),
           include_revenue: includeRevenue,
           include_liters: includeLiters,
           include_break_even: includeBreakEven,
@@ -318,7 +334,9 @@ export function DouanoUnmappedRulesCard() {
               const statusLabel = resolved
                 ? row.rule?.action === "ignore"
                   ? "genegeerd"
-                  : `categorie: ${row.rule?.category || "?"}`
+                  : row.rule?.action === "map_to_sku"
+                    ? `gekoppeld: ${row.rule?.sku_id || "?"}`
+                    : `categorie: ${normalizeCategoryId(row.rule?.category || "?")}`
                 : "open";
               return (
                 <tr key={`${row.match_type}:${row.douano_product_id}:${row.line_description}`}>
@@ -378,11 +396,9 @@ export function DouanoUnmappedRulesCard() {
             </div>
             <div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                {solveRow.match_type === "douano_product_id" ? (
-                  <button type="button" className={`editor-button ${solveMode === "map" ? "" : "editor-button-secondary"}`} onClick={() => setSolveMode("map")}>
-                    Koppelen aan SKU
-                  </button>
-                ) : null}
+                <button type="button" className={`editor-button ${solveMode === "map" ? "" : "editor-button-secondary"}`} onClick={() => setSolveMode("map")}>
+                  Koppelen aan SKU
+                </button>
                 <button type="button" className={`editor-button ${solveMode === "categorize" ? "" : "editor-button-secondary"}`} onClick={() => setSolveMode("categorize")}>
                   Categoriseren
                 </button>

@@ -9,6 +9,7 @@ from app.domain import (
     dataset_store,
     douano_product_ignore_storage,
     douano_product_mapping_storage,
+    douano_unmapped_rule_storage,
     postgres_storage,
 )
 from app.domain.douano_margin_service import (  # re-use canonical helpers
@@ -82,6 +83,7 @@ def get_sales_by_sku_summary(
 
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
 
     year_start, year_end = _year_bounds(int(year or 0))
@@ -109,16 +111,24 @@ def get_sales_by_sku_summary(
                 f"""
                 SELECT
                     l.{date_col} AS line_date,
-                    m.sku_id,
+                    COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
                     SUM(COALESCE(l.quantity, 0)) AS qty,
                     SUM(COALESCE(l.net_revenue_ex, 0)) AS net_revenue_ex
                 FROM {table} l
-                JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.action = 'map_to_sku'
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 WHERE ig.douano_product_id IS NULL
+                  AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL
+                  AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) <> ''
                   AND l.{date_col} >= %s::date
                   AND l.{date_col} < %s::date
-                GROUP BY l.{date_col}, m.sku_id
+                GROUP BY l.{date_col}, COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, ''))
                 ORDER BY l.{date_col} ASC
                 """,
                 (year_start, year_end),

@@ -172,6 +172,8 @@ def _iter_invoice_lines(
     """
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
     since_iso = since.isoformat()
     until_plus_one = (until + timedelta(days=1)).isoformat()
@@ -188,7 +190,7 @@ def _iter_invoice_lines(
                     COALESCE(i.transaction_type, '') AS status,
                     COALESCE(l.quantity, 0) AS quantity,
                     COALESCE(l.net_revenue_ex, 0) AS net_revenue_ex,
-                    COALESCE(m.sku_id, '') AS sku_id,
+                    COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, ''), '') AS sku_id,
                     COALESCE(m.product_group, '') AS product_group,
                     COALESCE(m.packaging_type, '') AS packaging_type
                 FROM douano_sales_invoice_lines l
@@ -196,6 +198,12 @@ def _iter_invoice_lines(
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.action = 'map_to_sku'
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 WHERE ig.douano_product_id IS NULL
                   AND l.invoice_date >= %s::date
                   AND l.invoice_date < %s::date

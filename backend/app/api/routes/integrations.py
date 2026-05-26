@@ -1011,6 +1011,7 @@ def put_douano_unmapped_rule(payload: dict[str, Any]) -> dict[str, Any]:
             douano_product_id=int(payload.get("douano_product_id", 0) or 0),
             line_description=str(payload.get("line_description", "") or ""),
             action=str(payload.get("action", "") or ""),
+            sku_id=str(payload.get("sku_id", "") or ""),
             category=str(payload.get("category", "") or ""),
             include_revenue=bool(payload.get("include_revenue", True)),
             include_liters=bool(payload.get("include_liters", False)),

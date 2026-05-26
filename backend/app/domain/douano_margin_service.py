@@ -199,6 +199,8 @@ def get_company_margin_summary(
 
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
 
     since_text = (since or "").strip()
@@ -231,11 +233,16 @@ def get_company_margin_summary(
                     COALESCE(SUM(l.net_revenue_ex), 0) AS netto_omzet_ex,
                     COALESCE(SUM(l.quantity), 0) AS total_quantity,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
-                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
                 FROM douano_sales_order_lines l
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 {where}
                 GROUP BY l.company_id, c.name, c.public_name
                 ORDER BY netto_omzet_ex DESC
@@ -276,10 +283,24 @@ def get_company_margin_summary(
             where2 = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             cur.execute(
                 f"""
-                SELECT l.company_id, l.order_date, l.douano_product_id, l.quantity, l.net_revenue_ex, m.sku_id
+                SELECT
+                    l.company_id,
+                    l.order_date,
+                    l.douano_product_id,
+                    l.quantity,
+                    l.net_revenue_ex,
+                    COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id
                 FROM douano_sales_order_lines l
-                JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.action = 'map_to_sku'
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 {where2}
+                AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL
+                AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) <> ''
                 """,
                 tuple(params2),
             )
@@ -336,6 +357,8 @@ def get_company_margin_summary(
 def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limit: int = 500) -> list[dict[str, Any]]:
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
 
     since_text = (since or "").strip()
@@ -369,11 +392,16 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                     COALESCE(SUM(l.net_revenue_ex), 0) AS netto_omzet_ex,
                     COALESCE(SUM(l.quantity), 0) AS total_quantity,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
-                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
                 FROM douano_sales_invoice_lines l
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 {where}
                 GROUP BY l.company_id, c.name, c.public_name
                 ORDER BY netto_omzet_ex DESC
@@ -410,10 +438,24 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
             where2 = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             cur.execute(
                 f"""
-                SELECT l.company_id, l.invoice_date, l.douano_product_id, l.quantity, l.net_revenue_ex, m.sku_id
+                SELECT
+                    l.company_id,
+                    l.invoice_date,
+                    l.douano_product_id,
+                    l.quantity,
+                    l.net_revenue_ex,
+                    COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id
                 FROM douano_sales_invoice_lines l
-                JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.action = 'map_to_sku'
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 {where2}
+                AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL
+                AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) <> ''
                 """,
                 tuple(params2),
             )
@@ -761,6 +803,8 @@ def list_company_orders(
     """
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
     cid = int(company_id or 0)
     if cid <= 0:
@@ -794,11 +838,16 @@ def list_company_orders(
                     COALESCE(SUM(l.charges_total_ex), 0) AS charges_ex,
                     COALESCE(SUM(l.net_revenue_ex), 0) AS netto_omzet_ex,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
-                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
                 FROM douano_sales_orders o
                 JOIN douano_sales_order_lines l ON l.sales_order_id = o.sales_order_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 WHERE o.company_id = %s
                 {where}
                 GROUP BY o.sales_order_id, o.order_date, o.transaction_number, o.status
@@ -836,12 +885,20 @@ def list_company_orders(
                         l.order_date,
                         l.quantity,
                         l.net_revenue_ex,
-                        m.sku_id
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id
                     FROM douano_sales_order_lines l
-                    JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                     LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                     WHERE ig.douano_product_id IS NULL
                       AND l.sales_order_id = ANY(%s)
+                      AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL
+                      AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) <> ''
                     """,
                     (order_ids,),
                 )
@@ -919,6 +976,8 @@ def list_company_invoices(
     """List sales invoices for a company with totals + counts (invoice_date basis)."""
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
     cid = int(company_id or 0)
     if cid <= 0:
@@ -953,11 +1012,16 @@ def list_company_invoices(
                     COALESCE(SUM(l.charges_total_ex), 0) AS charges_ex,
                     COALESCE(SUM(l.net_revenue_ex), 0) AS netto_omzet_ex,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
-                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
                 FROM douano_sales_invoices i
                 JOIN douano_sales_invoice_lines l ON l.sales_invoice_id = i.sales_invoice_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 WHERE i.company_id = %s
                 {where}
                 GROUP BY i.sales_invoice_id, i.invoice_date, i.invoice_number, i.transaction_type, i.is_sent
@@ -993,12 +1057,20 @@ def list_company_invoices(
                         l.invoice_date,
                         l.quantity,
                         l.net_revenue_ex,
-                        m.sku_id
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id
                     FROM douano_sales_invoice_lines l
-                    JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                     LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                     WHERE ig.douano_product_id IS NULL
                       AND l.sales_invoice_id = ANY(%s)
+                      AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL
+                      AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) <> ''
                     """,
                     (invoice_ids,),
                 )
