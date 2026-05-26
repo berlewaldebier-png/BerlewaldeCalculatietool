@@ -363,9 +363,13 @@ export function OmzetEnMargeKlantDetail({
                     <td>
                       <a
                         className="cpq-link"
-                        href={`/beheer/productkoppeling?douano_product_id=${encodeURIComponent(
-                          String(row.douano_product_id || 0)
-                        )}`}
+                        href={
+                          Number(row.douano_product_id || 0) > 0
+                            ? `/beheer/productkoppeling?douano_product_id=${encodeURIComponent(
+                                String(row.douano_product_id || 0)
+                              )}`
+                            : `/beheer/productkoppeling?tab=unmapped`
+                        }
                       >
                         Koppelen
                       </a>

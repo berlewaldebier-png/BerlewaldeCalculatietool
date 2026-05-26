@@ -480,6 +480,10 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
     """Return unmapped products (excluding ignored) for a company, ranked by net revenue."""
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    from app.domain import douano_sync_storage
+    douano_unmapped_rule_storage.ensure_schema()
+    douano_sync_storage.ensure_schema()
     postgres_storage.ensure_schema()
     cid = int(company_id or 0)
     if cid <= 0:
@@ -508,9 +512,15 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
                     LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
                     LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                     LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON (
+                        (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
+                        OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                      )
                     WHERE l.company_id = %s
                       AND ig.douano_product_id IS NULL
                       AND m.douano_product_id IS NULL
+                      AND r.rule_id IS NULL
                       {where_since}
                     GROUP BY l.douano_product_id, p.sku, p.gtin
                 )
@@ -1063,6 +1073,10 @@ def list_order_lines(
     """List order lines for a sales order, with mapping + cost resolution."""
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    from app.domain import douano_sync_storage
+    douano_unmapped_rule_storage.ensure_schema()
+    douano_sync_storage.ensure_schema()
     postgres_storage.ensure_schema()
     oid = int(sales_order_id or 0)
     if oid <= 0:
@@ -1072,7 +1086,7 @@ def list_order_lines(
     clauses: list[str] = ["l.sales_order_id = %s"]
     params: list[Any] = [oid]
     if only_unmapped:
-        clauses.append("ig.douano_product_id IS NULL AND m.douano_product_id IS NULL")
+        clauses.append("ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL")
     if only_missing_cost:
         clauses.append("m.douano_product_id IS NOT NULL")
     where = " AND ".join(clauses)
@@ -1100,6 +1114,11 @@ def list_order_lines(
                 LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON (
+                    (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
+                    OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                  )
                 WHERE {where}
                 ORDER BY l.line_id ASC
                 LIMIT %s
@@ -1218,6 +1237,10 @@ def list_invoice_lines(
     """List invoice lines for a sales invoice, with mapping + cost resolution."""
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    from app.domain import douano_unmapped_rule_storage
+    from app.domain import douano_sync_storage
+    douano_unmapped_rule_storage.ensure_schema()
+    douano_sync_storage.ensure_schema()
     postgres_storage.ensure_schema()
     iid = int(sales_invoice_id or 0)
     if iid <= 0:
@@ -1227,7 +1250,7 @@ def list_invoice_lines(
     clauses: list[str] = ["l.sales_invoice_id = %s"]
     params: list[Any] = [iid]
     if only_unmapped:
-        clauses.append("ig.douano_product_id IS NULL AND m.douano_product_id IS NULL")
+        clauses.append("ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL")
     if only_missing_cost:
         clauses.append("m.douano_product_id IS NOT NULL")
     where = " AND ".join(clauses)
@@ -1255,6 +1278,11 @@ def list_invoice_lines(
                 LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON (
+                    (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
+                    OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                  )
                 WHERE {where}
                 ORDER BY l.line_id ASC
                 LIMIT %s

@@ -1,4 +1,4 @@
-import { DouanoProductMappingCard } from "@/components/DouanoProductMappingCard";
+import { ProductkoppelingWorkspace } from "@/components/ProductkoppelingWorkspace";
 import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 
@@ -12,6 +12,7 @@ export default async function ProductkoppelingPage({
   const douanoProductId =
     typeof resolved.douano_product_id === "string" ? resolved.douano_product_id : "";
   const skuId = typeof resolved.sku_id === "string" ? resolved.sku_id : "";
+  const tab = typeof resolved.tab === "string" ? resolved.tab : "";
   const bootstrap = await getBootstrap(["auth-status"], true, "/beheer/productkoppeling");
   const navigation = bootstrap.navigation ?? [];
 
@@ -22,9 +23,10 @@ export default async function ProductkoppelingPage({
       activePath="/beheer"
       navigation={navigation}
     >
-      <DouanoProductMappingCard
+      <ProductkoppelingWorkspace
         initialFilter={douanoProductId ? String(douanoProductId) : q}
         initialSkuId={skuId}
+        initialTab={tab === "unmapped" ? "unmapped" : "mappings"}
       />
     </PageShell>
   );

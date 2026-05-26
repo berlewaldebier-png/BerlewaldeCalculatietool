@@ -192,6 +192,10 @@ def get_sales_by_sku_summary(
 
     unmapped = {"total_units": 0.0, "total_net_revenue_ex": 0.0, "items": []}
     if top_unmapped > 0:
+        from app.domain import douano_unmapped_rule_storage
+        from app.domain import douano_sync_storage
+        douano_unmapped_rule_storage.ensure_schema()
+        douano_sync_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -208,9 +212,15 @@ def get_sales_by_sku_summary(
                     FROM {table} l
                     LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                     LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON (
+                        (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
+                        OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                      )
                     LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
                     WHERE ig.douano_product_id IS NULL
                       AND m.douano_product_id IS NULL
+                      AND r.rule_id IS NULL
                       AND l.{date_col} >= %s::date
                       AND l.{date_col} < %s::date
                     GROUP BY l.douano_product_id, p.sku, product_name

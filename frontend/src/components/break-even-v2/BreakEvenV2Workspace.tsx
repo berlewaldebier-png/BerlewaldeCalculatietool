@@ -615,7 +615,8 @@ export function BreakEvenV2Workspace(props: Props) {
                 <div className="module-card-title">Gerealiseerde verkoop (per SKU)</div>
                 {sales?.unmapped?.total_net_revenue_ex ? (
                   <div className="cpq-alert cpq-alert-warn" style={{ marginBottom: 12 }}>
-                    Ongekoppelde omzet: {formatMoney(Number(sales.unmapped.total_net_revenue_ex) || 0)} (koppel in Beheer → productkoppelingen).
+                    Ongekoppelde omzet: {formatMoney(Number(sales.unmapped.total_net_revenue_ex) || 0)}{" "}
+                    (<a className="cpq-link" href="/beheer/productkoppeling?tab=unmapped">oplossen</a> in Beheer → productkoppeling).
                   </div>
                 ) : null}
                 {Array.isArray(sales?.unmapped?.items) && sales.unmapped.items.length > 0 ? (
@@ -656,9 +657,13 @@ export function BreakEvenV2Workspace(props: Props) {
                             <td>
                               <a
                                 className="cpq-link"
-                                href={`/beheer/productkoppeling?douano_product_id=${encodeURIComponent(
-                                  String(row.douano_product_id || 0)
-                                )}`}
+                                href={
+                                  Number(row.douano_product_id || 0) > 0
+                                    ? `/beheer/productkoppeling?douano_product_id=${encodeURIComponent(
+                                        String(row.douano_product_id || 0)
+                                      )}`
+                                    : `/beheer/productkoppeling?tab=unmapped`
+                                }
                               >
                                 Koppelen
                               </a>
