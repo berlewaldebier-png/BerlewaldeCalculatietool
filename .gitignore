@@ -15,3 +15,6 @@ build/
 backend/.env.local.ps1
 frontend/.tmp/
 logs/
+frontend/test-results/
+frontend/audit/artifacts/
+frontend/audit/.last-run.json
