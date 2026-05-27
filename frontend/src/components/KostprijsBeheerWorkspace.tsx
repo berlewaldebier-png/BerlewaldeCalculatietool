@@ -412,8 +412,13 @@ export function KostprijsBeheerWorkspace({
     const recordType = String((record as any)?.type ?? "").toLowerCase();
     const basis = (record as any)?.basisgegevens ?? {};
     const skuType = String((basis as any)?.sku_type ?? "").toLowerCase();
-    // Only composition-based bundles use ArticleKostprijsWizard.
-    if (recordType === "bundle") {
+    // Only composition-based article bundles use ArticleKostprijsWizard.
+    // Some legacy/product-derived cost versions may still use `type: bundle` while being beer-linked.
+    // Article bundles have no `bier_id` and carry `basisgegevens.article_id` + `basisgegevens.sku_id`.
+    const bierId = String((record as any)?.bier_id ?? "").trim();
+    const articleId = String((basis as any)?.article_id ?? "").trim();
+    const isArticleBundle = recordType === "bundle" && (Boolean(articleId) || !bierId);
+    if (isArticleBundle) {
       return (
         <ArticleKostprijsWizard
           initialRows={currentBerekeningen}
