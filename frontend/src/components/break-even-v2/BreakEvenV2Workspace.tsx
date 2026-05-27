@@ -615,7 +615,63 @@ export function BreakEvenV2Workspace(props: Props) {
                 <div className="module-card-title">Gerealiseerde verkoop (per SKU)</div>
                 {sales?.unmapped?.total_net_revenue_ex ? (
                   <div className="cpq-alert cpq-alert-warn" style={{ marginBottom: 12 }}>
-                    Ongekoppelde omzet: {formatMoney(Number(sales.unmapped.total_net_revenue_ex) || 0)} (koppel in Beheer → productkoppelingen).
+                    Ongekoppelde omzet: {formatMoney(Number(sales.unmapped.total_net_revenue_ex) || 0)}{" "}
+                    (<a className="cpq-link" href="/beheer/productkoppeling?tab=unmapped">oplossen</a> in Beheer → productkoppeling).
+                  </div>
+                ) : null}
+                {Array.isArray(sales?.unmapped?.items) && sales.unmapped.items.length > 0 ? (
+                  <div className="data-table" style={{ marginBottom: 16 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Ongekoppeld product</th>
+                          <th>Voorbeeld</th>
+                          <th>Douano SKU</th>
+                          <th style={{ textAlign: "right" }}>Stuks</th>
+                          <th style={{ textAlign: "right" }}>Omzet (ex)</th>
+                          <th style={{ width: 110 }}>Actie</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sales.unmapped.items.map((row) => (
+                          <tr key={row.douano_product_id}>
+                            <td>{row.product_name || `Product ${row.douano_product_id}`}</td>
+                            <td>
+                              {row.example_ref ? (
+                                <span title={row.example_date ? `Datum: ${row.example_date}` : ""}>
+                                  <code>{row.example_ref}</code>
+                                </span>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                            <td>
+                              <code>{row.product_sku || "-"}</code>
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              {formatNumber(Number(row.units) || 0, 0)}
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              {formatMoney(Number(row.net_revenue_ex) || 0)}
+                            </td>
+                            <td>
+                              <a
+                                className="cpq-link"
+                                href={
+                                  Number(row.douano_product_id || 0) > 0
+                                    ? `/beheer/productkoppeling?douano_product_id=${encodeURIComponent(
+                                        String(row.douano_product_id || 0)
+                                      )}`
+                                    : `/beheer/productkoppeling?tab=unmapped`
+                                }
+                              >
+                                Koppelen
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 ) : null}
                 <div className="data-table">

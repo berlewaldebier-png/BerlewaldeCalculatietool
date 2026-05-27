@@ -19,6 +19,8 @@ from app.domain import douano_product_mapping_storage
 from app.domain import douano_product_ignore_storage
 from app.domain import dataset_store
 from app.domain import douano_margin_service
+from app.domain import douano_unmapped_rule_storage
+from app.domain import douano_unmapped_service
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
@@ -950,6 +952,76 @@ def get_douano_company_unmapped_products(
             limit=int(limit),
         )
     }
+
+
+@router.get("/douano/unmapped-groups")
+def get_douano_unmapped_groups(
+    year: int = Query(..., ge=1),
+    basis: str = Query("invoice", description="invoice of order"),
+    since: str = Query("", description="Optioneel: since (YYYY-MM-DD)"),
+    limit: int = Query(200, ge=1, le=1000),
+    status: str = Query("open", description="open|resolved|all"),
+) -> dict[str, Any]:
+    return {
+        "result": douano_unmapped_service.list_unmapped_groups(
+            basis="order" if str(basis or "").strip().lower() == "order" else "invoice",
+            year=int(year),
+            since=since,
+            limit=int(limit),
+            status=str(status or "open").strip().lower() or "open",
+        )
+    }
+
+
+@router.get("/douano/unmapped-group-lines")
+def get_douano_unmapped_group_lines(
+    year: int = Query(..., ge=1),
+    basis: str = Query("invoice", description="invoice of order"),
+    match_type: str = Query(..., description="douano_product_id|product0_description"),
+    douano_product_id: int = Query(0, ge=0),
+    line_description: str = Query("", description="alleen voor product0_description"),
+    limit: int = Query(500, ge=1, le=5000),
+) -> dict[str, Any]:
+    return {
+        "result": douano_unmapped_service.list_unmapped_group_lines(
+            basis="order" if str(basis or "").strip().lower() == "order" else "invoice",
+            year=int(year),
+            match_type=str(match_type or ""),
+            douano_product_id=int(douano_product_id or 0),
+            line_description=line_description,
+            limit=int(limit),
+        )
+    }
+
+
+@router.put("/douano/unmapped-rules")
+def put_douano_unmapped_rule(payload: dict[str, Any]) -> dict[str, Any]:
+    action = str(payload.get("action", "") or "").strip()
+    if action == "delete":
+        deleted = douano_unmapped_rule_storage.delete_rule(
+            match_type=str(payload.get("match_type", "") or ""),
+            douano_product_id=int(payload.get("douano_product_id", 0) or 0),
+            line_description=str(payload.get("line_description", "") or ""),
+        )
+        return {"result": {"deleted": bool(deleted)}}
+
+    try:
+        record = douano_unmapped_rule_storage.upsert_rule(
+            match_type=str(payload.get("match_type", "") or ""),
+            douano_product_id=int(payload.get("douano_product_id", 0) or 0),
+            line_description=str(payload.get("line_description", "") or ""),
+            action=str(payload.get("action", "") or ""),
+            sku_id=str(payload.get("sku_id", "") or ""),
+            category=str(payload.get("category", "") or ""),
+            include_revenue=bool(payload.get("include_revenue", True)),
+            include_liters=bool(payload.get("include_liters", False)),
+            include_break_even=bool(payload.get("include_break_even", True)),
+            note=str(payload.get("note", "") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"result": record}
 
 
 @router.post("/douano/backfill-line-snapshots")

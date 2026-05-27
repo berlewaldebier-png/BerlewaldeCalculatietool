@@ -86,6 +86,18 @@ type InvoiceLineRow = {
   margin_ex: number;
 };
 
+type CompanyUnmappedProductRow = {
+  douano_product_id: number;
+  name: string;
+  sku: string;
+  gtin: string;
+  lines: number;
+  quantity: number;
+  net_revenue_ex: number;
+  example_ref?: string;
+  example_date?: string;
+};
+
 async function readJson(path: string) {
   const response = await fetch(path, { cache: "no-store" });
   const payload = await response.json();
@@ -135,6 +147,7 @@ export function OmzetEnMargeKlantDetail({
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [orderLines, setOrderLines] = useState<Record<number, OrderLineRow[]>>({});
   const [invoiceLines, setInvoiceLines] = useState<Record<number, InvoiceLineRow[]>>({});
+  const [unmappedProducts, setUnmappedProducts] = useState<CompanyUnmappedProductRow[]>([]);
 
   async function load() {
     setStatus("Laden…");
@@ -173,6 +186,23 @@ export function OmzetEnMargeKlantDetail({
     }
   }
 
+  async function loadUnmappedProducts() {
+    if (!onlyUnmapped) {
+      setUnmappedProducts([]);
+      return;
+    }
+    try {
+      const qs = new URLSearchParams();
+      qs.set("company_id", String(companyId));
+      if (since.trim()) qs.set("since", since.trim());
+      qs.set("limit", "100");
+      const payload = await readJson(`/api/integrations/douano/company-unmapped-products?${qs.toString()}`);
+      setUnmappedProducts(Array.isArray(payload?.items) ? payload.items : []);
+    } catch {
+      setUnmappedProducts([]);
+    }
+  }
+
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,6 +212,11 @@ export function OmzetEnMargeKlantDetail({
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basis]);
+
+  useEffect(() => {
+    void loadUnmappedProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyUnmapped, companyId, since]);
 
   // Keep the URL in sync so copy/paste links remain stable.
   useEffect(() => {
@@ -287,6 +322,63 @@ export function OmzetEnMargeKlantDetail({
       {status ? (
         <div className={`editor-status${tone ? ` ${tone}` : ""}`} style={{ marginTop: 12 }}>
           {status}
+        </div>
+      ) : null}
+
+      {onlyUnmapped && unmappedProducts.length > 0 ? (
+        <div style={{ marginTop: 12 }} className="module-card">
+          <div className="module-card-title">Ongekoppelde producten (top)</div>
+          <div className="data-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Voorbeeld</th>
+                  <th>SKU</th>
+                  <th style={{ textAlign: "right" }}>Regels</th>
+                  <th style={{ textAlign: "right" }}>Aantal</th>
+                  <th style={{ textAlign: "right" }}>Omzet (ex)</th>
+                  <th style={{ width: 110 }}>Actie</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unmappedProducts.slice(0, 100).map((row) => (
+                  <tr key={row.douano_product_id}>
+                    <td style={{ fontWeight: 700 }}>{row.name || `Product ${row.douano_product_id}`}</td>
+                    <td>
+                      {row.example_ref ? (
+                        <span title={row.example_date ? `Datum: ${row.example_date}` : ""}>
+                          <code>{row.example_ref}</code>
+                        </span>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td>
+                      <code>{row.sku || "-"}</code>
+                    </td>
+                    <td style={{ textAlign: "right" }}>{Number(row.lines ?? 0) || 0}</td>
+                    <td style={{ textAlign: "right" }}>{Number(row.quantity ?? 0) || 0}</td>
+                    <td style={{ textAlign: "right" }}>{euro(Number(row.net_revenue_ex ?? 0) || 0)}</td>
+                    <td>
+                      <a
+                        className="cpq-link"
+                        href={
+                          Number(row.douano_product_id || 0) > 0
+                            ? `/beheer/productkoppeling?douano_product_id=${encodeURIComponent(
+                                String(row.douano_product_id || 0)
+                              )}`
+                            : `/beheer/productkoppeling?tab=unmapped`
+                        }
+                      >
+                        Koppelen
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 

@@ -9,6 +9,7 @@ from app.domain import (
     dataset_store,
     douano_product_ignore_storage,
     douano_product_mapping_storage,
+    douano_unmapped_rule_storage,
     postgres_storage,
 )
 from app.domain.douano_margin_service import (  # re-use canonical helpers
@@ -82,6 +83,7 @@ def get_sales_by_sku_summary(
 
     douano_product_mapping_storage.ensure_schema()
     douano_product_ignore_storage.ensure_schema()
+    douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
 
     year_start, year_end = _year_bounds(int(year or 0))
@@ -109,16 +111,24 @@ def get_sales_by_sku_summary(
                 f"""
                 SELECT
                     l.{date_col} AS line_date,
-                    m.sku_id,
+                    COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
                     SUM(COALESCE(l.quantity, 0)) AS qty,
                     SUM(COALESCE(l.net_revenue_ex, 0)) AS net_revenue_ex
                 FROM {table} l
-                JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                LEFT JOIN douano_unmapped_rules r
+                  ON l.douano_product_id = 0
+                 AND r.match_type = 'product0_description'
+                 AND r.douano_product_id = 0
+                 AND r.action = 'map_to_sku'
+                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 WHERE ig.douano_product_id IS NULL
+                  AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL
+                  AND COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) <> ''
                   AND l.{date_col} >= %s::date
                   AND l.{date_col} < %s::date
-                GROUP BY l.{date_col}, m.sku_id
+                GROUP BY l.{date_col}, COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, ''))
                 ORDER BY l.{date_col} ASC
                 """,
                 (year_start, year_end),
@@ -192,6 +202,10 @@ def get_sales_by_sku_summary(
 
     unmapped = {"total_units": 0.0, "total_net_revenue_ex": 0.0, "items": []}
     if top_unmapped > 0:
+        from app.domain import douano_unmapped_rule_storage
+        from app.domain import douano_sync_storage
+        douano_unmapped_rule_storage.ensure_schema()
+        douano_sync_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -200,17 +214,26 @@ def get_sales_by_sku_summary(
                         l.douano_product_id,
                         SUM(COALESCE(l.quantity, 0)) AS qty,
                         SUM(COALESCE(l.net_revenue_ex, 0)) AS net_revenue_ex,
-                        COALESCE(p.name, '') AS product_name,
+                        CASE
+                            WHEN l.douano_product_id = 0 THEN COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                            ELSE COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), '')
+                        END AS product_name,
                         COALESCE(p.sku, '') AS product_sku
                     FROM {table} l
                     LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                     LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON (
+                        (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
+                        OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                      )
                     LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
                     WHERE ig.douano_product_id IS NULL
                       AND m.douano_product_id IS NULL
+                      AND r.rule_id IS NULL
                       AND l.{date_col} >= %s::date
                       AND l.{date_col} < %s::date
-                    GROUP BY l.douano_product_id, p.name, p.sku
+                    GROUP BY l.douano_product_id, p.sku, product_name
                     ORDER BY net_revenue_ex DESC
                     LIMIT %s
                     """,
@@ -218,18 +241,55 @@ def get_sales_by_sku_summary(
                 )
                 rows = cur.fetchall() or []
 
-        for douano_product_id, qty, net_rev, name, sku in rows:
-            unmapped["total_units"] = float(unmapped["total_units"] or 0.0) + float(qty or 0.0)
-            unmapped["total_net_revenue_ex"] = float(unmapped["total_net_revenue_ex"] or 0.0) + float(net_rev or 0.0)
-            unmapped["items"].append(
-                {
-                    "douano_product_id": int(douano_product_id or 0),
-                    "product_name": str(name or ""),
-                    "product_sku": str(sku or ""),
-                    "units": float(qty or 0.0),
-                    "net_revenue_ex": float(net_rev or 0.0),
-                }
-            )
+        example_query = (
+            """
+            SELECT i.invoice_number, l.invoice_date
+            FROM douano_sales_invoice_lines l
+            JOIN douano_sales_invoices i ON i.sales_invoice_id = l.sales_invoice_id
+            WHERE l.douano_product_id = %s
+              AND l.invoice_date >= %s::date
+              AND l.invoice_date < %s::date
+              AND (%s = '' OR COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s)
+            ORDER BY l.invoice_date DESC, l.sales_invoice_id DESC
+            LIMIT 1
+            """
+            if basis_norm == "invoice"
+            else """
+            SELECT o.transaction_number, l.order_date
+            FROM douano_sales_order_lines l
+            JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
+            WHERE l.douano_product_id = %s
+              AND l.order_date >= %s::date
+              AND l.order_date < %s::date
+              AND (%s = '' OR COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s)
+            ORDER BY l.order_date DESC, l.sales_order_id DESC
+            LIMIT 1
+            """
+        )
+
+        with postgres_storage.connect() as conn2:
+            with conn2.cursor() as cur2:
+                for douano_product_id, qty, net_rev, name, sku in rows:
+                    pid = int(douano_product_id or 0)
+                    desc_filter = str(name or "") if pid == 0 else ""
+                    cur2.execute(example_query, (pid, year_start, year_end, desc_filter, desc_filter))
+                    row2 = cur2.fetchone()
+                    example_ref = str(row2[0] or "") if row2 else ""
+                    example_date = row2[1].isoformat() if row2 and row2[1] else ""
+
+                    unmapped["total_units"] = float(unmapped["total_units"] or 0.0) + float(qty or 0.0)
+                    unmapped["total_net_revenue_ex"] = float(unmapped["total_net_revenue_ex"] or 0.0) + float(net_rev or 0.0)
+                    unmapped["items"].append(
+                        {
+                            "douano_product_id": int(douano_product_id or 0),
+                            "product_name": str(name or ""),
+                            "product_sku": str(sku or ""),
+                            "units": float(qty or 0.0),
+                            "net_revenue_ex": float(net_rev or 0.0),
+                            "example_ref": example_ref,
+                            "example_date": example_date,
+                        }
+                    )
 
     return {
         "year": int(year or 0),

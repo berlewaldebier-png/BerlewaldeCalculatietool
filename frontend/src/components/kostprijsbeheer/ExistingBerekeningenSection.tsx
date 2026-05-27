@@ -24,8 +24,7 @@ export function ExistingBerekeningenSection({
   existingBerekeningenRows,
   selectedYear,
   formatEuro,
-  setSelectedId,
-  setMode,
+  onOpenBerekening,
 }: {
   existingRef: RefObject<HTMLDivElement | null>;
   existingSearch: string;
@@ -35,8 +34,7 @@ export function ExistingBerekeningenSection({
   existingBerekeningenRows: ExistingBerekeningRow[];
   selectedYear: number;
   formatEuro: (value: number) => string;
-  setSelectedId: (next: string) => void;
-  setMode: (next: WorkspaceMode) => void;
+  onOpenBerekening: (id: string) => void;
 }) {
   return (
     <>
@@ -105,8 +103,7 @@ export function ExistingBerekeningenSection({
                         type="button"
                         className="editor-button editor-button-secondary"
                         onClick={() => {
-                          setSelectedId(row.id);
-                          setMode("wizard-edit");
+                          onOpenBerekening(row.id);
                         }}
                       >
                         Openen

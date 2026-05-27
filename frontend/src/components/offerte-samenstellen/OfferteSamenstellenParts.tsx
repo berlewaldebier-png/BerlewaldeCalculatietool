@@ -6,15 +6,22 @@ export function Field({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
 }) {
   return (
     <label className="cpq-field">
       <div className="cpq-label">{label}</div>
-      <input value={value} onChange={(e) => onChange(e.target.value)} className="cpq-input" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="cpq-input"
+      />
     </label>
   );
 }

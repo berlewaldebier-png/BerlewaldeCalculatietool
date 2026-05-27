@@ -1602,6 +1602,128 @@ def post_repair_inkoop_unit_costs(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/repair/kostprijs-activation-sku-mismatches")
+def post_repair_kostprijs_activation_sku_mismatches(
+    year: int = Query(0, description="Optioneel: alleen dit jaar (0 = alle jaren)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets verwijderen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin repair: remove activation rows that point to a cost version belonging to a different SKU.
+
+    Problem we fix:
+    - `kostprijsproductactiveringen.sku_id` -> `kostprijsversie_id`
+    - but the referenced cost version's `basisgegevens.sku_id` is a *different* SKU
+
+    This corrupts "active cost" resolution (two SKUs can show the same cost version).
+
+    Approach:
+    - Build a map version_id -> version.basisgegevens.sku_id (when present)
+    - Flag activations where the cost version has a non-empty sku_id that != activation.sku_id
+    - Optionally hard delete the offending activation rows (safe because they are invalid history)
+    """
+    try:
+        from app.domain import cost_versions_storage, kostprijs_activation_storage
+
+        cost_versions_storage.ensure_schema()
+        kostprijs_activation_storage.ensure_schema()
+
+        year_value = int(year or 0)
+        activations = kostprijs_activation_storage.load_activations()
+        if year_value > 0:
+            activations = [a for a in activations if int(a.get("jaar", 0) or 0) == year_value]
+
+        versions = cost_versions_storage.load_dataset([])
+        version_sku_by_id: dict[str, str] = {}
+        version_year_by_id: dict[str, int] = {}
+        for v in versions if isinstance(versions, list) else []:
+            if not isinstance(v, dict):
+                continue
+            vid = str(v.get("id", "") or "")
+            if not vid:
+                continue
+            basis = v.get("basisgegevens")
+            sku_from_version = ""
+            if isinstance(basis, dict):
+                sku_from_version = str(basis.get("sku_id", "") or "")
+            version_sku_by_id[vid] = sku_from_version
+            try:
+                version_year_by_id[vid] = int(v.get("jaar", 0) or 0)
+            except Exception:
+                version_year_by_id[vid] = 0
+
+        mismatches: list[dict[str, Any]] = []
+        for act in activations:
+            if not isinstance(act, dict):
+                continue
+            act_id = str(act.get("id", "") or "")
+            act_sku = str(act.get("sku_id", "") or "")
+            act_year = int(act.get("jaar", 0) or 0)
+            act_version_id = str(act.get("kostprijsversie_id", "") or "")
+            if not act_id or not act_sku or not act_version_id:
+                continue
+            version_sku = str(version_sku_by_id.get(act_version_id, "") or "")
+            if not version_sku:
+                # Legacy/inkoop/productie versions often have no sku_id in basisgegevens; can't validate.
+                continue
+            if version_sku != act_sku:
+                mismatches.append(
+                    {
+                        "activation": {
+                            "id": act_id,
+                            "sku_id": act_sku,
+                            "jaar": act_year,
+                            "kostprijsversie_id": act_version_id,
+                            "effectief_tot": str(act.get("effectief_tot", "") or ""),
+                        },
+                        "cost_version": {
+                            "id": act_version_id,
+                            "jaar": int(version_year_by_id.get(act_version_id, 0) or 0),
+                            "basis_sku_id": version_sku,
+                        },
+                        "reason": "activation_sku_mismatch",
+                    }
+                )
+
+        if dry_run:
+            return {
+                "dry_run": True,
+                "year": year_value,
+                "mismatches": {
+                    "count": len(mismatches),
+                    "sample": mismatches[:10],
+                },
+            }
+
+        if not mismatches:
+            return {"dry_run": False, "year": year_value, "deleted": {"activations": 0}, "mismatches": {"count": 0}}
+
+        ids_to_delete = [m["activation"]["id"] for m in mismatches if isinstance(m.get("activation"), dict)]
+        deleted = 0
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM kostprijs_sku_activations
+                    WHERE id = ANY(%s)
+                    """,
+                    (ids_to_delete,),
+                )
+                deleted = int(cur.rowcount or 0)
+            if not postgres_storage.in_transaction():
+                conn.commit()
+
+        return {
+            "dry_run": False,
+            "year": year_value,
+            "deleted": {"activations": deleted},
+            "mismatches": {"count": len(mismatches), "sample": mismatches[:10]},
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/repair/beer-bundles")
 def post_repair_beer_bundles(
     year: int = Query(2025, description="Jaar om te gebruiken voor activatie-detectie (default 2025)."),

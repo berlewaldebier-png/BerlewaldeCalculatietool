@@ -1094,6 +1094,28 @@ def _known_kostprijsversie_ids() -> set[str]:
     }
 
 
+def _kostprijsversie_basis_sku_by_id() -> dict[str, str]:
+    """Map cost version id -> basisgegevens.sku_id (when present).
+
+    Notes:
+    - Many inkoop/productie cost versions historically have an empty basisgegevens.sku_id.
+      In those cases we can't enforce SKU linkage via basisgegevens.
+    """
+    mapping: dict[str, str] = {}
+    for record in load_kostprijsversies():
+        if not isinstance(record, dict):
+            continue
+        version_id = str(record.get("id", "") or "")
+        if not version_id:
+            continue
+        basis = record.get("basisgegevens")
+        if not isinstance(basis, dict):
+            mapping[version_id] = ""
+            continue
+        mapping[version_id] = str(basis.get("sku_id", "") or "")
+    return mapping
+
+
 def _validate_kostprijsproductactiveringen(
     rows: list[dict[str, Any]],
     *,
@@ -1102,6 +1124,7 @@ def _validate_kostprijsproductactiveringen(
 ) -> list[dict[str, Any]]:
     known_skus = known_skus if known_skus is not None else _known_sku_ids()
     known_versions = known_versions if known_versions is not None else _known_kostprijsversie_ids()
+    version_basis_sku_by_id = _kostprijsversie_basis_sku_by_id()
     validated: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, int]] = set()
     invalid: list[dict[str, Any]] = []
@@ -1120,6 +1143,10 @@ def _validate_kostprijsproductactiveringen(
             continue
         if not version_id or version_id not in known_versions:
             invalid.append({"reason": "unknown_kostprijsversie", "row": normalized})
+            continue
+        basis_sku = str(version_basis_sku_by_id.get(version_id, "") or "")
+        if basis_sku and basis_sku != sku_id:
+            invalid.append({"reason": "kostprijsversie_sku_mismatch", "row": normalized})
             continue
         if unique_key in seen_keys:
             duplicates.append(unique_key)
