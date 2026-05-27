@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   BerekeningenWizard,
@@ -77,6 +78,7 @@ export function KostprijsBeheerWorkspace({
   initialSkuId,
   initialSelectedId
 }: KostprijsBeheerWorkspaceProps) {
+  const router = useRouter();
   const [currentBerekeningen, setCurrentBerekeningen] = useState<GenericRecord[]>(
     Array.isArray(berekeningen) ? berekeningen : []
   );
@@ -410,6 +412,7 @@ export function KostprijsBeheerWorkspace({
   if (mode === "wizard-edit" && selectedId) {
     const record = berekeningenById.get(selectedId) ?? null;
     const recordType = String((record as any)?.type ?? "").toLowerCase();
+    const bronType = String((record as any)?.brontype ?? "").toLowerCase().trim();
     const basis = (record as any)?.basisgegevens ?? {};
     const skuType = String((basis as any)?.sku_type ?? "").toLowerCase();
     // Only composition-based article bundles use ArticleKostprijsWizard.
@@ -417,7 +420,8 @@ export function KostprijsBeheerWorkspace({
     // Article bundles have no `bier_id` and carry `basisgegevens.article_id` + `basisgegevens.sku_id`.
     const bierId = String((record as any)?.bier_id ?? "").trim();
     const articleId = String((basis as any)?.article_id ?? "").trim();
-    const isArticleBundle = recordType === "bundle" && (Boolean(articleId) || !bierId);
+    const isArticleBundle =
+      recordType === "bundle" && (bronType === "bundle_article" || Boolean(articleId));
     if (isArticleBundle) {
       return (
         <ArticleKostprijsWizard
@@ -534,8 +538,15 @@ export function KostprijsBeheerWorkspace({
         existingBerekeningenRows={existingBerekeningenRows}
         selectedYear={selectedYear}
         formatEuro={formatEuro}
-        setSelectedId={(next) => setSelectedId(next)}
-        setMode={(next) => setMode(next)}
+        onOpenBerekening={(id) => {
+          const cleanId = String(id || "").trim();
+          if (!cleanId) return;
+          setSelectedId(cleanId);
+          setMode("wizard-edit");
+          router.push(
+            `/nieuwe-kostprijsberekening?mode=wizard-edit&selected_id=${encodeURIComponent(cleanId)}`
+          );
+        }}
       />
     </section>
   );
