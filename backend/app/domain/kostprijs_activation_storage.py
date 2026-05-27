@@ -59,6 +59,30 @@ def ensure_schema() -> None:
                     );
                     """
                 )
+                # Phase G: add FK constraints as NOT VALID to avoid blocking startup on legacy/inconsistent dev DBs.
+                # These are validated explicitly via /api/meta/validate-phase-g-constraints once data is clean.
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='skus')
+                           AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_kostprijs_sku_activations_sku') THEN
+                            ALTER TABLE kostprijs_sku_activations
+                            ADD CONSTRAINT fk_kostprijs_sku_activations_sku
+                            FOREIGN KEY (sku_id) REFERENCES skus(id) ON DELETE RESTRICT
+                            NOT VALID;
+                        END IF;
+
+                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='cost_versions')
+                           AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_kostprijs_sku_activations_cost_version') THEN
+                            ALTER TABLE kostprijs_sku_activations
+                            ADD CONSTRAINT fk_kostprijs_sku_activations_cost_version
+                            FOREIGN KEY (kostprijsversie_id) REFERENCES cost_versions(id) ON DELETE RESTRICT
+                            NOT VALID;
+                        END IF;
+                    END $$;
+                    """
+                )
                 # One active activation per (sku, year).
                 cur.execute("DROP INDEX IF EXISTS ux_kostprijs_product_activation_active_scope;")
                 cur.execute(

@@ -2247,6 +2247,8 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
 
     targets: list[dict[str, str]] = [
         {"constraint": "fk_cost_version_sku_rows_sku", "table": "cost_version_sku_rows"},
+        {"constraint": "fk_kostprijs_sku_activations_sku", "table": "kostprijs_sku_activations"},
+        {"constraint": "fk_kostprijs_sku_activations_cost_version", "table": "kostprijs_sku_activations"},
     ]
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:

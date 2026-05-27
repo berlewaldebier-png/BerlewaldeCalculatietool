@@ -29,10 +29,17 @@ export async function apiGetServer<T>(path: string, nextPath: string): Promise<T
   const cookieJar = await cookies();
   const cookieHeader = cookieJar.toString();
   const baseUrl = await resolveServerApiBaseUrl();
-  const response = await fetch(`${baseUrl}${path}`, {
-    cache: "no-store",
-    headers: cookieHeader ? { cookie: cookieHeader } : undefined
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      cache: "no-store",
+      headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`API request failed (network/timeout): ${path}\n${message}`);
+  }
 
   if (response.status === 401) {
     redirect(`/login?next=${encodeURIComponent(nextPath || "/")}`);
@@ -46,7 +53,7 @@ export async function apiGetServer<T>(path: string, nextPath: string): Promise<T
       bodyText = "";
     }
     const snippet = bodyText.trim().slice(0, 500);
-    const suffix = bodyText.trim().length > 500 ? "…" : "";
+    const suffix = bodyText.trim().length > 500 ? "..." : "";
     throw new Error(`API request failed (${response.status}): ${path}${snippet ? `\n${snippet}${suffix}` : ""}`);
   }
 

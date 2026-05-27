@@ -72,8 +72,13 @@ export function FinalizeStep({
           Vorige
         </button>
         <div className="cpq-actions-inline">
-          <button onClick={onSave} className="cpq-button cpq-button-secondary" type="button" disabled={isSaving}>
-            {isSaving ? "Opslaan..." : "Opslaan"}
+          <button
+            onClick={onSave}
+            className="cpq-button cpq-button-secondary"
+            type="button"
+            disabled={isSaving || draftStatus === "definitief"}
+          >
+            {draftStatus === "definitief" ? "Read-only" : isSaving ? "Opslaan..." : "Opslaan"}
           </button>
           <button
             onClick={onFinalize}

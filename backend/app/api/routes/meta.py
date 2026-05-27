@@ -1724,6 +1724,18 @@ def post_repair_kostprijs_activation_sku_mismatches(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.get("/health/kostprijs-activation-sku-mismatches")
+def get_health_kostprijs_activation_sku_mismatches(
+    year: int = Query(0, description="Optioneel: alleen dit jaar (0 = alle jaren)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Read-only health check for activation->cost version SKU mismatches.
+
+    This is a safe alias for the repair endpoint in `dry_run=true` mode.
+    """
+    return post_repair_kostprijs_activation_sku_mismatches(year=int(year), dry_run=True, _={})
+
+
 @router.post("/repair/beer-bundles")
 def post_repair_beer_bundles(
     year: int = Query(2025, description="Jaar om te gebruiken voor activatie-detectie (default 2025)."),
