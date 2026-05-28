@@ -272,8 +272,9 @@ def get_bootstrap(
     navigation: bool = Query(True, description="Include navigation items"),
     since: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
     until: str = Query("", description="Optioneel: ISO datum (YYYY-MM-DD) voor ERP dashboard"),
-    basis: str = Query("order", description="Optioneel: basis voor ERP dashboard (order)"),
+    basis: str = Query("invoice", description="Optioneel: basis voor ERP dashboard (invoice/order)"),
     year: int = Query(0, ge=0, le=2100, description="Optioneel: jaarfilter voor ERP dashboard (0 = auto)"),
+    sku_id: str = Query("", description="Optioneel: filter ERP dashboard op SKU id"),
     session: dict = Depends(require_user),
 ) -> dict[str, Any]:
     names = [name.strip() for name in (datasets or "").split(",") if name.strip()]
@@ -303,6 +304,7 @@ def get_bootstrap(
                     until=until,
                     basis=basis,
                     year=int(year or 0),
+                    sku_id=sku_id,
                 )
                 continue
             if name == "auth-status":

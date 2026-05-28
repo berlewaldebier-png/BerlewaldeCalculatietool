@@ -46,7 +46,7 @@ import {
 type Props = {
   navigation: NavigationItem[];
   payload: ErpDashboardPayload;
-  initialFilters?: { since: string; until: string; year: string; basis?: string };
+  initialFilters?: { since: string; until: string; year: string; basis?: string; sku_id?: string };
   breakEvenContext?: {
     configs?: unknown;
     vasteKosten?: unknown;
@@ -99,6 +99,41 @@ function shortDateLabel(iso: string) {
   return `${parts[2]}-${parts[1]}`;
 }
 
+function toISODate(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
+function inferPresetFromRange(input: { since: string; until: string; basis: string; skuId: string }) {
+  const skuId = String(input.skuId || "").trim();
+  if (skuId) return "sku";
+
+  const basis = String(input.basis || "").trim().toLowerCase() || "invoice";
+  const since = String(input.since || "").trim();
+  const until = String(input.until || "").trim();
+  if (!since || !until) return "";
+
+  const today = toISODate(new Date());
+  const currentYear = new Date().getFullYear();
+
+  const thisYearSince = `${currentYear}-01-01`;
+  if (basis === "invoice" && since === thisYearSince && until === today) return "this-year";
+
+  const lastYear = currentYear - 1;
+  if (basis === "invoice" && since === `${lastYear}-01-01` && until === `${lastYear}-12-31`) return "last-year";
+
+  const now = new Date();
+  const thisMonthSince = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  if (basis === "invoice" && since === thisMonthSince && until === today) return "this-month";
+
+  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMonthSince = `${prevMonthStart.getFullYear()}-${String(prevMonthStart.getMonth() + 1).padStart(2, "0")}-01`;
+  const prevMonthUntil = toISODate(new Date(prevMonthStart.getFullYear(), prevMonthStart.getMonth() + 1, 0));
+  if (basis === "invoice" && since === prevMonthSince && until === prevMonthUntil) return "last-month";
+
+  if (since && until) return "custom";
+  return "";
+}
+
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <section className={`erp-card ${className}`}>
@@ -132,21 +167,74 @@ function EmptyState({ title, body, href, hrefLabel }: { title: string; body: str
 
 export function ErpDashboard({ navigation, payload, breakEvenContext, initialFilters }: Props) {
   const router = useRouter();
-  const hasInitialFilters = Boolean(
-    (initialFilters?.since || "").trim() ||
-      (initialFilters?.until || "").trim() ||
-      (initialFilters?.year || "").trim() ||
-      (initialFilters?.basis || "").trim()
-  );
-  const [showFilters, setShowFilters] = useState(hasInitialFilters);
+  const [showFilters, setShowFilters] = useState(false);
   const [sinceInput, setSinceInput] = useState((initialFilters?.since || payload.range?.since || "").trim());
   const [untilInput, setUntilInput] = useState((initialFilters?.until || payload.range?.until || "").trim());
   const [yearInput, setYearInput] = useState<string>((initialFilters?.year || "").trim());
   const [basisInput, setBasisInput] = useState<string>(
-    (initialFilters?.basis || payload.range?.basis || "order").trim() || "order"
+    (initialFilters?.basis || payload.range?.basis || "invoice").trim() || "invoice"
+  );
+  const [skuInput, setSkuInput] = useState<string>(initialFilters?.sku_id || "");
+  const [activePreset, setActivePreset] = useState<string>(() =>
+    inferPresetFromRange({
+      since: (initialFilters?.since || payload.range?.since || "").trim(),
+      until: (initialFilters?.until || payload.range?.until || "").trim(),
+      basis: (initialFilters?.basis || payload.range?.basis || "invoice").trim() || "invoice",
+      skuId: String(initialFilters?.sku_id || "").trim(),
+    })
   );
 
   const availableYears = (payload.available_years ?? []).filter((y) => Number.isFinite(y) && y > 0);
+
+  const availableSkus = useMemo(() => {
+    const rows = Array.isArray((breakEvenContext as any)?.skus) ? ((breakEvenContext as any).skus as any[]) : [];
+    return rows
+      .filter((row) => row && typeof row === "object")
+      .map((row) => ({
+        id: String((row as any).id || "").trim(),
+        name: String((row as any).name || (row as any).naam || "").trim(),
+      }))
+      .filter((row) => row.id)
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  }, [breakEvenContext]);
+
+  const applyFilters = (next?: { since?: string; until?: string; year?: string; basis?: string; sku_id?: string }) => {
+    const params = new URLSearchParams();
+    const nextYear = String(next?.year ?? yearInput).trim();
+    const nextSince = String(next?.since ?? sinceInput).trim();
+    const nextUntil = String(next?.until ?? untilInput).trim();
+    const nextBasis = String(next?.basis ?? basisInput).trim();
+    const nextSku = String(next?.sku_id ?? skuInput).trim();
+    if (nextYear) params.set("year", nextYear);
+    if (nextSince) params.set("since", nextSince);
+    if (nextUntil) params.set("until", nextUntil);
+    if (nextBasis) params.set("basis", nextBasis);
+    if (nextSku) params.set("sku_id", nextSku);
+    const qs = params.toString();
+    router.push(qs ? `/?${qs}` : "/");
+  };
+
+  const setPresetAndApply = (preset: string, next: { since: string; until: string; year: string }) => {
+    setActivePreset(preset);
+    setSinceInput(next.since);
+    setUntilInput(next.until);
+    setYearInput(next.year);
+    applyFilters({ ...next, basis: basisInput, sku_id: skuInput });
+  };
+
+  const resetToCurrentYear = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const since = `${y}-01-01`;
+    const until = toISODate(now);
+    setActivePreset("this-year");
+    setBasisInput("invoice");
+    setSkuInput("");
+    setSinceInput(since);
+    setUntilInput(until);
+    setYearInput(String(y));
+    applyFilters({ since, until, year: String(y), basis: "invoice", sku_id: "" });
+  };
 
   const hasValidRange = useMemo(() => {
     if (!sinceInput.trim() || !untilInput.trim()) return true;
@@ -326,13 +414,15 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
               <div className="erp-dashboard-header-actions">
                 <button
                   type="button"
-                  className="erp-dashboard-pill"
+                  className={`erp-dashboard-pill${activePreset === "this-year" ? " is-active" : ""}`}
                   onClick={() => {
                     const now = new Date();
                     const y = now.getFullYear();
-                    setSinceInput(`${y}-01-01`);
-                    setUntilInput(now.toISOString().slice(0, 10));
-                    setYearInput(String(y));
+                    setPresetAndApply("this-year", {
+                      since: `${y}-01-01`,
+                      until: toISODate(now),
+                      year: String(y),
+                    });
                   }}
                   title="Zet filters op dit jaar (YTD)"
                 >
@@ -340,13 +430,15 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                 </button>
                 <button
                   type="button"
-                  className="erp-dashboard-pill"
+                  className={`erp-dashboard-pill${activePreset === "last-year" ? " is-active" : ""}`}
                   onClick={() => {
                     const now = new Date();
                     const y = now.getFullYear() - 1;
-                    setSinceInput(`${y}-01-01`);
-                    setUntilInput(`${y}-12-31`);
-                    setYearInput(String(y));
+                    setPresetAndApply("last-year", {
+                      since: `${y}-01-01`,
+                      until: `${y}-12-31`,
+                      year: String(y),
+                    });
                   }}
                   title="Zet filters op vorig jaar"
                 >
@@ -354,41 +446,111 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                 </button>
                 <button
                   type="button"
-                  className="erp-dashboard-pill"
+                  className={`erp-dashboard-pill${activePreset === "this-month" ? " is-active" : ""}`}
+                  onClick={() => {
+                    const now = new Date();
+                    const y = now.getFullYear();
+                    const m = now.getMonth();
+                    const mm = String(m + 1).padStart(2, "0");
+                    setPresetAndApply("this-month", {
+                      since: `${y}-${mm}-01`,
+                      until: toISODate(now),
+                      year: String(y),
+                    });
+                  }}
+                  title="Zet filters op deze maand (t/m vandaag)"
+                >
+                  Deze maand
+                </button>
+                <button
+                  type="button"
+                  className={`erp-dashboard-pill${activePreset === "last-month" ? " is-active" : ""}`}
                   onClick={() => {
                     const now = new Date();
                     const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
                     const y = d.getFullYear();
                     const m = d.getMonth();
                     const mm = String(m + 1).padStart(2, "0");
-                    setSinceInput(`${y}-${mm}-01`);
-                    setUntilInput(new Date(y, m + 1, 0).toISOString().slice(0, 10));
-                    setYearInput(String(y));
+                    setPresetAndApply("last-month", {
+                      since: `${y}-${mm}-01`,
+                      until: toISODate(new Date(y, m + 1, 0)),
+                      year: String(y),
+                    });
                   }}
                   title="Zet filters op vorige maand"
                 >
                   Vorige maand
                 </button>
 
-                <button type="button" className="erp-dashboard-pill" title="(placeholder)">Alleen SKU</button>
-                <button type="button" className="erp-dashboard-pill" title="(placeholder)">Eigen selectie/filter</button>
-                <button type="button" className="erp-dashboard-pill" title="(placeholder)">Vergelijken</button>
+                <label className="erp-dashboard-pill erp-dashboard-pill-select" title="Filter op SKU">
+                  <span>Alleen SKU</span>
+                  <select
+                    aria-label="Alleen SKU"
+                    value={skuInput}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setSkuInput(next);
+                      setActivePreset(next ? "sku" : "");
+                      applyFilters({ sku_id: next });
+                    }}
+                  >
+                    <option value="">Alle</option>
+                    {availableSkus.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.name ? `${row.name} (${row.id})` : row.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
                 <button
                   type="button"
-                  className="erp-dashboard-pill"
-                  title="Klik om filters te openen"
-                  onClick={() => setShowFilters((prev) => !prev)}
+                  className={`erp-dashboard-pill${activePreset === "custom" ? " is-active" : ""}`}
+                  title="Open eigen filters"
+                  onClick={() => {
+                    setActivePreset("custom");
+                    setShowFilters(true);
+                  }}
                 >
-                  <CalendarDays className="h-4 w-4" /> {payload.range.since} - {payload.range.until}
+                  Eigen selectie/filter
                 </button>
+                <button type="button" className="erp-dashboard-pill" title="(placeholder)">
+                  Vergelijken
+                </button>
+
+              </div>
+
+              <div className="erp-dashboard-subbar" aria-label="Datum basis en reset">
+                <div className="erp-dashboard-segment" role="group" aria-label="Basis">
+                  <button
+                    type="button"
+                    className={`erp-dashboard-segment-pill${basisInput === "invoice" ? " is-active" : ""}`}
+                    onClick={() => {
+                      setBasisInput("invoice");
+                      applyFilters({ basis: "invoice" });
+                    }}
+                  >
+                    Factuurdatum
+                  </button>
+                  <button
+                    type="button"
+                    className={`erp-dashboard-segment-pill${basisInput === "order" ? " is-active" : ""}`}
+                    onClick={() => {
+                      setBasisInput("order");
+                      applyFilters({ basis: "order" });
+                    }}
+                  >
+                    Orderdatum
+                  </button>
+                </div>
+
                 <button
                   type="button"
-                  className="erp-dashboard-pill"
-                  title="Filters (volgt)"
-                  onClick={() => setShowFilters((prev) => !prev)}
+                  className="erp-dashboard-reset"
+                  onClick={() => resetToCurrentYear()}
+                  title="Reset naar huidig jaar (factuurdatum)"
                 >
-                  <Filter className="h-4 w-4" /> Filters
+                  Reset filter
                 </button>
               </div>
             </header>
@@ -397,22 +559,10 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
               <Card className="erp-pad" aria-label="Filters">
                 <div className="module-card-title">Filters</div>
                 <div className="module-card-text" style={{ marginTop: 4 }}>
-                  Kies een periode (YYYY-MM-DD). Basis bepaalt of we filteren op orderdatum of factuurdatum.
+                  Kies een periode (YYYY-MM-DD). Jaar is optioneel.
                 </div>
 
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-                  <label className="editor-field" style={{ minWidth: 220 }}>
-                    <div className="editor-label">Datumtype</div>
-                    <select
-                      className="editor-input"
-                      value={basisInput}
-                      onChange={(e) => setBasisInput(e.target.value)}
-                      aria-label="Datumtype"
-                    >
-                      <option value="order">Orderdatum</option>
-                      <option value="invoice">Factuurdatum</option>
-                    </select>
-                  </label>
                   <label className="editor-field" style={{ minWidth: 180 }}>
                     <div className="editor-label">Jaar</div>
                     <select
@@ -454,13 +604,14 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                       className="editor-button"
                       disabled={!hasValidRange}
                       onClick={() => {
-                        const params = new URLSearchParams();
-                        if (yearInput.trim()) params.set("year", yearInput.trim());
-                        if (sinceInput.trim()) params.set("since", sinceInput.trim());
-                        if (untilInput.trim()) params.set("until", untilInput.trim());
-                        if (basisInput.trim()) params.set("basis", basisInput.trim());
-                        const qs = params.toString();
-                        router.push(qs ? `/?${qs}` : "/");
+                        setActivePreset("custom");
+                        applyFilters({
+                          year: yearInput,
+                          since: sinceInput,
+                          until: untilInput,
+                          basis: basisInput,
+                          sku_id: skuInput,
+                        });
                         setShowFilters(false);
                       }}
                     >
@@ -470,29 +621,23 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                       type="button"
                       className="editor-button editor-button-secondary"
                       onClick={() => {
-                        setSinceInput((initialFilters?.since || payload.range?.since || "").trim());
-                        setUntilInput((initialFilters?.until || payload.range?.until || "").trim());
-                        setYearInput((initialFilters?.year || "").trim());
-                        setBasisInput((initialFilters?.basis || payload.range?.basis || "order").trim() || "order");
+                        const nextSince = (initialFilters?.since || payload.range?.since || "").trim();
+                        const nextUntil = (initialFilters?.until || payload.range?.until || "").trim();
+                        const nextYear = (initialFilters?.year || "").trim();
+                        const nextBasis = (initialFilters?.basis || payload.range?.basis || "invoice").trim() || "invoice";
+                        const nextSku = String(initialFilters?.sku_id || "").trim();
+                        setSinceInput(nextSince);
+                        setUntilInput(nextUntil);
+                        setYearInput(nextYear);
+                        setBasisInput(nextBasis);
+                        setSkuInput(nextSku);
+                        setActivePreset(
+                          inferPresetFromRange({ since: nextSince, until: nextUntil, basis: nextBasis, skuId: nextSku })
+                        );
                         setShowFilters(false);
                       }}
                     >
                       Annuleren
-                    </button>
-                    <button
-                      type="button"
-                      className="editor-button editor-button-secondary"
-                      onClick={() => {
-                        router.push("/");
-                        setSinceInput((payload.range?.since || "").trim());
-                        setUntilInput((payload.range?.until || "").trim());
-                        setYearInput("");
-                        setBasisInput("order");
-                        setShowFilters(false);
-                      }}
-                      title="Verwijder filters"
-                    >
-                      Reset
                     </button>
                   </div>
                 </div>
@@ -501,51 +646,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                     Ongeldige periode: “Tot” moet op of na “Sinds” liggen.
                   </div>
                 ) : null}
-                <div className="editor-actions" style={{ justifyContent: "flex-start", marginTop: 10 }}>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => {
-                      const now = new Date();
-                      const y = now.getFullYear();
-                      const m = String(now.getMonth() + 1).padStart(2, "0");
-                      setSinceInput(`${y}-${m}-01`);
-                      setUntilInput(new Date(y, now.getMonth() + 1, 0).toISOString().slice(0, 10));
-                      setYearInput(String(y));
-                    }}
-                  >
-                    Deze maand
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => {
-                      const now = new Date();
-                      const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                      const y = d.getFullYear();
-                      const m = d.getMonth();
-                      const mm = String(m + 1).padStart(2, "0");
-                      setSinceInput(`${y}-${mm}-01`);
-                      setUntilInput(new Date(y, m + 1, 0).toISOString().slice(0, 10));
-                      setYearInput(String(y));
-                    }}
-                  >
-                    Vorige maand
-                  </button>
-                  <button
-                    type="button"
-                    className="editor-button editor-button-secondary"
-                    onClick={() => {
-                      const now = new Date();
-                      const y = now.getFullYear();
-                      setSinceInput(`${y}-01-01`);
-                      setUntilInput(now.toISOString().slice(0, 10));
-                      setYearInput(String(y));
-                    }}
-                  >
-                    YTD
-                  </button>
-                </div>
+
               </Card>
             ) : null}
 
