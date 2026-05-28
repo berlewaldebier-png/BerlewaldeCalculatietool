@@ -766,9 +766,10 @@ a {
 }
 
 .erp-dashboard-container {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 1.4rem 1.25rem;
+  max-width: none;
+  margin: 0;
+  /* Keep ERP dashboard aligned with the global header + sidebar grid. */
+  padding: 0.2rem 0 0;
 }
 
 .erp-dashboard-header {
