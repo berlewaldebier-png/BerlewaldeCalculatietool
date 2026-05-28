@@ -1,6 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
-async function login(page: any) {
+async function ensureLoggedIn(page: Page) {
+  // Prefer reusing the authenticated storageState from globalSetup.
+  await page.goto("/break-even-v2");
+  if (!/\/login/.test(page.url())) return;
+
   await page.goto("/login");
   await page.getByLabel("Gebruikersnaam").fill(process.env.TEST_USERNAME || "admin");
   await page.getByLabel("Wachtwoord").fill(process.env.TEST_PASSWORD || "admin");
@@ -10,9 +14,7 @@ async function login(page: any) {
 
 test.describe("App smoke (read-only)", () => {
   test("login + core pages load", async ({ page }) => {
-    await login(page);
-
-    await page.goto("/break-even-v2");
+    await ensureLoggedIn(page);
     await expect(page.getByRole("heading", { name: /Break-even analyseren/i })).toBeVisible();
 
     await page.goto("/nieuwe-kostprijsberekening");
@@ -26,9 +28,7 @@ test.describe("App smoke (read-only)", () => {
   });
 
   test("refresh + back button behavior on protected page", async ({ page }) => {
-    await login(page);
-
-    await page.goto("/break-even-v2");
+    await ensureLoggedIn(page);
     await expect(page.getByRole("heading", { name: /Break-even analyseren/i })).toBeVisible();
 
     await page.reload();

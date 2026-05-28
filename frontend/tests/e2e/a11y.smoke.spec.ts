@@ -5,11 +5,14 @@ const TEST_USERNAME = process.env.TEST_USERNAME || "";
 const TEST_PASSWORD = process.env.TEST_PASSWORD || "";
 
 async function login(page: Page) {
+  await page.goto("/break-even-v2");
+  if (!/\/login/.test(page.url())) return;
+
   await page.goto("/login");
   await page.getByLabel("Gebruikersnaam").fill(TEST_USERNAME);
   await page.getByLabel("Wachtwoord").fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "Inloggen" }).click();
-  await expect(page).toHaveURL(/\/(?!login)/);
+  await expect(page).not.toHaveURL(/\/login/);
 }
 
 test.describe("a11y smoke", () => {
@@ -21,7 +24,8 @@ test.describe("a11y smoke", () => {
     const routes = ["/", "/break-even-v2", "/omzet-en-marge", "/beheer/productkoppeling", "/offerte-samenstellen"];
 
     for (const route of routes) {
-      await page.goto(route);
+      // Some routes can redirect or re-render server components; avoid flaky "load" waits.
+      await page.goto(route, { waitUntil: "domcontentloaded" });
       await expect(page.locator("body")).toBeVisible();
 
       const results = await new AxeBuilder({ page })

@@ -546,6 +546,13 @@ def reset_all_datasets_to_defaults() -> dict[str, bool]:
     # Reset normalized tables first.
     fixed_costs_storage.reset_defaults()
     production_storage.reset_defaults()
+    try:
+        from app.domain import cost_versions_storage
+
+        cost_versions_storage.reset_defaults()
+    except Exception:
+        # Best-effort: legacy/local DBs might not have these tables yet.
+        pass
     for dataset_name, default_value in DATASET_DEFAULTS.items():
         if dataset_name in READ_ONLY_PROJECTION_DATASETS:
             results[dataset_name] = True

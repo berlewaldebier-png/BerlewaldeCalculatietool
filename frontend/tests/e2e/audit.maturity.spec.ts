@@ -1,16 +1,22 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, chromium, type Page } from "@playwright/test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const USERNAME = process.env.TEST_USERNAME || "admin";
 const PASSWORD = process.env.TEST_PASSWORD || "admin";
 
-async function screenshot(page: any, name: string) {
+async function screenshot(page: Page, name: string) {
   await page.screenshot({
     path: `audit/artifacts/${name}`,
     fullPage: true
   });
 }
 
-async function login(page: any) {
+async function ensureLoggedIn(page: Page) {
+  await page.goto("/break-even-v2");
+  if (!/\/login/.test(page.url())) return;
+
   await page.goto("/login");
   await page.getByLabel("Gebruikersnaam").fill(USERNAME);
   await page.getByLabel("Wachtwoord").fill(PASSWORD);
@@ -21,7 +27,7 @@ async function login(page: any) {
 
 test.describe("Maturity audit (read-only)", () => {
   test("Happy path: navigation + core pages (desktop)", async ({ page }) => {
-    await login(page);
+    await ensureLoggedIn(page);
 
     await page.goto("/");
     await screenshot(page, "02-home.png");
@@ -52,7 +58,7 @@ test.describe("Maturity audit (read-only)", () => {
   });
 
   test("Resilience: refresh/back on multi-step route", async ({ page }) => {
-    await login(page);
+    await ensureLoggedIn(page);
 
     await page.goto("/nieuwe-kostprijsberekening");
     await expect(page.getByRole("heading", { name: /Kostprijs beheren/i })).toBeVisible();
@@ -69,7 +75,7 @@ test.describe("Maturity audit (read-only)", () => {
   });
 
   test("Error path: offline during data load (shows recoverable error)", async ({ page, context }) => {
-    await login(page);
+    await ensureLoggedIn(page);
 
     // Navigate online first so we can test recovery behavior on reload.
     await page.goto("/break-even-v2");
@@ -86,14 +92,23 @@ test.describe("Maturity audit (read-only)", () => {
     await screenshot(page, "12-recovered-break-even.png");
   });
 
-  test("Form validation: login errors are clear", async ({ page }) => {
+  test("Form validation: login errors are clear", async ({ browser, baseURL }) => {
+    // Use a persistent context with a fresh userDataDir so no system/browser-profile cookies leak in.
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "calculatietool-audit-"));
+    const context = await chromium.launchPersistentContext(userDataDir, { channel: "msedge", baseURL });
+    const page = await context.newPage();
     await page.goto("/login");
     await page.getByLabel("Gebruikersnaam").fill("wrong-user");
     await page.getByLabel("Wachtwoord").fill("wrong-pass");
     await page.getByRole("button", { name: "Inloggen" }).click();
-    // Error copy may vary; assert an error container is shown.
     await expect(page.locator(".login-error")).toBeVisible();
     await expect(page.locator(".login-error")).not.toHaveText(/^\\s*$/);
     await screenshot(page, "13-login-invalid.png");
+    await context.close();
+    try {
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
   });
 });
