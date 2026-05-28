@@ -15,11 +15,10 @@ _SCHEMA_LOCK = Lock()
 
 def ensure_schema() -> None:
     global _SCHEMA_READY
-    if _SCHEMA_READY:
-        return
     with _SCHEMA_LOCK:
-        if _SCHEMA_READY:
-            return
+        # Even if _SCHEMA_READY is true, still run idempotent ALTER statements.
+        # This prevents long-running servers from getting stuck with a stale
+        # schema state after deploying new columns (e.g. sku_id for map_to_sku).
         postgres_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
@@ -46,7 +45,31 @@ def ensure_schema() -> None:
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_douano_unmapped_rules_updated ON douano_unmapped_rules(updated_at DESC)"
                 )
-                cur.execute("ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS sku_id TEXT NOT NULL DEFAULT ''")
+                # Idempotent evolutions for older databases.
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS sku_id TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS include_revenue BOOLEAN NOT NULL DEFAULT TRUE"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS include_liters BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS include_break_even BOOLEAN NOT NULL DEFAULT TRUE"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+                )
             if not postgres_storage.in_transaction():
                 conn.commit()
         _SCHEMA_READY = True
