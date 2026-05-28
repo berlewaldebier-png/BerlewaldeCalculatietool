@@ -50,7 +50,9 @@ export function ScenarioAnalyseApp(props: Props) {
   const [scenarioId, setScenarioId] = useState<string | null>(null);
   const [scenarioName, setScenarioName] = useState("Scenario");
   const [selectedYear, setSelectedYear] = useState<number>(props.year);
-  const [selectedProductId, setSelectedProductId] = useState<string>("");
+  // ProductFact.productId is a format/article id and can repeat across beers (e.g. fmt-doos-24-33cl).
+  // Use ProductFact.ref as the unique UI selection key.
+  const [selectedProductRef, setSelectedProductRef] = useState<string>("");
   const [targetLitersPerUnit, setTargetLitersPerUnit] = useState<number>(0);
   const [volumeLiters, setVolumeLiters] = useState<number>(() => {
     const prod = (props.productie as any)?.[String(props.year)] ?? null;
@@ -67,18 +69,6 @@ export function ScenarioAnalyseApp(props: Props) {
     window.addEventListener("calculatietool-scenarios-changed", sync);
     return () => window.removeEventListener("calculatietool-scenarios-changed", sync);
   }, []);
-
-  useEffect(() => {
-    if (!scenarioId) return;
-    const found = getScenario(scenarioId);
-    if (!found) return;
-    setScenarioName(found.name);
-    setSelectedYear(found.year);
-    const first = (found.overrides ?? [])[0] ?? null;
-    if (first?.productId) {
-      setSelectedProductId(String(first.productId));
-    }
-  }, [scenarioId]);
 
   const factsIndex = useMemo(() => {
     return buildProductFacts({
@@ -108,8 +98,32 @@ export function ScenarioAnalyseApp(props: Props) {
     props.samengesteldeProducten,
   ]);
 
+  const overrideKeyForFact = (fact: (typeof factsIndex.facts)[number]) => {
+    if (fact.ref.startsWith("sku:")) return fact.ref.slice(4);
+    return fact.productId;
+  };
+
+  useEffect(() => {
+    if (!scenarioId) return;
+    const found = getScenario(scenarioId);
+    if (!found) return;
+    setScenarioName(found.name);
+    setSelectedYear(found.year);
+    const first = (found.overrides ?? [])[0] ?? null;
+    const wanted = String(first?.productId ?? "").trim();
+    if (!wanted) return;
+
+    const match =
+      factsIndex.facts.find((fact) => fact.ref === wanted) ??
+      factsIndex.facts.find((fact) => overrideKeyForFact(fact) === wanted) ??
+      null;
+    if (match) setSelectedProductRef(match.ref);
+  }, [factsIndex.facts, scenarioId]);
+
   const productOptions = useMemo(() => {
     return factsIndex.facts.map((fact) => ({
+      ref: fact.ref,
+      overrideKey: overrideKeyForFact(fact),
       productId: fact.productId,
       label: fact.label,
       packLabel: fact.packLabel,
@@ -120,8 +134,8 @@ export function ScenarioAnalyseApp(props: Props) {
   }, [factsIndex.facts]);
 
   const selectedFact = useMemo(() => {
-    return factsIndex.facts.find((fact) => fact.productId === selectedProductId) ?? null;
-  }, [factsIndex.facts, selectedProductId]);
+    return factsIndex.facts.find((fact) => fact.ref === selectedProductRef) ?? null;
+  }, [factsIndex.facts, selectedProductRef]);
 
   useEffect(() => {
     if (!selectedFact) return;
@@ -189,7 +203,7 @@ export function ScenarioAnalyseApp(props: Props) {
   }, [scenarioId]);
 
   function saveScenario() {
-    if (!selectedProductId) {
+    if (!selectedProductRef || !selectedFact) {
       alert("Kies eerst een product/verpakking om op te slaan.");
       return;
     }
@@ -202,7 +216,8 @@ export function ScenarioAnalyseApp(props: Props) {
       id: scenarioId ?? undefined,
       name: scenarioName,
       year: selectedYear,
-      overrides: [{ productId: selectedProductId, litersPerUnit: targetLitersPerUnit }],
+      // Store overrides keyed by sku_id when available to avoid collisions across beers sharing the same format id.
+      overrides: [{ productId: overrideKeyForFact(selectedFact), litersPerUnit: targetLitersPerUnit }],
     });
     if (next) setScenarioId(next.id);
   }
@@ -260,7 +275,7 @@ export function ScenarioAnalyseApp(props: Props) {
                 <QuickCell label="Naam" value={scenarioName} />
                 <QuickCell label="Jaar" value={String(selectedYear)} />
                 <QuickCell label="Product" value={selectedFact?.packLabel || "—"} />
-                <QuickCell label="Overrides" value={selectedProductId ? "1" : "0"} />
+                <QuickCell label="Overrides" value={selectedProductRef ? "1" : "0"} />
               </div>
             </div>
           </aside>
@@ -293,12 +308,12 @@ export function ScenarioAnalyseApp(props: Props) {
                     <span>Product/verpakking</span>
                     <select
                       className="dataset-input"
-                      value={selectedProductId}
-                      onChange={(e) => setSelectedProductId(e.target.value)}
+                      value={selectedProductRef}
+                      onChange={(e) => setSelectedProductRef(e.target.value)}
                     >
                       <option value="">Kies een product…</option>
                       {productOptions.map((opt) => (
-                        <option key={opt.productId} value={opt.productId}>
+                        <option key={opt.ref} value={opt.ref}>
                           {opt.label}
                         </option>
                       ))}
@@ -316,7 +331,7 @@ export function ScenarioAnalyseApp(props: Props) {
                   </label>
 
                   <div className="editor-actions-group" style={{ justifySelf: "end" }}>
-                    <button type="button" className="editor-button" onClick={() => setStep("overrides")} disabled={!selectedProductId}>
+                    <button type="button" className="editor-button" onClick={() => setStep("overrides")} disabled={!selectedProductRef}>
                       Volgende
                     </button>
                   </div>
@@ -357,7 +372,7 @@ export function ScenarioAnalyseApp(props: Props) {
                       <button type="button" className="editor-button editor-button-secondary" onClick={() => setStep("basis")}>
                         Vorige
                       </button>
-                      <button type="button" className="editor-button" onClick={() => setStep("compare")} disabled={!selectedProductId}>
+                      <button type="button" className="editor-button" onClick={() => setStep("compare")} disabled={!selectedProductRef}>
                         Volgende
                       </button>
                     </div>
