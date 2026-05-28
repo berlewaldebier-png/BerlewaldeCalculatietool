@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AppHeader } from "@/components/AppHeader";
+import { DashboardHeader } from "@/components/DashboardHeader";
 import { AuthGate } from "@/components/AuthGate";
 
 
@@ -19,7 +19,9 @@ export default function RootLayout({
     <html lang="nl">
       <body>
         <div className="app-shell">
-          <AppHeader />
+          <div className="app-main app-main-header">
+            <DashboardHeader />
+          </div>
           <AuthGate>
             <main className="app-main">{children}</main>
           </AuthGate>

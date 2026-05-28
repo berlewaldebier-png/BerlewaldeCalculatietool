@@ -11,15 +11,18 @@ export default async function HomePage({
   const untilRaw = resolved.until;
   const yearRaw = resolved.year;
   const basisRaw = resolved.basis;
+  const skuRaw = (resolved as any).sku_id;
   const since = Array.isArray(sinceRaw) ? sinceRaw[0] : sinceRaw;
   const until = Array.isArray(untilRaw) ? untilRaw[0] : untilRaw;
   const year = Array.isArray(yearRaw) ? yearRaw[0] : yearRaw;
   const basis = Array.isArray(basisRaw) ? basisRaw[0] : basisRaw;
+  const sku_id = Array.isArray(skuRaw) ? skuRaw[0] : skuRaw;
   const extraParams: Record<string, string> = {};
   if (since) extraParams.since = String(since);
   if (until) extraParams.until = String(until);
   if (year) extraParams.year = String(year);
   if (basis) extraParams.basis = String(basis);
+  if (sku_id) extraParams.sku_id = String(sku_id);
 
   const nextPath = Object.keys(extraParams).length
     ? `/?${new URLSearchParams(extraParams).toString()}`
@@ -73,7 +76,13 @@ export default async function HomePage({
       navigation={navigation}
       payload={payload}
       breakEvenContext={breakEvenContext}
-      initialFilters={{ since: since ? String(since) : "", until: until ? String(until) : "", year: year ? String(year) : "", basis: basis ? String(basis) : "" }}
+      initialFilters={{
+        since: since ? String(since) : "",
+        until: until ? String(until) : "",
+        year: year ? String(year) : "",
+        basis: basis ? String(basis) : "",
+        ...(sku_id ? { sku_id: String(sku_id) } : {}),
+      }}
     />
   );
 }

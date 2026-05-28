@@ -2,10 +2,8 @@
 
 import type { Route } from "next";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo } from "react";
 
-import { fetchMe, logout } from "@/lib/auth";
 import type { DashboardSummary, NavigationItem } from "@/lib/apiShared";
 import { NavigationSidebar } from "@/components/NavigationSidebar";
 
@@ -62,21 +60,6 @@ function buildAlertCards(summary: DashboardSummary): AlertCard[] {
 }
 
 export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
-  const router = useRouter();
-  const [currentUser, setCurrentUser] = useState("gebruiker");
-
-  useEffect(() => {
-    const sync = () => {
-      void fetchMe().then((session) => {
-        setCurrentUser(session?.display_name ?? "gebruiker");
-      });
-    };
-
-    sync();
-    window.addEventListener("calculatietool-auth-changed", sync);
-    return () => window.removeEventListener("calculatietool-auth-changed", sync);
-  }, []);
-
   const alertCards = useMemo(() => buildAlertCards(summary), [summary]);
 
   return (
@@ -85,42 +68,6 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
         <NavigationSidebar navigation={navigation} activePath="/" />
 
         <section className="dashboard-main-content">
-          <header className="dashboard-topbar">
-            <div className="dashboard-searchbar">
-              <input type="text" placeholder="Zoeken..." aria-label="Zoeken" />
-              <button type="button" className="dashboard-search-button" aria-label="Zoeken">
-                <SearchIcon />
-              </button>
-            </div>
-
-            <div className="dashboard-topbar-actions">
-              <button type="button" className="dashboard-icon-button" aria-label="Meldingen">
-                <BellIcon />
-              </button>
-
-              <div className="dashboard-user-chip">
-                <div className="dashboard-user-avatar">
-                  <UserIcon />
-                </div>
-                <span className="dashboard-user-greeting">Hoi, {currentUser}</span>
-              </div>
-
-              <button
-                type="button"
-                className="dashboard-icon-button"
-                aria-label="Uitloggen"
-                title="Uitloggen"
-                onClick={() => {
-                  void logout().finally(() => {
-                    router.replace("/login");
-                  });
-                }}
-              >
-                <LogoutIcon />
-              </button>
-            </div>
-          </header>
-
           <section className="dashboard-hero-section">
             <div className="dashboard-hero-copy">
               <p className="dashboard-hero-eyebrow">Overzicht</p>
@@ -240,43 +187,6 @@ export function HomeDashboard({ navigation, summary }: HomeDashboardProps) {
         </section>
       </div>
     </main>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="11" cy="11" r="6.5" />
-      <path d="M16 16L21 21" />
-    </svg>
-  );
-}
-
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.9">
-      <path d="M12 4a4 4 0 0 0-4 4v2.2c0 .8-.24 1.57-.68 2.23L6 14.5h12l-1.32-2.07A4.02 4.02 0 0 1 16 10.2V8a4 4 0 0 0-4-4Z" />
-      <path d="M10 18a2 2 0 0 0 4 0" />
-    </svg>
-  );
-}
-
-function UserIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <circle cx="12" cy="8" r="3.5" />
-      <path d="M5 19c1.5-3 4.1-4.5 7-4.5S17.5 16 19 19" />
-    </svg>
-  );
-}
-
-function LogoutIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.9">
-      <path d="M10 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3" />
-      <path d="M14 16l5-4-5-4" />
-      <path d="M19 12H10" />
-    </svg>
   );
 }
 

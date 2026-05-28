@@ -36,6 +36,12 @@ def _default_range_today_month() -> _DateRange:
     return _DateRange(since=since, until=today)
 
 
+def _default_range_current_year_ytd() -> _DateRange:
+    today = date.today()
+    since = date(today.year, 1, 1)
+    return _DateRange(since=since, until=today)
+
+
 def _date_buckets(since: date, until: date, max_points: int = 12) -> list[date]:
     if until < since:
         return [since]
@@ -91,6 +97,7 @@ def _iter_order_lines(
     *,
     since: date,
     until: date,
+    sku_id: str = "",
 ) -> Iterable[tuple[int, date, int, str, str, str, float, float, str, str, str]]:
     """
     Yield (line_id, order_date, company_id, company_name, order_number, status, quantity, net_revenue_ex, sku_id, product_group, packaging_type).
@@ -101,6 +108,7 @@ def _iter_order_lines(
     postgres_storage.ensure_schema()
     since_iso = since.isoformat()
     until_plus_one = (until + timedelta(days=1)).isoformat()
+    sku_filter = str(sku_id or "").strip()
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -125,9 +133,10 @@ def _iter_order_lines(
                 WHERE ig.douano_product_id IS NULL
                   AND l.order_date >= %s::date
                   AND l.order_date < %s::date
+                  AND (%s = '' OR m.sku_id = %s)
                 ORDER BY l.order_date ASC, l.line_id ASC
                 """,
-                (since_iso, until_plus_one),
+                (since_iso, until_plus_one, sku_filter, sku_filter),
             )
             rows = cur.fetchall() or []
     for (
@@ -165,6 +174,7 @@ def _iter_invoice_lines(
     *,
     since: date,
     until: date,
+    sku_id: str = "",
 ) -> Iterable[tuple[int, date, int, str, str, str, float, float, str, str, str]]:
     """
     Yield (line_id, invoice_date, company_id, company_name, invoice_number, status, quantity, net_revenue_ex, sku_id, product_group, packaging_type).
@@ -177,6 +187,7 @@ def _iter_invoice_lines(
     postgres_storage.ensure_schema()
     since_iso = since.isoformat()
     until_plus_one = (until + timedelta(days=1)).isoformat()
+    sku_filter = str(sku_id or "").strip()
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -207,9 +218,13 @@ def _iter_invoice_lines(
                 WHERE ig.douano_product_id IS NULL
                   AND l.invoice_date >= %s::date
                   AND l.invoice_date < %s::date
+                  AND (
+                    %s = ''
+                    OR COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, ''), '') = %s
+                  )
                 ORDER BY l.invoice_date ASC, l.line_id ASC
                 """,
-                (since_iso, until_plus_one),
+                (since_iso, until_plus_one, sku_filter, sku_filter),
             )
             rows = cur.fetchall() or []
     for (
@@ -247,8 +262,9 @@ def get_erp_dashboard(
     *,
     since: str = "",
     until: str = "",
-    basis: str = "order",
+    basis: str = "invoice",
     year: int = 0,
+    sku_id: str = "",
 ) -> dict[str, Any]:
     """
     ERP performance dashboard read-model.
@@ -258,16 +274,16 @@ def get_erp_dashboard(
     - Cost is derived from active kostprijsversies via kostprijsproductactiveringen (same logic as douano_margin_service).
     - Break-even computation is currently handled client-side; we expose the active config as context.
     """
-    basis = str(basis or "order").strip().lower() or "order"
+    basis = str(basis or "invoice").strip().lower() or "invoice"
     if basis not in ("order", "invoice"):
-        basis = "order"
+        basis = "invoice"
 
     since_text = str(since or "").strip()
     until_text = str(until or "").strip()
     year_int = int(year or 0)
     has_explicit_filters = bool(year_int > 0 or since_text or until_text)
 
-    default = _default_range_today_month()
+    default = _default_range_current_year_ytd()
     range_since = _parse_date(since, default.since)
     range_until = _parse_date(until, default.until)
 
@@ -275,21 +291,7 @@ def get_erp_dashboard(
         range_since = date(year_int, 1, 1)
         range_until = date(year_int, 12, 31)
 
-    # Better default: if the user didn't specify a range/year, show the most recent month with orders
-    # instead of the current calendar month (which is often empty in dev snapshots).
-    if not has_explicit_filters:
-        postgres_storage.ensure_schema()
-        with postgres_storage.connect() as conn:
-            with conn.cursor() as cur:
-                if basis == "invoice":
-                    cur.execute("SELECT MAX(invoice_date)::date FROM douano_sales_invoices WHERE invoice_date IS NOT NULL")
-                else:
-                    cur.execute("SELECT MAX(order_date)::date FROM douano_sales_orders WHERE order_date IS NOT NULL")
-                row = cur.fetchone()
-        latest_order_date = row[0] if row else None
-        if isinstance(latest_order_date, date):
-            range_since = date(latest_order_date.year, latest_order_date.month, 1)
-            range_until = latest_order_date
+    sku_filter = str(sku_id or "").strip()
     if range_until < range_since:
         range_until = range_since
 
@@ -364,7 +366,11 @@ def get_erp_dashboard(
     # Per-order totals for latest + under break-even.
     by_order: dict[str, dict[str, Any]] = {}
 
-    lines_iter = _iter_invoice_lines(since=range_since, until=range_until) if basis == "invoice" else _iter_order_lines(since=range_since, until=range_until)
+    lines_iter = (
+        _iter_invoice_lines(since=range_since, until=range_until, sku_id=sku_filter)
+        if basis == "invoice"
+        else _iter_order_lines(since=range_since, until=range_until, sku_id=sku_filter)
+    )
 
     for (
         line_id,
