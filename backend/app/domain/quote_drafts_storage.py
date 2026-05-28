@@ -339,6 +339,10 @@ def save_draft(payload: dict[str, Any], *, draft_id: str | None = None) -> dict[
                 existing = cur.fetchone()
 
                 if existing:
+                    # Freeze semantics: a finalized quote draft becomes immutable.
+                    # Users can copy/duplicate to create a new draft if they need changes.
+                    if existing[3] is not None:
+                        raise ValueError("Offerte is definitief en kan niet meer aangepast worden.")
                     quote_number = str(existing[0] or "")
                     quote_number_seq = int(existing[1] or 0)
                     created_at = existing[2] or now

@@ -13,6 +13,21 @@ _SCHEMA_READY = False
 _SCHEMA_LOCK = Lock()
 
 
+def reset_defaults() -> None:
+    """Development helper: clear cost versions and their normalized SKU rows.
+
+    This is intentionally destructive and should only be called from local/dev reset flows.
+    """
+    ensure_schema()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            # Delete SKU rows first to satisfy FK constraints (cost_version_sku_rows -> skus).
+            cur.execute("TRUNCATE TABLE cost_version_sku_rows")
+            cur.execute("TRUNCATE TABLE cost_versions")
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+
 def ensure_schema() -> None:
     global _SCHEMA_READY
     if _SCHEMA_READY:

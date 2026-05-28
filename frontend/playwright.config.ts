@@ -4,11 +4,15 @@ const iPhone13 = devices["iPhone 13"];
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./tests/e2e/global-setup.ts",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   retries: 1,
   use: {
     baseURL: process.env.BASE_URL || "http://localhost:3000",
+    // When credentials are provided, globalSetup writes an authenticated storage state.
+    // Tests can reuse it to avoid repeated logins (prevents rate limiting).
+    storageState: process.env.TEST_USERNAME && process.env.TEST_PASSWORD ? "test-results/.auth/storageState.json" : undefined,
     // In restricted Windows environments, spawning helper processes (trace/video)
     // can fail with EPERM. Keep this lightweight by default; enable locally when needed.
     trace: "off",

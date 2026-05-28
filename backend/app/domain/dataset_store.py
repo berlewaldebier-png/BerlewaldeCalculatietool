@@ -546,6 +546,13 @@ def reset_all_datasets_to_defaults() -> dict[str, bool]:
     # Reset normalized tables first.
     fixed_costs_storage.reset_defaults()
     production_storage.reset_defaults()
+    try:
+        from app.domain import cost_versions_storage
+
+        cost_versions_storage.reset_defaults()
+    except Exception:
+        # Best-effort: legacy/local DBs might not have these tables yet.
+        pass
     for dataset_name, default_value in DATASET_DEFAULTS.items():
         if dataset_name in READ_ONLY_PROJECTION_DATASETS:
             results[dataset_name] = True
@@ -2247,6 +2254,8 @@ def validate_phase_g_constraints(*, validate_all: bool = False) -> dict[str, Any
 
     targets: list[dict[str, str]] = [
         {"constraint": "fk_cost_version_sku_rows_sku", "table": "cost_version_sku_rows"},
+        {"constraint": "fk_kostprijs_sku_activations_sku", "table": "kostprijs_sku_activations"},
+        {"constraint": "fk_kostprijs_sku_activations_cost_version", "table": "kostprijs_sku_activations"},
     ]
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:

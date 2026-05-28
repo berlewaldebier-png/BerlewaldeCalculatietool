@@ -4,9 +4,11 @@
   --surface-strong: #ffffff;
   --border: #e4e9f2;
   --text: #18223a;
-  --muted: #7b86a3;
+  /* Slightly darker muted color for WCAG AA contrast on white surfaces. */
+  --muted: #5e6a85;
   --accent: #5d83ff;
-  --accent-strong: #4f78ff;
+  /* Darker accent for WCAG AA contrast on light surfaces. */
+  --accent-strong: #1f4bdd;
   --accent-border: #83a3ff;
   --shadow: 0 16px 34px rgba(38, 57, 111, 0.08);
   --sidebar-width: 220px;

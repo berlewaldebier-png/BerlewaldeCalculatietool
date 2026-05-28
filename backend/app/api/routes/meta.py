@@ -487,6 +487,14 @@ def post_dev_reset(
         # Clear normalized tables first (keeps schema intact).
         if normalized_mode == "all":
             kostprijs_activation_storage.reset_defaults()
+            # Clear cost versions before seeding or wiping masters; otherwise FK constraints
+            # (cost_version_sku_rows -> skus) can block deleting/replacing SKUs.
+            try:
+                from app.domain import cost_versions_storage
+
+                cost_versions_storage.reset_defaults()
+            except Exception:
+                pass
             if normalized_profile:
                 # SKU-aanpak: use the canonical SKU seeders instead of legacy seed bundles.
                 try:
@@ -788,6 +796,15 @@ def post_dev_seed_sku_foundation(
     productie = {str(year_value): {"hoeveelheid_inkoop_l": 0, "hoeveelheid_productie_l": 0, "batchgrootte_eigen_productie_l": 0}}
 
     with postgres_storage.transaction():
+        # Ensure we can safely overwrite SKU masters even when a dev DB already contains cost versions.
+        # FK constraints (cost_version_sku_rows -> skus) would otherwise block deleting/replacing SKUs.
+        try:
+            from app.domain import cost_versions_storage
+
+            cost_versions_storage.reset_defaults()
+        except Exception:
+            pass
+
         # Seed controlled vocabularies so Beheer is the single source of truth.
         # This ensures the same options appear in:
         # - Beheer > Productclassificaties
@@ -1722,6 +1739,18 @@ def post_repair_kostprijs_activation_sku_mismatches(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/health/kostprijs-activation-sku-mismatches")
+def get_health_kostprijs_activation_sku_mismatches(
+    year: int = Query(0, description="Optioneel: alleen dit jaar (0 = alle jaren)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Read-only health check for activation->cost version SKU mismatches.
+
+    This is a safe alias for the repair endpoint in `dry_run=true` mode.
+    """
+    return post_repair_kostprijs_activation_sku_mismatches(year=int(year), dry_run=True, _={})
 
 
 @router.post("/repair/beer-bundles")
