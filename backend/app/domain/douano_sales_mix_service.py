@@ -9,6 +9,7 @@ from app.domain import (
     dataset_store,
     douano_product_ignore_storage,
     douano_product_mapping_storage,
+    douano_sync_storage,
     douano_unmapped_rule_storage,
     postgres_storage,
 )
@@ -202,9 +203,6 @@ def get_sales_by_sku_summary(
 
     unmapped = {"total_units": 0.0, "total_net_revenue_ex": 0.0, "items": []}
     if top_unmapped > 0:
-        from app.domain import douano_unmapped_rule_storage
-        from app.domain import douano_sync_storage
-        douano_unmapped_rule_storage.ensure_schema()
         douano_sync_storage.ensure_schema()
         with postgres_storage.connect() as conn:
             with conn.cursor() as cur:
