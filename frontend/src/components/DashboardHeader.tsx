@@ -117,92 +117,91 @@ export function DashboardHeader() {
   const crumbs = useMemo(() => buildBreadcrumb(pathname), [pathname]);
 
   return (
-    <header className="w-full bg-white border border-slate-200 rounded-2xl shadow-sm px-6 py-4 flex items-center justify-between gap-6">
-      <div className="flex items-center gap-3 min-w-fit">
-        <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden">
+    <header className="dashboard-header">
+      <div className="dashboard-header__brand">
+        <div className="dashboard-header__logo">
           <Image
             src="/brand/berlewalde.png"
             alt="Berlewalde"
             width={40}
             height={40}
-            className="w-10 h-10 object-cover"
+            className="dashboard-header__logo-image"
             priority
           />
         </div>
 
-        <div>
-          <h1 className="text-sm font-bold tracking-widest text-slate-900">BERLEWALDE</h1>
-          <p className="text-xs text-slate-500">CalculatieTool</p>
+        <div className="dashboard-header__brand-text">
+          <div className="dashboard-header__brand-title">BERLEWALDE</div>
+          <div className="dashboard-header__brand-subtitle">CalculatieTool</div>
         </div>
       </div>
 
       {!isLoginPage ? (
         <>
           <nav
-            className="hidden lg:flex items-center gap-3 text-sm text-slate-500"
+            className="dashboard-header__crumbs"
             aria-label="Breadcrumb"
           >
-            <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center">
+            <span className="dashboard-header__crumbs-home" aria-hidden="true">
               <Home size={16} />
-            </div>
-            <ChevronRight size={14} aria-hidden="true" />
+            </span>
 
             {crumbs.map((crumb, index) => (
-              <span key={`${crumb.label}-${index}`} className="flex items-center gap-3">
+              <span key={`${crumb.label}-${index}`} className="dashboard-header__crumb">
                 {index === 0 ? null : <ChevronRight size={14} aria-hidden="true" />}
                 {crumb.href ? (
-                  <Link href={crumb.href as any} className="hover:text-slate-700 transition">
+                  <Link href={crumb.href as any} className="dashboard-header__crumb-link">
                     {crumb.label}
                   </Link>
                 ) : (
-                  <span className="text-blue-600 font-medium">{crumb.label}</span>
+                  <span className="dashboard-header__crumb-current">{crumb.label}</span>
                 )}
               </span>
             ))}
           </nav>
 
-          <div className="flex-1 max-w-md relative hidden md:block">
+          <div className="dashboard-header__search">
             <Search
               size={18}
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+              className="dashboard-header__search-icon"
               aria-hidden="true"
             />
             <input
               type="text"
               placeholder="Zoek orders, klanten, producten..."
-              className="w-full h-11 pl-11 pr-14 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+              className="dashboard-header__search-input"
             />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-md">
+            <span className="dashboard-header__search-kbd" aria-hidden="true">
               ⌘ K
             </span>
           </div>
 
-          <div className="flex items-center gap-3 min-w-fit">
+          <div className="dashboard-header__actions">
             <button
               type="button"
-              className="h-11 px-5 rounded-xl bg-blue-600 text-white text-sm font-semibold flex items-center gap-2 shadow-sm hover:bg-blue-700 transition"
+              className="dashboard-header__primary-button"
               onClick={() => {
                 router.push("/nieuwe-kostprijsberekening?mode=wizard-new" as any);
               }}
             >
               <Plus size={18} aria-hidden="true" />
-              Nieuwe calculatie
+              <span>Nieuwe calculatie</span>
             </button>
 
             <button
               type="button"
-              className="relative w-11 h-11 rounded-xl border border-slate-200 flex items-center justify-center hover:bg-slate-50 transition"
+              className="dashboard-header__icon-button dashboard-header__icon-button--bell"
               aria-label="Meldingen"
             >
               <Bell size={18} aria-hidden="true" />
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+              <span className="dashboard-header__badge" aria-hidden="true">
                 3
               </span>
             </button>
 
             <button
               type="button"
-              className="w-11 h-11 rounded-xl border border-slate-200 flex items-center justify-center hover:bg-slate-50 transition"
+              className="dashboard-header__icon-button"
               aria-label="Instellingen"
               onClick={() => {
                 router.push("/beheer" as any);
@@ -211,26 +210,24 @@ export function DashboardHeader() {
               <Settings size={18} aria-hidden="true" />
             </button>
 
-            <div className="h-9 w-px bg-slate-200 mx-1" />
+            <div className="dashboard-header__divider" aria-hidden="true" />
 
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+            <div className="dashboard-header__user">
+              <div className="dashboard-header__avatar" aria-hidden="true">
                 {initialsForDisplayName(session?.display_name ?? "Berlewalde")}
               </div>
 
-              <div className="hidden xl:block">
-                <p className="text-sm font-semibold text-slate-900">
-                  {session?.display_name ?? "Berle"}
-                </p>
-                <p className="text-xs text-slate-500">
+              <div className="dashboard-header__user-meta">
+                <div className="dashboard-header__user-name">{session?.display_name ?? "Berle"}</div>
+                <div className="dashboard-header__user-subtitle">
                   {(session?.role ? `${session.role} • ` : "") + "Berlewalde"}
-                </p>
+                </div>
               </div>
             </div>
 
             <button
               type="button"
-              className="h-11 px-4 rounded-xl text-slate-600 hover:bg-slate-50 flex items-center gap-2 text-sm transition"
+              className="dashboard-header__logout"
               onClick={() => {
                 void logout().finally(() => {
                   router.replace("/login");
@@ -239,7 +236,7 @@ export function DashboardHeader() {
               aria-label="Uitloggen"
             >
               <LogOut size={17} aria-hidden="true" />
-              <span className="hidden xl:inline">Uitloggen</span>
+              <span className="dashboard-header__logout-text">Uitloggen</span>
             </button>
           </div>
         </>
