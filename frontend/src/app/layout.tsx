@@ -19,7 +19,7 @@ export default function RootLayout({
     <html lang="nl">
       <body>
         <div className="app-shell">
-          <div className="app-main">
+          <div className="app-main app-main-header">
             <DashboardHeader />
           </div>
           <AuthGate>

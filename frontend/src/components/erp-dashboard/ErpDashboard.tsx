@@ -323,12 +323,57 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
         <div className="dashboard-main-content">
           <div className="erp-dashboard-container">
             <header className="erp-dashboard-header">
-              <div>
-                <p className="dashboard-hero-eyebrow">Overzicht</p>
-                <h1 className="erp-dashboard-title">Welkom terug</h1>
-                <p className="dashboard-hero-description">Belangrijkste prestaties, marges en break-even inzichten.</p>
-              </div>
               <div className="erp-dashboard-header-actions">
+                <button
+                  type="button"
+                  className="erp-dashboard-pill"
+                  onClick={() => {
+                    const now = new Date();
+                    const y = now.getFullYear();
+                    setSinceInput(`${y}-01-01`);
+                    setUntilInput(now.toISOString().slice(0, 10));
+                    setYearInput(String(y));
+                  }}
+                  title="Zet filters op dit jaar (YTD)"
+                >
+                  Dit jaar
+                </button>
+                <button
+                  type="button"
+                  className="erp-dashboard-pill"
+                  onClick={() => {
+                    const now = new Date();
+                    const y = now.getFullYear() - 1;
+                    setSinceInput(`${y}-01-01`);
+                    setUntilInput(`${y}-12-31`);
+                    setYearInput(String(y));
+                  }}
+                  title="Zet filters op vorig jaar"
+                >
+                  Vorig jaar
+                </button>
+                <button
+                  type="button"
+                  className="erp-dashboard-pill"
+                  onClick={() => {
+                    const now = new Date();
+                    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    const y = d.getFullYear();
+                    const m = d.getMonth();
+                    const mm = String(m + 1).padStart(2, "0");
+                    setSinceInput(`${y}-${mm}-01`);
+                    setUntilInput(new Date(y, m + 1, 0).toISOString().slice(0, 10));
+                    setYearInput(String(y));
+                  }}
+                  title="Zet filters op vorige maand"
+                >
+                  Vorige maand
+                </button>
+
+                <button type="button" className="erp-dashboard-pill" title="(placeholder)">Alleen SKU</button>
+                <button type="button" className="erp-dashboard-pill" title="(placeholder)">Eigen selectie/filter</button>
+                <button type="button" className="erp-dashboard-pill" title="(placeholder)">Vergelijken</button>
+
                 <button
                   type="button"
                   className="erp-dashboard-pill"

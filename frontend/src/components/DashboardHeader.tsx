@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Home,
   LogOut,
-  Plus,
   Search,
   Settings
 } from "lucide-react";
@@ -179,17 +178,6 @@ export function DashboardHeader() {
           <div className="dashboard-header__actions">
             <button
               type="button"
-              className="dashboard-header__primary-button"
-              onClick={() => {
-                router.push("/nieuwe-kostprijsberekening?mode=wizard-new" as any);
-              }}
-            >
-              <Plus size={18} aria-hidden="true" />
-              <span>Nieuwe calculatie</span>
-            </button>
-
-            <button
-              type="button"
               className="dashboard-header__icon-button dashboard-header__icon-button--bell"
               aria-label="Meldingen"
             >
@@ -241,6 +229,10 @@ export function DashboardHeader() {
           </div>
         </>
       ) : null}
+
+      <div className="dashboard-header__version" aria-label="Versie">
+        versie 0,1
+      </div>
     </header>
   );
 }
