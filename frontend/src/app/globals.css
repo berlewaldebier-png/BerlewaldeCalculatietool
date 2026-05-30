@@ -784,6 +784,11 @@ a {
   padding: 0;
 }
 
+/* Utility: some components use Tailwind-ish classnames without Tailwind. */
+.hidden {
+  display: none !important;
+}
+
 .erp-dashboard-container {
   max-width: none;
   margin: 0;

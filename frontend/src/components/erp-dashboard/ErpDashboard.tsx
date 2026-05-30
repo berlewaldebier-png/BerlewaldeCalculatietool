@@ -358,7 +358,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
         date: dateLabel,
         omzet: Number(row.revenue_ex || 0),
         breakEven: Number(beByDate.get(dateLabel) || 0),
-        prognose: forecast ?? Number(row.revenue_ex || 0),
+        prognose: forecast,
       };
     });
   }, [payload.trends?.revenue, breakEvenTrend.line]);
@@ -680,10 +680,12 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
             )}
 
             <section>
-              <Card className={`erp-pad${chartView === "revenue" ? "" : " hidden"}`}>
+              <Card className="erp-pad">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <h2 className="module-card-title">Omzet over tijd</h2>
+                    <h2 className="module-card-title">
+                      {chartView === "revenue" ? "Omzet over tijd" : "Orders & gem. orderwaarde"}
+                    </h2>
                     <span className="erp-chip">Maand</span>
                   </div>
                   <div className="erp-dashboard-segment" aria-label="Grafiek kiezen">
@@ -722,9 +724,10 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         <Line
                           type="monotone"
                           dataKey="prognose"
-                          stroke={CHART_COLORS.blue}
+                          stroke={CHART_COLORS.purple}
                           strokeDasharray="6 6"
                           dot={false}
+                          connectNulls
                         />
                         <Line
                           type="monotone"
@@ -779,9 +782,10 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                           yAxisId="left"
                           type="monotone"
                           dataKey="prognoseOrders"
-                          stroke={CHART_COLORS.blue}
+                          stroke={CHART_COLORS.purple}
                           strokeDasharray="6 6"
                           dot={false}
+                          connectNulls
                         />
                         <Line
                           yAxisId="right"

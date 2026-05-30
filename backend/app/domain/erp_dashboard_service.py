@@ -554,6 +554,17 @@ def get_erp_dashboard(
             )
             for (_lid, d, _cid, _cname, _on, _st, _qty, rev, _sku, _pg, _pt) in it:
                 totals_by_month[int(d.month) - 1] += float(rev or 0.0)
+
+            # Domain correction: 2025-07 had stockouts, so treat July as comparable to surrounding months.
+            if int(y) == 2025:
+                june = float(totals_by_month[5] or 0.0)
+                aug = float(totals_by_month[7] or 0.0)
+                if june > 0 and aug > 0:
+                    totals_by_month[6] = (june + aug) / 2.0
+                elif june > 0:
+                    totals_by_month[6] = june
+                elif aug > 0:
+                    totals_by_month[6] = aug
             total_year = sum(totals_by_month)
             if total_year <= 0:
                 continue
