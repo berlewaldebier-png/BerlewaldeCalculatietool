@@ -168,6 +168,7 @@ function EmptyState({ title, body, href, hrefLabel }: { title: string; body: str
 export function ErpDashboard({ navigation, payload, breakEvenContext, initialFilters }: Props) {
   const router = useRouter();
   const [showFilters, setShowFilters] = useState(false);
+  const [chartView, setChartView] = useState<"revenue" | "orders">("revenue");
   const [sinceInput, setSinceInput] = useState((initialFilters?.since || payload.range?.since || "").trim());
   const [untilInput, setUntilInput] = useState((initialFilters?.until || payload.range?.until || "").trim());
   const [yearInput, setYearInput] = useState<string>((initialFilters?.year || "").trim());
@@ -352,10 +353,12 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
     const beByDate = new Map((breakEvenTrend.line ?? []).map((p) => [p.date, p.breakEven]));
     return (payload.trends?.revenue ?? []).map((row) => {
       const dateLabel = shortDateLabel(row.date);
+      const forecast = typeof row.forecast_ex === "number" ? row.forecast_ex : null;
       return {
         date: dateLabel,
         omzet: Number(row.revenue_ex || 0),
         breakEven: Number(beByDate.get(dateLabel) || 0),
+        prognose: forecast ?? Number(row.revenue_ex || 0),
       };
     });
   }, [payload.trends?.revenue, breakEvenTrend.line]);
@@ -365,6 +368,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
       date: shortDateLabel(row.date),
       orders: Number(row.orders || 0),
       aov: Number(row.aov_ex || 0),
+      prognoseOrders: typeof row.forecast_orders === "number" ? Number(row.forecast_orders) : Number(row.orders || 0),
     }));
   }, [payload.trends?.orders]);
 
@@ -675,11 +679,29 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
               />
             )}
 
-            <section className="erp-grid-2">
-              <Card className="erp-pad">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="module-card-title">Omzet over tijd</h2>
-                  <span className="erp-chip">Maand</span>
+            <section>
+              <Card className={`erp-pad${chartView === "revenue" ? "" : " hidden"}`}>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <h2 className="module-card-title">Omzet over tijd</h2>
+                    <span className="erp-chip">Maand</span>
+                  </div>
+                  <div className="erp-dashboard-segment" aria-label="Grafiek kiezen">
+                    <button
+                      type="button"
+                      className={`erp-dashboard-segment-pill${chartView === "revenue" ? " is-active" : ""}`}
+                      onClick={() => setChartView("revenue")}
+                    >
+                      Omzet over tijd
+                    </button>
+                    <button
+                      type="button"
+                      className={`erp-dashboard-segment-pill${chartView === "orders" ? " is-active" : ""}`}
+                      onClick={() => setChartView("orders")}
+                    >
+                      Orders & gem.
+                    </button>
+                  </div>
                 </div>
                 <div className="erp-chart-area">
                   {revenueData.length ? (
@@ -699,6 +721,13 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         />
                         <Line
                           type="monotone"
+                          dataKey="prognose"
+                          stroke={CHART_COLORS.blue}
+                          strokeDasharray="6 6"
+                          dot={false}
+                        />
+                        <Line
+                          type="monotone"
                           dataKey="breakEven"
                           stroke={CHART_COLORS.slate}
                           strokeDasharray="5 5"
@@ -712,10 +741,28 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                 </div>
               </Card>
 
-              <Card className="erp-pad">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="module-card-title">Orders & gem. orderwaarde</h2>
-                  <span className="erp-chip">Maand</span>
+              <Card className={`erp-pad${chartView === "orders" ? "" : " hidden"}`}>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <h2 className="module-card-title">Orders & gem. orderwaarde</h2>
+                    <span className="erp-chip">Maand</span>
+                  </div>
+                  <div className="erp-dashboard-segment" aria-label="Grafiek kiezen">
+                    <button
+                      type="button"
+                      className={`erp-dashboard-segment-pill${chartView === "revenue" ? " is-active" : ""}`}
+                      onClick={() => setChartView("revenue")}
+                    >
+                      Omzet over tijd
+                    </button>
+                    <button
+                      type="button"
+                      className={`erp-dashboard-segment-pill${chartView === "orders" ? " is-active" : ""}`}
+                      onClick={() => setChartView("orders")}
+                    >
+                      Orders & gem.
+                    </button>
+                  </div>
                 </div>
                 <div className="erp-chart-area">
                   {ordersData.length ? (
@@ -728,6 +775,14 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString("nl-NL") : String(v))} />
                         <Legend />
                         <Bar yAxisId="left" dataKey="orders" fill={CHART_COLORS.blue} radius={[8, 8, 0, 0]} />
+                        <Line
+                          yAxisId="left"
+                          type="monotone"
+                          dataKey="prognoseOrders"
+                          stroke={CHART_COLORS.blue}
+                          strokeDasharray="6 6"
+                          dot={false}
+                        />
                         <Line
                           yAxisId="right"
                           type="monotone"

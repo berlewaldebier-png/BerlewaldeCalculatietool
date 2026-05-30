@@ -111,12 +111,14 @@ export type ErpDashboardRevenueTrendPoint = {
   date: string;
   revenue_ex: number;
   break_even_ex?: number;
+  forecast_ex?: number | null;
 };
 
 export type ErpDashboardOrdersTrendPoint = {
   date: string;
   orders: number;
   aov_ex: number;
+  forecast_orders?: number | null;
 };
 
 export type ErpDashboardPayload = {

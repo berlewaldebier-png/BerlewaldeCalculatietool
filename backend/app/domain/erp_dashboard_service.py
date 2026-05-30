@@ -485,40 +485,100 @@ def get_erp_dashboard(
         if isinstance(row, dict)
     ]
 
-    # Trends: lightweight bucket-by-date for revenue + orders.
-    buckets = _date_buckets(range_since, range_until, max_points=8)
-    revenue_trend = [{"date": d.isoformat(), "revenue_ex": 0.0} for d in buckets]
-    orders_trend = [{"date": d.isoformat(), "orders": 0, "aov_ex": 0.0} for d in buckets]
-    by_bucket = {row["date"]: row for row in revenue_trend}
-    by_order_bucket = {row["date"]: row for row in orders_trend}
+    # Trends: full-year monthly series + a forecast line (based on realized-to-date and historical seasonality).
+    chart_year = int(range_since.year)
+    year_start = date(chart_year, 1, 1)
+    year_end = date(chart_year, 12, 31)
+    month_starts = [date(chart_year, month, 1) for month in range(1, 13)]
 
-    # For trends we approximate by assigning orders to nearest bucket date <= order_date.
-    bucket_dates = buckets[:]
-    bucket_dates.sort()
+    revenue_trend: list[dict[str, Any]] = [{"date": d.isoformat(), "revenue_ex": 0.0, "forecast_ex": None} for d in month_starts]
+    orders_trend: list[dict[str, Any]] = [{"date": d.isoformat(), "orders": 0, "aov_ex": 0.0, "forecast_orders": None} for d in month_starts]
+    revenue_by_month = {row["date"]: row for row in revenue_trend}
+    orders_by_month = {row["date"]: row for row in orders_trend}
+    month_order_keys: dict[str, set[str]] = {row["date"]: set() for row in orders_trend}
 
-    def bucket_for(d: str) -> str:
-        try:
-            dt = date.fromisoformat(d)
-        except Exception:
-            return bucket_dates[0].isoformat()
-        chosen = bucket_dates[0]
-        for b in bucket_dates:
-            if b <= dt:
-                chosen = b
-            else:
-                break
-        return chosen.isoformat()
+    def month_key(d: date) -> str:
+        return date(d.year, d.month, 1).isoformat()
 
-    for row in order_rows:
-        key = bucket_for(str(row.get("order_date", "") or ""))
-        by_bucket[key]["revenue_ex"] = float(by_bucket[key]["revenue_ex"] or 0.0) + float(row.get("revenue_ex", 0.0) or 0.0)
-        by_order_bucket[key]["orders"] = int(by_order_bucket[key]["orders"] or 0) + 1
-        by_order_bucket[key]["aov_ex"] = float(by_order_bucket[key]["aov_ex"] or 0.0) + float(row.get("revenue_ex", 0.0) or 0.0)
+    today = date.today()
+    as_of = min(today, year_end) if chart_year == today.year else year_end
+    ytd_revenue = 0.0
 
-    for row in orders_trend:
-        count = int(row.get("orders", 0) or 0)
-        revenue_sum = float(row.get("aov_ex", 0.0) or 0.0)
-        row["aov_ex"] = (revenue_sum / count) if count > 0 else 0.0
+    year_lines_iter = (
+        _iter_invoice_lines(since=year_start, until=year_end, sku_id=sku_filter)
+        if basis == "invoice"
+        else _iter_order_lines(since=year_start, until=year_end, sku_id=sku_filter)
+    )
+    for (
+        line_id,
+        line_date,
+        _company_id,
+        _company_name,
+        order_number,
+        _status,
+        _quantity,
+        net_revenue_ex,
+        _sku_id,
+        _product_group,
+        _packaging_type,
+    ) in year_lines_iter:
+        key = month_key(line_date)
+        if key in revenue_by_month:
+            revenue_by_month[key]["revenue_ex"] = float(revenue_by_month[key]["revenue_ex"] or 0.0) + float(net_revenue_ex or 0.0)
+            order_key = str(order_number or "").strip() or str(line_id)
+            month_order_keys[key].add(order_key)
+        if chart_year == today.year and line_date <= as_of:
+            ytd_revenue += float(net_revenue_ex or 0.0)
+
+    for key, row in orders_by_month.items():
+        order_count = len(month_order_keys.get(key, set()))
+        row["orders"] = int(order_count)
+        revenue = float(revenue_by_month[key]["revenue_ex"] or 0.0)
+        row["aov_ex"] = (revenue / order_count) if order_count > 0 else 0.0
+
+    # Determine month weights from historical years (same basis + sku filter), fallback to uniform.
+    month_weights: list[float] = [1.0 / 12.0 for _ in range(12)]
+    historical_years = [int(y) for y in (available_years or []) if int(y) > 0 and int(y) != chart_year]
+    historical_years = sorted(historical_years)[-4:]
+    if historical_years:
+        sums = [0.0 for _ in range(12)]
+        counts = [0 for _ in range(12)]
+        for y in historical_years:
+            start = date(y, 1, 1)
+            end = date(y, 12, 31)
+            totals_by_month = [0.0 for _ in range(12)]
+            it = (
+                _iter_invoice_lines(since=start, until=end, sku_id=sku_filter)
+                if basis == "invoice"
+                else _iter_order_lines(since=start, until=end, sku_id=sku_filter)
+            )
+            for (_lid, d, _cid, _cname, _on, _st, _qty, rev, _sku, _pg, _pt) in it:
+                totals_by_month[int(d.month) - 1] += float(rev or 0.0)
+            total_year = sum(totals_by_month)
+            if total_year <= 0:
+                continue
+            for idx in range(12):
+                sums[idx] += totals_by_month[idx] / total_year
+                counts[idx] += 1
+        averaged = [(sums[i] / counts[i]) if counts[i] > 0 else 0.0 for i in range(12)]
+        if sum(averaged) > 0:
+            month_weights = averaged
+
+    # Forecast total-year revenue from ytd using historical cumulative share at end of current month.
+    if chart_year == today.year:
+        ytd_month = int(as_of.month)
+        ytd_share = sum(month_weights[:ytd_month])
+        projected_total = (ytd_revenue / ytd_share) if ytd_share > 0 else 0.0
+        if projected_total > 0:
+            # Orders forecast: run-rate on orders YTD distributed with the same seasonality weights.
+            ytd_orders = sum(int(orders_by_month[date(chart_year, m, 1).isoformat()]["orders"] or 0) for m in range(1, ytd_month + 1))
+            projected_orders_total = (float(ytd_orders) / ytd_share) if ytd_share > 0 else 0.0
+            for idx, month_start in enumerate(month_starts):
+                if idx + 1 <= ytd_month:
+                    continue
+                key = month_start.isoformat()
+                revenue_by_month[key]["forecast_ex"] = float(projected_total) * float(month_weights[idx] or 0.0)
+                orders_by_month[key]["forecast_orders"] = float(projected_orders_total) * float(month_weights[idx] or 0.0) if projected_orders_total > 0 else None
 
     year = int(range_since.year)
     alerts: list[dict[str, Any]] = []
