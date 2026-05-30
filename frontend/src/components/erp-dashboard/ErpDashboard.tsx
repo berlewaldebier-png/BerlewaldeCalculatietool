@@ -680,7 +680,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
             )}
 
             <section>
-              <Card className="erp-pad">
+              <Card className={`erp-pad${chartView === "revenue" ? "" : " hidden"}`}>
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <h2 className="module-card-title">
