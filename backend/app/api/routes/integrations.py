@@ -16,6 +16,7 @@ from app.domain.auth_dependencies import require_user
 from app.domain import douano_oauth_storage
 from app.domain import douano_sync_storage
 from app.domain import douano_product_mapping_storage
+from app.domain import postgres_storage
 from app.domain import douano_product_ignore_storage
 from app.domain import dataset_store
 from app.domain import douano_margin_service
@@ -961,6 +962,7 @@ def get_douano_unmapped_groups(
     since: str = Query("", description="Optioneel: since (YYYY-MM-DD)"),
     limit: int = Query(200, ge=1, le=1000),
     status: str = Query("open", description="open|resolved|all"),
+    include_zero_revenue: bool = Query(False, description="Toon ook groepen met netto omzet = 0"),
 ) -> dict[str, Any]:
     return {
         "result": douano_unmapped_service.list_unmapped_groups(
@@ -969,6 +971,7 @@ def get_douano_unmapped_groups(
             since=since,
             limit=int(limit),
             status=str(status or "open").strip().lower() or "open",
+            include_zero_revenue=bool(include_zero_revenue),
         )
     }
 
@@ -1024,6 +1027,26 @@ def put_douano_unmapped_rule(payload: dict[str, Any]) -> dict[str, Any]:
     return {"result": record}
 
 
+@router.get("/douano/unmapped-rules")
+def get_douano_unmapped_rules(
+    action: str = Query("", description="Optioneel: filter op action (categorize|ignore|map_to_sku)"),
+    match_type: str = Query("", description="Optioneel: filter op match_type (douano_product_id|product0_description)"),
+    limit: int = Query(10000, ge=1, le=50000),
+) -> dict[str, Any]:
+    """List stored unmapped rules.
+
+    Used to show which 'Ongekoppelde regels' have been solved via action=map_to_sku.
+    """
+    items = douano_unmapped_rule_storage.list_rules(limit=int(limit))
+    act = str(action or "").strip()
+    mt = str(match_type or "").strip()
+    if act:
+        items = [r for r in items if str(r.get("action", "") or "").strip() == act]
+    if mt:
+        items = [r for r in items if str(r.get("match_type", "") or "").strip() == mt]
+    return {"items": items}
+
+
 @router.post("/douano/backfill-line-snapshots")
 def post_douano_backfill_line_snapshots(
     since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
@@ -1042,6 +1065,132 @@ def post_douano_backfill_line_snapshots(
 @router.get("/douano/product-mappings")
 def get_douano_product_mappings(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
     return {"items": douano_product_mapping_storage.list_mappings(limit=int(limit))}
+
+
+@router.post("/douano/create-service-sku")
+def post_douano_create_service_sku(payload: dict[str, Any]) -> dict[str, Any]:
+    """Create a service SKU (kind=article) and map a Douano product to it.
+
+    This supports pass-through/service lines like "Verzending" and "Proeverij" that should:
+    - be mapped (so omzet & marge totals reconcile),
+    - but not be forced into beer/packaging cost combos.
+
+    The created SKU is a canonical (articles + skus) record:
+    - article.kind = sellable
+    - article.sellable_subtype = dienst
+    - sku.kind = article
+    - sku.payload.product_group = dienst
+    """
+    try:
+        douano_product_id = int(payload.get("douano_product_id", 0) or 0)
+        name = str(payload.get("name", "") or "").strip()
+        uom = str(payload.get("uom", "") or "").strip().lower() or "stuk"
+        if douano_product_id <= 0:
+            raise ValueError("douano_product_id ontbreekt")
+        if not name:
+            raise ValueError("name is verplicht")
+
+        def _slugify(value: str) -> str:
+            slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "")).strip("-")
+            while "--" in slug:
+                slug = slug.replace("--", "-")
+            return slug
+
+        with postgres_storage.transaction():
+            articles = dataset_store.load_dataset("articles")
+            skus = dataset_store.load_dataset("skus")
+            if not isinstance(articles, list):
+                articles = []
+            if not isinstance(skus, list):
+                skus = []
+
+            # If already mapped to a SKU, return it (idempotent).
+            existing_mappings = douano_product_mapping_storage.list_mappings(limit=20000)
+            for row in existing_mappings:
+                if int(row.get("douano_product_id", 0) or 0) == douano_product_id:
+                    sku_id = str(row.get("sku_id", "") or "").strip()
+                    if sku_id:
+                        return {"created": False, "sku_id": sku_id, "mapping": row}
+
+            articles_by_id = {str(r.get("id", "") or ""): r for r in articles if isinstance(r, dict) and str(r.get("id", "") or "")}
+
+            # Prefer reusing an existing dienst article by name (case-insensitive).
+            existing_article_id = ""
+            for row in articles:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("sellable_subtype", "") or "").strip().lower() != "dienst":
+                    continue
+                row_name = str(row.get("name", row.get("naam", "")) or "").strip().lower()
+                if row_name and row_name == name.lower():
+                    existing_article_id = str(row.get("id", "") or "").strip()
+                    break
+
+            article_id = existing_article_id
+            if not article_id:
+                base_slug = _slugify(name) or "dienst"
+                candidate = f"service-{base_slug}"
+                article_id = candidate
+                suffix = 2
+                while article_id in articles_by_id:
+                    article_id = f"{candidate}-{suffix}"
+                    suffix += 1
+
+            sku_id = f"sku-{article_id}".lower()
+
+            # Upsert Article row.
+            if article_id not in articles_by_id:
+                code = f"SVC-{_slugify(name)[:12]}".upper()
+                articles.append(
+                    {
+                        "id": article_id,
+                        "code": code[:20],
+                        "name": name,
+                        "kind": "sellable",
+                        "uom": uom,
+                        "content_liter": 0.0,
+                        "active": True,
+                        "sellable_subtype": "dienst",
+                    }
+                )
+
+            # Upsert SKU row (kind=article).
+            skus_by_id = {str(r.get("id", "") or ""): r for r in skus if isinstance(r, dict) and str(r.get("id", "") or "")}
+            if sku_id not in skus_by_id:
+                skus.append(
+                    {
+                        "id": sku_id,
+                        "kind": "article",
+                        "beer_id": "",
+                        "format_article_id": "",
+                        "article_id": article_id,
+                        "code": f"SVC-{_slugify(name)[:12]}".upper()[:20],
+                        "name": name,
+                        "active": True,
+                        # Classification: service lines.
+                        "product_group": "dienst",
+                        "alcohol_category": "",
+                        "packaging_type": "",
+                        # Convenience: allow filtering in UI without needing articles join.
+                        "sellable_subtype": "dienst",
+                    }
+                )
+
+            # Persist canonical datasets (table-backed) with full payload.
+            dataset_store.save_dataset("articles", articles)
+            dataset_store.save_dataset("skus", skus)
+
+            mapping = douano_product_mapping_storage.upsert_mapping(
+                douano_product_id=douano_product_id,
+                sku_id=sku_id,
+                product_group="dienst",
+                alcohol_category="",
+                packaging_type="",
+            )
+
+        return {"created": True, "sku_id": sku_id, "article_id": article_id, "mapping": mapping}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/douano/product-mappings/{douano_product_id}")

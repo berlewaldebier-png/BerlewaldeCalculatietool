@@ -48,6 +48,7 @@ export function FinalizeStep({
           <Metric label="Voorstel" value={scenario.name} />
           <Metric label="Omzet (ex)" value={euro(metrics.revenueEx)} />
           <Metric label="Marge" value={`${Math.round(metrics.marginPct)}%`} />
+          <Metric label="Handelingskosten (ex)" value={euro(metrics.handlingCostEx ?? 0)} />
           <Metric
             label="Break-even omzet"
             value={metrics.breakEvenCurrent === null ? "Niet ingesteld" : euro(metrics.breakEvenCurrent)}

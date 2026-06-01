@@ -14,6 +14,10 @@ from app.domain import auth_service
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
 from app.domain import seed_bundle_service
+from app.domain import douano_sync_storage
+from app.domain import production_storage
+from app.domain import company_distance_storage
+from app.domain.ors_client import OrsClient, Coordinate
 from app.domain.auth_dependencies import require_admin, require_user
 from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
 from app.schemas.kostprijs_activation import (
@@ -1600,6 +1604,506 @@ def post_repair_cost_lines(
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/rebuild-overhead-cost-versions")
+def post_rebuild_overhead_cost_versions(
+    year: int = Query(2025, description="Jaar om te herberekenen (default 2025)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    activate: bool = Query(True, description="Wanneer true: activeer nieuw aangemaakte versies direct."),
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Phase 4: bulk rebuild overhead by minting new cost versions for a year and (optionally) activating them."""
+    owner = str(session.get("username", "") or "").strip() or "admin"
+    report = cost_versions_storage.rebuild_overhead_versions_for_year(year=int(year), owner=owner, dry_run=bool(dry_run))
+    if dry_run:
+        return {"result": report}
+
+    # Rebuild normalized per-SKU cost rows so activation + dashboards see the new numbers.
+    cost_versions_storage.rebuild_sku_rows_for_year(year=int(year), dry_run=False)
+
+    activated = 0
+    if activate:
+        created_ids = report.get("created_version_ids") if isinstance(report, dict) else None
+        if isinstance(created_ids, list):
+            for version_id in created_ids:
+                vid = str(version_id or "").strip()
+                if not vid:
+                    continue
+                if dataset_store.activate_cost_version(vid, context={"action": "bulk_overhead_rebuild", "owner": owner}) is not None:
+                    activated += 1
+
+    return {"result": {**(report if isinstance(report, dict) else {}), "activated": activated}}
+
+
+@router.post("/derive-production-order-drivers")
+def post_derive_production_order_drivers(
+    year: int = Query(2025, description="Jaar om te vullen (default 2025)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    overwrite: bool = Query(False, description="Wanneer true: overschrijf bestaande waarden (anders alleen vullen als 0)."),
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Derive production 'normal' drivers from Douano order lines (order basis).
+
+    - normal_shipments: COUNT(DISTINCT sales_order_id) for the year
+    - normal_orderlines: COUNT(*) order lines for the year
+
+    Rationale: invoice basis can merge multiple orders into one invoice; for handling costs we want the activity count.
+    """
+    try:
+        from app.domain import douano_sync_storage
+
+        yr = int(year or 0)
+        if yr <= 0:
+            raise ValueError("year is verplicht.")
+
+        postgres_storage.ensure_schema()
+        production_storage.ensure_schema()
+        douano_sync_storage.ensure_schema()
+
+        since = f"{yr:04d}-01-01"
+        until = f"{yr + 1:04d}-01-01"
+
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                      COUNT(DISTINCT l.sales_order_id)::int AS shipments,
+                      COUNT(*)::int AS orderlines
+                    FROM douano_sales_order_lines l
+                    WHERE l.order_date >= %s::date
+                      AND l.order_date < %s::date
+                    """,
+                    (since, until),
+                )
+                row = cur.fetchone() or (0, 0)
+                shipments, orderlines = row
+
+        result = {
+            "year": yr,
+            "basis": "order",
+            "source": "douano_sales_order_lines",
+            "computed": {"normal_shipments": int(shipments or 0), "normal_orderlines": int(orderlines or 0)},
+            "dry_run": bool(dry_run),
+            "overwrite": bool(overwrite),
+            "owner": str(session.get("username", "") or "").strip() or "admin",
+        }
+
+        if dry_run:
+            return {"result": result}
+
+        updated = production_storage.update_order_drivers_for_year(
+            jaar=yr,
+            normal_shipments=float(shipments or 0),
+            normal_orderlines=float(orderlines or 0),
+            overwrite=bool(overwrite),
+        )
+        return {"result": {**result, "updated": updated}}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/derive-sales-liters")
+def post_derive_sales_liters(
+    year: int = Query(2025, description="Jaar om te vullen (default 2025)."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    overwrite: bool = Query(False, description="Wanneer true: overschrijf bestaande waarden (anders alleen vullen als 0)."),
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Derive sales liters from Douano invoice lines (invoice basis).
+
+    Liters are computed for mapped lines only:
+      quantity * articles.content_liter (via douano_product_mapping -> skus -> articles)
+    """
+    try:
+        from app.domain import douano_sync_storage
+
+        yr = int(year or 0)
+        if yr <= 0:
+            raise ValueError("year is verplicht.")
+
+        postgres_storage.ensure_schema()
+        production_storage.ensure_schema()
+        douano_sync_storage.ensure_schema()
+
+        since = f"{yr:04d}-01-01"
+        until = f"{yr + 1:04d}-01-01"
+
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                      COALESCE(SUM(l.quantity * COALESCE(a.content_liter, 0)), 0) AS liters
+                    FROM douano_sales_invoice_lines l
+                    JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN skus s ON s.id = m.sku_id
+                    LEFT JOIN articles a ON a.id = s.format_article_id
+                    WHERE l.invoice_date >= %s::date
+                      AND l.invoice_date < %s::date
+                    """,
+                    (since, until),
+                )
+                row = cur.fetchone() or (0,)
+                liters = row[0] if isinstance(row, (tuple, list)) else 0
+
+        liters_value = float(liters or 0.0)
+        result = {
+            "year": yr,
+            "basis": "invoice",
+            "source": "douano_sales_invoice_lines",
+            "computed": {"sales_l": liters_value},
+            "dry_run": bool(dry_run),
+            "overwrite": bool(overwrite),
+            "owner": str(session.get("username", "") or "").strip() or "admin",
+        }
+
+        if dry_run:
+            return {"result": result}
+
+        updated = production_storage.update_sales_liters_for_year(
+            jaar=yr,
+            sales_l=liters_value,
+            overwrite=bool(overwrite),
+        )
+        return {"result": {**result, "updated": updated}}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/repair/douano-companies-flat")
+def post_repair_douano_companies_flat(
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    limit: int = Query(0, ge=0, le=20000, description="Optioneel: max aantal companies om te verwerken (0 = alles)."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Backfill normalized address + sales_price_class columns from douano_companies.raw_payload.
+
+    Useful after schema migrations; avoids needing to re-sync from Douano.
+    """
+    try:
+        postgres_storage.ensure_schema()
+        douano_sync_storage.ensure_schema()
+
+        lim = int(limit or 0)
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT company_id, raw_payload
+                    FROM douano_companies
+                    ORDER BY company_id
+                    """
+                )
+                rows = cur.fetchall() or []
+
+        processed = 0
+        updated = 0
+        missing_payload = 0
+        sample: list[dict[str, Any]] = []
+
+        def extract(raw: Any) -> tuple[str, str, str, str, int, str]:
+            if not isinstance(raw, dict):
+                return ("", "", "", "", 0, "")
+            invoice = raw.get("invoice_address") if isinstance(raw.get("invoice_address"), dict) else {}
+            line1 = str(invoice.get("address_line1", "") or "")
+            post = str(invoice.get("post_code", "") or "")
+            city = str(invoice.get("city", "") or "")
+            country = ""
+            cobj = invoice.get("country")
+            if isinstance(cobj, dict):
+                country = str(cobj.get("name", "") or "")
+
+            spc = raw.get("sales_price_class")
+            spc_id = 0
+            spc_name = ""
+            if isinstance(spc, dict):
+                try:
+                    spc_id = int(spc.get("id", 0) or 0)
+                except (TypeError, ValueError):
+                    spc_id = 0
+                spc_name = str(spc.get("name", "") or "")
+            return (line1, post, city, country, spc_id, spc_name)
+
+        if dry_run:
+            for company_id, raw_payload in rows[: min(len(rows), 10)]:
+                raw = raw_payload if isinstance(raw_payload, dict) else {}
+                line1, post, city, country, spc_id, spc_name = extract(raw)
+                sample.append(
+                    {
+                        "company_id": int(company_id or 0),
+                        "invoice_address": {"address_line1": line1, "post_code": post, "city": city, "country": country},
+                        "sales_price_class": {"id": spc_id, "name": spc_name},
+                    }
+                )
+            return {
+                "result": {
+                    "dry_run": True,
+                    "total_companies": len(rows),
+                    "sample": sample,
+                }
+            }
+
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                for company_id, raw_payload in rows:
+                    if lim and processed >= lim:
+                        break
+                    processed += 1
+                    cid = int(company_id or 0)
+                    raw = raw_payload if isinstance(raw_payload, dict) else {}
+                    if not raw:
+                        missing_payload += 1
+                    line1, post, city, country, spc_id, spc_name = extract(raw)
+                    cur.execute(
+                        """
+                        UPDATE douano_companies
+                        SET
+                          invoice_address_line1 = %s,
+                          invoice_post_code = %s,
+                          invoice_city = %s,
+                          invoice_country = %s,
+                          sales_price_class_id = %s,
+                          sales_price_class_name = %s
+                        WHERE company_id = %s
+                        """,
+                        (line1, post, city, country, int(spc_id or 0), spc_name, cid),
+                    )
+                    if int(cur.rowcount or 0) > 0:
+                        updated += 1
+            if not postgres_storage.in_transaction():
+                conn.commit()
+
+        return {
+            "result": {
+                "dry_run": False,
+                "processed": processed,
+                "updated": updated,
+                "missing_payload": missing_payload,
+            }
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _hash_address(*parts: str) -> str:
+    import hashlib
+
+    normalized = "|".join([str(p or "").strip().lower() for p in parts])
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+@router.post("/ors/compute-company-distances")
+def post_compute_company_distances(
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    overwrite: bool = Query(False, description="Wanneer true: overschrijf bestaande cache entries."),
+    limit: int = Query(500, ge=1, le=5000, description="Max aantal companies om te verwerken."),
+    exclude_particulier: bool = Query(True, description="Wanneer true: sla Particulier over op basis van sales_price_class_name."),
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Compute and cache driving distance (km one-way) from brewery to customers via ORS.
+
+    Requires env var: CALCULATIETOOL_ORS_API_KEY
+
+    Brewery origin is currently fixed for MVP:
+      Enkweg 2A, 7021 KD Zelhem, NL
+
+    Notes:
+    - Uses invoice address only (delivery address not available yet).
+    - Caches per company_id with address_hash.
+    """
+    try:
+        # This endpoint writes to PostgreSQL. We must commit those writes explicitly;
+        # the request middleware rolls back pooled connections after each request.
+        with postgres_storage.transaction():
+            postgres_storage.ensure_schema()
+            douano_sync_storage.ensure_schema()
+            company_distance_storage.ensure_schema()
+
+            ors = OrsClient()
+            if not ors.is_configured():
+                raise HTTPException(status_code=400, detail="ORS API key ontbreekt (CALCULATIETOOL_ORS_API_KEY).")
+
+            owner = str(session.get("username", "") or "").strip() or "admin"
+
+            brewery_query = "Enkweg 2A, 7021 KD Zelhem, Nederland"
+            brewery_coord = ors.geocode(brewery_query, country="NL")
+            if brewery_coord is None:
+                raise HTTPException(status_code=400, detail="Brouwerijadres kon niet worden geocoded via ORS.")
+
+            lim = int(limit or 500)
+            lim = max(1, min(lim, 5000))
+            where_parts = ["is_customer = TRUE"]
+            params: list[Any] = []
+            if exclude_particulier:
+                where_parts.append("LOWER(COALESCE(sales_price_class_name, '')) <> 'particulier'")
+            where_parts.append("COALESCE(invoice_address_line1, '') <> ''")
+            where_parts.append("COALESCE(invoice_post_code, '') <> ''")
+            where = " AND ".join(where_parts)
+
+            # Selection strategy:
+            # - When overwrite=false, we may hit a prefix of already-cached OK customers (ORDER BY company_id).
+            #   To avoid returning "cached skip N / updated 0" while there are still pending customers later,
+            #   we scan a wider window and stop once we *computed* `lim` customers (or run out).
+            # - When overwrite=true, scan_limit == lim (recompute everything in that window).
+            scan_limit = lim if overwrite else min(5000, lim * 50)
+            params.append(scan_limit)
+
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""
+                        SELECT
+                          company_id,
+                          COALESCE(public_name, '') AS public_name,
+                          COALESCE(name, '') AS name,
+                          COALESCE(invoice_address_line1, '') AS line1,
+                          COALESCE(invoice_post_code, '') AS post_code,
+                          COALESCE(invoice_city, '') AS city,
+                          COALESCE(invoice_country, '') AS country,
+                          COALESCE(sales_price_class_name, '') AS price_class
+                        FROM douano_companies
+                        WHERE {where}
+                        ORDER BY company_id
+                        LIMIT %s
+                        """
+                    ,
+                        tuple(params),
+                    )
+                    companies = cur.fetchall() or []
+
+            processed = 0
+            skipped_cached = 0
+            geocode_failed = 0
+            routed_failed = 0
+            updated = 0
+            results_sample: list[dict[str, Any]] = []
+
+            for row in companies:
+                # Stop once we've actually computed `lim` entries (ok + failures).
+                if not overwrite and (updated + geocode_failed + routed_failed) >= lim:
+                    break
+                (
+                    company_id,
+                    public_name,
+                    name,
+                    line1,
+                    post_code,
+                    city,
+                    country,
+                    price_class,
+                ) = row
+                cid = int(company_id or 0)
+                if cid <= 0:
+                    continue
+                processed += 1
+
+                address_hash = _hash_address(line1, post_code, city, country)
+                cached = company_distance_storage.get_cache(cid)
+                if cached and not overwrite:
+                    if str(cached.get("address_hash", "") or "") == address_hash and str(cached.get("status", "") or "") == "ok":
+                        skipped_cached += 1
+                        continue
+
+                query = f"{line1}, {post_code} {city}, {country or 'Nederland'}"
+                coord = ors.geocode(query, country="NL", focus=Coordinate(lat=brewery_coord.lat, lng=brewery_coord.lng))
+                if coord is None:
+                    geocode_failed += 1
+                    if not dry_run:
+                        company_distance_storage.upsert_distance(
+                            company_id=cid,
+                            address_hash=address_hash,
+                            lat=0,
+                            lng=0,
+                            distance_km_one_way=0,
+                            status="geocode_failed",
+                            error="geocode_failed",
+                        )
+                    continue
+
+                km = ors.driving_distance_km_one_way(
+                    Coordinate(lat=brewery_coord.lat, lng=brewery_coord.lng),
+                    Coordinate(lat=coord.lat, lng=coord.lng),
+                )
+                if km is None:
+                    routed_failed += 1
+                    if not dry_run:
+                        company_distance_storage.upsert_distance(
+                            company_id=cid,
+                            address_hash=address_hash,
+                            lat=coord.lat,
+                            lng=coord.lng,
+                            distance_km_one_way=0,
+                            status="route_failed",
+                            error="route_failed",
+                        )
+                    continue
+
+                updated += 1
+                if not dry_run:
+                    company_distance_storage.upsert_distance(
+                        company_id=cid,
+                        address_hash=address_hash,
+                        lat=coord.lat,
+                        lng=coord.lng,
+                        distance_km_one_way=km,
+                        status="ok",
+                        error="",
+                    )
+
+                if len(results_sample) < 15:
+                    results_sample.append(
+                        {
+                            "company_id": cid,
+                            "company_name": str(public_name or name or ""),
+                            "sales_price_class": str(price_class or ""),
+                            "address": f"{line1}, {post_code} {city}",
+                            "customer_coord": {"lat": coord.lat, "lng": coord.lng},
+                            "distance_km_one_way": round(float(km or 0), 2),
+                        }
+                    )
+
+            return {
+                "result": {
+                    "dry_run": bool(dry_run),
+                    "owner": owner,
+                    "brewery_query": brewery_query,
+                    "brewery_coord": {"lat": brewery_coord.lat, "lng": brewery_coord.lng},
+                    "exclude_particulier": bool(exclude_particulier),
+                    "overwrite": bool(overwrite),
+                    "limit": lim,
+                    "processed": processed,
+                    "skipped_cached": skipped_cached,
+                    "geocode_failed": geocode_failed,
+                    "route_failed": routed_failed,
+                    "updated": updated,
+                    "sample": results_sample,
+                }
+            }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/ors/company-distance-cache")
+def get_company_distance_cache(
+    company_id: int = Query(..., ge=1, description="Douano company_id om cache voor op te halen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Debug helper: return raw cached distance entry for a company_id (if any)."""
+    try:
+        postgres_storage.ensure_schema()
+        company_distance_storage.ensure_schema()
+        cached = company_distance_storage.get_cache(int(company_id))
+        return {"company_id": int(company_id), "cache": cached}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Iterable
 
 from app.domain import postgres_storage
+
+logger = logging.getLogger(__name__)
 
 _SCHEMA_READY = False
 _SCHEMA_LOCK = Lock()
@@ -56,10 +59,34 @@ def ensure_schema() -> None:
                         company_number TEXT NOT NULL DEFAULT '',
                         is_customer BOOLEAN NOT NULL DEFAULT FALSE,
                         status TEXT NOT NULL DEFAULT '',
+                        invoice_address_line1 TEXT NOT NULL DEFAULT '',
+                        invoice_post_code TEXT NOT NULL DEFAULT '',
+                        invoice_city TEXT NOT NULL DEFAULT '',
+                        invoice_country TEXT NOT NULL DEFAULT '',
+                        sales_price_class_id BIGINT NOT NULL DEFAULT 0,
+                        sales_price_class_name TEXT NOT NULL DEFAULT '',
                         updated_at TIMESTAMPTZ,
                         raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb
                     )
                     """
+                )
+                cur.execute(
+                    "ALTER TABLE douano_companies ADD COLUMN IF NOT EXISTS invoice_address_line1 TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_companies ADD COLUMN IF NOT EXISTS invoice_post_code TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_companies ADD COLUMN IF NOT EXISTS invoice_city TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_companies ADD COLUMN IF NOT EXISTS invoice_country TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_companies ADD COLUMN IF NOT EXISTS sales_price_class_id BIGINT NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_companies ADD COLUMN IF NOT EXISTS sales_price_class_name TEXT NOT NULL DEFAULT ''"
                 )
                 cur.execute(
                     """
@@ -310,6 +337,25 @@ def upsert_companies(items: Iterable[dict[str, Any]]) -> int:
                 company_id = int(item.get("id", 0) or 0)
                 if company_id <= 0:
                     continue
+
+                invoice_address = item.get("invoice_address") if isinstance(item.get("invoice_address"), dict) else {}
+                invoice_line1 = str(invoice_address.get("address_line1", "") or "")
+                invoice_post = str(invoice_address.get("post_code", "") or "")
+                invoice_city = str(invoice_address.get("city", "") or "")
+                invoice_country = ""
+                invoice_country_obj = invoice_address.get("country")
+                if isinstance(invoice_country_obj, dict):
+                    invoice_country = str(invoice_country_obj.get("name", "") or "")
+
+                spc_obj = item.get("sales_price_class")
+                spc_id = 0
+                spc_name = ""
+                if isinstance(spc_obj, dict):
+                    try:
+                        spc_id = int(spc_obj.get("id", 0) or 0)
+                    except (TypeError, ValueError):
+                        spc_id = 0
+                    spc_name = str(spc_obj.get("name", "") or "")
                 cur.execute(
                     """
                     INSERT INTO douano_companies(
@@ -321,10 +367,16 @@ def upsert_companies(items: Iterable[dict[str, Any]]) -> int:
                         company_number,
                         is_customer,
                         status,
+                        invoice_address_line1,
+                        invoice_post_code,
+                        invoice_city,
+                        invoice_country,
+                        sales_price_class_id,
+                        sales_price_class_name,
                         updated_at,
                         raw_payload
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                     ON CONFLICT (company_id)
                     DO UPDATE SET
                         entity_version = EXCLUDED.entity_version,
@@ -334,6 +386,12 @@ def upsert_companies(items: Iterable[dict[str, Any]]) -> int:
                         company_number = EXCLUDED.company_number,
                         is_customer = EXCLUDED.is_customer,
                         status = EXCLUDED.status,
+                        invoice_address_line1 = EXCLUDED.invoice_address_line1,
+                        invoice_post_code = EXCLUDED.invoice_post_code,
+                        invoice_city = EXCLUDED.invoice_city,
+                        invoice_country = EXCLUDED.invoice_country,
+                        sales_price_class_id = EXCLUDED.sales_price_class_id,
+                        sales_price_class_name = EXCLUDED.sales_price_class_name,
                         updated_at = EXCLUDED.updated_at,
                         raw_payload = EXCLUDED.raw_payload
                     """,
@@ -346,6 +404,12 @@ def upsert_companies(items: Iterable[dict[str, Any]]) -> int:
                         str(item.get("company_number", "") or ""),
                         bool(item.get("is_customer", False)),
                         str(((item.get("company_status") or {}) if isinstance(item.get("company_status"), dict) else {}).get("name", "") or ""),
+                        invoice_line1,
+                        invoice_post,
+                        invoice_city,
+                        invoice_country,
+                        spc_id,
+                        spc_name,
                         _parse_ts(item.get("updated_at")),
                         json.dumps(item, ensure_ascii=True),
                     ),
@@ -841,23 +905,145 @@ def upsert_sales_invoices(items: Iterable[dict[str, Any]]) -> dict[str, int]:
 
 def list_companies(*, only_customers: bool = False, limit: int = 200) -> list[dict[str, Any]]:
     ensure_schema()
+    # Ensure distance cache table exists when companies are listed (used by Beheer > API integraties).
+    from app.domain import company_distance_storage
+
+    company_distance_storage.ensure_schema()
     lim = max(1, min(int(limit or 200), 2000))
     where = "WHERE is_customer = TRUE" if only_customers else ""
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT company_id, name, public_name, vat_number, company_number, is_customer, status, updated_at
-                FROM douano_companies
-                {where}
-                ORDER BY name
-                LIMIT %s
-                """,
-                (lim,),
-            )
-            rows = cur.fetchall() or []
+            try:
+                cur.execute(
+                    f"""
+                    SELECT
+                      douano_companies.company_id,
+                      name,
+                      public_name,
+                      vat_number,
+                      company_number,
+                      is_customer,
+                      douano_companies.status,
+                      invoice_address_line1,
+                      invoice_post_code,
+                      invoice_city,
+                      invoice_country,
+                      sales_price_class_id,
+                      sales_price_class_name,
+                      COALESCE(dc.status, '') AS distance_status,
+                      COALESCE(dc.distance_km_one_way, 0) AS distance_km_one_way,
+                      dc.updated_at AS distance_updated_at,
+                      douano_companies.updated_at
+                    FROM douano_companies
+                    LEFT JOIN company_distance_cache dc ON dc.company_id = douano_companies.company_id
+                    {where}
+                    ORDER BY name
+                    LIMIT %s
+                    """,
+                    (lim,),
+                )
+                rows = cur.fetchall() or []
+            except Exception as exc:
+                # Fail-open: if the distance cache table isn't available for any reason,
+                # fall back to the legacy company listing so the UI remains usable.
+                logger.warning(
+                    "list_companies: failed to join company_distance_cache; falling back to base company query",
+                    exc_info=True,
+                )
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+                got_rows = False
+
+                # Also attempt a simpler join query (without updated_at) in case the
+                # failure is caused by a type/column issue with the timestamp field.
+                try:
+                    cur.execute(
+                        f"""
+                        SELECT
+                          douano_companies.company_id,
+                          name,
+                          public_name,
+                          vat_number,
+                          company_number,
+                          is_customer,
+                          douano_companies.status,
+                          invoice_address_line1,
+                          invoice_post_code,
+                          invoice_city,
+                          invoice_country,
+                          sales_price_class_id,
+                          sales_price_class_name,
+                          COALESCE(dc.status, '') AS distance_status,
+                          COALESCE(dc.distance_km_one_way, 0) AS distance_km_one_way,
+                          NULL::timestamptz AS distance_updated_at,
+                          douano_companies.updated_at
+                        FROM douano_companies
+                        LEFT JOIN company_distance_cache dc ON dc.company_id = douano_companies.company_id
+                        {where}
+                        ORDER BY name
+                        LIMIT %s
+                        """,
+                        (lim,),
+                    )
+                    rows = cur.fetchall() or []
+                    got_rows = True
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+
+                if not got_rows:
+                    # Last-resort fallback: no join information.
+                    cur.execute(
+                        f"""
+                        SELECT
+                          douano_companies.company_id,
+                          name,
+                          public_name,
+                          vat_number,
+                          company_number,
+                          is_customer,
+                          douano_companies.status,
+                          invoice_address_line1,
+                          invoice_post_code,
+                          invoice_city,
+                          invoice_country,
+                          sales_price_class_id,
+                          sales_price_class_name,
+                          douano_companies.updated_at
+                        FROM douano_companies
+                        {where}
+                        ORDER BY name
+                        LIMIT %s
+                        """,
+                        (lim,),
+                    )
+                    base_rows = cur.fetchall() or []
+                    rows = [(*r[:-1], "", 0, None, r[-1]) for r in base_rows]
     out: list[dict[str, Any]] = []
-    for company_id, name, public_name, vat_number, company_number, is_customer, status, updated_at in rows:
+    for (
+        company_id,
+        name,
+        public_name,
+        vat_number,
+        company_number,
+        is_customer,
+        status,
+        invoice_line1,
+        invoice_post,
+        invoice_city,
+        invoice_country,
+        spc_id,
+        spc_name,
+        distance_status,
+        distance_km_one_way,
+        distance_updated_at,
+        updated_at,
+    ) in rows:
         out.append(
             {
                 "company_id": int(company_id or 0),
@@ -867,6 +1053,18 @@ def list_companies(*, only_customers: bool = False, limit: int = 200) -> list[di
                 "company_number": str(company_number or ""),
                 "is_customer": bool(is_customer),
                 "status": str(status or ""),
+                "invoice_address": {
+                    "address_line1": str(invoice_line1 or ""),
+                    "post_code": str(invoice_post or ""),
+                    "city": str(invoice_city or ""),
+                    "country": str(invoice_country or ""),
+                },
+                "sales_price_class": {"id": int(spc_id or 0), "name": str(spc_name or "")},
+                "distance_cache": {
+                    "status": str(distance_status or ""),
+                    "distance_km_one_way": float(distance_km_one_way or 0),
+                    "updated_at": distance_updated_at.isoformat() if distance_updated_at else "",
+                },
                 "updated_at": updated_at.isoformat() if updated_at else "",
             }
         )

@@ -1,5 +1,6 @@
 import { ErpDashboard } from "@/components/erp-dashboard/ErpDashboard";
 import { getBootstrap } from "@/lib/apiServer";
+import type { ErpDashboardPayload } from "@/lib/apiShared";
 
 export default async function HomePage({
   searchParams,
@@ -29,7 +30,6 @@ export default async function HomePage({
     : "/";
   const bootstrap = await getBootstrap(
     [
-      "erp-dashboard",
       // Break-even context for dashboard target line (reuse existing frontend compute).
       "break-even-configuraties",
       "vaste-kosten",
@@ -48,8 +48,9 @@ export default async function HomePage({
     extraParams
   );
   const navigation = bootstrap.navigation ?? [];
-  const payload = (bootstrap.datasets["erp-dashboard"] as any) ?? {
-    range: { basis: "order", since: "", until: "" },
+  // ERP dashboard data is fetched client-side to avoid long SSR bootstrap timeouts.
+  const payload: ErpDashboardPayload = {
+    range: { basis: "invoice", since: "", until: "" },
     kpis: null,
     trends: { revenue: [], orders: [] },
     tables: { top_customers: [], latest_orders: [], under_break_even: [], product_groups: [], packaging_types: [] },

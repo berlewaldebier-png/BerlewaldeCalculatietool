@@ -100,6 +100,8 @@ type Props = {
   year: number;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  productie: Record<string, unknown>;
+  costManagementSettings: Record<string, unknown>;
   skus: GenericRecord[];
   articles: GenericRecord[];
   kostprijsversies: GenericRecord[];
@@ -141,6 +143,7 @@ export function OfferteSamenstellenApp({
   year,
   channels,
   bieren,
+  productie,
   skus,
   articles,
   kostprijsversies,
@@ -150,6 +153,7 @@ export function OfferteSamenstellenApp({
   samengesteldeProducten,
   breakEvenConfiguraties,
   vasteKosten,
+  costManagementSettings,
   initialMode,
   initialDraftId,
   scenarioId,
@@ -495,8 +499,16 @@ export function OfferteSamenstellenApp({
   }
 
   const scenarioMetrics = useMemo(
-    () => buildScenarioMetricsMap({ scenarios, effectiveBreakEvenSnapshot }),
-    [effectiveBreakEvenSnapshot, scenarios]
+    () =>
+      buildScenarioMetricsMap({
+        scenarios,
+        effectiveBreakEvenSnapshot,
+        year: currentYear,
+        productie,
+        vasteKosten,
+        settings: costManagementSettings,
+      }),
+    [effectiveBreakEvenSnapshot, scenarios, currentYear, productie, vasteKosten, costManagementSettings]
   );
 
   // Keep transport distance in sync with Basisgegevens so the Transport card summary is correct

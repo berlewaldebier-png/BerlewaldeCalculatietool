@@ -9,12 +9,15 @@ import { clampPage, computeTotalPages, slicePage } from "@/lib/tableControls";
 type Row = {
   company_id: number;
   company_name: string;
+  documents?: number;
   omzet_ex: number;
   korting_ex: number;
   charges_ex: number;
   netto_omzet_ex: number;
   kostprijs_ex: number;
   brutomarge_ex: number;
+  distance_km_one_way?: number;
+  km_total?: number;
   lines: number;
   unmapped_lines: number;
   ignored_lines?: number;
@@ -29,6 +32,8 @@ type SortKey =
   | "netto_omzet_ex"
   | "kostprijs_ex"
   | "brutomarge_ex"
+  | "km_total"
+  | "documents"
   | "lines"
   | "unmapped_lines"
   | "ignored_lines"
@@ -47,6 +52,12 @@ async function readJson(path: string) {
 function euro(value: number) {
   if (!Number.isFinite(value)) return "-";
   return formatMoneyEUR(value);
+}
+
+function formatKm(value: unknown, decimals = 1) {
+  const num = Number(value ?? 0);
+  if (!Number.isFinite(num) || num <= 0) return "-";
+  return `${num.toFixed(decimals).replace(".", ",")} km`;
 }
 
 function normalizeText(value: unknown) {
@@ -167,9 +178,11 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
         acc.marge += Number(row.brutomarge_ex ?? 0) || 0;
         acc.unmapped += Number(row.unmapped_lines ?? 0) || 0;
         acc.missing_cost += Number(row.missing_cost_lines ?? 0) || 0;
+        acc.documents += Number((row as any).documents ?? 0) || 0;
+        acc.km_total += Number((row as any).km_total ?? 0) || 0;
         return acc;
       },
-      { omzet: 0, netto: 0, kostprijs: 0, marge: 0, unmapped: 0, missing_cost: 0 }
+      { omzet: 0, netto: 0, kostprijs: 0, marge: 0, unmapped: 0, missing_cost: 0, documents: 0, km_total: 0 }
     );
   }, [rows]);
 
@@ -267,6 +280,8 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
           <span className="pill">Netto {euro(totals.netto)}</span>
           <span className="pill">Kostprijs {euro(totals.kostprijs)}</span>
           <span className="pill">Marge {euro(totals.marge)}</span>
+          <span className="pill">{basis === "invoice" ? "Facturen" : "Orders"} {Math.round(Number((totals as any).documents ?? 0) || 0)}</span>
+          <span className="pill">KM (retour) {formatKm((totals as any).km_total ?? 0, 0)}</span>
         </div>
       </div>
 
@@ -331,6 +346,22 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                   onClick={() => toggleSort("brutomarge_ex")}
                 />
               </th>
+              <th style={{ width: 140 }}>
+                <TableSortButton
+                  label="KM (retour)"
+                  active={sortKey === "km_total"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("km_total")}
+                />
+              </th>
+              <th style={{ width: 120 }}>
+                <TableSortButton
+                  label={basis === "invoice" ? "# Facturen" : "# Orders"}
+                  active={sortKey === "documents"}
+                  dir={sortDir}
+                  onClick={() => toggleSort("documents")}
+                />
+              </th>
               <th style={{ width: 100 }}>
                 <TableSortButton label="Regels" active={sortKey === "lines"} dir={sortDir} onClick={() => toggleSort("lines")} />
               </th>
@@ -378,6 +409,8 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
                 <td>{euro(row.netto_omzet_ex)}</td>
                 <td>{euro(row.kostprijs_ex)}</td>
                 <td>{euro(row.brutomarge_ex)}</td>
+                <td>{formatKm((row as any).km_total ?? 0, 0)}</td>
+                <td>{Math.round(Number((row as any).documents ?? 0) || 0)}</td>
                 <td>{row.lines}</td>
                 <td>
                   {row.unmapped_lines > 0 ? (
@@ -412,7 +445,7 @@ export function OmzetgegevensWorkspace({ availableYears = [] }: { availableYears
             ))}
             {pageRows.length === 0 ? (
               <tr>
-                <td colSpan={11} style={{ opacity: 0.75 }}>
+                <td colSpan={13} style={{ opacity: 0.75 }}>
                   Geen resultaten.
                 </td>
               </tr>

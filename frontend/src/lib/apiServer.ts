@@ -34,7 +34,8 @@ export async function apiGetServer<T>(path: string, nextPath: string): Promise<T
     response = await fetch(`${baseUrl}${path}`, {
       cache: "no-store",
       headers: cookieHeader ? { cookie: cookieHeader } : undefined,
-      signal: AbortSignal.timeout(20_000),
+      // Some bootstrap payloads (e.g. ERP dashboard) can take longer than 20s on cold starts / slow DB.
+      signal: AbortSignal.timeout(60_000),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

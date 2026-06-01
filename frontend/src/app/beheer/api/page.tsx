@@ -3,6 +3,8 @@ import Link from "next/link";
 import { DouanoSyncPanel } from "@/components/DouanoSyncPanel";
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
+import { OrsDistanceRunner } from "@/components/instellingen/OrsDistanceRunner";
+import { CompanyDistanceOverview } from "@/components/beheer/CompanyDistanceOverview";
 import { apiGetServer, getBootstrap } from "@/lib/apiServer";
 
 type DouanoStatus = {
@@ -99,6 +101,20 @@ export default async function ApiIntegratiesPage() {
       </SectionCard>
 
       <DouanoSyncPanel />
+
+      <SectionCard
+        title="OpenRouteService (ORS) afstanden"
+        description="Bereken rijafstanden naar klanten (km enkele reis) op basis van Douano invoice-adres. Dit gebruikt ORS geocoding + routing en cached resultaten."
+      >
+        <OrsDistanceRunner defaultExcludeParticulier />
+        <CompanyDistanceOverview />
+        <div className="placeholder-block" style={{ marginTop: 12 }}>
+          <strong>Configuratie</strong>
+          <div className="muted">
+            Vereist backend env var <code>CALCULATIETOOL_ORS_API_KEY</code> (optioneel <code>CALCULATIETOOL_ORS_BASE_URL</code>).
+          </div>
+        </div>
+      </SectionCard>
 
       <SectionCard title="Gebruikte aanroepen" description="Dit zijn de interne endpoints die we gebruiken voor de Douano OAuth flow.">
         <div className="data-table">

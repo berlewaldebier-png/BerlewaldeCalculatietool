@@ -11,10 +11,18 @@ export function ProductkoppelingWorkspace({
   initialFilter = "",
   initialSkuId = "",
   initialTab = "mappings",
+  initialUnmappedBasis = "invoice",
+  initialUnmappedYear,
+  initialUnmappedMatchType,
+  initialUnmappedLineDescription,
 }: {
   initialFilter?: string;
   initialSkuId?: string;
   initialTab?: Tab;
+  initialUnmappedBasis?: "invoice" | "order";
+  initialUnmappedYear?: number;
+  initialUnmappedMatchType?: "douano_product_id" | "product0_description";
+  initialUnmappedLineDescription?: string;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab === "unmapped" ? "unmapped" : "mappings");
 
@@ -47,7 +55,12 @@ export function ProductkoppelingWorkspace({
         {tab === "mappings" ? (
           <DouanoProductMappingCard initialFilter={initialFilter} initialSkuId={initialSkuId} />
         ) : (
-          <DouanoUnmappedRulesCard />
+          <DouanoUnmappedRulesCard
+            initialBasis={initialUnmappedBasis}
+            initialYear={initialUnmappedYear}
+            initialMatchType={initialUnmappedMatchType}
+            initialLineDescription={initialUnmappedLineDescription}
+          />
         )}
       </div>
     </div>

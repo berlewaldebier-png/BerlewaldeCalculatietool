@@ -137,11 +137,22 @@ function Modal({
   );
 }
 
-export function DouanoUnmappedRulesCard() {
-  const [basis, setBasis] = useState<Basis>("invoice");
-  const [year, setYear] = useState<number>(defaultYear());
+export function DouanoUnmappedRulesCard({
+  initialBasis = "invoice",
+  initialYear,
+  initialMatchType,
+  initialLineDescription,
+}: {
+  initialBasis?: Basis;
+  initialYear?: number;
+  initialMatchType?: "douano_product_id" | "product0_description";
+  initialLineDescription?: string;
+}) {
+  const [basis, setBasis] = useState<Basis>(initialBasis === "order" ? "order" : "invoice");
+  const [year, setYear] = useState<number>(typeof initialYear === "number" && Number.isFinite(initialYear) ? initialYear : defaultYear());
   const [statusFilter, setStatusFilter] = useState<Status>("open");
   const [limit, setLimit] = useState<number>(200);
+  const [includeZeroRevenue, setIncludeZeroRevenue] = useState<boolean>(false);
   const [items, setItems] = useState<GroupRow[]>([]);
   const [skus, setSkus] = useState<SkuRow[]>([]);
   const [combos, setCombos] = useState<CostCombo[]>([]);
@@ -158,6 +169,7 @@ export function DouanoUnmappedRulesCard() {
   const [includeLiters, setIncludeLiters] = useState<boolean>(false);
   const [includeBreakEven, setIncludeBreakEven] = useState<boolean>(true);
   const [selectedSkuId, setSelectedSkuId] = useState<string>("");
+  const [initialFocusApplied, setInitialFocusApplied] = useState<boolean>(false);
 
   const availableSkus = useMemo(() => {
     return combos
@@ -178,7 +190,7 @@ export function DouanoUnmappedRulesCard() {
         readJson(
           `/api/integrations/douano/unmapped-groups?year=${encodeURIComponent(String(year))}&basis=${encodeURIComponent(
             basis
-          )}&status=${encodeURIComponent(statusFilter)}&limit=${encodeURIComponent(String(limit))}`
+          )}&status=${encodeURIComponent(statusFilter)}&limit=${encodeURIComponent(String(limit))}&include_zero_revenue=${encodeURIComponent(includeZeroRevenue ? "true" : "false")}`
         ),
         readJson(`/api/data/skus`),
         readJson(`/api/integrations/douano/cost-combos`),
@@ -202,6 +214,24 @@ export function DouanoUnmappedRulesCard() {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basis, year, statusFilter, limit, includeZeroRevenue]);
+
+  useEffect(() => {
+    if (initialFocusApplied) return;
+    const mt = String(initialMatchType ?? "").trim();
+    const desc = String(initialLineDescription ?? "").trim();
+    if (!mt || !desc) return;
+    if (items.length === 0) return;
+    const found = items.find((row) => row.match_type === mt && row.line_description === desc);
+    if (found) {
+      setShowLinesFor(found);
+      setInitialFocusApplied(true);
+    }
+  }, [initialFocusApplied, initialLineDescription, initialMatchType, items]);
 
   function openSolve(row: GroupRow) {
     setSolveRow(row);
@@ -317,6 +347,14 @@ export function DouanoUnmappedRulesCard() {
             <option value="200">200</option>
             <option value="500">500</option>
           </select>
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center", opacity: 0.9 }}>
+            <input
+              type="checkbox"
+              checked={includeZeroRevenue}
+              onChange={(e) => setIncludeZeroRevenue(e.target.checked)}
+            />
+            Toon ook €0,00
+          </label>
           <button type="button" className="editor-button editor-button-secondary" onClick={() => void refresh()}>
             Ververs
           </button>

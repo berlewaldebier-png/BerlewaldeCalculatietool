@@ -218,6 +218,10 @@ def get_company_margin_summary(
     where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     params_list.append(lim)
     params: tuple[Any, ...] = tuple(params_list)
+    # Ensure distance cache schema exists so we can enrich rows with KM.
+    from app.domain import company_distance_storage
+    company_distance_storage.ensure_schema()
+
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -226,6 +230,7 @@ def get_company_margin_summary(
                     l.company_id,
                     c.name,
                     c.public_name,
+                    COUNT(DISTINCT l.sales_order_id)::int AS documents,
                     COUNT(*)::int AS lines,
                     COALESCE(SUM(l.gross_revenue_ex), 0) AS omzet_ex,
                     COALESCE(SUM(l.discount_ex), 0) AS korting_ex,
@@ -233,9 +238,13 @@ def get_company_margin_summary(
                     COALESCE(SUM(l.net_revenue_ex), 0) AS netto_omzet_ex,
                     COALESCE(SUM(l.quantity), 0) AS total_quantity,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
-                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines,
+                    COALESCE(dc.distance_km_one_way, 0) AS distance_km_one_way
                 FROM douano_sales_order_lines l
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
+                LEFT JOIN company_distance_cache dc
+                  ON dc.company_id = l.company_id
+                 AND dc.status = 'ok'
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_unmapped_rules r
@@ -244,7 +253,7 @@ def get_company_margin_summary(
                  AND r.douano_product_id = 0
                  AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 {where}
-                GROUP BY l.company_id, c.name, c.public_name
+                GROUP BY l.company_id, c.name, c.public_name, dc.distance_km_one_way
                 ORDER BY netto_omzet_ex DESC
                 LIMIT %s
                 """,
@@ -329,15 +338,20 @@ def get_company_margin_summary(
         bucket["cost_total_ex"] = float(bucket.get("cost_total_ex", 0.0) or 0.0) + _num(quantity) * float(cost_unit)
 
     out: list[dict[str, Any]] = []
-    for company_id, name, public_name, lines, omzet, korting, charges, netto, total_quantity, ignored_lines, unmapped_lines in rows:
+    out: list[dict[str, Any]] = []
+    for company_id, name, public_name, documents, lines, omzet, korting, charges, netto, total_quantity, ignored_lines, unmapped_lines, distance_km_one_way in rows:
         cid = int(company_id or 0)
         cost_bucket = cost_by_company.get(cid, {"cost_total_ex": 0.0, "mapped_lines": 0, "missing_cost_lines": 0})
         cost_total = float(cost_bucket.get("cost_total_ex", 0.0) or 0.0)
         margin = float(netto or 0.0) - cost_total
+        docs = int(documents or 0)
+        km_one_way = float(distance_km_one_way or 0.0)
+        km_total = float(docs) * km_one_way * 2.0
         out.append(
             {
                 "company_id": cid,
                 "company_name": str(public_name or name or ""),
+                "documents": docs,
                 "lines": int(lines or 0),
                 "omzet_ex": float(omzet or 0.0),
                 "korting_ex": float(korting or 0.0),
@@ -345,6 +359,8 @@ def get_company_margin_summary(
                 "netto_omzet_ex": float(netto or 0.0),
                 "kostprijs_ex": cost_total,
                 "brutomarge_ex": margin,
+                "distance_km_one_way": km_one_way,
+                "km_total": km_total,
                 "unmapped_lines": int(unmapped_lines or 0),
                 "ignored_lines": int(ignored_lines or 0),
                 "mapped_lines": int(cost_bucket.get("mapped_lines", 0) or 0),
@@ -377,6 +393,9 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
     params_list.append(lim)
     params: tuple[Any, ...] = tuple(params_list)
 
+    from app.domain import company_distance_storage
+    company_distance_storage.ensure_schema()
+
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -385,6 +404,7 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                     l.company_id,
                     c.name,
                     c.public_name,
+                    COUNT(DISTINCT l.sales_invoice_id)::int AS documents,
                     COUNT(*)::int AS lines,
                     COALESCE(SUM(l.gross_revenue_ex), 0) AS omzet_ex,
                     COALESCE(SUM(l.discount_ex), 0) AS korting_ex,
@@ -392,9 +412,13 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                     COALESCE(SUM(l.net_revenue_ex), 0) AS netto_omzet_ex,
                     COALESCE(SUM(l.quantity), 0) AS total_quantity,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
-                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines
+                    COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines,
+                    COALESCE(dc.distance_km_one_way, 0) AS distance_km_one_way
                 FROM douano_sales_invoice_lines l
                 LEFT JOIN douano_companies c ON c.company_id = l.company_id
+                LEFT JOIN company_distance_cache dc
+                  ON dc.company_id = l.company_id
+                 AND dc.status = 'ok'
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_unmapped_rules r
@@ -403,7 +427,7 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                  AND r.douano_product_id = 0
                  AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
                 {where}
-                GROUP BY l.company_id, c.name, c.public_name
+                GROUP BY l.company_id, c.name, c.public_name, dc.distance_km_one_way
                 ORDER BY netto_omzet_ex DESC
                 LIMIT %s
                 """,
@@ -484,15 +508,19 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
             bucket["kostprijs_ex"] += _num(quantity) * float(cost_unit)
 
     out: list[dict[str, Any]] = []
-    for company_id, name, public_name, lines, omzet, korting, charges, netto, _total_qty, ignored_lines, unmapped_lines in rows:
+    for company_id, name, public_name, documents, lines, omzet, korting, charges, netto, _total_qty, ignored_lines, unmapped_lines, distance_km_one_way in rows:
         cid = int(company_id or 0)
         cost_bucket = cost_by_company.get(cid, {})
         cost_total = float(cost_bucket.get("kostprijs_ex", 0.0) or 0.0)
         margin = float(netto or 0.0) - cost_total
+        docs = int(documents or 0)
+        km_one_way = float(distance_km_one_way or 0.0)
+        km_total = float(docs) * km_one_way * 2.0
         out.append(
             {
                 "company_id": cid,
                 "company_name": str(public_name or name or ""),
+                "documents": docs,
                 "lines": int(lines or 0),
                 "omzet_ex": float(omzet or 0.0),
                 "korting_ex": float(korting or 0.0),
@@ -500,6 +528,8 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                 "netto_omzet_ex": float(netto or 0.0),
                 "kostprijs_ex": cost_total,
                 "brutomarge_ex": margin,
+                "distance_km_one_way": km_one_way,
+                "km_total": km_total,
                 "unmapped_lines": int(unmapped_lines or 0),
                 "ignored_lines": int(ignored_lines or 0),
                 "mapped_lines": int(cost_bucket.get("mapped_lines", 0) or 0),

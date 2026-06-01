@@ -11,6 +11,10 @@ export type Scenario = QuoteScenario;
 export function buildScenarioMetricsMap(args: {
   scenarios: Record<ScenarioId, Scenario>;
   effectiveBreakEvenSnapshot: QuoteBreakEvenSnapshot | null;
+  year: number;
+  productie: Record<string, unknown>;
+  vasteKosten: Record<string, unknown>;
+  settings?: Record<string, unknown>;
 }): Record<ScenarioId, { standard: ScenarioMetrics; intro: ScenarioMetrics | null }> {
   const ids: ScenarioId[] = ["A", "B", "C"];
   return Object.fromEntries(
@@ -19,9 +23,19 @@ export function buildScenarioMetricsMap(args: {
       return [
         id,
         {
-          standard: calculateScenarioMetrics(sc, "standard", args.effectiveBreakEvenSnapshot),
+          standard: calculateScenarioMetrics(sc, "standard", args.effectiveBreakEvenSnapshot, {
+            year: args.year,
+            productie: args.productie,
+            vasteKosten: args.vasteKosten,
+            settings: args.settings,
+          }),
           intro: sc.intro
-            ? calculateScenarioMetrics(sc, "intro", args.effectiveBreakEvenSnapshot)
+            ? calculateScenarioMetrics(sc, "intro", args.effectiveBreakEvenSnapshot, {
+                year: args.year,
+                productie: args.productie,
+                vasteKosten: args.vasteKosten,
+                settings: args.settings,
+              })
             : null,
         },
       ];

@@ -5,6 +5,12 @@ type GenericRecord = Record<string, unknown>;
 export type KostprijsCalcType = "inkoop" | "eigen_productie";
 export type ProductType = "basis" | "samengesteld";
 
+export type OverheadBucket = {
+  manufacturingPerLiter: number;
+  businessPerLiter: number;
+  totalPerLiter: number;
+};
+
 export type SummaryProductRow = {
   biernaam: string;
   soort: string;
@@ -15,14 +21,26 @@ export type SummaryProductRow = {
   primaire_kosten: string | number;
   verpakkingskosten: string | number;
   vaste_kosten: string | number;
+  manufacturing_overhead?: string | number;
+  business_overhead?: string | number;
+  overhead_breakdown?: Array<{
+    cost_pool: string;
+    allocation_driver: string;
+    amount: number;
+  }>;
   accijns: string | number;
   kostprijs: string | number;
 };
 
 export type ResultaatSnapshot = {
+  methodology_version?: "legacy" | "abc_v1";
   integrale_kostprijs_per_liter: number | null;
   variabele_kosten_per_liter: number | null;
   directe_vaste_kosten_per_liter: number | null;
+  manufacturing_overhead_per_liter?: number | null;
+  business_overhead_per_liter?: number | null;
+  productkost_per_liter?: number | null;
+  kostendekkend_per_liter?: number | null;
   producten: {
     basisproducten: SummaryProductRow[];
     samengestelde_producten: SummaryProductRow[];
@@ -147,21 +165,183 @@ export function computeFixedCostPerLiter(params: {
   vasteKostenRows: any[];
 }): number {
   const { calcType, year, productieYear, vasteKostenRows } = params;
-  return calcType === "inkoop"
-    ? vasteKostenPerLiter({
-        year,
-        productieYear,
-        vasteKostenRows,
-        kostensoort: "indirect",
-        delerType: "inkoop"
-      })
-    : vasteKostenPerLiter({
-        year,
-        productieYear,
-        vasteKostenRows,
-        kostensoort: "direct",
-        delerType: "productie"
-      });
+
+  // Backwards-compatible behavior: if no ABC fields are present, fall back to legacy direct/indirect split.
+  const hasAnyAbc =
+    (Array.isArray(vasteKostenRows) ? vasteKostenRows : []).some((row) => {
+      const r = row as any;
+      return (
+        String(r?.allocation_driver ?? "").trim() ||
+        String(r?.cost_pool ?? "").trim()
+      );
+    }) ?? false;
+
+  if (!hasAnyAbc) {
+    return calcType === "inkoop"
+      ? vasteKostenPerLiter({
+          year,
+          productieYear,
+          vasteKostenRows,
+          kostensoort: "indirect",
+          delerType: "inkoop"
+        })
+      : vasteKostenPerLiter({
+          year,
+          productieYear,
+          vasteKostenRows,
+          kostensoort: "direct",
+          delerType: "productie"
+        });
+  }
+
+  const overhead = computeAbcOverheadPerLiter({ calcType, productieYear, vasteKostenRows });
+  return overhead.totalPerLiter;
+}
+
+function computeDriverTotalLiters(args: {
+  calcType: KostprijsCalcType;
+  driver: string;
+  stand: "normal" | "actual";
+  domain: "sales" | "production";
+  productieYear: any;
+}): number {
+  const { calcType, driver, stand, domain, productieYear } = args;
+  const d = String(driver || "").trim().toUpperCase();
+
+  if (domain === "sales") {
+    const actualSales = Number(productieYear?.sales_l ?? 0);
+    const normalSales = Number(productieYear?.normal_sales_l ?? 0) || actualSales;
+    const sales = stand === "actual" ? actualSales : normalSales;
+    if (d === "ALL_LITERS") return sales;
+
+    // Normalized handling drivers: we still allocate into €/L for SKU costing (all-in baseline),
+    // but require the underlying driver totals to be present so the rule is considered valid.
+    if (d === "SHIPMENTS") {
+      const actualShipments = Number(productieYear?.shipments ?? 0);
+      const normalShipments = Number(productieYear?.normal_shipments ?? 0) || actualShipments;
+      const shipments = stand === "actual" ? actualShipments : normalShipments;
+      if (shipments > 0 && sales > 0) return sales;
+      return 0;
+    }
+    if (d === "PICKS_OR_ORDER_LINES") {
+      const actualOrderlines = Number(productieYear?.orderlines ?? 0);
+      const normalOrderlines = Number(productieYear?.normal_orderlines ?? 0) || actualOrderlines;
+      const orderlines = stand === "actual" ? actualOrderlines : normalOrderlines;
+      if (orderlines > 0 && sales > 0) return sales;
+      return 0;
+    }
+    return 0;
+  }
+
+  const actualPurchased = Number(productieYear?.hoeveelheid_inkoop_l ?? 0);
+  const actualOwn = Number(productieYear?.hoeveelheid_productie_l ?? 0);
+  const normalPurchased = Number(productieYear?.normal_inkoop_l ?? 0) || actualPurchased;
+  const normalOwn = Number(productieYear?.normal_productie_l ?? 0) || actualOwn;
+  const normalContract = Number(productieYear?.normal_contract_brew_l ?? 0);
+
+  const purchased = stand === "actual" ? actualPurchased : normalPurchased;
+  const own = stand === "actual" ? actualOwn : normalOwn;
+  const contract = stand === "actual" ? 0 : normalContract;
+
+  if (d === "ALL_LITERS") {
+    return purchased + own + contract;
+  }
+  if (d === "PURCHASED_LITERS") {
+    return purchased;
+  }
+  if (d === "OWN_PRODUCTION_LITERS") {
+    return own;
+  }
+  if (d === "CONTRACT_BREW_LITERS") {
+    return contract;
+  }
+  if (d === "PRODUCTION_LITERS") {
+    return own + contract;
+  }
+
+  // Legacy mapping: treat empty/unknown driver as the old direct/indirect per calcType.
+  if (!d) {
+    return calcType === "inkoop" ? purchased : own;
+  }
+  return 0;
+}
+
+function ruleAppliesToCalcType(scope: string, calcType: KostprijsCalcType): boolean {
+  const s = String(scope || "").trim().toLowerCase() || "all";
+  if (s === "all") return true;
+  if (s === "purchased") return calcType === "inkoop";
+  if (s === "own_production") return calcType !== "inkoop";
+  if (s === "contract_brew") return false; // not supported in current calcType union yet
+  return true;
+}
+
+export function computeAbcOverheadPerLiter(params: {
+  calcType: KostprijsCalcType;
+  productieYear: any;
+  vasteKostenRows: any[];
+}): OverheadBucket {
+  const { calcType, productieYear, vasteKostenRows } = params;
+  const rows = Array.isArray(vasteKostenRows) ? vasteKostenRows : [];
+
+  const hasAnyAbc = rows.some((raw) => {
+    const row = raw as any;
+    return Boolean(String(row?.allocation_driver ?? "").trim() || String(row?.cost_pool ?? "").trim());
+  });
+
+  if (!hasAnyAbc) {
+    // Legacy behavior: treat the previous fixed-cost-per-liter as manufacturing overhead.
+    const total =
+      calcType === "inkoop"
+        ? vasteKostenPerLiter({
+            year: 0,
+            productieYear,
+            vasteKostenRows: rows,
+            kostensoort: "indirect",
+            delerType: "inkoop"
+          })
+        : vasteKostenPerLiter({
+            year: 0,
+            productieYear,
+            vasteKostenRows: rows,
+            kostensoort: "direct",
+            delerType: "productie"
+          });
+    return { manufacturingPerLiter: total, businessPerLiter: 0, totalPerLiter: total };
+  }
+
+  let manufacturing = 0;
+  let business = 0;
+
+  for (const raw of rows) {
+    const row = raw as any;
+    const scope = String(row?.allocation_scope ?? "all");
+    if (!ruleAppliesToCalcType(scope, calcType)) continue;
+
+    const amount = Number(row?.bedrag_per_jaar ?? 0) || 0;
+    if (!Number.isFinite(amount) || amount === 0) continue;
+
+    const driver = String(row?.allocation_driver ?? "").trim().toUpperCase();
+    const stand = String(row?.stand ?? row?.basis ?? "").trim().toLowerCase() === "actual" ? "actual" : "normal";
+    const domain = String(row?.domain ?? "sales").trim().toLowerCase() === "production" ? "production" : "sales";
+    const denom = computeDriverTotalLiters({ calcType, driver, stand, domain, productieYear });
+    if (!Number.isFinite(denom) || denom <= 0) continue;
+
+    const rate = amount / denom;
+    const includeInInventory =
+      typeof row?.include_in_inventory_cost === "boolean"
+        ? Boolean(row.include_in_inventory_cost)
+        : // Legacy heuristic: "direct" treated as manufacturing, "indirect" as business when ABC fields are partially filled.
+          !String(row?.kostensoort ?? "").toLowerCase().includes("indirect");
+
+    if (includeInInventory) manufacturing += rate;
+    else business += rate;
+  }
+
+  return {
+    manufacturingPerLiter: manufacturing,
+    businessPerLiter: business,
+    totalPerLiter: manufacturing + business
+  };
 }
 
 export function computeAccijnsForLiters(params: {
@@ -214,6 +394,10 @@ export function computeSummaryRows(params: {
   bierSnapshot?: GenericRecord;
   tarievenHeffingenRow: GenericRecord | null | undefined;
   fixedCostPerLiter: number;
+  overheadPerLiter?: OverheadBucket;
+  vasteKostenRows?: any[];
+  calcType?: KostprijsCalcType;
+  productieYear?: any;
   includePackagingCosts: boolean;
   packagingCost: (productId: string, productType: ProductType, year: number) => number;
   litersPerUnit: (productId: string, productType: ProductType, year: number) => number;
@@ -229,6 +413,10 @@ export function computeSummaryRows(params: {
     bierSnapshot,
     tarievenHeffingenRow,
     fixedCostPerLiter,
+    overheadPerLiter,
+    vasteKostenRows,
+    calcType,
+    productieYear,
     includePackagingCosts,
     packagingCost,
     litersPerUnit,
@@ -246,7 +434,21 @@ export function computeSummaryRows(params: {
       bierSnapshot,
       tarievenHeffingenRow
     });
-    const vasteKosten = fixedCostPerLiter * liters;
+    const manufacturingPerLiter = overheadPerLiter?.manufacturingPerLiter ?? fixedCostPerLiter;
+    const businessPerLiter = overheadPerLiter?.businessPerLiter ?? 0;
+    const manufacturingOverhead = manufacturingPerLiter * liters;
+    const businessOverhead = businessPerLiter * liters;
+    const vasteKosten = manufacturingOverhead + businessOverhead;
+
+    const overhead_breakdown: SummaryProductRow["overhead_breakdown"] =
+      vasteKostenRows && calcType && productieYear
+        ? computeOverheadBreakdownForLiters({
+            liters,
+            calcType,
+            productieYear,
+            vasteKostenRows
+          })
+        : undefined;
     const packaging = includePackagingCosts ? packagingCost(productId, productType, year) : 0;
     const kostprijs = Number(primaryCost ?? 0) + packaging + vasteKosten + accijns;
 
@@ -260,10 +462,51 @@ export function computeSummaryRows(params: {
       primaire_kosten: roundValue(Number(primaryCost ?? 0)),
       verpakkingskosten: roundValue(packaging),
       vaste_kosten: roundValue(vasteKosten),
+      manufacturing_overhead: roundValue(manufacturingOverhead),
+      business_overhead: roundValue(businessOverhead),
+      overhead_breakdown,
       accijns: roundValue(accijns),
       kostprijs: roundValue(kostprijs)
     };
   });
+}
+
+function computeOverheadBreakdownForLiters(params: {
+  liters: number;
+  calcType: KostprijsCalcType;
+  productieYear: any;
+  vasteKostenRows: any[];
+}): Array<{ cost_pool: string; allocation_driver: string; amount: number }> {
+  const { liters, calcType, productieYear, vasteKostenRows } = params;
+  const l = Number(liters ?? 0);
+  if (!Number.isFinite(l) || l <= 0) return [];
+
+  const rows = Array.isArray(vasteKostenRows) ? vasteKostenRows : [];
+  const out: Array<{ cost_pool: string; allocation_driver: string; amount: number }> = [];
+
+  for (const raw of rows) {
+    const row = raw as any;
+    const scope = String(row?.allocation_scope ?? "all");
+    if (!ruleAppliesToCalcType(scope, calcType)) continue;
+
+    const amount = Number(row?.bedrag_per_jaar ?? 0) || 0;
+    if (!Number.isFinite(amount) || amount === 0) continue;
+
+    const driver = String(row?.allocation_driver ?? "").trim().toUpperCase();
+    const stand = String(row?.stand ?? row?.basis ?? "").trim().toLowerCase() === "actual" ? "actual" : "normal";
+    const domain = String(row?.domain ?? "sales").trim().toLowerCase() === "production" ? "production" : "sales";
+    const denom = computeDriverTotalLiters({ calcType, driver, stand, domain, productieYear });
+    if (!Number.isFinite(denom) || denom <= 0) continue;
+
+    const rate = amount / denom;
+    const allocated = rate * l;
+    if (!Number.isFinite(allocated) || allocated === 0) continue;
+
+    const pool = String(row?.cost_pool ?? "").trim() || String(row?.omschrijving ?? "").trim() || "Overhead";
+    out.push({ cost_pool: pool, allocation_driver: driver || "LEGACY", amount: roundValue(allocated) });
+  }
+
+  return out;
 }
 
 export function computeResultaatSnapshot(params: {
@@ -273,6 +516,10 @@ export function computeResultaatSnapshot(params: {
   calcType: KostprijsCalcType;
   variabeleKostenPerLiter: number;
   fixedCostPerLiter: number;
+  overheadPerLiter?: OverheadBucket;
+  methodologyVersion?: "legacy" | "abc_v1";
+  vasteKostenRows?: any[];
+  productieYear?: any;
   basisgegevens: GenericRecord;
   bierSnapshot?: GenericRecord;
   tarievenHeffingenRow: GenericRecord | null | undefined;
@@ -287,8 +534,13 @@ export function computeResultaatSnapshot(params: {
     biernaam,
     soortLabel,
     year,
+    calcType,
     variabeleKostenPerLiter,
     fixedCostPerLiter,
+    overheadPerLiter,
+    methodologyVersion,
+    vasteKostenRows,
+    productieYear,
     basisgegevens,
     bierSnapshot,
     tarievenHeffingenRow,
@@ -310,6 +562,10 @@ export function computeResultaatSnapshot(params: {
     bierSnapshot,
     tarievenHeffingenRow,
     fixedCostPerLiter,
+    overheadPerLiter,
+    vasteKostenRows,
+    calcType,
+    productieYear,
     includePackagingCosts,
     packagingCost,
     litersPerUnit,
@@ -325,16 +581,30 @@ export function computeResultaatSnapshot(params: {
     bierSnapshot,
     tarievenHeffingenRow,
     fixedCostPerLiter,
+    overheadPerLiter,
+    vasteKostenRows,
+    calcType,
+    productieYear,
     includePackagingCosts,
     packagingCost,
     litersPerUnit,
     productLabel
   });
 
+  const manufacturingPerLiter = overheadPerLiter ? overheadPerLiter.manufacturingPerLiter : fixedCostPerLiter;
+  const businessPerLiter = overheadPerLiter ? overheadPerLiter.businessPerLiter : 0;
+  const productkostPerLiter = Number(variabeleKostenPerLiter ?? 0) + Number(manufacturingPerLiter ?? 0);
+  const kostendekkendPerLiter = productkostPerLiter + Number(businessPerLiter ?? 0);
+
   return {
+    methodology_version: methodologyVersion,
     integrale_kostprijs_per_liter: roundValue(Number(variabeleKostenPerLiter ?? 0) + Number(fixedCostPerLiter ?? 0)),
     variabele_kosten_per_liter: roundValue(Number(variabeleKostenPerLiter ?? 0)),
     directe_vaste_kosten_per_liter: roundValue(Number(fixedCostPerLiter ?? 0)),
+    manufacturing_overhead_per_liter: overheadPerLiter ? roundValue(overheadPerLiter.manufacturingPerLiter) : undefined,
+    business_overhead_per_liter: overheadPerLiter ? roundValue(overheadPerLiter.businessPerLiter) : undefined,
+    productkost_per_liter: overheadPerLiter ? roundValue(productkostPerLiter) : undefined,
+    kostendekkend_per_liter: overheadPerLiter ? roundValue(kostendekkendPerLiter) : undefined,
     producten: {
       basisproducten,
       samengestelde_producten

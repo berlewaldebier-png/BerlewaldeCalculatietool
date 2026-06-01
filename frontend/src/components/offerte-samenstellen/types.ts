@@ -213,6 +213,7 @@ export type ProductIndexResult = {
 export type ScenarioMetrics = {
   revenueEx: number;
   costEx: number;
+  handlingCostEx?: number;
   extraCostEx: number;
   transportCostEx: number;
   transportInternalCostEx: number;
@@ -317,6 +318,7 @@ export type OfferteSamenstellenProps = {
   year: number;
   channels: GenericRecord[];
   bieren: GenericRecord[];
+  productie: Record<string, unknown>;
   skus: GenericRecord[];
   articles: GenericRecord[];
   kostprijsversies: GenericRecord[];

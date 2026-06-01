@@ -89,6 +89,21 @@ DATASET_DEFAULTS: dict[str, Any] = {
         {"id": "glas-50cl", "label": "50 cl", "volume_ml": 500, "sort_order": 50, "active": True, "is_default": False},
     ],
     "variabele-kosten": {},
+    # Cost management: global defaults for driver definitions + quote handling.
+    "cost-management-settings": {
+        "handling_default_shipments": 1,
+        "handling_picks_per_orderline": 1.0,
+        "handling_shipments_multiplier": 1.0,
+        "handling_orderlines_mode": "unique_products",
+    },
+    "cost-pools": [
+        {"id": "auto", "label": "Auto", "sort_order": 10, "active": True},
+        {"id": "huisvesting", "label": "Huisvesting", "sort_order": 20, "active": True},
+        {"id": "energie", "label": "Energie", "sort_order": 30, "active": True},
+        {"id": "salaris", "label": "Salaris", "sort_order": 40, "active": True},
+        {"id": "accountant", "label": "Accountant", "sort_order": 50, "active": True},
+        {"id": "overig", "label": "Overig", "sort_order": 90, "active": True},
+    ],
     # Beheerbare classificaties voor SKU's (SSOT).
     "productgroepen": [
         {"id": "drank", "label": "Drank", "sort_order": 10, "active": True},
@@ -273,7 +288,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
 
     # Note: `channels` is stored and served as a list (see `_normalize_channels_dataset`),
     # so treating it as a dict here would break seed import + writes.
-    dict_datasets = {"productie", "vaste-kosten", "variabele-kosten"}
+    dict_datasets = {"productie", "vaste-kosten", "variabele-kosten", "cost-management-settings"}
     list_datasets = {
         "tarieven-heffingen",
         "verpakkingsonderdelen",
@@ -313,6 +328,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "productgroepen",
         "alcoholcategorieen",
         "verpakkingstypen",
+        "cost-pools",
     }
 
     if name in dict_datasets:

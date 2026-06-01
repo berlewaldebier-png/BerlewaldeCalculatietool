@@ -2,7 +2,7 @@
 
 import type { Route } from "next";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -22,6 +22,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
   Pie,
@@ -165,8 +166,13 @@ function EmptyState({ title, body, href, hrefLabel }: { title: string; body: str
   );
 }
 
-export function ErpDashboard({ navigation, payload, breakEvenContext, initialFilters }: Props) {
+export function ErpDashboard({ navigation, payload: initialPayload, breakEvenContext, initialFilters }: Props) {
   const router = useRouter();
+  const [remotePayload, setRemotePayload] = useState<ErpDashboardPayload | null>(null);
+  const [remoteError, setRemoteError] = useState<string>("");
+  const [isRemoteLoading, setIsRemoteLoading] = useState<boolean>(true);
+
+  const payload = remotePayload ?? initialPayload;
   const [showFilters, setShowFilters] = useState(false);
   const [chartView, setChartView] = useState<"revenue" | "orders">("revenue");
   const [sinceInput, setSinceInput] = useState((initialFilters?.since || payload.range?.since || "").trim());
@@ -184,6 +190,50 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
       skuId: String(initialFilters?.sku_id || "").trim(),
     })
   );
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    params.set("datasets", "erp-dashboard");
+    params.set("navigation", "false");
+    const since = String(initialFilters?.since || "").trim();
+    const until = String(initialFilters?.until || "").trim();
+    const year = String(initialFilters?.year || "").trim();
+    const basis = String(initialFilters?.basis || "").trim();
+    const skuId = String(initialFilters?.sku_id || "").trim();
+    if (since) params.set("since", since);
+    if (until) params.set("until", until);
+    if (year) params.set("year", year);
+    if (basis) params.set("basis", basis);
+    if (skuId) params.set("sku_id", skuId);
+
+    const controller = new AbortController();
+    async function load() {
+      setIsRemoteLoading(true);
+      setRemoteError("");
+      try {
+        const response = await fetch(`/api/meta/bootstrap?${params.toString()}`, {
+          cache: "no-store",
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = typeof (json as any)?.detail === "string" ? (json as any).detail : response.statusText;
+          throw new Error(detail || "ERP dashboard laden faalde.");
+        }
+        const next = (json as any)?.datasets?.["erp-dashboard"] as ErpDashboardPayload | undefined;
+        if (!controller.signal.aborted) setRemotePayload(next ?? null);
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setRemotePayload(null);
+        setRemoteError(err instanceof Error ? err.message : "ERP dashboard laden faalde.");
+      } finally {
+        if (!controller.signal.aborted) setIsRemoteLoading(false);
+      }
+    }
+    void load();
+    return () => controller.abort();
+  }, [initialFilters?.since, initialFilters?.until, initialFilters?.year, initialFilters?.basis, initialFilters?.sku_id]);
 
   const availableYears = (payload.available_years ?? []).filter((y) => Number.isFinite(y) && y > 0);
 
@@ -362,6 +412,17 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
       };
     });
   }, [payload.trends?.revenue, breakEvenTrend.line]);
+
+  const forecastRevenueEx = useMemo(() => {
+    return (payload.trends?.revenue ?? []).reduce((sum, row) => {
+      const v = (row as any)?.forecast_ex;
+      return sum + (typeof v === "number" ? Number(v) : 0);
+    }, 0);
+  }, [payload.trends?.revenue]);
+
+  const realizedRevenueEx = payload.kpis?.total_revenue_ex ?? 0;
+  const forecastTotalRevenueEx = realizedRevenueEx + forecastRevenueEx;
+  const breakEvenTargetRevenueEx = breakEvenTrend.breakEvenRevenue ?? null;
 
   const ordersData = useMemo(() => {
     return (payload.trends?.orders ?? []).map((row) => ({
@@ -680,7 +741,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
             )}
 
             <section>
-              <Card className={`erp-pad${chartView === "revenue" ? "" : " hidden"}`}>
+              <Card className="erp-pad">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <h2 className="module-card-title">
@@ -706,69 +767,46 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                   </div>
                 </div>
                 <div className="erp-chart-area">
-                  {revenueData.length ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={revenueData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="date" fontSize={12} />
-                        <YAxis fontSize={12} tickFormatter={(v) => `€ ${Math.round(Number(v) / 1000)}k`} />
-                        <Tooltip formatter={(v) => euro(Number(v))} />
-                        <Legend />
-                        <Area
-                          type="monotone"
-                          dataKey="omzet"
-                          stroke={CHART_COLORS.blue}
-                          fill={CHART_COLORS.blueFill}
-                          fillOpacity={1}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="prognose"
-                          stroke={CHART_COLORS.purple}
-                          strokeDasharray="6 6"
-                          dot={false}
-                          connectNulls
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="breakEven"
-                          stroke={CHART_COLORS.slate}
-                          strokeDasharray="5 5"
-                          dot={false}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <EmptyState title="Geen trenddata" body="Geen omzetpunten gevonden in deze periode." />
-                  )}
-                </div>
-              </Card>
-
-              <Card className={`erp-pad${chartView === "orders" ? "" : " hidden"}`}>
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <h2 className="module-card-title">Orders & gem. orderwaarde</h2>
-                    <span className="erp-chip">Maand</span>
-                  </div>
-                  <div className="erp-dashboard-segment" aria-label="Grafiek kiezen">
-                    <button
-                      type="button"
-                      className={`erp-dashboard-segment-pill${chartView === "revenue" ? " is-active" : ""}`}
-                      onClick={() => setChartView("revenue")}
-                    >
-                      Omzet over tijd
-                    </button>
-                    <button
-                      type="button"
-                      className={`erp-dashboard-segment-pill${chartView === "orders" ? " is-active" : ""}`}
-                      onClick={() => setChartView("orders")}
-                    >
-                      Orders & gem.
-                    </button>
-                  </div>
-                </div>
-                <div className="erp-chart-area">
-                  {ordersData.length ? (
+                  {chartView === "revenue" ? (
+                    revenueData.length ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={revenueData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis dataKey="date" fontSize={12} />
+                          <YAxis fontSize={12} tickFormatter={(v) => `€ ${Math.round(Number(v) / 1000)}k`} />
+                          <Tooltip formatter={(v) => euro(Number(v))} />
+                          <Legend />
+                          <Area
+                            type="monotone"
+                            dataKey="omzet"
+                            name="Omzet"
+                            stroke={CHART_COLORS.blue}
+                            fill={CHART_COLORS.blueFill}
+                            fillOpacity={1}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="prognose"
+                            name="Prognose"
+                            stroke={CHART_COLORS.purple}
+                            strokeDasharray="6 6"
+                            dot={false}
+                            connectNulls
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="breakEven"
+                            name="Break-even"
+                            stroke={CHART_COLORS.slate}
+                            strokeDasharray="5 5"
+                            dot={false}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyState title="Geen trenddata" body="Geen omzetpunten gevonden in deze periode." />
+                    )
+                  ) : ordersData.length ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={ordersData}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -777,11 +815,12 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                         <YAxis yAxisId="right" orientation="right" fontSize={12} tickFormatter={(v) => `€ ${Math.round(Number(v))}`} />
                         <Tooltip formatter={(v) => (typeof v === "number" ? v.toLocaleString("nl-NL") : String(v))} />
                         <Legend />
-                        <Bar yAxisId="left" dataKey="orders" fill={CHART_COLORS.blue} radius={[8, 8, 0, 0]} />
+                        <Bar yAxisId="left" dataKey="orders" name="Orders" fill={CHART_COLORS.blue} radius={[8, 8, 0, 0]} />
                         <Line
                           yAxisId="left"
                           type="monotone"
                           dataKey="prognoseOrders"
+                          name="Prognose"
                           stroke={CHART_COLORS.purple}
                           strokeDasharray="6 6"
                           dot={false}
@@ -791,6 +830,7 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                           yAxisId="right"
                           type="monotone"
                           dataKey="aov"
+                          name="Gem. orderwaarde"
                           stroke={CHART_COLORS.purple}
                           strokeWidth={3}
                           dot={false}
@@ -801,6 +841,25 @@ export function ErpDashboard({ navigation, payload, breakEvenContext, initialFil
                     <EmptyState title="Geen ordertrend" body="Geen orderpunten gevonden in deze periode." />
                   )}
                 </div>
+
+                {chartView === "revenue" ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-end gap-x-6 gap-y-2 text-sm">
+                    <span className="erp-muted-inline">
+                      Gerealiseerde omzet: <span className="erp-strong">{euro(realizedRevenueEx)}</span>
+                    </span>
+                    <span className="erp-muted-inline">
+                      Prognose omzet: <span className="erp-strong">{euro(forecastTotalRevenueEx)}</span>
+                    </span>
+                    <span className="erp-muted-inline">
+                      Break-even omzet:{" "}
+                      <span className="erp-strong">
+                        {typeof breakEvenTargetRevenueEx === "number" && Number.isFinite(breakEvenTargetRevenueEx)
+                          ? euro(breakEvenTargetRevenueEx)
+                          : "—"}
+                      </span>
+                    </span>
+                  </div>
+                ) : null}
               </Card>
             </section>
 

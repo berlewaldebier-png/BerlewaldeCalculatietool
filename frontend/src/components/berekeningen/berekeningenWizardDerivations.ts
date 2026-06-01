@@ -3,6 +3,7 @@
 import { vasteKostenPerLiter } from "@/lib/kostprijsEngine";
 import {
   createPackagingResolvers,
+  computeAbcOverheadPerLiter,
   computeResultaatSnapshot,
   type ResultaatSnapshot,
 } from "@/lib/kostprijsSnapshotEngine";
@@ -58,6 +59,7 @@ export function buildResultaatSnapshotFromWizard(params: {
     calculateVariabeleKostenPerLiter(row, jaar, productie, basisproducten, samengesteldeProducten) ?? 0;
   const productieGegevens = getYearProduction(jaar, productie);
   const vasteKostenRows = Array.isArray((vasteKosten as any)[String(jaar)]) ? ((vasteKosten as any)[String(jaar)] as any[]) : [];
+  const calcType = soort.trim().toLowerCase() === "inkoop" ? "inkoop" : "eigen_productie";
   const fixedPerLiter =
     soort === "Inkoop"
       ? vasteKostenPerLiter({
@@ -74,6 +76,17 @@ export function buildResultaatSnapshotFromWizard(params: {
           kostensoort: "direct",
           delerType: "productie"
         });
+
+  const overheadPerLiter = computeAbcOverheadPerLiter({
+    calcType,
+    productieYear: productieGegevens as any,
+    vasteKostenRows: vasteKostenRows as any
+  });
+  const hasAnyAbc = (Array.isArray(vasteKostenRows) ? vasteKostenRows : []).some((row: any) => {
+    return Boolean(String(row?.allocation_driver ?? "").trim() || String(row?.cost_pool ?? "").trim());
+  });
+  const methodologyVersion = hasAnyAbc ? "abc_v1" : "legacy";
+  const fixedPerLiterEffective = hasAnyAbc ? overheadPerLiter.totalPerLiter : fixedPerLiter;
   const geselecteerdeInkoopProducten =
     soort === "Inkoop"
       ? expandSelectedInkoopProductsToBasisproducten(
@@ -96,7 +109,7 @@ export function buildResultaatSnapshotFromWizard(params: {
       : null) ?? null;
 
   const includePackagingCosts = soort !== "Inkoop";
-  const calcType = soort.trim().toLowerCase() === "inkoop" ? "inkoop" : "eigen_productie";
+
 
   const packagingByProductId = new Map<string, number>();
   const litersByProductId = new Map<string, number>();
@@ -140,13 +153,17 @@ export function buildResultaatSnapshotFromWizard(params: {
     year: jaar,
     calcType,
     variabeleKostenPerLiter,
-    fixedCostPerLiter: fixedPerLiter,
+    fixedCostPerLiter: fixedPerLiterEffective,
     basisgegevens,
     bierSnapshot: basisgegevens,
     tarievenHeffingenRow: tarievenRow,
     basisRows: basisInputs,
     samengRows: samengInputs,
     includePackagingCosts,
+    overheadPerLiter,
+    methodologyVersion,
+    vasteKostenRows: vasteKostenRows as any,
+    productieYear: productieGegevens as any,
     packagingCost: (productId) =>
       includePackagingCosts ? Number(packagingByProductId.get(String(productId)) ?? 0) : 0,
     litersPerUnit: (productId) => Number(litersByProductId.get(String(productId)) ?? 0),

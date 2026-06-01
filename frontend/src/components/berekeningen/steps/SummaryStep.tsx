@@ -5,6 +5,14 @@ import type { SummaryProductRow } from "@/lib/kostprijsSnapshotEngine";
 type GenericRecord = Record<string, unknown>;
 type BerekeningSubjectType = "bier" | "artikel" | "dienst";
 
+function ArrowDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
 function EyeIcon() {
   return (
     <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -53,6 +61,42 @@ export function SummaryStep({
   const totaalAantal = factuurregels.reduce((sum, regel) => sum + Number((regel as any).aantal ?? 0), 0);
   const gemiddeldePrijsPerEenheid = totaalAantal > 0 ? (totaalFactuurbedrag + totaalExtraKosten) / totaalAantal : 0;
 
+  function getOverheadCell(row: SummaryProductRow) {
+    const manufacturing = Number((row as any).manufacturing_overhead ?? 0);
+    const business = Number((row as any).business_overhead ?? 0);
+    const hasBuckets =
+      (row as any).manufacturing_overhead !== undefined || (row as any).business_overhead !== undefined;
+
+    const legacy = Number((row as any).vaste_kosten ?? 0);
+    const total = hasBuckets ? manufacturing + business : legacy;
+
+    const breakdown = Array.isArray((row as any).overhead_breakdown) ? ((row as any).overhead_breakdown as any[]) : [];
+    const breakdownText =
+      breakdown.length > 0
+        ? breakdown
+            .map((line) => {
+              const pool = String(line?.cost_pool ?? "").trim() || "Overhead";
+              const driver = String(line?.allocation_driver ?? "").trim() || "LEGACY";
+              const amount = Number(line?.amount ?? 0);
+              return `${pool} (${driver}): ${formatCurrencyDisplay(amount)}`;
+            })
+            .join("\n")
+        : "";
+
+    const title = hasBuckets
+      ? [
+          `Productie-overhead: ${formatCurrencyDisplay(manufacturing)}`,
+          `Business-overhead: ${formatCurrencyDisplay(business)}`,
+          breakdownText ? "" : null,
+          breakdownText || null,
+        ]
+          .filter((v) => typeof v === "string" && v.length > 0)
+          .join("\n")
+      : breakdownText;
+
+    return { total, title, manufacturing, business, hasBuckets, breakdown };
+  }
+
   return (
     <div className="wizard-stack">
       <div className="stats-grid wizard-stats-grid">
@@ -63,13 +107,26 @@ export function SummaryStep({
               ["Factuurbedragen", formatCurrencyDisplay(totaalFactuurbedrag)],
             ] as [string, unknown][])
           : ([
-              ["Integrale kostprijs / L", snapshot.integrale_kostprijs_per_liter],
-              ["Variabele kosten / L", snapshot.variabele_kosten_per_liter],
-              [
-                soort === "Inkoop" ? "Indirecte vaste kosten / L" : "Directe vaste kosten / L",
-                snapshot.directe_vaste_kosten_per_liter,
-              ],
-            ] as [string, unknown][])).map(([label, value]) => (
+              snapshot.methodology_version === "abc_v1"
+                ? ["All-in kostprijs / L", formatDecimalValue(snapshot.kostendekkend_per_liter, 2)]
+                : ["Integrale kostprijs / L", formatDecimalValue(snapshot.integrale_kostprijs_per_liter, 2)],
+              snapshot.methodology_version === "abc_v1"
+                ? ["Voorraad-kostprijs / L", formatDecimalValue(snapshot.productkost_per_liter, 2)]
+                : [
+                    soort === "Inkoop" ? "Indirecte vaste kosten / L" : "Directe vaste kosten / L",
+                    formatDecimalValue(snapshot.directe_vaste_kosten_per_liter, 2),
+                  ],
+              snapshot.methodology_version === "abc_v1"
+                ? ["Productkosten / L", formatDecimalValue(snapshot.variabele_kosten_per_liter, 2)]
+                : ["Variabele kosten / L", formatDecimalValue(snapshot.variabele_kosten_per_liter, 2)],
+              snapshot.methodology_version === "abc_v1"
+                ? ["Productie-overhead / L", formatDecimalValue(snapshot.manufacturing_overhead_per_liter, 2)]
+                : null,
+              snapshot.methodology_version === "abc_v1"
+                ? ["Business-overhead / L", formatDecimalValue(snapshot.business_overhead_per_liter, 2)]
+                : null,
+            ]
+              .filter(Boolean) as [string, unknown][])).map(([label, value]) => (
           <div key={label} className="stat-card">
             <div className="stat-label">{label}</div>
             <div className="stat-value small">{String(value ?? "-")}</div>
@@ -88,7 +145,7 @@ export function SummaryStep({
                   <th>Eenheid</th>
                   <th>Inkoop</th>
                   <th>Verpakkingskosten</th>
-                  <th>Opslag direct/indirect</th>
+                  <th>Overhead</th>
                   <th>Accijns</th>
                   <th>Kostprijs</th>
                 </tr>
@@ -97,10 +154,10 @@ export function SummaryStep({
                 <tr>
                   <td>{String((basis as any).biernaam ?? "-")}</td>
                   <td>Inkoop</td>
-                  <td>{uom || "-"}</td>
-                  <td>{formatCurrencyDisplay(gemiddeldePrijsPerEenheid)}</td>
-                  <td>{formatCurrencyDisplay(0)}</td>
-                  <td>{formatCurrencyDisplay(0)}</td>
+                      <td>{uom || "-"}</td>
+                      <td>{formatCurrencyDisplay(gemiddeldePrijsPerEenheid)}</td>
+                      <td>{formatCurrencyDisplay(0)}</td>
+                      <td>{formatCurrencyDisplay(0)}</td>
                   <td>{formatCurrencyDisplay(0)}</td>
                   <td>{formatCurrencyDisplay(gemiddeldePrijsPerEenheid)}</td>
                 </tr>
@@ -126,14 +183,14 @@ export function SummaryStep({
                     </th>
                     <th>Biernaam</th>
                     <th>Soort</th>
-                    <th>Verpakkingseenheid</th>
-                    <th>{soort === "Inkoop" ? "Inkoop" : "Ingredienten"}</th>
-                    <th>Verpakkingskosten</th>
-                    <th>{soort === "Inkoop" ? "Indirecte kosten" : "Directe kosten"}</th>
-                    <th>Accijns</th>
-                    <th>Kostprijs</th>
-                  </tr>
-                </thead>
+                  <th>Verpakkingseenheid</th>
+                  <th>{soort === "Inkoop" ? "Inkoop" : "Ingredienten"}</th>
+                  <th>Verpakkingskosten</th>
+                  <th>{snapshot.methodology_version === "abc_v1" ? "Overhead (ABC)" : soort === "Inkoop" ? "Indirecte kosten" : "Directe kosten"}</th>
+                  <th>Accijns</th>
+                  <th>Kostprijs</th>
+                </tr>
+              </thead>
                 <tbody>
                   {records.length === 0 ? (
                     <tr>
@@ -178,7 +235,63 @@ export function SummaryStep({
                       <td>{String((row as any).verpakkingseenheid ?? "-")}</td>
                       <td>{formatCurrencyDisplay((row as any).primaire_kosten)}</td>
                       <td>{formatCurrencyDisplay((row as any).verpakkingskosten)}</td>
-                      <td>{formatCurrencyDisplay((row as any).vaste_kosten)}</td>
+                      {(() => {
+                        const overhead = getOverheadCell(row);
+                        const hasDetails = snapshot.methodology_version === "abc_v1" && overhead.hasBuckets;
+                        const hasBreakdown = overhead.breakdown.length > 0;
+                        if (!hasDetails || !hasBreakdown) {
+                          return (
+                            <td title={overhead.title || undefined}>
+                              {formatCurrencyDisplay(overhead.total)}
+                            </td>
+                          );
+                        }
+                        return (
+                          <td title={overhead.title || undefined}>
+                            <details>
+                              <summary style={{ cursor: "pointer", display: "inline-flex", gap: 6, alignItems: "center" }}>
+                                <span>{formatCurrencyDisplay(overhead.total)}</span>
+                                <span style={{ opacity: 0.7 }} aria-hidden>
+                                  <ArrowDownIcon />
+                                </span>
+                              </summary>
+                              <div style={{ paddingTop: 8, minWidth: 240 }}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                                    <span>Productie-overhead</span>
+                                    <span>{formatCurrencyDisplay(overhead.manufacturing)}</span>
+                                  </div>
+                                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                                    <span>Business-overhead</span>
+                                    <span>{formatCurrencyDisplay(overhead.business)}</span>
+                                  </div>
+                                </div>
+                                <div style={{ borderTop: "1px solid rgba(0,0,0,0.08)", paddingTop: 8 }}>
+                                  <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>ABC breakdown</div>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                    {overhead.breakdown.map((line: any, idx: number) => {
+                                      const pool = String(line?.cost_pool ?? "").trim() || "Overhead";
+                                      const driver = String(line?.allocation_driver ?? "").trim() || "LEGACY";
+                                      const amount = Number(line?.amount ?? 0);
+                                      return (
+                                        <div
+                                          key={`${pool}-${driver}-${idx}`}
+                                          style={{ display: "flex", justifyContent: "space-between", gap: 12 }}
+                                        >
+                                          <span>
+                                            {pool} <span style={{ opacity: 0.7 }}>({driver})</span>
+                                          </span>
+                                          <span>{formatCurrencyDisplay(amount)}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            </details>
+                          </td>
+                        );
+                      })()}
                       <td>{formatCurrencyDisplay((row as any).accijns)}</td>
                       <td>{formatCurrencyDisplay((row as any).kostprijs)}</td>
                     </tr>

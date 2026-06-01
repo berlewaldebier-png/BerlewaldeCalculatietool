@@ -9,6 +9,7 @@ import {
   computeGratisFreeByRefFromPaidRows,
 } from "./pricingEngine";
 import { calculateTransportImpact } from "./transportImpact";
+import { computeQuoteHandlingCost } from "./quoteHandlingCost";
 import { applyStaffelToLines as applyStaffelBlock } from "./actionBlocks/applyStaffel";
 import { applyMixDealToLines as applyMixDealBlock } from "./actionBlocks/applyMixDeal";
 
@@ -46,6 +47,7 @@ type CalculationState = {
   transportIncludedInNetEffect: boolean;
   palletHandlingCostEx: number;
   palletHandlingRevenueEx: number;
+  handlingCostEx: number;
 };
 
 type MetricsBuildParams = {
@@ -54,6 +56,7 @@ type MetricsBuildParams = {
   lines: CalculationLine[];
   revenueEx: number;
   costEx: number;
+  handlingCostEx: number;
   extraCostEx: number;
   transportCostEx: number;
   transportInternalCostEx: number;
@@ -68,7 +71,13 @@ type MetricsBuildParams = {
 export function calculateQuoteScenarioMetrics(
   scenario: QuoteScenario,
   activePeriod: PeriodKey,
-  breakEven: QuoteBreakEvenSnapshot | null = null
+  breakEven: QuoteBreakEvenSnapshot | null = null,
+  handlingContext?: {
+    year: number;
+    productie: Record<string, unknown>;
+    vasteKosten: Record<string, unknown>;
+    settings?: Record<string, unknown>;
+  }
 ): ScenarioMetrics {
   const state = createCalculationState(scenario, activePeriod);
 
@@ -94,8 +103,46 @@ export function calculateQuoteScenarioMetrics(
     },
   });
 
+  if (handlingContext && typeof handlingContext.year === "number") {
+    const yearKey = String(handlingContext.year);
+    const productieYear = (handlingContext.productie as any)?.[yearKey] ?? {};
+    const vasteRowsRaw = (handlingContext.vasteKosten as any)?.[yearKey] ?? [];
+    const vasteKostenRows = Array.isArray(vasteRowsRaw) ? (vasteRowsRaw as Array<Record<string, unknown>>) : [];
+
+    const uniqueRefs = new Set<string>();
+    for (const line of state.lines) {
+      const units = Math.max(0, (line.qtyPaid ?? 0) + (line.qtyFree ?? 0));
+      if (units <= 0) continue;
+      uniqueRefs.add(String(line.ref ?? ""));
+    }
+
+    const transportBlock = state.blocks.find((b) => b.type === "Transport");
+    const transportPayload = transportBlock ? asRecord(transportBlock.payload) : {};
+
+    const settings = handlingContext.settings ?? {};
+    const defaultShipments = Math.max(0, clampNumber((settings as any).handling_default_shipments ?? 1, 1));
+    const picksPerOrderline = Math.max(0, clampNumber((settings as any).handling_picks_per_orderline ?? 1, 1));
+    const shipmentsMultiplier = Math.max(0, clampNumber((settings as any).handling_shipments_multiplier ?? 1, 1));
+
+    const shipmentsRaw = transportPayload.transportDeliveries ?? transportPayload.deliveries ?? defaultShipments;
+    const shipments = clampNumber(shipmentsRaw, 1) * shipmentsMultiplier;
+
+    const handling = computeQuoteHandlingCost({
+      year: handlingContext.year,
+      productionYear: productieYear,
+      vasteKostenRows,
+      shipments,
+      orderLines: uniqueRefs.size * picksPerOrderline,
+      scope: "all",
+    });
+
+    state.handlingCostEx += Math.max(0, handling.total);
+    handling.warnings.forEach((w) => state.notes.push(w));
+  }
+
   costEx += state.extraCostEx + state.transportCostEx;
   costEx += state.palletHandlingCostEx;
+  costEx += state.handlingCostEx;
 
   return buildScenarioMetrics({
     breakEven,
@@ -103,6 +150,7 @@ export function calculateQuoteScenarioMetrics(
     lines: state.lines,
     revenueEx,
     costEx,
+    handlingCostEx: state.handlingCostEx,
     extraCostEx: state.extraCostEx,
     transportCostEx: state.transportCostEx,
     transportInternalCostEx: state.transportInternalCostEx,
@@ -163,6 +211,7 @@ function createCalculationState(
     transportIncludedInNetEffect: true,
     palletHandlingCostEx: 0,
     palletHandlingRevenueEx: 0,
+    handlingCostEx: 0,
   };
 }
 
@@ -744,6 +793,7 @@ function buildScenarioMetrics(params: MetricsBuildParams): ScenarioMetrics {
   return {
     revenueEx: Math.max(0, params.revenueEx),
     costEx: Math.max(0, params.costEx),
+    handlingCostEx: Math.max(0, params.handlingCostEx),
     extraCostEx: params.extraCostEx,
     transportCostEx: params.transportCostEx,
     transportInternalCostEx: params.transportInternalCostEx,

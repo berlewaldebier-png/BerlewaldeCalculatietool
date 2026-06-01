@@ -98,6 +98,7 @@ def list_unmapped_groups(
     since: str = "",
     limit: int = 200,
     status: Status = "open",
+    include_zero_revenue: bool = False,
 ) -> dict[str, Any]:
     """Return grouped 'unmapped' items that can be solved via rules or mappings.
 
@@ -140,6 +141,7 @@ def list_unmapped_groups(
     # This is intentionally lightweight and deterministic; user can override in UI later.
     _auto_categorize_prepayments(table=table, date_col=date_col, year_start=year_start, year_end=year_end)
 
+    having_clause = "" if include_zero_revenue else "HAVING ABS(SUM(b.net_revenue_ex)) > 0.0000001"
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -184,7 +186,7 @@ def list_unmapped_groups(
                         match_type,
                         CASE WHEN b.douano_product_id = 0 THEN 0 ELSE b.douano_product_id END,
                         CASE WHEN b.douano_product_id = 0 THEN b.line_description ELSE '' END
-                    HAVING ABS(SUM(b.net_revenue_ex)) > 0.0000001
+                    {having_clause}
                 ),
                 with_rules AS (
                     SELECT

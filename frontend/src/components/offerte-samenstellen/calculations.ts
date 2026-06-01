@@ -10,7 +10,13 @@ type PeriodKey = "standard" | "intro";
 export function calculateScenarioMetrics(
   scenario: QuoteScenario,
   activePeriod: PeriodKey,
-  breakEven: QuoteBreakEvenSnapshot | null = null
+  breakEven: QuoteBreakEvenSnapshot | null = null,
+  handlingContext?: {
+    year: number;
+    productie: Record<string, unknown>;
+    vasteKosten: Record<string, unknown>;
+    settings?: Record<string, unknown>;
+  }
 ): ScenarioMetrics {
-  return calculateQuoteScenarioMetrics(scenario, activePeriod, breakEven);
+  return calculateQuoteScenarioMetrics(scenario, activePeriod, breakEven, handlingContext);
 }

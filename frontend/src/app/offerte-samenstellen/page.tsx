@@ -26,7 +26,8 @@ export default async function OfferteSamenstellenPage({
       "packaging-components",
       "packaging-component-prices",
       "break-even-configuraties",
-      "vaste-kosten"
+      "vaste-kosten",
+      "cost-management-settings"
     ],
     true,
     "/offerte-samenstellen"
@@ -47,6 +48,7 @@ export default async function OfferteSamenstellenPage({
   const verpakkingsonderdeelPrijzen = (bootstrap.datasets["packaging-component-prices"] as any[]) ?? [];
   const breakEvenConfiguraties = bootstrap.datasets["break-even-configuraties"] ?? [];
   const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
+  const costManagementSettings = (bootstrap.datasets["cost-management-settings"] as Record<string, any>) ?? {};
 
   const yearOptions = Object.keys(productie)
     .map((year) => Number(year))
@@ -70,6 +72,8 @@ export default async function OfferteSamenstellenPage({
         year={year}
         channels={channels}
         bieren={bieren}
+        productie={productie}
+        costManagementSettings={costManagementSettings}
         skus={skus}
         articles={articles}
         kostprijsversies={kostprijsversies}

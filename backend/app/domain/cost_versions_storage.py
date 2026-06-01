@@ -5,8 +5,11 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
+from uuid import uuid4
 
 from app.domain import postgres_storage
+from app.domain import fixed_costs_storage
+from app.domain import production_storage
 
 
 _SCHEMA_READY = False
@@ -839,6 +842,324 @@ def repair_inkoop_unit_costs_for_year(*, year: int, dry_run: bool = True) -> dic
         "inkoop_versions_processed": len(candidates),
         "year_versions_preserved": preserved_count_before,
         "year_versions_replaced": replaced,
+        "issues": issues,
+    }
+
+
+def rebuild_overhead_versions_for_year(*, year: int, owner: str, dry_run: bool = True) -> dict[str, Any]:
+    """Create new definitive cost versions for the given year with ABC-light overhead recomputed.
+
+    This is Phase 4 glue for the costing refactor: "recalculate" means mint a new version (non-destructive),
+    then optionally activate it via the existing activation pipeline.
+
+    Notes:
+    - We only recompute overhead for product rows where we can resolve liters (basis/samengesteld formats).
+    - When no ABC fields are configured on vaste kosten rows, we do not change overhead (legacy behaviour).
+    """
+    ensure_schema()
+    year_value = int(year or 0)
+    if year_value <= 0:
+        raise ValueError("Jaar is ongeldig.")
+
+    versions = load_dataset(default_value=[])
+    records = [row for row in (versions if isinstance(versions, list) else []) if isinstance(row, dict)]
+    year_records = [row for row in records if int(row.get("jaar", 0) or 0) == year_value]
+    if not year_records:
+        return {
+            "year": year_value,
+            "dry_run": bool(dry_run),
+            "created_versions": 0,
+            "created_version_ids": [],
+            "detail": "Geen kostprijsversies gevonden voor dit jaar.",
+        }
+
+    productie_by_year = production_storage.load_productie()
+    productie_year = productie_by_year.get(str(year_value), {}) if isinstance(productie_by_year, dict) else {}
+    vaste_by_year = fixed_costs_storage.load_grouped_by_year()
+    vaste_rows = vaste_by_year.get(str(year_value), []) if isinstance(vaste_by_year, dict) else []
+    vaste_rows = vaste_rows if isinstance(vaste_rows, list) else []
+
+    # Determine whether ABC is configured at all for this year.
+    has_any_abc = any(
+        isinstance(r, dict)
+        and (str(r.get("allocation_driver", "") or "").strip() or str(r.get("cost_pool", "") or "").strip())
+        for r in vaste_rows
+    )
+    if not has_any_abc:
+        return {
+            "year": year_value,
+            "dry_run": bool(dry_run),
+            "created_versions": 0,
+            "created_version_ids": [],
+            "detail": "Geen ABC overhead rules gevonden (allocation_driver/cost_pool zijn leeg).",
+        }
+
+    basisproducten = postgres_storage.load_dataset("basisproducten", [])
+    samengestelde = postgres_storage.load_dataset("samengestelde-producten", [])
+    liters_by_product_id: dict[str, float] = {}
+    if isinstance(basisproducten, list):
+        for row in basisproducten:
+            if not isinstance(row, dict):
+                continue
+            if int(row.get("jaar", 0) or 0) != year_value:
+                continue
+            pid = str(row.get("id", "") or "").strip()
+            if not pid:
+                continue
+            liters_by_product_id[pid] = float(row.get("inhoud_per_eenheid_liter", 0) or 0)
+    if isinstance(samengestelde, list):
+        for row in samengestelde:
+            if not isinstance(row, dict):
+                continue
+            if int(row.get("jaar", 0) or 0) != year_value:
+                continue
+            pid = str(row.get("id", "") or "").strip()
+            if not pid:
+                continue
+            liters_by_product_id[pid] = float(row.get("totale_inhoud_liter", 0) or 0)
+
+    now = datetime.now(UTC).isoformat()
+    owner_value = str(owner or "").strip() or "admin"
+
+    # Compute next version numbers per (bier_id, jaar).
+    next_num_by_key: dict[tuple[str, int], int] = {}
+    for row in year_records:
+        bier_id = str(row.get("bier_id", "") or "").strip()
+        key = (bier_id, year_value)
+        try:
+            num = int(row.get("versie_nummer", 0) or 0)
+        except (TypeError, ValueError):
+            num = 0
+        next_num_by_key[key] = max(next_num_by_key.get(key, 0), num)
+
+    def normalize_scope(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        return text if text in {"all", "purchased", "own_production", "contract_brew"} else "all"
+
+    def scope_applies(scope: str, calc_type: str) -> bool:
+        s = normalize_scope(scope)
+        if s == "all":
+            return True
+        if s == "purchased":
+            return calc_type == "inkoop"
+        if s == "own_production":
+            return calc_type == "productie"
+        if s == "contract_brew":
+            return calc_type == "contract_brew"
+        return True
+
+    def driver_total(domain: str, driver: str, stand: str) -> float:
+        dom = str(domain or "").strip().lower() or "sales"
+        d = str(driver or "").strip().upper()
+        stand_code = "actual" if str(stand or "").strip().lower() == "actual" else "normal"
+
+        # Sales domain: use sales liters totals (filled in Productie & drivers).
+        if dom == "sales":
+            actual_sales = float(productie_year.get("sales_l", 0) or 0)
+            normal_sales = float(productie_year.get("normal_sales_l", 0) or actual_sales)
+            sales = actual_sales if stand_code == "actual" else normal_sales
+            if d == "ALL_LITERS":
+                return sales
+            # Normalized handling drivers: keep SKU costing on €/L (baseline all-in),
+            # but only include these rules when their driver totals are present.
+            if d == "SHIPMENTS":
+                actual_shipments = float(productie_year.get("shipments", 0) or 0)
+                normal_shipments = float(productie_year.get("normal_shipments", 0) or actual_shipments)
+                shipments = actual_shipments if stand_code == "actual" else normal_shipments
+                return sales if shipments > 0 and sales > 0 else 0.0
+            if d == "PICKS_OR_ORDER_LINES":
+                actual_orderlines = float(productie_year.get("orderlines", 0) or 0)
+                normal_orderlines = float(productie_year.get("normal_orderlines", 0) or actual_orderlines)
+                orderlines = actual_orderlines if stand_code == "actual" else normal_orderlines
+                return sales if orderlines > 0 and sales > 0 else 0.0
+
+            # Other liter sub-types don't have a meaningful sales split yet.
+            return 0.0
+
+        # Production domain (default): use production totals.
+        actual_purchased = float(productie_year.get("hoeveelheid_inkoop_l", 0) or 0)
+        actual_own = float(productie_year.get("hoeveelheid_productie_l", 0) or 0)
+        normal_purchased = float(productie_year.get("normal_inkoop_l", 0) or actual_purchased)
+        normal_own = float(productie_year.get("normal_productie_l", 0) or actual_own)
+        normal_contract = float(productie_year.get("normal_contract_brew_l", 0) or 0)
+        purchased = actual_purchased if stand_code == "actual" else normal_purchased
+        own = actual_own if stand_code == "actual" else normal_own
+        contract = 0.0 if stand_code == "actual" else normal_contract
+        if d == "ALL_LITERS":
+            return purchased + own + contract
+        if d == "PURCHASED_LITERS":
+            return purchased
+        if d == "OWN_PRODUCTION_LITERS":
+            return own
+        if d == "CONTRACT_BREW_LITERS":
+            return contract
+        if d == "PRODUCTION_LITERS":
+            return own + contract
+        return 0.0
+
+    # Compute per-liter buckets per calc_type (inkoop/productie/contract_brew) because scope rules can vary.
+    def compute_overhead_rates(calc_type: str) -> tuple[float, float, list[dict[str, Any]]]:
+        manufacturing = 0.0
+        business = 0.0
+        breakdown_rules: list[dict[str, Any]] = []
+        for r in vaste_rows:
+            if not isinstance(r, dict):
+                continue
+            if not scope_applies(r.get("allocation_scope", "all"), calc_type):
+                continue
+            amount = float(r.get("bedrag_per_jaar", 0) or 0)
+            if amount == 0:
+                continue
+            driver = str(r.get("allocation_driver", "") or "").strip().upper()
+            stand_code = str(r.get("stand", r.get("basis", "normal")) or "normal")
+            domain_code = str(r.get("domain", "sales") or "sales")
+            denom = driver_total(domain_code, driver, stand_code)
+            if denom <= 0:
+                continue
+            rate = amount / denom
+            include_in_inventory = bool(r.get("include_in_inventory_cost", True))
+            cost_pool = str(r.get("cost_pool", "") or "").strip() or str(r.get("omschrijving", "") or "").strip() or "Overhead"
+            breakdown_rules.append(
+                {
+                    "cost_pool": cost_pool,
+                    "allocation_driver": driver or "NONE",
+                    "include_in_inventory_cost": include_in_inventory,
+                    "rate_per_liter": rate,
+                }
+            )
+            if include_in_inventory:
+                manufacturing += rate
+            else:
+                business += rate
+        return manufacturing, business, breakdown_rules
+
+    created: list[dict[str, Any]] = []
+    created_ids: list[str] = []
+    issues: list[str] = []
+
+    for source in year_records:
+        if str(source.get("status", "") or "").strip().lower() != "definitief":
+            continue
+        calc_type = str(source.get("type", "") or "").strip().lower()
+        if calc_type not in {"inkoop", "productie", "contract_brew", "bundle", "article"}:
+            calc_type = "inkoop" if str((source.get("soort_berekening") or {}).get("type", "")).lower() == "inkoop" else "productie"
+
+        # Only rebuild versions that actually have snapshot product rows.
+        snapshot = source.get("resultaat_snapshot") if isinstance(source.get("resultaat_snapshot"), dict) else {}
+        producten = snapshot.get("producten") if isinstance(snapshot.get("producten"), dict) else {}
+        basis_rows = producten.get("basisproducten") if isinstance(producten.get("basisproducten"), list) else []
+        sameng_rows = producten.get("samengestelde_producten") if isinstance(producten.get("samengestelde_producten"), list) else []
+        if not basis_rows and not sameng_rows:
+            continue
+
+        manufacturing_per_liter, business_per_liter, rule_rates = compute_overhead_rates(calc_type if calc_type in {"inkoop", "productie", "contract_brew"} else "inkoop")
+        total_per_liter = manufacturing_per_liter + business_per_liter
+
+        def rebuild_product_row(row: dict[str, Any]) -> dict[str, Any]:
+            product_id = str(row.get("product_id", "") or "").strip()
+            liters = float(liters_by_product_id.get(product_id, 0.0) or 0.0)
+            manufacturing_amount = manufacturing_per_liter * liters if liters > 0 else 0.0
+            business_amount = business_per_liter * liters if liters > 0 else 0.0
+            overhead_breakdown: list[dict[str, Any]] = []
+            if liters > 0 and rule_rates:
+                for rr in rule_rates:
+                    rate = float(rr.get("rate_per_liter", 0.0) or 0.0)
+                    if rate == 0:
+                        continue
+                    allocated = rate * liters
+                    if allocated == 0:
+                        continue
+                    overhead_breakdown.append(
+                        {
+                            "cost_pool": str(rr.get("cost_pool", "") or ""),
+                            "allocation_driver": str(rr.get("allocation_driver", "") or ""),
+                            "amount": round(allocated, 2),
+                        }
+                    )
+            primary = float(row.get("primaire_kosten", row.get("variabele_kosten", 0.0)) or 0.0)
+            packaging = float(row.get("verpakkingskosten", 0.0) or 0.0)
+            excise = float(row.get("accijns", 0.0) or 0.0)
+            overhead_total = manufacturing_amount + business_amount
+            total_cost = primary + packaging + overhead_total + excise
+            next_row = dict(row)
+            next_row["liters_per_product"] = liters
+            next_row["manufacturing_overhead"] = round(manufacturing_amount, 2)
+            next_row["business_overhead"] = round(business_amount, 2)
+            next_row["vaste_kosten"] = round(overhead_total, 2)
+            next_row["kostprijs"] = round(total_cost, 2)
+            next_row["overhead_breakdown"] = overhead_breakdown
+            return next_row
+
+        next_basis = [rebuild_product_row(r) for r in basis_rows if isinstance(r, dict)]
+        next_sameng = [rebuild_product_row(r) for r in sameng_rows if isinstance(r, dict)]
+
+        # New version metadata.
+        bier_id = str(source.get("bier_id", "") or "").strip()
+        key = (bier_id, year_value)
+        next_num = next_num_by_key.get(key, 0) + 1
+        next_num_by_key[key] = next_num
+
+        new_id = str(uuid4())
+        created_ids.append(new_id)
+        created_version = dict(source)
+        created_version["id"] = new_id
+        created_version["versie_nummer"] = next_num
+        created_version["status"] = "definitief"
+        created_version["created_at"] = now
+        created_version["updated_at"] = now
+        created_version["finalized_at"] = now
+        created_version["hercalculatie_reden"] = "abc_overhead_rebuild"
+        created_version["hercalculatie_notitie"] = f"Overhead herberekend (ABC-light) door {owner_value} op {now}"
+        created_version["hercalculatie_timestamp"] = now
+
+        next_snapshot = dict(snapshot)
+        next_snapshot["methodology_version"] = "abc_v1"
+        next_snapshot["manufacturing_overhead_per_liter"] = round(manufacturing_per_liter, 6)
+        next_snapshot["business_overhead_per_liter"] = round(business_per_liter, 6)
+        next_snapshot["productkost_per_liter"] = round(float(snapshot.get("variabele_kosten_per_liter", 0.0) or 0.0) + manufacturing_per_liter, 6)
+        next_snapshot["kostendekkend_per_liter"] = round(float(snapshot.get("variabele_kosten_per_liter", 0.0) or 0.0) + total_per_liter, 6)
+        # Keep legacy fields for now (integrale/directe_vaste) for compatibility.
+        next_snapshot.setdefault("directe_vaste_kosten_per_liter", float(snapshot.get("directe_vaste_kosten_per_liter", 0.0) or 0.0))
+        next_snapshot.setdefault("integrale_kostprijs_per_liter", float(snapshot.get("integrale_kostprijs_per_liter", 0.0) or 0.0))
+        next_snapshot.setdefault("variabele_kosten_per_liter", float(snapshot.get("variabele_kosten_per_liter", 0.0) or 0.0))
+        next_snapshot["producten"] = {
+            "basisproducten": next_basis,
+            "samengestelde_producten": next_sameng,
+        }
+        created_version["resultaat_snapshot"] = next_snapshot
+        created.append(created_version)
+
+    if not created:
+        return {
+            "year": year_value,
+            "dry_run": bool(dry_run),
+            "created_versions": 0,
+            "created_version_ids": [],
+            "detail": "Geen geschikte definitieve versies met product rows gevonden.",
+            "issues": issues,
+        }
+
+    if dry_run:
+        return {
+            "year": year_value,
+            "dry_run": True,
+            "created_versions": len(created),
+            "created_version_ids": created_ids,
+            "detail": "Dry run; geen data opgeslagen.",
+            "issues": issues,
+        }
+
+    # Persist: include old + new versions for this year to avoid delete-by-scope.
+    kept = [row for row in records if int(row.get("jaar", 0) or 0) != year_value]
+    next_year_records = [row for row in year_records] + created
+    save_dataset([*kept, *next_year_records], overwrite=True)
+
+    return {
+        "year": year_value,
+        "dry_run": False,
+        "created_versions": len(created),
+        "created_version_ids": created_ids,
+        "detail": "Nieuwe versies aangemaakt; sku rows moeten (opnieuw) worden opgebouwd.",
         "issues": issues,
     }
 
