@@ -63,6 +63,13 @@ async function proxy(request: NextRequest, context: RouteContext) {
       headers: outHeaders
     });
   } catch (error) {
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        { error: "api_proxy_failed" },
+        { status: 500 }
+      );
+    }
+
     const err = error as any;
     const message = error instanceof Error ? error.message : String(error);
     const cause = err?.cause;

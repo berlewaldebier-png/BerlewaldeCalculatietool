@@ -159,6 +159,22 @@ READ_ONLY_PROJECTION_DATASETS = {
 }
 
 
+class DatasetConflictError(ValueError):
+    pass
+
+
+class DatasetItemNotFoundError(ValueError):
+    pass
+
+
+class DatasetPreconditionRequiredError(ValueError):
+    pass
+
+
+class DatasetReadOnlyError(ValueError):
+    pass
+
+
 def _stable_json_hash(value: Any) -> str:
     """Compute a stable hash for nested JSON-ish values.
 
@@ -167,6 +183,150 @@ def _stable_json_hash(value: Any) -> str:
     """
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _normalize_etag(value: str | None) -> str:
+    return str(value or "").strip().strip('"')
+
+
+def _dataset_item_etag(item: dict[str, Any]) -> str:
+    return _stable_json_hash(item)
+
+
+def compute_dataset_etag(value: Any) -> str:
+    return _stable_json_hash(value)
+
+
+def _assert_resource_dataset(name: str) -> None:
+    if name not in DATASET_DEFAULTS:
+        raise DatasetItemNotFoundError(f"Dataset '{name}' niet gevonden.")
+    if name in READ_ONLY_PROJECTION_DATASETS:
+        raise DatasetReadOnlyError(f"Dataset '{name}' is read-only.")
+    if not isinstance(DATASET_DEFAULTS[name], list):
+        raise ValueError(f"Dataset '{name}' ondersteunt geen resource-CRUD.")
+
+
+def _load_resource_rows(name: str) -> list[dict[str, Any]]:
+    _assert_resource_dataset(name)
+    payload = load_dataset(name)
+    if not isinstance(payload, list):
+        raise ValueError(f"Dataset '{name}' heeft geen lijst-structuur.")
+    if any(not isinstance(row, dict) for row in payload):
+        raise ValueError(f"Dataset '{name}' bevat ongeldige records.")
+    return [dict(row) for row in payload]
+
+
+def _find_resource_index(rows: list[dict[str, Any]], item_id: str) -> int | None:
+    target_id = str(item_id or "").strip()
+    if not target_id:
+        raise ValueError("Item-id ontbreekt.")
+    matches = [idx for idx, row in enumerate(rows) if str(row.get("id", "") or "").strip() == target_id]
+    if len(matches) > 1:
+        raise DatasetConflictError(f"Dataset bevat meerdere records met id '{target_id}'.")
+    return matches[0] if matches else None
+
+
+def _require_matching_etag(item: dict[str, Any], expected_etag: str | None) -> None:
+    expected = _normalize_etag(expected_etag)
+    if not expected:
+        raise DatasetPreconditionRequiredError("If-Match header ontbreekt.")
+    current = _dataset_item_etag(item)
+    if expected != current:
+        raise DatasetConflictError("Record is gewijzigd door een andere gebruiker.")
+
+
+def list_dataset_items(name: str) -> dict[str, Any]:
+    rows = _load_resource_rows(name)
+    return {
+        "items": rows,
+        "item_etags": {
+            str(row.get("id", "") or "").strip(): _dataset_item_etag(row)
+            for row in rows
+            if str(row.get("id", "") or "").strip()
+        },
+        "count": len(rows),
+        "dataset_etag": _stable_json_hash(rows),
+    }
+
+
+def get_dataset_item(name: str, item_id: str) -> dict[str, Any]:
+    rows = _load_resource_rows(name)
+    idx = _find_resource_index(rows, item_id)
+    if idx is None:
+        raise DatasetItemNotFoundError(f"Record '{item_id}' niet gevonden.")
+    item = rows[idx]
+    return {"item": item, "etag": _dataset_item_etag(item)}
+
+
+def create_dataset_item(name: str, item: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("Payload moet een object zijn.")
+    item_id = str(item.get("id", "") or "").strip()
+    if not item_id:
+        raise ValueError("Payload mist verplicht veld 'id'.")
+    with postgres_storage.transaction():
+        rows = _load_resource_rows(name)
+        if _find_resource_index(rows, item_id) is not None:
+            raise DatasetConflictError(f"Record '{item_id}' bestaat al.")
+        next_item = dict(item)
+        next_item["id"] = item_id
+        rows.append(next_item)
+        save_dataset(name, rows)
+    return {"item": next_item, "etag": _dataset_item_etag(next_item)}
+
+
+def replace_dataset_item(name: str, item_id: str, item: dict[str, Any], *, expected_etag: str | None) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("Payload moet een object zijn.")
+    target_id = str(item_id or "").strip()
+    payload_id = str(item.get("id", target_id) or "").strip()
+    if not target_id:
+        raise ValueError("Item-id ontbreekt.")
+    if payload_id and payload_id != target_id:
+        raise ValueError("Payload-id komt niet overeen met URL-id.")
+    with postgres_storage.transaction():
+        rows = _load_resource_rows(name)
+        idx = _find_resource_index(rows, target_id)
+        if idx is None:
+            raise DatasetItemNotFoundError(f"Record '{target_id}' niet gevonden.")
+        _require_matching_etag(rows[idx], expected_etag)
+        next_item = dict(item)
+        next_item["id"] = target_id
+        rows[idx] = next_item
+        save_dataset(name, rows)
+    return {"item": next_item, "etag": _dataset_item_etag(next_item)}
+
+
+def patch_dataset_item(name: str, item_id: str, patch: dict[str, Any], *, expected_etag: str | None) -> dict[str, Any]:
+    if not isinstance(patch, dict):
+        raise ValueError("Payload moet een object zijn.")
+    target_id = str(item_id or "").strip()
+    if "id" in patch and str(patch.get("id", "") or "").strip() != target_id:
+        raise ValueError("Payload-id komt niet overeen met URL-id.")
+    with postgres_storage.transaction():
+        rows = _load_resource_rows(name)
+        idx = _find_resource_index(rows, target_id)
+        if idx is None:
+            raise DatasetItemNotFoundError(f"Record '{target_id}' niet gevonden.")
+        _require_matching_etag(rows[idx], expected_etag)
+        next_item = {**rows[idx], **patch, "id": target_id}
+        rows[idx] = next_item
+        save_dataset(name, rows)
+    return {"item": next_item, "etag": _dataset_item_etag(next_item)}
+
+
+def delete_dataset_item(name: str, item_id: str, *, expected_etag: str | None) -> dict[str, Any]:
+    target_id = str(item_id or "").strip()
+    with postgres_storage.transaction():
+        rows = _load_resource_rows(name)
+        idx = _find_resource_index(rows, target_id)
+        if idx is None:
+            raise DatasetItemNotFoundError(f"Record '{target_id}' niet gevonden.")
+        current = rows[idx]
+        _require_matching_etag(current, expected_etag)
+        del rows[idx]
+        save_dataset(name, rows)
+    return {"deleted": True, "id": target_id}
 
 
 def _normalize_rows_for_hash(rows: list[dict[str, Any]], *, sort_keys: list[str]) -> list[dict[str, Any]]:

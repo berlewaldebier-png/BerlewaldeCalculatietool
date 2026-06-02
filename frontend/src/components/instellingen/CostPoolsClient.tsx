@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 
 type PoolRow = {
   id: string;
@@ -97,15 +97,7 @@ export function CostPoolsClient({ initial }: { initial: unknown[] }) {
         seen.add(row.id);
       }
 
-      const response = await fetch(`${API_BASE_URL}/data/cost-pools`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(normalized),
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Opslaan mislukt");
-      }
+      await reconcileDatasetItems("cost-pools", normalized);
       setStatus("Opgeslagen.");
       setTone("success");
       router.refresh();
@@ -213,4 +205,3 @@ export function CostPoolsClient({ initial }: { initial: unknown[] }) {
     </section>
   );
 }
-

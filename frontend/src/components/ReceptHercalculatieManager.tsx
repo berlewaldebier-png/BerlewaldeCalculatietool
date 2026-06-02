@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -261,14 +262,7 @@ export function ReceptHercalculatieManager({
     setStatus("");
     setIsSaving(true);
     try {
-      const response = await fetch(KOSTPRIJSVERSIES_API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextRows)
-      });
-      if (!response.ok) {
-        throw new Error("Opslaan mislukt");
-      }
+      await reconcileDatasetItems("kostprijsversies", nextRows);
       setRows(nextRows.map((row) => normalizeBerekening(row)));
       setStatus(successMessage);
     } catch {

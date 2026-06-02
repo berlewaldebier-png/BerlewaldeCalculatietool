@@ -28,9 +28,11 @@ def validate_config() -> None:
         try:
             secret = auth_service._auth_secret()
             if "change-me" in secret.lower() or secret == "":
-                errors.append("AUTH_SECRET is not properly configured (looks like default)")
+                errors.append(
+                    "CALCULATIETOOL_AUTH_SECRET / AUTH_SECRET is not properly configured (looks like default)"
+                )
         except RuntimeError as e:
-            errors.append(f"AUTH_SECRET issue: {e}")
+            errors.append(f"CALCULATIETOOL_AUTH_SECRET / AUTH_SECRET issue: {e}")
     
     # Check environment
     env = os.getenv("CALCULATIETOOL_ENV", "local").strip().lower()

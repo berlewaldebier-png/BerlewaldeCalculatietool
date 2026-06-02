@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 import {
   normalizeConfigList,
   type BreakEvenConfig,
@@ -357,12 +358,7 @@ export function BreakEvenV2Workspace(props: Props) {
     setIsSaving(true);
     setStatus("");
     try {
-      const response = await fetch(`${API_BASE_URL}/data/break-even-configuraties`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(configs),
-      });
-      if (!response.ok) throw new Error(await response.text());
+      await reconcileDatasetItems("break-even-configuraties", configs);
       setStatus("Break-even basis en scenario's opgeslagen.");
     } catch (error) {
       setStatus(`Opslaan mislukt: ${error instanceof Error ? error.message : "onbekende fout"}`);

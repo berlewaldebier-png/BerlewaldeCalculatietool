@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 
 type JsonDatasetEditorProps = {
   endpoint: string;
@@ -10,6 +11,11 @@ type JsonDatasetEditorProps = {
   title?: string;
   description?: string;
 };
+
+function datasetNameFromEndpoint(endpoint: string) {
+  const match = endpoint.match(/^\/data\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
 
 export function JsonDatasetEditor({
   endpoint,
@@ -37,6 +43,12 @@ export function JsonDatasetEditor({
 
     setIsSaving(true);
     try {
+      const datasetName = Array.isArray(parsed) ? datasetNameFromEndpoint(endpoint) : "";
+      if (datasetName) {
+        await reconcileDatasetItems(datasetName, parsed as Array<Record<string, unknown>>);
+        setStatus("Opgeslagen.");
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "PUT",
         headers: {

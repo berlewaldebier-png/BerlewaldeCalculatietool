@@ -1,14 +1,11 @@
 "use client";
 
 import { ApiRequestError, apiGetClient, apiRequestTextClient } from "@/lib/apiClient";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 import type { GenericRecord } from "@/components/berekeningen/berekeningenWizardUtils";
 
 export async function saveKostprijsversies(payload: GenericRecord[]) {
-  await apiRequestTextClient("/data/kostprijsversies", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  await reconcileDatasetItems("kostprijsversies", payload);
 }
 
 export async function activateKostprijsversie(versionId: string, effectiveFrom?: string) {
@@ -30,11 +27,7 @@ export async function loadSkus(): Promise<GenericRecord[]> {
 }
 
 export async function saveSkus(payload: GenericRecord[]) {
-  await apiRequestTextClient("/data/skus", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  await reconcileDatasetItems("skus", payload);
 }
 
 export async function saveSkuClassification(skuId: string, payload: Record<string, unknown>) {

@@ -7,6 +7,7 @@ like cost version activation.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -105,7 +106,7 @@ def put_sku_classification(
         raise
     except Exception as exc:
         logger.exception("Error updating sku classification")
-        raise HTTPException(status_code=500, detail=str(exc) or "Internal server error") from exc
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 # Special handlers for complex operations
@@ -165,9 +166,7 @@ def post_activate_kostprijsversie(
         raise
     except Exception as exc:
         logger.exception(f"Error activating cost version {version_id}")
-        # In local/dev this endpoint is frequently used to diagnose data-model issues.
-        # Include the exception message so the UI/Swagger can surface the real root cause.
-        raise HTTPException(status_code=500, detail=str(exc) or "Internal server error") from exc
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.post("/kostprijsversies/{version_id}/activate-products")
@@ -240,8 +239,6 @@ def post_bootstrap_postgres(_: dict = Depends(require_admin)) -> dict[str, Any]:
 
 
 def _slugify_id(value: str) -> str:
-    import re
-
     normalized = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower())
     normalized = re.sub(r"(^-|-$)", "", normalized)
     return normalized or "new"
@@ -378,7 +375,7 @@ def post_upsert_format(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Error upserting format")
-        raise HTTPException(status_code=500, detail=str(exc) or "Internal server error") from exc
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.post("/sku-composition/upsert-bundle", response_model=UpsertBundleResponse)
@@ -618,4 +615,4 @@ def post_upsert_bundle(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Error upserting bundle")
-        raise HTTPException(status_code=500, detail=str(exc) or "Internal server error") from exc
+        raise HTTPException(status_code=500, detail="Internal server error") from exc

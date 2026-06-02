@@ -15,6 +15,7 @@ import {
 } from "@/components/offerte-samenstellen/sellInResolver";
 import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
 import { apiRequestTextClient } from "@/lib/apiClient";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 import {
   buildAdviesOpslagByChannel,
   buildChannelDefaultOpslag,
@@ -275,11 +276,7 @@ export function AdviesprijzenWorkspace(props: {
     try {
       const next = buildAdviesprijzenSavePayload({ rows, selectedYear, yearRows });
 
-      await apiRequestTextClient("/data/adviesprijzen", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
-      });
+      await reconcileDatasetItems("adviesprijzen", next);
       setRows(next);
       setStatus("Opgeslagen.");
     } catch (error) {

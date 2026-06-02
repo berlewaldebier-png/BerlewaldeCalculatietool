@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 
 type FieldType = "text" | "number" | "checkbox";
 type NestedFieldType = FieldType | "select";
@@ -45,6 +46,11 @@ type NestedComputedField = {
   leftKey: string;
   rightKey: string;
 };
+
+function datasetNameFromEndpoint(endpoint: string) {
+  const match = endpoint.match(/^\/data\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
 
 type ParentAggregate = {
   targetKey: string;
@@ -316,6 +322,13 @@ export function NestedCollectionEditor({
 
     try {
       const payload = rows.map(stripInternal);
+      const datasetName = datasetNameFromEndpoint(endpoint);
+      if (datasetName) {
+        await reconcileDatasetItems(datasetName, payload);
+        setStatus("Opgeslagen.");
+        router.refresh();
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "PUT",
         headers: {

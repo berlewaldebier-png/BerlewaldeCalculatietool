@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
 import { clampPage, compareNullableNumber, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
 
@@ -50,6 +51,11 @@ function createUiId() {
 function stripInternal(row: InternalRow) {
   const { _uiId, ...rest } = row;
   return rest;
+}
+
+function datasetNameFromEndpoint(endpoint: string) {
+  const match = endpoint.match(/^\/data\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
 }
 
 function TrashIcon() {
@@ -211,12 +217,20 @@ export function DatasetTableEditor({
     setIsSaving(true);
 
     try {
+      const payload = buildPayload();
+      const datasetName = Array.isArray(payload) ? datasetNameFromEndpoint(endpoint) : "";
+      if (datasetName) {
+        await reconcileDatasetItems(datasetName, payload as Array<Record<string, unknown>>);
+        setStatus("Opgeslagen.");
+        router.refresh();
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(buildPayload())
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {

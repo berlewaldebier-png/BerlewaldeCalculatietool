@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
+import { createDatasetItem } from "@/lib/datasetItems";
 
 type EditorValue = string | number | boolean | null;
 type EditorRow = Record<string, EditorValue>;
@@ -542,15 +543,7 @@ export function VasteKostenClient({
         },
       ];
 
-      const response = await fetch(`${API_BASE_URL}/data/cost-pools`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Pool opslaan mislukt");
-      }
+      await createDatasetItem("cost-pools", next[next.length - 1]);
       router.refresh();
     } finally {
       setIsPoolSaving(false);

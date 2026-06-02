@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 import {
   cloneValue,
   normalizeFactuur,
@@ -423,24 +424,6 @@ export function InkoopFacturenManager({
         [];
       const maxVersion = groupRecords.reduce((max, row) => Math.max(max, Number(row.versie_nummer ?? 0) || 0), 0);
 
-      async function readResponseError(response: Response): Promise<string> {
-        try {
-          const text = await response.text();
-          if (!text) {
-            return `HTTP ${response.status}`;
-          }
-          try {
-            const parsed = JSON.parse(text) as any;
-            const detail = typeof parsed?.detail === "string" ? parsed.detail : null;
-            return detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}: ${text}`;
-          } catch {
-            return `HTTP ${response.status}: ${text}`;
-          }
-        } catch {
-          return `HTTP ${response.status}`;
-        }
-      }
-
       const existingConceptForGroup =
         rows.find(
           (row) =>
@@ -488,15 +471,7 @@ export function InkoopFacturenManager({
         .map((row) => normalizeBerekening(row))
         .filter((row) => !isConceptFactuurVersie(row) || sanitizeFacturen(getInkoopFacturen(row)).length > 0);
 
-      const response = await fetch(KOSTPRIJSVERSIES_API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cleanedRows)
-      });
-
-      if (!response.ok) {
-        throw new Error(await readResponseError(response));
-      }
+      await reconcileDatasetItems("kostprijsversies", cleanedRows);
 
       setRows(cleanedRows);
       setDraftMode("edit");
@@ -570,14 +545,7 @@ export function InkoopFacturenManager({
         .concat(normalizeBerekening(nextVersion))
         .map((row) => normalizeBerekening(row));
 
-      const response = await fetch(KOSTPRIJSVERSIES_API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cleanedRows)
-      });
-      if (!response.ok) {
-        throw new Error(await readResponseError(response));
-      }
+      await reconcileDatasetItems("kostprijsversies", cleanedRows);
 
       setRows(cleanedRows);
       setDraftFactuur(null);
@@ -603,16 +571,7 @@ export function InkoopFacturenManager({
         .filter((row) => String(row.id ?? "") !== String(versionId))
         .map((row) => normalizeBerekening(row));
 
-      const response = await fetch(KOSTPRIJSVERSIES_API, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cleanedRows)
-      });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw new Error(text ? `HTTP ${response.status}: ${text}` : `HTTP ${response.status}`);
-      }
+      await reconcileDatasetItems("kostprijsversies", cleanedRows);
 
       setRows(cleanedRows);
       setDraftFactuur(null);

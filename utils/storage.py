@@ -1,9 +1,14 @@
-"""Test compatibility shim.
+"""Compatibility alias for the backend storage module.
 
-The canonical implementation lives in `app.utils.storage` (backend runtime).
-This module exists so unit tests can `from utils import storage` and patch
-`utils.storage.*` without accidentally importing a third-party `utils` package.
+The canonical implementation lives in `app.utils.storage`. Older tests import
+`utils.storage` and patch private helpers; aliasing the module keeps those
+patches applied to the actual implementation.
 """
 
-from app.utils.storage import *  # noqa: F403
+from __future__ import annotations
 
+import sys
+
+from app.utils import storage as _storage
+
+sys.modules[__name__] = _storage

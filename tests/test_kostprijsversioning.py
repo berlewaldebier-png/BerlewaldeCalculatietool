@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 import sys
@@ -15,6 +16,32 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from backend.app.domain import dataset_store
 from utils import storage
+
+
+class _FakePostgres:
+    @staticmethod
+    def uses_postgres() -> bool:
+        return True
+
+    @staticmethod
+    def load_dataset(name: str, default: object = None) -> object:
+        if name == "skus":
+            return [
+                {"id": "basis-1", "beer_id": "bier-1", "format_article_id": "basis-1", "article_id": "basis-1"},
+                {"id": "basis-fles-33", "beer_id": "bier-1", "format_article_id": "basis-fles-33", "article_id": "basis-fles-33"},
+                {"id": "doos-24", "beer_id": "bier-1", "format_article_id": "doos-24", "article_id": "doos-24"},
+                {"id": "fles-33", "beer_id": "bier-1", "format_article_id": "fles-33", "article_id": "fles-33"},
+                {"id": "fust-20l", "beer_id": "bier-1", "format_article_id": "fust-20l", "article_id": "fust-20l"},
+                {"id": "prod-1", "beer_id": "bier-1", "format_article_id": "prod-1", "article_id": "prod-1"},
+                {"id": "sam-doos-24", "beer_id": "bier-1", "format_article_id": "sam-doos-24", "article_id": "sam-doos-24"},
+            ]
+        if name == "bieren":
+            return [{"id": "bier-1", "alcoholpercentage": 6.5}]
+        return [] if default is None else default
+
+    @staticmethod
+    def transaction():
+        return nullcontext()
 
 
 def _sample_version(
@@ -62,6 +89,23 @@ def _sample_version(
 
 
 class KostprijsVersioningTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._postgres_patcher = patch("utils.storage._get_postgres_storage_module", return_value=_FakePostgres)
+        self._postgres_patcher.start()
+        self._cost_index_patcher = patch(
+            "app.domain.cost_versions_storage.load_cost_row_index_for_versions",
+            side_effect=lambda version_ids: {
+                (str(version_id), sku_id): {"kostprijs_ex": 1.0}
+                for version_id in version_ids
+                for sku_id in {"basis-1", "doos-24", "fles-33", "fust-20l", "prod-1"}
+            },
+        )
+        self._cost_index_patcher.start()
+
+    def tearDown(self) -> None:
+        self._cost_index_patcher.stop()
+        self._postgres_patcher.stop()
+
     def test_normalize_berekening_backfills_snapshot_product_identity(self) -> None:
         with patch(
             "utils.storage.load_basisproducten",
@@ -75,13 +119,27 @@ class KostprijsVersioningTests(unittest.TestCase):
                     "id": "v-old",
                     "bier_id": "bier-1",
                     "status": "definitief",
-                    "basisgegevens": {"jaar": 2026, "biernaam": "Testbier"},
+                    "basisgegevens": {"jaar": 2026, "biernaam": "Testbier", "alcoholpercentage": 6.5},
                     "soort_berekening": {"type": "Inkoop"},
                     "resultaat_snapshot": {
                         "integrale_kostprijs_per_liter": 1.0,
                         "producten": {
-                            "basisproducten": [{"verpakking": "Fles 33cl", "kostprijs": 1.1}],
-                            "samengestelde_producten": [{"verpakking": "24*33cl", "kostprijs": 27.9}],
+                            "basisproducten": [
+                                {
+                                    "product_id": "basis-fles-33",
+                                    "product_type": "basis",
+                                    "verpakking": "Fles 33cl",
+                                    "kostprijs": 1.1,
+                                }
+                            ],
+                            "samengestelde_producten": [
+                                {
+                                    "product_id": "sam-doos-24",
+                                    "product_type": "samengesteld",
+                                    "verpakking": "24*33cl",
+                                    "kostprijs": 27.9,
+                                }
+                            ],
                         },
                     },
                 }
@@ -100,16 +158,50 @@ class KostprijsVersioningTests(unittest.TestCase):
                 "id": "v1",
                 "bier_id": "bier-1",
                 "status": "definitief",
-                "basisgegevens": {"jaar": 2026, "biernaam": "Testbier"},
+                "basisgegevens": {"jaar": 2026, "biernaam": "Testbier", "alcoholpercentage": 6.5},
                 "soort_berekening": {"type": "Inkoop"},
                 "resultaat_snapshot": {
                     "integrale_kostprijs_per_liter": 1.0,
                     "producten": {
-                        "basisproducten": [{"verpakking": "Fles 33cl", "kostprijs": 1.1}],
-                        "samengestelde_producten": [{"verpakking": "24*33cl", "kostprijs": 27.9}],
+                        "basisproducten": [
+                            {
+                                "product_id": "basis-fles-33",
+                                "product_type": "basis",
+                                "verpakking": "Fles 33cl",
+                                "kostprijs": 1.1,
+                            }
+                        ],
+                        "samengestelde_producten": [
+                            {
+                                "product_id": "sam-doos-24",
+                                "product_type": "samengesteld",
+                                "verpakking": "24*33cl",
+                                "kostprijs": 27.9,
+                            }
+                        ],
                     },
                 },
             }
+        ]
+        existing_activations = [
+            {
+                "bier_id": "bier-1",
+                "jaar": 2026,
+                "product_id": "basis-fles-33",
+                "product_type": "basis",
+                "sku_id": "basis-fles-33",
+                "kostprijsversie_id": "v1",
+                "effectief_vanaf": "2026-04-01T10:00:00",
+            },
+            {
+                "bier_id": "bier-1",
+                "jaar": 2026,
+                "product_id": "sam-doos-24",
+                "product_type": "samengesteld",
+                "sku_id": "sam-doos-24",
+                "kostprijsversie_id": "v1",
+                "effectief_vanaf": "2026-04-01T10:00:00",
+            },
         ]
         with patch(
             "utils.storage.load_basisproducten",
@@ -118,7 +210,7 @@ class KostprijsVersioningTests(unittest.TestCase):
             "utils.storage.load_samengestelde_producten",
             return_value=[{"id": "sam-doos-24", "omschrijving": "24*33cl"}],
         ):
-            normalized_records, activations = storage._normalize_and_sync_kostprijsversie_state(records, [])
+            normalized_records, activations = storage._normalize_and_sync_kostprijsversie_state(records, existing_activations)
 
         activation_map = {
             (row["product_type"], row["product_id"]): row["kostprijsversie_id"]
@@ -133,7 +225,7 @@ class KostprijsVersioningTests(unittest.TestCase):
                 for row in activations
                 if row["product_type"] == "basis" and row["product_id"] == "basis-fles-33"
             ),
-            normalized_records[0]["finalized_at"],
+            "2026-04-01T10:00:00",
         )
 
     def test_normalize_definitieve_version_backfills_finalized_at(self) -> None:
@@ -142,7 +234,7 @@ class KostprijsVersioningTests(unittest.TestCase):
                 "id": "v-legacy",
                 "bier_id": "bier-1",
                 "status": "definitief",
-                "basisgegevens": {"jaar": 2026, "biernaam": "Testbier"},
+                "basisgegevens": {"jaar": 2026, "biernaam": "Testbier", "alcoholpercentage": 6.5},
                 "soort_berekening": {"type": "Eigen productie"},
                 "resultaat_snapshot": {
                     "integrale_kostprijs_per_liter": 1.0,
@@ -314,9 +406,7 @@ class KostprijsVersioningTests(unittest.TestCase):
         ):
             versions = storage.load_packaging_component_price_versions()
 
-        self.assertEqual(len(versions), 1)
-        self.assertEqual(versions[0]["versie_nummer"], 1)
-        self.assertTrue(versions[0]["is_actief"])
+        self.assertEqual(versions, [])
         self.assertEqual(saved_payloads, {})
 
     def test_save_packaging_component_prices_creates_new_version_on_change(self) -> None:
@@ -408,11 +498,31 @@ class KostprijsVersioningTests(unittest.TestCase):
                 ],
             ),
         ]
+        existing_activations = [
+            {
+                "bier_id": "bier-1",
+                "jaar": 2026,
+                "product_id": "doos-24",
+                "product_type": "samengesteld",
+                "sku_id": "doos-24",
+                "kostprijsversie_id": "v1",
+                "effectief_vanaf": "2026-04-01T10:00:00",
+            },
+            {
+                "bier_id": "bier-1",
+                "jaar": 2026,
+                "product_id": "fust-20l",
+                "product_type": "basis",
+                "sku_id": "fust-20l",
+                "kostprijsversie_id": "v2",
+                "effectief_vanaf": "2026-04-02T10:00:00",
+            },
+        ]
         with patch("utils.storage.load_basisproducten", return_value=[]), patch(
             "utils.storage.load_samengestelde_producten",
             return_value=[],
         ):
-            normalized_rows, activations = storage._normalize_and_sync_kostprijsversie_state(state, [])
+            normalized_rows, activations = storage._normalize_and_sync_kostprijsversie_state(state, existing_activations)
 
         activation_map = {
             (row["product_id"], row["kostprijsversie_id"])
@@ -473,8 +583,11 @@ class KostprijsVersioningTests(unittest.TestCase):
             return True
 
         def fake_save_activations(data: list[dict]) -> bool:
+            by_product_id = {str(row.get("product_id", "") or ""): deepcopy(row) for row in activations}
+            for row in data:
+                by_product_id[str(row.get("product_id", "") or "")] = deepcopy(row)
             activations.clear()
-            activations.extend(deepcopy(data))
+            activations.extend(by_product_id.values())
             return True
 
         with patch("utils.storage.load_kostprijsversies", side_effect=fake_load), patch(
@@ -482,14 +595,10 @@ class KostprijsVersioningTests(unittest.TestCase):
         ), patch("utils.storage.load_basisproducten", return_value=[]), patch(
             "utils.storage.load_samengestelde_producten",
             return_value=[],
-        ), patch(
-            "utils.storage._save_postgres_dataset",
-            side_effect=lambda dataset_name, payload: (
-                fake_save_versions(payload)
-                if dataset_name == "kostprijsversies"
-                else fake_save_activations(payload)
-            ),
-        ), patch("utils.storage._save_json_value", return_value=True):
+        ), patch("utils.storage.upsert_kostprijsproductactiveringen", side_effect=lambda rows, context=None: fake_save_activations(rows)), patch(
+            "utils.storage._save_json_value",
+            return_value=True,
+        ):
             activated = storage.activate_kostprijsversie("v2")
 
         self.assertIsNotNone(activated)
@@ -549,7 +658,7 @@ class KostprijsVersioningTests(unittest.TestCase):
         ), patch("utils.storage.load_basisproducten", return_value=[]), patch(
             "utils.storage.load_samengestelde_producten",
             return_value=[],
-        ), patch("utils.storage._save_postgres_dataset", return_value=True), patch(
+        ), patch("utils.storage.upsert_kostprijsproductactiveringen", return_value=True), patch(
             "utils.storage._save_json_value",
             return_value=True,
         ):
@@ -704,13 +813,7 @@ class KostprijsVersioningTests(unittest.TestCase):
             loaded = storage.load_packaging_component_price_versions()
         self.assertEqual([row["id"] for row in loaded], ["price-v1"])
 
-    def test_save_kostprijsproductactiveringen_filters_invalid_refs(self) -> None:
-        captured: dict[str, list[dict]] = {}
-
-        def fake_save(dataset_name: str, data: list[dict]) -> bool:
-            captured[dataset_name] = data
-            return True
-
+    def test_save_kostprijsproductactiveringen_rejects_invalid_refs(self) -> None:
         with patch("utils.storage.load_bieren", return_value=[{"id": "bier-1"}]), patch(
             "utils.storage.load_kostprijsversies",
             return_value=[{"id": "v1"}],
@@ -720,29 +823,28 @@ class KostprijsVersioningTests(unittest.TestCase):
         ), patch(
             "utils.storage.load_samengestelde_producten",
             return_value=[],
-        ), patch("utils.storage._save_postgres_dataset", side_effect=fake_save):
-            saved = storage.save_kostprijsproductactiveringen(
-                [
-                    {
-                        "bier_id": "bier-1",
-                        "jaar": 2026,
-                        "product_id": "basis-1",
-                        "product_type": "basis",
-                        "kostprijsversie_id": "v1",
-                    },
-                    {
-                        "bier_id": "bier-missing",
-                        "jaar": 2026,
-                        "product_id": "basis-1",
-                        "product_type": "basis",
-                        "kostprijsversie_id": "v1",
-                    },
-                ]
-            )
-
-        self.assertTrue(saved)
-        self.assertEqual(len(captured["kostprijsproductactiveringen"]), 1)
-        self.assertEqual(captured["kostprijsproductactiveringen"][0]["bier_id"], "bier-1")
+        ), patch("utils.storage._save_postgres_dataset", side_effect=AssertionError("invalid payload should not save")):
+            with self.assertRaises(ValueError):
+                storage.save_kostprijsproductactiveringen(
+                    [
+                        {
+                            "bier_id": "bier-1",
+                            "jaar": 2026,
+                            "sku_id": "basis-1",
+                            "product_id": "basis-1",
+                            "product_type": "basis",
+                            "kostprijsversie_id": "v1",
+                        },
+                        {
+                            "bier_id": "bier-missing",
+                            "jaar": 2026,
+                            "sku_id": "missing-sku",
+                            "product_id": "basis-1",
+                            "product_type": "basis",
+                            "kostprijsversie_id": "v1",
+                        },
+                    ]
+                )
 
     def test_save_prijsvoorstellen_filters_invalid_refs(self) -> None:
         captured: dict[str, list[dict]] = {}

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 
 type FieldType = "text" | "number";
 
@@ -31,6 +32,11 @@ type RecordCardEditorProps = {
 type InternalRow = Record<string, unknown> & {
   _uiId: string;
 };
+
+function datasetNameFromEndpoint(endpoint: string) {
+  const match = endpoint.match(/^\/data\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
 
 function createUiId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -87,6 +93,12 @@ export function RecordCardEditor({
 
     try {
       const payload = rows.map(stripInternal);
+      const datasetName = datasetNameFromEndpoint(endpoint);
+      if (datasetName) {
+        await reconcileDatasetItems(datasetName, payload);
+        setStatus("Opgeslagen.");
+        return;
+      }
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "PUT",
         headers: {

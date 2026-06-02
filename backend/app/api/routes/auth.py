@@ -17,6 +17,11 @@ from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
     MeResponse,
+    PasswordForgotRequest,
+    PasswordForgotResponse,
+    PasswordResetRequest,
+    PasswordResetResponse,
+    UpdateUserRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,8 +67,42 @@ def post_login(request: Request, payload: LoginRequest, response: Response) -> L
         return LoginResponse(**authenticated)
     except HTTPException:
         raise
+    except RuntimeError as exc:
+        logger.exception("Configuration error during login")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Error during login")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@router.post("/forgot-password", response_model=PasswordForgotResponse)
+@limiter.limit("5/minute")
+def post_forgot_password(request: Request, payload: PasswordForgotRequest) -> PasswordForgotResponse:
+    """Initiate password reset by email."""
+    try:
+        return PasswordForgotResponse(**auth_service.request_password_reset(payload.email))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/reset-password", response_model=PasswordResetResponse)
+@limiter.limit("5/minute")
+def post_reset_password(request: Request, payload: PasswordResetRequest) -> PasswordResetResponse:
+    """Reset a forgotten password using a one-time email code."""
+    try:
+        auth_service.reset_password(
+            email=payload.email,
+            code=payload.code,
+            new_password=payload.password,
+            password_confirm=payload.password_confirm,
+        )
+        return PasswordResetResponse(reset=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Error during password reset")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
@@ -104,6 +143,7 @@ def post_bootstrap_admin(
             username=payload.username,
             password=payload.password,
             display_name=payload.display_name,
+            email=payload.email,
         )
         logger.info(f"Bootstrap admin created: {payload.username}")
     except RuntimeError as exc:
@@ -123,6 +163,7 @@ def post_create_user(
             username=payload.username,
             password=payload.password,
             display_name=payload.display_name,
+            email=payload.email,
             role=payload.role,
         )
         logger.info(f"New user created: {payload.username}")
@@ -130,3 +171,32 @@ def post_create_user(
         logger.warning(f"Error creating user {payload.username}: {exc}")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CreateUserResponse(created=True, username=str(result.get("username", "") or payload.username))
+
+
+@router.put("/users/{username}", response_model=dict[str, bool])
+def put_update_user(
+    username: str,
+    payload: UpdateUserRequest,
+    _: dict = Depends(require_admin),
+) -> dict[str, bool]:
+    """Update user profile, role, or active status."""
+    try:
+        provided_fields = getattr(payload, "model_fields_set", None)
+        if provided_fields is None:
+            provided_fields = getattr(payload, "__fields_set__", set())
+        auth_service.update_user(
+            username=username,
+            display_name=payload.display_name,
+            email=payload.email,
+            email_provided="email" in provided_fields,
+            role=payload.role,
+            is_active=payload.is_active,
+        )
+        logger.info(f"User updated: {username}")
+        return {"updated": True}
+    except ValueError as exc:
+        logger.warning(f"Error updating user {username}: {exc}")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(f"Error updating user {username}")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc

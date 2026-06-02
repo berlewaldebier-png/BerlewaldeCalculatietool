@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-import json
+import logging
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
 import urllib.parse
-import urllib.request
-import urllib.error
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
-from app.domain.auth_dependencies import require_user
+from app.domain.douano_client import parse_json_payload as _client_parse_json_payload
+from app.domain.douano_client import probe_url as _probe_url
+from app.domain.douano_client import request as _douano_request
+from app.domain.auth_dependencies import require_admin, require_user
 from app.domain import douano_oauth_storage
 from app.domain import douano_sync_storage
 from app.domain import douano_product_mapping_storage
@@ -25,6 +26,7 @@ from app.domain import douano_unmapped_service
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
+logger = logging.getLogger(__name__)
 
 
 def _douano_base_url() -> str:
@@ -85,47 +87,6 @@ def _douano_token_url() -> str:
     return f"{_douano_base_url()}{path}"
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
-        return None
-
-
-def _probe_url(url: str, method: str) -> dict[str, Any]:
-    opener = urllib.request.build_opener(_NoRedirect())
-    req = urllib.request.Request(
-        url,
-        data=(b"x=1" if method.upper() == "POST" else None),
-        method=method.upper(),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "calculatietool/0.1 (+http://localhost)",
-        },
-    )
-    try:
-        with opener.open(req, timeout=10) as resp:
-            return {
-                "ok": True,
-                "status": getattr(resp, "status", None),
-                "url": getattr(resp, "url", url),
-                "server": resp.headers.get("Server", ""),
-                "allow": resp.headers.get("Allow", ""),
-                "location": resp.headers.get("Location", ""),
-            }
-    except urllib.error.HTTPError as exc:
-        headers = getattr(exc, "headers", None)
-        return {
-            "ok": False,
-            "status": getattr(exc, "code", None),
-            "url": getattr(exc, "geturl", lambda: url)() or url,
-            "server": (headers.get("Server", "") if headers else ""),
-            "allow": (headers.get("Allow", "") if headers else ""),
-            "location": (headers.get("Location", "") if headers else ""),
-        }
-    except Exception as exc:
-        return {"ok": False, "status": None, "url": url, "error": str(exc)}
-
-
 def _require_douano_tokens() -> dict[str, Any]:
     tokens = douano_oauth_storage.get_tokens("douano") or {}
     if not tokens:
@@ -155,7 +116,7 @@ def _parse_iso_ts(value: Any) -> datetime | None:
         return None
 
 
-def _refresh_douano_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
+async def _refresh_douano_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
     refresh_token = str(tokens.get("refresh_token", "") or "")
     if not refresh_token:
         raise HTTPException(status_code=400, detail="Douano refresh_token ontbreekt; opnieuw koppelen.")
@@ -167,7 +128,9 @@ def _refresh_douano_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
         "client_secret": _douano_client_secret(),
         "refresh_token": refresh_token,
     }
-    status, _, raw = _douano_request(tokens={"access_token": ""}, method="POST", url=token_url, form=form)
+    status, _, raw = await _douano_request(tokens={"access_token": ""}, method="POST", url=token_url, form=form)
+    if status <= 0:
+        raise HTTPException(status_code=400, detail="Douano token refresh mislukt.")
     if status >= 400:
         snippet = raw.strip().replace("\r", " ").replace("\n", " ")
         if len(snippet) > 500:
@@ -201,49 +164,12 @@ def _refresh_douano_tokens(tokens: dict[str, Any]) -> dict[str, Any]:
     return refreshed if refreshed else tokens
 
 
-def _douano_request(
-    *,
-    tokens: dict[str, Any],
-    method: str,
-    url: str,
-    form: dict[str, str] | None = None,
-) -> tuple[int, dict[str, str], str]:
-    opener = urllib.request.build_opener(_NoRedirect())
-    body = None
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "calculatietool/0.1 (+http://localhost)",
-    }
-    access = str(tokens.get("access_token", "") or "").strip()
-    if access:
-        headers["Authorization"] = f"Bearer {access}"
-    if form is not None:
-        body = urllib.parse.urlencode(form).encode("utf-8")
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
-    req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers)
-    try:
-        with opener.open(req, timeout=20) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            return int(getattr(resp, "status", 200) or 200), dict(resp.headers.items()), raw
-    except urllib.error.HTTPError as exc:
-        try:
-            raw = exc.read().decode("utf-8", errors="replace")
-        except Exception:
-            raw = ""
-        hdrs = getattr(exc, "headers", None)
-        return int(getattr(exc, "code", 0) or 0), (dict(hdrs.items()) if hdrs else {}), raw
-    except Exception as exc:
-        return 0, {}, str(exc)
-
-
 def _parse_json_payload(raw: str) -> dict[str, Any]:
     try:
-        parsed = json.loads(raw or "")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Douano response is geen JSON: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=502, detail="Douano response ongeldig (verwacht object).")
-    return parsed
+        return _client_parse_json_payload(raw)
+    except ValueError as exc:
+        logger.exception("Douano response JSON parsing failed")
+        raise HTTPException(status_code=502, detail="Douano response is geen geldige JSON.") from exc
 
 
 def _extract_result_list(payload: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
@@ -258,7 +184,7 @@ def _extract_result_list(payload: dict[str, Any]) -> tuple[int, list[dict[str, A
     return current_page, cleaned
 
 
-def _fetch_paged_resource(
+async def _fetch_paged_resource(
     *,
     tokens: dict[str, Any],
     path: str,
@@ -281,11 +207,13 @@ def _fetch_paged_resource(
         pages_fetched = page
         q_with_page = {**q, "page": str(page)}
         url = f"{base}{path}?{urllib.parse.urlencode(q_with_page)}" if q_with_page else f"{base}{path}"
-        status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
+        status, _, raw = await _douano_request(tokens=tokens, method="GET", url=url)
         if status == 401:
             # Try a single refresh+retry; if rights are missing this still stays 401/403.
-            tokens = _refresh_douano_tokens(tokens)
-            status, _, raw = _douano_request(tokens=tokens, method="GET", url=url)
+            tokens = await _refresh_douano_tokens(tokens)
+            status, _, raw = await _douano_request(tokens=tokens, method="GET", url=url)
+        if status <= 0:
+            raise HTTPException(status_code=502, detail="Douano request faalde.")
         if status >= 400:
             snippet = raw.strip().replace("\r", " ").replace("\n", " ")
             if len(snippet) > 300:
@@ -312,12 +240,13 @@ def _fetch_paged_resource(
 
 
 def _set_state_cookie(response: Response, state: str) -> None:
+    env = os.getenv("CALCULATIETOOL_ENV", "local").strip().lower()
     response.set_cookie(
         "douano_oauth_state",
         state,
         httponly=True,
         samesite="lax",
-        secure=False,  # local dev
+        secure=env not in {"local", "dev", "development"},
         path="/",
         max_age=60 * 10,
     )
@@ -342,7 +271,7 @@ def get_douano_connect() -> RedirectResponse:
 
 
 @router.get("/douano/probe")
-def get_douano_probe() -> dict[str, Any]:
+async def get_douano_probe() -> dict[str, Any]:
     base = _douano_base_url()
     candidates = [
         _douano_token_url(),
@@ -362,7 +291,14 @@ def get_douano_probe() -> dict[str, Any]:
 
     results: list[dict[str, Any]] = []
     for u in uniq:
-        results.append({"url": u, "options": _probe_url(u, "OPTIONS"), "post": _probe_url(u, "POST"), "get": _probe_url(u, "GET")})
+        results.append(
+            {
+                "url": u,
+                "options": await _probe_url(u, "OPTIONS"),
+                "post": await _probe_url(u, "POST"),
+                "get": await _probe_url(u, "GET"),
+            }
+        )
 
     return {
         "base_url": base,
@@ -374,7 +310,7 @@ def get_douano_probe() -> dict[str, Any]:
 
 
 @router.get("/douano/debug")
-def get_douano_debug(
+async def get_douano_debug(
     path: str = Query("/api", description="Path on Douano host, e.g. /api/public/v1/core/companies"),
     query: str = Query("", description="Raw query string without ?, e.g. filter_by_is_customer=true"),
 ) -> dict[str, Any]:
@@ -386,7 +322,7 @@ def get_douano_debug(
     url = f"{base}{p}"
     if query.strip():
         url = f"{url}?{query.strip().lstrip('?')}"
-    status, headers, raw = _douano_request(tokens=tokens, method="GET", url=url)
+    status, headers, raw = await _douano_request(tokens=tokens, method="GET", url=url)
     snippet = raw.strip().replace("\r", " ").replace("\n", " ")
     if len(snippet) > 800:
         snippet = snippet[:800] + "…"
@@ -402,7 +338,7 @@ def get_douano_debug(
 
 
 @router.get("/douano/discover-companies")
-def get_douano_discover_companies() -> dict[str, Any]:
+async def get_douano_discover_companies() -> dict[str, Any]:
     tokens = _require_douano_tokens()
     base = _douano_api_base_url(tokens)
 
@@ -426,7 +362,7 @@ def get_douano_discover_companies() -> dict[str, Any]:
     first_non_404 = ""
     for p in candidates:
         url = f"{base}{p}?{query}"
-        status, headers, raw = _douano_request(tokens=tokens, method="GET", url=url)
+        status, headers, raw = await _douano_request(tokens=tokens, method="GET", url=url)
         ct = headers.get("Content-Type", "")
         short = raw.strip().replace("\r", " ").replace("\n", " ")
         if len(short) > 220:
@@ -445,7 +381,7 @@ def get_douano_discover_companies() -> dict[str, Any]:
 
 
 @router.get("/douano/callback")
-def get_douano_callback(
+async def get_douano_callback(
     request: Request,
     code: str = Query("", description="Authorization code from Douano"),
     state: str = Query("", description="State from /connect"),
@@ -464,68 +400,32 @@ def get_douano_callback(
         "redirect_uri": _douano_redirect_uri(),
         "code": code,
     }
-    body = urllib.parse.urlencode(form).encode("utf-8")
-    req = urllib.request.Request(
-        token_url,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            # Some providers behave oddly without a UA. Keep it explicit for debugging.
-            "User-Agent": "calculatietool/0.1 (+http://localhost)",
-        },
-    )
-    try:
-        opener = urllib.request.build_opener(_NoRedirect())
-        with opener.open(req, timeout=20) as resp:
-            raw = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        # Include response body + Allow header when present; 405 usually means wrong method/endpoint.
-        try:
-            body_text = exc.read().decode("utf-8", errors="replace")
-        except Exception:
-            body_text = ""
-        allow = ""
-        location = ""
-        final_url = ""
-        try:
-            allow = str(exc.headers.get("Allow", "") or "")
-            location = str(exc.headers.get("Location", "") or "")
-        except Exception:
-            allow = ""
-            location = ""
-        try:
-            final_url = str(exc.geturl() or "")
-        except Exception:
-            final_url = ""
-        msg = f"HTTP {getattr(exc, 'code', '?')} {getattr(exc, 'reason', '')}".strip()
+    status, headers, raw = await _douano_request(tokens={"access_token": ""}, method="POST", url=token_url, form=form)
+    if status <= 0:
+        raise HTTPException(status_code=400, detail="Douano token exchange mislukt.")
+    if status >= 400:
         extra = []
-        if final_url:
-            extra.append(f"URL={final_url}")
+        location = headers.get("Location", "")
+        allow = headers.get("Allow", "")
         if location:
             extra.append(f"Location={location}")
         if allow:
             extra.append(f"Allow={allow}")
-        if body_text:
-            # Keep it short; Douano can return HTML.
-            snippet = body_text.strip().replace("\r", " ").replace("\n", " ")
-            if len(snippet) > 500:
-                snippet = snippet[:500] + "…"
+        snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+        if len(snippet) > 500:
+            snippet = snippet[:500] + "…"
+        if snippet:
             extra.append(f"Body={snippet}")
-        detail = f"Douano token exchange mislukt: {msg}"
+        detail = f"Douano token exchange mislukt: HTTP {status}"
         if extra:
             detail += f" ({'; '.join(extra)})"
-        raise HTTPException(status_code=400, detail=detail) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Douano token exchange mislukt: {exc}") from exc
+        raise HTTPException(status_code=400, detail=detail)
 
     try:
-        parsed = json.loads(raw)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Douano token response is geen JSON: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=400, detail="Douano token response ongeldig.")
+        parsed = _client_parse_json_payload(raw)
+    except ValueError as exc:
+        logger.exception("Douano token response JSON parsing failed")
+        raise HTTPException(status_code=400, detail="Douano token response is geen geldige JSON.") from exc
 
     access_token = str(parsed.get("access_token", "") or "")
     refresh_token = str(parsed.get("refresh_token", "") or "")
@@ -585,6 +485,7 @@ def get_douano_sync_status() -> dict[str, Any]:
 @router.post("/douano/sync/companies")
 def post_douano_sync_companies(
     max_pages: int = Query(10, ge=1, le=200),
+    _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
@@ -605,13 +506,14 @@ def post_douano_sync_companies(
         raise
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="companies", success=False, since_date=None, stats={}, error=str(exc))
-        raise HTTPException(status_code=500, detail=f"Companies sync faalde: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Companies sync faalde.") from exc
 
 
 @router.post("/douano/sync/products")
 def post_douano_sync_products(
     max_pages: int = Query(10, ge=1, le=200),
     is_sellable: bool = Query(True, description="Wanneer true: filter_by_is_sellable=true"),
+    _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     query: dict[str, str] = {}
@@ -650,13 +552,14 @@ def post_douano_sync_products(
         raise
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="products", success=False, since_date=None, stats={}, error=str(exc))
-        raise HTTPException(status_code=500, detail=f"Products sync faalde: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Products sync faalde.") from exc
 
 
 @router.post("/douano/sync/sales-orders")
 def post_douano_sync_sales_orders(
     max_pages: int = Query(200, ge=1, le=500),
     since_date: str = Query("", description="Optioneel: filter orders client-side op date >= since_date (YYYY-MM-DD)."),
+    _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
@@ -717,13 +620,14 @@ def post_douano_sync_sales_orders(
         raise
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="sales_orders", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc))
-        raise HTTPException(status_code=500, detail=f"Sales-orders sync faalde: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Sales-orders sync faalde.") from exc
 
 
 @router.post("/douano/sync/sales-invoices")
 def post_douano_sync_sales_invoices(
     max_pages: int = Query(200, ge=1, le=500),
     since_date: str = Query("", description="Optioneel: filter invoices client-side op date >= since_date (YYYY-MM-DD)."),
+    _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
@@ -790,7 +694,7 @@ def post_douano_sync_sales_invoices(
         raise
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="sales_invoices", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc))
-        raise HTTPException(status_code=500, detail=f"Sales-invoices sync faalde: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Sales-invoices sync faalde.") from exc
 
 
 @router.get("/douano/companies")
@@ -998,7 +902,7 @@ def get_douano_unmapped_group_lines(
 
 
 @router.put("/douano/unmapped-rules")
-def put_douano_unmapped_rule(payload: dict[str, Any]) -> dict[str, Any]:
+def put_douano_unmapped_rule(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
     action = str(payload.get("action", "") or "").strip()
     if action == "delete":
         deleted = douano_unmapped_rule_storage.delete_rule(
@@ -1052,6 +956,7 @@ def post_douano_backfill_line_snapshots(
     since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
     company_id: int = Query(0, ge=0, description="Optioneel: alleen deze company_id backfillen"),
     limit: int = Query(5000, ge=1, le=50000),
+    _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     return {
         "result": douano_margin_service.backfill_line_snapshots(
@@ -1068,7 +973,7 @@ def get_douano_product_mappings(limit: int = Query(2000, ge=1, le=10000)) -> dic
 
 
 @router.post("/douano/create-service-sku")
-def post_douano_create_service_sku(payload: dict[str, Any]) -> dict[str, Any]:
+def post_douano_create_service_sku(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
     """Create a service SKU (kind=article) and map a Douano product to it.
 
     This supports pass-through/service lines like "Verzending" and "Proeverij" that should:
@@ -1194,7 +1099,11 @@ def post_douano_create_service_sku(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.put("/douano/product-mappings/{douano_product_id}")
-def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+def put_douano_product_mapping(
+    douano_product_id: int,
+    payload: dict[str, Any],
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
     try:
         sku_id = str(payload.get("sku_id", "") or "").strip()
         product_group = str(payload.get("product_group", "") or "").strip()
@@ -1226,7 +1135,10 @@ def put_douano_product_mapping(douano_product_id: int, payload: dict[str, Any]) 
 
 
 @router.delete("/douano/product-mappings/{douano_product_id}")
-def delete_douano_product_mapping(douano_product_id: int) -> dict[str, Any]:
+def delete_douano_product_mapping(
+    douano_product_id: int,
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
     deleted = douano_product_mapping_storage.delete_mapping(douano_product_id=int(douano_product_id or 0))
     return {"deleted": bool(deleted)}
 
@@ -1237,7 +1149,11 @@ def get_douano_product_ignored(limit: int = Query(10000, ge=1, le=50000)) -> dic
 
 
 @router.put("/douano/product-ignored/{douano_product_id}")
-def put_douano_product_ignored(douano_product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+def put_douano_product_ignored(
+    douano_product_id: int,
+    payload: dict[str, Any],
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
     try:
         record = douano_product_ignore_storage.upsert_ignore(
             douano_product_id=int(douano_product_id or 0),
@@ -1249,7 +1165,10 @@ def put_douano_product_ignored(douano_product_id: int, payload: dict[str, Any]) 
 
 
 @router.delete("/douano/product-ignored/{douano_product_id}")
-def delete_douano_product_ignored(douano_product_id: int) -> dict[str, Any]:
+def delete_douano_product_ignored(
+    douano_product_id: int,
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
     deleted = douano_product_ignore_storage.delete_ignore(douano_product_id=int(douano_product_id or 0))
     return {"deleted": bool(deleted)}
 

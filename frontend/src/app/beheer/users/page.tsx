@@ -1,16 +1,18 @@
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
 import { UserAdminPanel } from "@/components/UserAdminPanel";
+import { UserManagementTable } from "@/components/UserManagementTable";
 import { getBootstrap } from "@/lib/apiServer";
+import type { AuthUser } from "@/lib/apiShared";
 
 export default async function UsersPage() {
   let bootstrap: any;
-  let users: any[] = [];
+  let users: AuthUser[] = [];
   let usersLoadError = "";
 
   try {
     bootstrap = await getBootstrap(["auth-status", "auth-users"], true, "/beheer/users");
-    users = (bootstrap.datasets["auth-users"] as any[]) ?? [];
+    users = (bootstrap.datasets["auth-users"] as AuthUser[]) ?? [];
   } catch (error) {
     bootstrap = await getBootstrap(["auth-status"], true, "/beheer/users");
     usersLoadError =
@@ -82,38 +84,8 @@ export default async function UsersPage() {
             <strong>Gebruikers niet beschikbaar</strong>
             {usersLoadError}
           </div>
-        ) : users.length === 0 ? (
-          <div className="placeholder-block">
-            <strong>Nog geen users</strong>
-            De auth-laag staat klaar, maar er is nog geen admin of gebruiker aangemaakt.
-          </div>
         ) : (
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Gebruikersnaam</th>
-                  <th>Naam</th>
-                  <th>Rol</th>
-                  <th>Status</th>
-                  <th>Aangemaakt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td>{user.username}</td>
-                    <td>{user.display_name}</td>
-                    <td>
-                      <span className="pill">{user.role}</span>
-                    </td>
-                    <td>{user.is_active ? "Actief" : "Inactief"}</td>
-                    <td>{new Date(user.created_at).toLocaleString("nl-NL")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <UserManagementTable initialUsers={users} />
         )}
       </SectionCard>
 

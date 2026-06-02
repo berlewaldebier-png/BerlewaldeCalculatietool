@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 import {
   calcSellPriceFromOpslagPct,
   parseNumberLoose,
@@ -869,13 +870,18 @@ export function VerkoopstrategieWorkspace({
           setStatus("Concept opgeslagen.");
         }
       } else {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          // Preserve non-strategy records (product_pricing etc); only strategy is edited in this screen.
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error("Opslaan mislukt");
+        const datasetName = endpoint.match(/^\/data\/([^/]+)$/)?.[1] ?? "";
+        if (datasetName) {
+          await reconcileDatasetItems(decodeURIComponent(datasetName), payload);
+        } else {
+          const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            // Preserve non-strategy records (product_pricing etc); only strategy is edited in this screen.
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) throw new Error("Opslaan mislukt");
+        }
         if (isMountedRef.current) {
           isDirtyRef.current = false;
           setStatus("Opgeslagen.");

@@ -10,12 +10,14 @@ type CreateUserPayload = {
   password: string;
   display_name: string;
   role: "admin" | "user";
+  email?: string | null;
 };
 
 type BootstrapAdminPayload = {
   username: string;
   password: string;
   display_name: string;
+  email?: string | null;
 };
 
 type UserAdminPanelProps = {
@@ -28,19 +30,23 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [bootstrapUsername, setBootstrapUsername] = useState("admin");
   const [bootstrapDisplayName, setBootstrapDisplayName] = useState("Beheerder");
+  const [bootstrapEmail, setBootstrapEmail] = useState("");
   const [bootstrapPassword, setBootstrapPassword] = useState("");
   const [bootstrapError, setBootstrapError] = useState("");
   const [bootstrapBusy, setBootstrapBusy] = useState(false);
-  const canBootstrap = useMemo(() => {
-    return Boolean(bootstrapUsername.trim() && bootstrapDisplayName.trim() && bootstrapPassword);
-  }, [bootstrapUsername, bootstrapDisplayName, bootstrapPassword]);
 
   const [newUsername, setNewUsername] = useState("");
   const [newDisplayName, setNewDisplayName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState<"admin" | "user">("user");
   const [createError, setCreateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
+
+  const canBootstrap = useMemo(() => {
+    return Boolean(bootstrapUsername.trim() && bootstrapDisplayName.trim() && bootstrapPassword);
+  }, [bootstrapUsername, bootstrapDisplayName, bootstrapPassword]);
+
   const canCreate = useMemo(() => {
     return Boolean(newUsername.trim() && newDisplayName.trim() && newPassword);
   }, [newUsername, newDisplayName, newPassword]);
@@ -53,7 +59,8 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
     const payload: BootstrapAdminPayload = {
       username: bootstrapUsername.trim(),
       password: bootstrapPassword,
-      display_name: bootstrapDisplayName.trim()
+      display_name: bootstrapDisplayName.trim(),
+      email: bootstrapEmail.trim() || null
     };
 
     try {
@@ -72,6 +79,7 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
         return;
       }
 
+      setBootstrapPassword("");
       router.refresh();
     } catch {
       setBootstrapError("De backend is niet bereikbaar.");
@@ -89,7 +97,8 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
       username: newUsername.trim(),
       password: newPassword,
       display_name: newDisplayName.trim(),
-      role: newRole
+      role: newRole,
+      email: newEmail.trim() || null
     };
 
     try {
@@ -109,6 +118,7 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
 
       setNewUsername("");
       setNewDisplayName("");
+      setNewEmail("");
       setNewPassword("");
       setNewRole("user");
       router.refresh();
@@ -159,6 +169,17 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
             </label>
 
             <label className="nested-field">
+              <span>E-mailadres (optioneel)</span>
+              <input
+                className="dataset-input"
+                type="email"
+                value={bootstrapEmail}
+                onChange={(event) => setBootstrapEmail(event.target.value)}
+                autoComplete="email"
+              />
+            </label>
+
+            <label className="nested-field">
               <span>Wachtwoord</span>
               <input
                 className="dataset-input"
@@ -205,6 +226,17 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
           </label>
 
           <label className="nested-field">
+            <span>E-mailadres (optioneel)</span>
+            <input
+              className="dataset-input"
+              type="email"
+              value={newEmail}
+              onChange={(event) => setNewEmail(event.target.value)}
+              autoComplete="email"
+            />
+          </label>
+
+          <label className="nested-field">
             <span>Rol</span>
             <select
               className="dataset-input"
@@ -237,4 +269,3 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
     </div>
   );
 }
-

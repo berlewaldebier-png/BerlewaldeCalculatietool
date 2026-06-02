@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.data import router as data_router
@@ -46,6 +48,20 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
 
 
+async def _open_request_connection() -> tuple[Any, Any]:
+    connection_manager = db_pool.get_connection()
+    conn = await run_in_threadpool(connection_manager.__enter__)
+    return connection_manager, conn
+
+
+async def _rollback_and_close_request_connection(connection_manager: Any, conn: Any) -> None:
+    try:
+        await run_in_threadpool(conn.rollback)
+    except Exception:
+        logger.exception("Failed to rollback request database connection")
+    await run_in_threadpool(connection_manager.__exit__, None, None, None)
+
+
 @app.on_event("startup")
 def startup_event():
     """Initialize database connection pool and validate configuration."""
@@ -64,6 +80,10 @@ def startup_event():
             logger.info("Initializing PostgreSQL connection pool...")
             db_pool.initialize_pool(db_url, min_size=5, max_size=20)
             logger.info("Connection pool initialized successfully")
+
+            # Ensure base database schema is present before handling requests.
+            postgres_storage.ensure_schema()
+            logger.info("PostgreSQL schema ensured successfully")
         
         logger.info("Application startup complete")
     except Exception as e:
@@ -87,20 +107,14 @@ def shutdown_event():
 async def postgres_request_connection(request, call_next):
     """Bind a database connection to the request context for transaction support."""
     if postgres_storage.uses_postgres() and postgres_storage.database_url():
-        with db_pool.get_connection() as conn:
-            token = postgres_storage.set_request_connection(conn)
-            try:
-                response = await call_next(request)
-            finally:
-                # Always rollback at end-of-request to ensure the pooled connection
-                # is not left in an aborted/in-transaction state after an exception.
-                # This is safe even when the request committed successfully.
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                postgres_storage.reset_request_connection(token)
-            return response
+        connection_manager, conn = await _open_request_connection()
+        token = postgres_storage.set_request_connection(conn)
+        try:
+            return await call_next(request)
+        finally:
+            # Keep sync pool/rollback work out of the event loop.
+            postgres_storage.reset_request_connection(token)
+            await _rollback_and_close_request_connection(connection_manager, conn)
 
     return await call_next(request)
 

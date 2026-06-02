@@ -40,6 +40,7 @@ export type AuthUser = {
   id: string;
   username: string;
   display_name: string;
+  email?: string | null;
   role: string;
   is_active: boolean;
   created_at: string;

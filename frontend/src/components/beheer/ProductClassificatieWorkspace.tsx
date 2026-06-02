@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { apiGetClient, apiRequestTextClient } from "@/lib/apiClient";
+import { apiGetClient } from "@/lib/apiClient";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 
 type Productgroep = { id: string; label: string; sort_order: number; active: boolean };
 type AlcoholCategorie = { id: string; label: string; sort_order: number; active: boolean };
@@ -40,11 +41,7 @@ async function readDatasetV2<T>(name: string): Promise<T[]> {
 }
 
 async function writeDataset(name: string, data: unknown[]) {
-  await apiRequestTextClient(`/data/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(data)
-  });
+  await reconcileDatasetItems(name, data as Array<Record<string, unknown>>);
 }
 
 function normalizeId(value: string) {

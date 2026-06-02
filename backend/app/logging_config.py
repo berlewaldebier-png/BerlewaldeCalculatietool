@@ -19,6 +19,8 @@ def setup_logging() -> None:
     # Root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(LOG_LEVEL)
+    if getattr(root_logger, "_calculatietool_logging_configured", False):
+        return
 
     # Format
     formatter = logging.Formatter(
@@ -43,6 +45,7 @@ def setup_logging() -> None:
     root_logger.addHandler(file_handler)
 
     # Log startup
+    root_logger._calculatietool_logging_configured = True
     logger = logging.getLogger(__name__)
     logger.info(f"Logging initialized at level {LOG_LEVEL}")
 

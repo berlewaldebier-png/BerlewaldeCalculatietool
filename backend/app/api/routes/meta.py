@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -29,6 +30,12 @@ from app.schemas.navigation import DashboardSummary, NavigationItem
 
 
 router = APIRouter(prefix="/meta", tags=["meta"], dependencies=[Depends(require_user)])
+logger = logging.getLogger(__name__)
+
+
+def _raise_internal_error(message: str, exc: Exception) -> None:
+    logger.exception(message)
+    raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @router.get("/customer-sales-summary")
@@ -41,7 +48,6 @@ def get_customer_sales_summary(
     Used by the CPQ offer builder to estimate baseline volume before applying actions.
     Note: liters are only computed for mapped lines with a SKU that references a format article (content_liter).
     """
-    postgres_storage.ensure_schema()
     cid = int(company_id or 0)
     yr = int(year or 0)
     if cid <= 0 or yr <= 0:
@@ -328,7 +334,7 @@ def get_bootstrap(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"bootstrap dataset '{name}': {exc}") from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"bootstrap dataset '{name}' faalde: {exc}") from exc
+            _raise_internal_error(f"Bootstrap dataset failed: {name}", exc)
 
     return payload
 
@@ -1054,7 +1060,7 @@ def post_dev_seed_export(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Seed bundle export failed", exc)
 
 
 @router.post("/dev/cleanup-duplicate-skus")
@@ -1225,7 +1231,7 @@ def post_dev_delete_sellable(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/delete-sellable")
@@ -1453,7 +1459,7 @@ def post_delete_sellable(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/dev/delete-kostprijs-activation")
@@ -1515,7 +1521,7 @@ def post_dev_delete_kostprijs_activation(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/dev/delete-cost-version")
@@ -1576,7 +1582,7 @@ def post_dev_delete_cost_version(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.get("/audit/cost-lines")
@@ -1588,7 +1594,7 @@ def get_audit_cost_lines(
     try:
         return {"result": cost_versions_storage.audit_sku_row_coverage(year=int(year))}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/repair/cost-lines")
@@ -1605,7 +1611,7 @@ def post_repair_cost_lines(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/rebuild-overhead-cost-versions")
@@ -1705,7 +1711,7 @@ def post_derive_production_order_drivers(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/derive-sales-liters")
@@ -1775,7 +1781,7 @@ def post_derive_sales_liters(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/repair/douano-companies-flat")
@@ -1890,7 +1896,7 @@ def post_repair_douano_companies_flat(
             }
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 def _hash_address(*parts: str) -> str:
@@ -1901,7 +1907,7 @@ def _hash_address(*parts: str) -> str:
 
 
 @router.post("/ors/compute-company-distances")
-def post_compute_company_distances(
+async def post_compute_company_distances(
     dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
     overwrite: bool = Query(False, description="Wanneer true: overschrijf bestaande cache entries."),
     limit: int = Query(500, ge=1, le=5000, description="Max aantal companies om te verwerken."),
@@ -1934,7 +1940,7 @@ def post_compute_company_distances(
             owner = str(session.get("username", "") or "").strip() or "admin"
 
             brewery_query = "Enkweg 2A, 7021 KD Zelhem, Nederland"
-            brewery_coord = ors.geocode(brewery_query, country="NL")
+            brewery_coord = await ors.geocode(brewery_query, country="NL")
             if brewery_coord is None:
                 raise HTTPException(status_code=400, detail="Brouwerijadres kon niet worden geocoded via ORS.")
 
@@ -2013,7 +2019,7 @@ def post_compute_company_distances(
                         continue
 
                 query = f"{line1}, {post_code} {city}, {country or 'Nederland'}"
-                coord = ors.geocode(query, country="NL", focus=Coordinate(lat=brewery_coord.lat, lng=brewery_coord.lng))
+                coord = await ors.geocode(query, country="NL", focus=Coordinate(lat=brewery_coord.lat, lng=brewery_coord.lng))
                 if coord is None:
                     geocode_failed += 1
                     if not dry_run:
@@ -2028,7 +2034,7 @@ def post_compute_company_distances(
                         )
                     continue
 
-                km = ors.driving_distance_km_one_way(
+                km = await ors.driving_distance_km_one_way(
                     Coordinate(lat=brewery_coord.lat, lng=brewery_coord.lng),
                     Coordinate(lat=coord.lat, lng=coord.lng),
                 )
@@ -2090,7 +2096,7 @@ def post_compute_company_distances(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.get("/ors/company-distance-cache")
@@ -2105,7 +2111,7 @@ def get_company_distance_cache(
         cached = company_distance_storage.get_cache(int(company_id))
         return {"company_id": int(company_id), "cache": cached}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/repair/inkoop-unit-costs")
@@ -2122,7 +2128,7 @@ def post_repair_inkoop_unit_costs(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.post("/repair/kostprijs-activation-sku-mismatches")
@@ -2244,7 +2250,7 @@ def post_repair_kostprijs_activation_sku_mismatches(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 
 @router.get("/health/kostprijs-activation-sku-mismatches")
@@ -2454,7 +2460,7 @@ def post_repair_beer_bundles(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_error("Meta endpoint failed", exc)
 
 @router.get("/new-year-draft")
 def get_new_year_draft(
@@ -2564,3 +2570,4 @@ def post_rollback_year(
         return dataset_store.rollback_year(year=int(year), dry_run=bool(dry_run))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
