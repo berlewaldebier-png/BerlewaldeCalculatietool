@@ -19,6 +19,8 @@ from app.schemas.auth import (
     MeResponse,
     PasswordForgotRequest,
     PasswordForgotResponse,
+    PasswordChangeRequest,
+    PasswordChangeResponse,
     PasswordResetRequest,
     PasswordResetResponse,
     UpdateUserRequest,
@@ -103,6 +105,29 @@ def post_reset_password(request: Request, payload: PasswordResetRequest) -> Pass
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Error during password reset")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+@router.post("/change-password", response_model=PasswordChangeResponse)
+@limiter.limit("5/minute")
+def post_change_password(request: Request, payload: PasswordChangeRequest) -> PasswordChangeResponse:
+    """Change password for the currently authenticated user."""
+    token = request.cookies.get(auth_service.SESSION_COOKIE_NAME, "")
+    session = auth_service.verify_session_token(token)
+    if not session:
+        raise HTTPException(status_code=401, detail="Niet ingelogd.")
+    try:
+        auth_service.change_password(
+            username=str(session.get("username", "") or ""),
+            current_password=payload.current_password,
+            new_password=payload.password,
+            password_confirm=payload.password_confirm,
+        )
+        return PasswordChangeResponse(changed=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Error during password change")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 

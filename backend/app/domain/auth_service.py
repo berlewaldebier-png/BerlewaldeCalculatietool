@@ -370,6 +370,45 @@ def reset_password(email: str, code: str, new_password: str, password_confirm: s
     return True
 
 
+def change_password(username: str, current_password: str, new_password: str, password_confirm: str) -> bool:
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        raise ValueError("Gebruiker ontbreekt.")
+    if str(new_password or "") != str(password_confirm or ""):
+        raise ValueError("Wachtwoorden komen niet overeen.")
+    if len(new_password) < 10 and not _is_local_environment():
+        raise ValueError("Wachtwoord moet minimaal 10 tekens zijn.")
+
+    ensure_schema()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, password_hash, is_active
+                FROM app_users
+                WHERE LOWER(username) = LOWER(%s)
+                """,
+                (normalized_username,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError("Gebruiker niet gevonden in gebruikersbeheer.")
+
+            user_id, password_hash, is_active = row
+            if not is_active:
+                raise ValueError("Gebruiker is niet actief.")
+            if not verify_password(current_password, password_hash):
+                raise ValueError("Huidig wachtwoord is onjuist.")
+
+            cur.execute(
+                "UPDATE app_users SET password_hash = %s, updated_at = %s WHERE id = %s",
+                (_hash_password(new_password), datetime.utcnow(), user_id),
+            )
+        conn.commit()
+
+    return True
+
+
 def _hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac(

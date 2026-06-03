@@ -89,6 +89,16 @@ class PasswordResetResponse(BaseModel):
     reset: bool
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+    password_confirm: str = Field(min_length=1)
+
+
+class PasswordChangeResponse(BaseModel):
+    changed: bool
+
+
 class UpdateUserRequest(BaseModel):
     display_name: str | None = None
     email: str | None = None

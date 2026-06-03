@@ -2,23 +2,86 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Bell,
+  BookOpen,
+  Building2,
+  Calculator,
+  ChevronDown,
   ChevronRight,
+  Coins,
+  Headphones,
   Home,
   LogOut,
+  PlugZap,
   Search,
-  Settings
+  Sparkles,
+  UserRound,
+  Users
 } from "lucide-react";
 
+import { API_BASE_URL } from "@/lib/api";
 import { fetchMe, logout, type AuthSession } from "@/lib/auth";
 
 type Crumb = {
   label: string;
   href?: string;
 };
+
+type AccountMenuItem = {
+  label: string;
+  description: string;
+  href: string;
+  icon: typeof Bell;
+  adminOnly?: boolean;
+};
+
+const settingsItems: AccountMenuItem[] = [
+  { label: "Mijn account", description: "Profiel, wachtwoord, 2FA", href: "/account", icon: UserRound },
+  {
+    label: "Bedrijfsinstellingen",
+    description: "Bedrijfsgegevens, BTW, valuta",
+    href: "/instellingen/bedrijf",
+    icon: Building2,
+    adminOnly: true
+  },
+  {
+    label: "Calculatie instellingen",
+    description: "Formules, staffels, defaults",
+    href: "/instellingen",
+    icon: Calculator,
+    adminOnly: true
+  },
+  {
+    label: "Kostprijsbeheer",
+    description: "Categorieen, overhead, ABC-kosten",
+    href: "/instellingen/kostprijsbeheer",
+    icon: Coins
+  },
+  {
+    label: "Team & rechten",
+    description: "Gebruikers, rollen, rechtenmatrix",
+    href: "/beheer/users",
+    icon: Users,
+    adminOnly: true
+  },
+  {
+    label: "Integraties",
+    description: "Douano, ORS, API, import/export",
+    href: "/beheer/api",
+    icon: PlugZap,
+    adminOnly: true
+  }
+];
+
+const moreItems: AccountMenuItem[] = [
+  { label: "Meldingen", description: "E-mail, alerts en waarschuwingen", href: "/instellingen/meldingen", icon: Bell },
+  { label: "Helpcentrum", description: "Handleidingen en veelgestelde vragen", href: "/beheer/handleiding", icon: BookOpen },
+  { label: "Nieuw in Berlewalde", description: "Bekijk updates en verbeteringen", href: "/changelog", icon: Sparkles },
+  { label: "Support", description: "Neem contact op of meld een probleem", href: "/support", icon: Headphones }
+];
 
 function titleForSegment(segment: string): string {
   const normalized = segment.trim();
@@ -47,7 +110,13 @@ function titleForSegment(segment: string): string {
     deployment: "Deployment",
     jaarsets: "Jaarsets",
     productclassificatie: "Productclassificatie",
-    productkoppeling: "Productkoppeling"
+    productkoppeling: "Productkoppeling",
+    account: "Mijn account",
+    bedrijf: "Bedrijfsinstellingen",
+    meldingen: "Meldingen",
+    kostprijsbeheer: "Kostprijsbeheer",
+    changelog: "Nieuw in Berlewalde",
+    support: "Support"
   };
 
   if (map[normalized]) return map[normalized];
@@ -94,6 +163,9 @@ export function DashboardHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [companyName, setCompanyName] = useState("Berlewalde Brouwerij");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,8 +184,67 @@ export function DashboardHeader() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const syncSettings = () => {
+      void fetch(`${API_BASE_URL}/data/application-settings`, { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (cancelled) return;
+          const nextCompanyName = String(payload?.data?.company_name || "").trim();
+          if (nextCompanyName) {
+            setCompanyName(nextCompanyName);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setCompanyName("Berlewalde Brouwerij");
+          }
+        });
+    };
+
+    syncSettings();
+    window.addEventListener("calculatietool-settings-changed", syncSettings);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("calculatietool-settings-changed", syncSettings);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!accountMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && accountMenuRef.current?.contains(target)) {
+        return;
+      }
+      setAccountMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [accountMenuOpen]);
+
   const isLoginPage = pathname === "/login";
   const crumbs = useMemo(() => buildBreadcrumb(pathname), [pathname]);
+  const displayName = session?.display_name || "Beheerder";
+  const role = String(session?.role || "").toLowerCase();
+  const isAdmin = role === "admin";
+  const visibleSettingsItems = settingsItems.filter((item) => !item.adminOnly || isAdmin);
+  const roleLabel = isAdmin ? "Admin" : role || "Gebruiker";
 
   return (
     <header className="dashboard-header">
@@ -137,10 +268,7 @@ export function DashboardHeader() {
 
       {!isLoginPage ? (
         <>
-          <nav
-            className="dashboard-header__crumbs"
-            aria-label="Breadcrumb"
-          >
+          <nav className="dashboard-header__crumbs" aria-label="Breadcrumb">
             <span className="dashboard-header__crumbs-home" aria-hidden="true">
               <Home size={16} />
             </span>
@@ -160,18 +288,14 @@ export function DashboardHeader() {
           </nav>
 
           <div className="dashboard-header__search">
-            <Search
-              size={18}
-              className="dashboard-header__search-icon"
-              aria-hidden="true"
-            />
+            <Search size={18} className="dashboard-header__search-icon" aria-hidden="true" />
             <input
               type="text"
               placeholder="Zoek orders, klanten, producten..."
               className="dashboard-header__search-input"
             />
             <span className="dashboard-header__search-kbd" aria-hidden="true">
-              ⌘ K
+              Ctrl K
             </span>
           </div>
 
@@ -180,6 +304,7 @@ export function DashboardHeader() {
               type="button"
               className="dashboard-header__icon-button dashboard-header__icon-button--bell"
               aria-label="Meldingen"
+              onClick={() => router.push("/instellingen/meldingen" as any)}
             >
               <Bell size={18} aria-hidden="true" />
               <span className="dashboard-header__badge" aria-hidden="true">
@@ -187,45 +312,119 @@ export function DashboardHeader() {
               </span>
             </button>
 
-            <button
-              type="button"
-              className="dashboard-header__icon-button"
-              aria-label="Instellingen"
-              onClick={() => {
-                router.push("/beheer" as any);
-              }}
-            >
-              <Settings size={18} aria-hidden="true" />
-            </button>
-
             <div className="dashboard-header__divider" aria-hidden="true" />
 
-            <div className="dashboard-header__user">
-              <div className="dashboard-header__avatar" aria-hidden="true">
-                {initialsForDisplayName(session?.display_name ?? "Berlewalde")}
-              </div>
-
-              <div className="dashboard-header__user-meta">
-                <div className="dashboard-header__user-name">{session?.display_name ?? "Berle"}</div>
-                <div className="dashboard-header__user-subtitle">
-                  {(session?.role ? `${session.role} • ` : "") + "Berlewalde"}
+            <div className="dashboard-header__account" ref={accountMenuRef}>
+              <button
+                type="button"
+                className="dashboard-header__account-button"
+                aria-label="Accountmenu openen"
+                aria-haspopup="menu"
+                aria-expanded={accountMenuOpen}
+                onClick={() => setAccountMenuOpen((current) => !current)}
+              >
+                <div className="dashboard-header__avatar" aria-hidden="true">
+                  {initialsForDisplayName(displayName)}
                 </div>
-              </div>
-            </div>
 
-            <button
-              type="button"
-              className="dashboard-header__logout"
-              onClick={() => {
-                void logout().finally(() => {
-                  router.replace("/login");
-                });
-              }}
-              aria-label="Uitloggen"
-            >
-              <LogOut size={17} aria-hidden="true" />
-              <span className="dashboard-header__logout-text">Uitloggen</span>
-            </button>
+                <div className="dashboard-header__user-meta">
+                  <div className="dashboard-header__user-name">{displayName}</div>
+                  <div className="dashboard-header__user-subtitle">
+                    {roleLabel} &bull; {companyName}
+                  </div>
+                </div>
+
+                <ChevronDown
+                  size={16}
+                  aria-hidden="true"
+                  className={accountMenuOpen ? "dashboard-header__account-chevron is-open" : "dashboard-header__account-chevron"}
+                />
+              </button>
+
+              {accountMenuOpen ? (
+                <div className="account-menu" role="menu" aria-label="Account en instellingen">
+                  <div className="account-menu__profile">
+                    <div className="account-menu__avatar" aria-hidden="true">
+                      {initialsForDisplayName(displayName)}
+                    </div>
+                    <div className="account-menu__profile-text">
+                      <strong>{displayName}</strong>
+                      <span>
+                        {roleLabel} &bull; {companyName}
+                      </span>
+                      <small>{session?.username || "gebruiker"}</small>
+                    </div>
+                  </div>
+
+                  <div className="account-menu__section-label">Instellingen</div>
+                  <div className="account-menu__tiles">
+                    {visibleSettingsItems.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href as any}
+                          className="account-menu__tile"
+                          role="menuitem"
+                          onClick={() => setAccountMenuOpen(false)}
+                        >
+                          <span className="account-menu__tile-icon" aria-hidden="true">
+                            <Icon size={22} />
+                          </span>
+                          <span className="account-menu__tile-copy">
+                            <strong>{item.label}</strong>
+                            <small>{item.description}</small>
+                          </span>
+                          <ChevronRight size={16} aria-hidden="true" />
+                        </Link>
+                      );
+                    })}
+                  </div>
+
+                  <div className="account-menu__section-label">Meer</div>
+                  <div className="account-menu__list">
+                    {moreItems.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href as any}
+                          className="account-menu__row"
+                          role="menuitem"
+                          onClick={() => setAccountMenuOpen(false)}
+                        >
+                          <Icon size={20} aria-hidden="true" />
+                          <span>
+                            <strong>{item.label}</strong>
+                            <small>{item.description}</small>
+                          </span>
+                          <ChevronRight size={16} aria-hidden="true" />
+                        </Link>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="account-menu__row account-menu__logout"
+                    role="menuitem"
+                    onClick={() => {
+                      setAccountMenuOpen(false);
+                      void logout().finally(() => {
+                        router.replace("/login");
+                      });
+                    }}
+                  >
+                    <LogOut size={20} aria-hidden="true" />
+                    <span>
+                      <strong>Uitloggen</strong>
+                      <small>Veilig uitloggen uit jouw account</small>
+                    </span>
+                    <ChevronRight size={16} aria-hidden="true" />
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </>
       ) : null}

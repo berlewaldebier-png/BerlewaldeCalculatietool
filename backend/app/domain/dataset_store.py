@@ -89,6 +89,11 @@ DATASET_DEFAULTS: dict[str, Any] = {
         {"id": "glas-50cl", "label": "50 cl", "volume_ml": 500, "sort_order": 50, "active": True, "is_default": False},
     ],
     "variabele-kosten": {},
+    "application-settings": {
+        "company_name": "Berlewalde Brouwerij",
+        "currency": "EUR",
+        "support_email": "info@berlewaldebier.nl",
+    },
     # Cost management: global defaults for driver definitions + quote handling.
     "cost-management-settings": {
         "handling_default_shipments": 1,
@@ -448,7 +453,13 @@ def validate_dataset_write(name: str, data: Any) -> None:
 
     # Note: `channels` is stored and served as a list (see `_normalize_channels_dataset`),
     # so treating it as a dict here would break seed import + writes.
-    dict_datasets = {"productie", "vaste-kosten", "variabele-kosten", "cost-management-settings"}
+    dict_datasets = {
+        "productie",
+        "vaste-kosten",
+        "variabele-kosten",
+        "application-settings",
+        "cost-management-settings",
+    }
     list_datasets = {
         "tarieven-heffingen",
         "verpakkingsonderdelen",

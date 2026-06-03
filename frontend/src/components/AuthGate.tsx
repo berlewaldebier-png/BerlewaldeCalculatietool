@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 import { fetchMe } from "@/lib/auth";
 
@@ -11,7 +11,6 @@ type AuthGateProps = {
 
 export function AuthGate({ children }: AuthGateProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [isReady, setIsReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -28,14 +27,9 @@ export function AuthGate({ children }: AuthGateProps) {
       setIsAuthenticated(authenticated);
       setIsReady(true);
 
-      if (!authenticated && pathname !== "/login") {
+      if (!authenticated) {
         const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
         window.location.replace(`/login${next}`);
-        return;
-      }
-
-      if (authenticated && pathname === "/login") {
-        router.replace("/");
       }
     }
 
@@ -44,7 +38,7 @@ export function AuthGate({ children }: AuthGateProps) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, router]);
+  }, [pathname]);
 
   if (!isReady) {
     return (
@@ -57,7 +51,7 @@ export function AuthGate({ children }: AuthGateProps) {
     );
   }
 
-  if (!isAuthenticated && pathname !== "/login") {
+  if (!isAuthenticated) {
     return null;
   }
 

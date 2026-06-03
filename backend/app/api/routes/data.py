@@ -48,6 +48,7 @@ _STANDARD_DATASETS = [
     "trace-batches",
     "trace-batch-consumptions",
     "variabele-kosten",
+    "application-settings",
     "cost-management-settings",
     "cost-pools",
     # SKU-aanpak canonical datasets

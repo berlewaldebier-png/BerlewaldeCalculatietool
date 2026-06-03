@@ -1,14 +1,12 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight,
-  BookOpen,
   Check,
   Eye,
   EyeOff,
-  HelpCircle,
   Lock,
   Mail,
   ShieldCheck,
@@ -16,7 +14,7 @@ import {
 } from "lucide-react";
 
 import { API_BASE_URL } from "@/lib/api";
-import { writeAuthSession } from "@/lib/auth";
+import { fetchMe, writeAuthSession } from "@/lib/auth";
 
 type LoginResponse = {
   authenticated: boolean;
@@ -65,6 +63,23 @@ export function LoginForm() {
     "Scenario's simuleren",
     "Verkoopprijzen optimaliseren"
   ];
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function redirectIfAuthenticated() {
+      const session = await fetchMe();
+      if (!cancelled && session) {
+        router.replace("/");
+      }
+    }
+
+    void redirectIfAuthenticated();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -196,19 +211,11 @@ export function LoginForm() {
             <img className="login-brand-logo" src="/brand/berlewalde.png" alt="" />
             <div>
               <h1>BERLEWALDE</h1>
-              <p>CalculatieTool</p>
+              <p>Het is goed!</p>
             </div>
           </div>
 
-          <div className="login-header-actions" aria-label="Login links en systeemstatus">
-            <a href="mailto:support@berlewaldebier.nl">
-              <HelpCircle size={18} aria-hidden="true" />
-              Support
-            </a>
-            <a href="/docs/datamodel-compleet-erd.pdf">
-              <BookOpen size={18} aria-hidden="true" />
-              Documentatie
-            </a>
+          <div className="login-header-actions" aria-label="Systeemstatus">
             <div className="login-status" aria-label="Systeemstatus online">
               <span className="login-status-dot" aria-hidden="true" />
               <span>
@@ -222,8 +229,8 @@ export function LoginForm() {
         <section className="login-content">
           <aside className="login-story-panel">
             <div className="login-story-copy">
-              <h2>BERLEWALDE</h2>
-              <p>Calculatie & kostprijsbeheer voor brouwerijen.</p>
+              <h2>BROUWERIJ BERLEWALDE</h2>
+              <p>Calculatie & kostprijsbeheer.</p>
               <div className="login-story-rule" />
               <ul>
                 {featureItems.map((item) => (

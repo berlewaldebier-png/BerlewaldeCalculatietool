@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { DashboardHeader } from "@/components/DashboardHeader";
-import { AuthGate } from "@/components/AuthGate";
 
 
 export const metadata: Metadata = {
@@ -18,14 +16,7 @@ export default function RootLayout({
   return (
     <html lang="nl">
       <body>
-        <div className="app-shell">
-          <div className="app-main app-main-header">
-            <DashboardHeader />
-          </div>
-          <AuthGate>
-            <main className="app-main">{children}</main>
-          </AuthGate>
-        </div>
+        {children}
       </body>
     </html>
   );
