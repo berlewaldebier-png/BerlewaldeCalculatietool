@@ -457,7 +457,7 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
             <thead>
               <tr>
                 <th>Internal LOT</th>
-                <th style={{ width: "36%" }}>External LOT</th>
+                <th style={{ width: "48%" }}>External LOT</th>
               </tr>
             </thead>
             <tbody>
@@ -502,6 +502,7 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                               className="editor-input"
                               list="external-lot-options"
                               placeholder="Zoek externe LOT"
+                              style={{ width: "100%", minWidth: 420 }}
                               value={selectedExternalLots[lotKey] || ""}
                               onChange={(event) =>
                                 setSelectedExternalLots((current) => ({
