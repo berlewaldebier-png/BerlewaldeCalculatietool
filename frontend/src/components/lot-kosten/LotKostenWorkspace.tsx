@@ -54,6 +54,13 @@ type StockHistoryImport = {
   imported_at: string;
 };
 
+type ExternalLotItem = {
+  lot_number: string;
+  rows?: number;
+  last_movement_date?: string;
+  product_name?: string;
+};
+
 type InternalLotSku = {
   sku_id: string;
   sku_code?: string;
@@ -133,6 +140,8 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
   const [records, setRecords] = useState<GenericRecord[]>([]);
   const [stockImports, setStockImports] = useState<StockHistoryImport[]>([]);
   const [internalLotGroups, setInternalLotGroups] = useState<InternalLotGroup[]>([]);
+  const [externalLots, setExternalLots] = useState<ExternalLotItem[]>([]);
+  const [selectedExternalLots, setSelectedExternalLots] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [saving, setSaving] = useState(false);
@@ -196,10 +205,26 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
     }
   }
 
+  async function loadExternalLots() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/external-lots`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const payload = await readJson(response);
+      if (!response.ok) throw new Error(String(payload?.detail || response.statusText));
+      setExternalLots(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
   useEffect(() => {
     void loadRecords();
     void loadStockImports();
     void loadInternalLotSummary();
+    void loadExternalLots();
   }, [year]);
 
   async function upload(mode: "preview" | "confirm") {
@@ -419,15 +444,27 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
           Interne LOTs uit kostprijsversies en inkoopfacturen, gegroepeerd per stijl.
         </div>
         <div className="data-table" style={{ marginTop: 12 }}>
+          <datalist id="external-lot-options">
+            {externalLots.map((lot) => (
+              <option
+                key={lot.lot_number}
+                value={lot.lot_number}
+                label={`${lot.lot_number}${lot.product_name ? ` - ${lot.product_name}` : ""}${lot.rows ? ` (${lot.rows} regels)` : ""}`}
+              />
+            ))}
+          </datalist>
           <table>
             <thead>
               <tr>
                 <th>Internal LOT</th>
+                <th style={{ width: "36%" }}>External LOT</th>
               </tr>
             </thead>
             <tbody>
-              {internalLotGroups.map((group) => (
-                <tr key={group.style_id || group.style_name}>
+              {internalLotGroups.map((group) => {
+                const groupKey = group.style_id || group.style_name;
+                return (
+                <tr key={groupKey}>
                   <td>
                     <details>
                       <summary style={{ cursor: "pointer", fontWeight: 800 }}>
@@ -461,11 +498,29 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                       </div>
                     </details>
                   </td>
+                  <td style={{ verticalAlign: "top" }}>
+                    <input
+                      className="editor-input"
+                      list="external-lot-options"
+                      placeholder="Zoek externe LOT"
+                      value={selectedExternalLots[groupKey] || ""}
+                      onChange={(event) =>
+                        setSelectedExternalLots((current) => ({
+                          ...current,
+                          [groupKey]: event.target.value,
+                        }))
+                      }
+                    />
+                    <div className="module-card-text" style={{ marginTop: 6 }}>
+                      {externalLots.length} externe LOTs beschikbaar
+                    </div>
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
               {!internalLotGroups.length ? (
                 <tr>
-                  <td>Geen interne LOTs gevonden.</td>
+                  <td colSpan={2}>Geen interne LOTs gevonden.</td>
                 </tr>
               ) : null}
             </tbody>

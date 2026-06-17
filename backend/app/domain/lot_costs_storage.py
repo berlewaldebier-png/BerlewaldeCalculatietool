@@ -840,6 +840,39 @@ def list_lot_reconciliation(*, year: int = 0, limit: int = 500) -> list[dict[str
     return out
 
 
+def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
+    """Return distinct Douano/API LOTs from stored stock-history allocations."""
+    ensure_schema()
+    lim = max(1, min(int(limit or 5000), 50000))
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    lot_number,
+                    COUNT(*)::int AS rows,
+                    MAX(movement_date) AS last_movement_date,
+                    MAX(product_name) AS product_name
+                FROM sales_lot_allocations
+                WHERE COALESCE(NULLIF(lot_number, ''), '') <> ''
+                GROUP BY lot_number
+                ORDER BY lot_number
+                LIMIT %s
+                """,
+                (lim,),
+            )
+            rows = cur.fetchall() or []
+    return [
+        {
+            "lot_number": _text(lot_number),
+            "rows": int(count_rows or 0),
+            "last_movement_date": last_movement_date.isoformat() if last_movement_date else "",
+            "product_name": _text(product_name),
+        }
+        for lot_number, count_rows, last_movement_date, product_name in rows
+    ]
+
+
 def find_sales_lot(*, transaction_number: str, sku_code: str) -> dict[str, Any] | None:
     ensure_schema()
     tx = _text(transaction_number)
