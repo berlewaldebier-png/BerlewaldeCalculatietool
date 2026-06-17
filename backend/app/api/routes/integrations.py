@@ -1451,6 +1451,14 @@ def get_lot_costs(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
     return {"items": lot_costs_storage.list_lot_cost_records(limit=int(limit))}
 
 
+@router.get("/lot-costs/internal-summary")
+def get_internal_lot_summary(
+    year: int = Query(0, ge=0),
+    limit: int = Query(5000, ge=1, le=50000),
+) -> dict[str, Any]:
+    return {"items": lot_costs_storage.list_internal_lot_summary(year=int(year or 0), limit=int(limit))}
+
+
 @router.put("/lot-costs/aliases")
 def put_lot_alias(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
     try:

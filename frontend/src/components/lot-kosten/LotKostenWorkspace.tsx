@@ -54,6 +54,20 @@ type StockHistoryImport = {
   imported_at: string;
 };
 
+type InternalLotItem = {
+  lot_number: string;
+  versions?: string[];
+  years?: number[];
+  sources?: string[];
+};
+
+type InternalLotGroup = {
+  style_id: string;
+  style_name: string;
+  lot_count: number;
+  lots: InternalLotItem[];
+};
+
 const SUPPLIERS = ["Beerselect", "Groenlo", "Wentersch", "Eigen productie"];
 
 function createRowId() {
@@ -108,6 +122,7 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
   const [openingPreview, setOpeningPreview] = useState<OpeningLotImportPayload | null>(null);
   const [records, setRecords] = useState<GenericRecord[]>([]);
   const [stockImports, setStockImports] = useState<StockHistoryImport[]>([]);
+  const [internalLotGroups, setInternalLotGroups] = useState<InternalLotGroup[]>([]);
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [saving, setSaving] = useState(false);
@@ -156,9 +171,25 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
     }
   }
 
+  async function loadInternalLotSummary() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/internal-summary?year=${encodeURIComponent(String(year))}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const payload = await readJson(response);
+      if (!response.ok) throw new Error(String(payload?.detail || response.statusText));
+      setInternalLotGroups(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    }
+  }
+
   useEffect(() => {
     void loadRecords();
     void loadStockImports();
+    void loadInternalLotSummary();
   }, [year]);
 
   async function upload(mode: "preview" | "confirm") {
@@ -372,6 +403,54 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
 
   return (
     <div className="beheer-data-workspace">
+      <section className="module-card">
+        <div className="module-card-title">Interne LOT nummers</div>
+        <div className="module-card-text" style={{ marginTop: 4 }}>
+          Interne LOTs uit kostprijsversies en inkoopfacturen, gegroepeerd per stijl.
+        </div>
+        <div className="data-table" style={{ marginTop: 12 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Internal LOT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {internalLotGroups.map((group) => (
+                <tr key={group.style_id || group.style_name}>
+                  <td>
+                    <details>
+                      <summary style={{ cursor: "pointer", fontWeight: 800 }}>
+                        {group.style_name || "Onbekende stijl"}{" "}
+                        <span className="pill" style={{ marginLeft: 8 }}>
+                          {Number(group.lot_count || group.lots?.length || 0)} LOTs
+                        </span>
+                      </summary>
+                      <div style={{ display: "grid", gap: 8, marginTop: 10, paddingLeft: 18 }}>
+                        {(group.lots || []).map((lot) => (
+                          <div key={`${group.style_id || group.style_name}-${lot.lot_number}`}>
+                            <code>{lot.lot_number || "-"}</code>{" "}
+                            <span className="module-card-text">
+                              {(lot.versions || []).join("/")}
+                            </span>
+                          </div>
+                        ))}
+                        {!group.lots?.length ? <div className="module-card-text">Geen interne LOTs gevonden.</div> : null}
+                      </div>
+                    </details>
+                  </td>
+                </tr>
+              ))}
+              {!internalLotGroups.length ? (
+                <tr>
+                  <td>Geen interne LOTs gevonden.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="module-card" style={{ overflow: "hidden" }}>
         <div className="module-card-title">Voorraadhistoriek import</div>
         <div className="module-card-text" style={{ marginTop: 4 }}>
