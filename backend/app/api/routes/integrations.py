@@ -1451,17 +1451,6 @@ def get_lot_costs(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
     return {"items": lot_costs_storage.list_lot_cost_records(limit=int(limit))}
 
 
-@router.get("/lot-costs/reconciliation")
-def get_lot_reconciliation(
-    year: int = Query(0, ge=0),
-    limit: int = Query(500, ge=1, le=5000),
-    _: dict = Depends(require_admin),
-) -> dict[str, Any]:
-    groups = lot_costs_storage.list_lot_master_reconciliation(year=int(year or 0), limit=int(limit))
-    items = [row for group in groups for row in group.get("rows", [])]
-    return {"groups": groups, "items": items}
-
-
 @router.put("/lot-costs/aliases")
 def put_lot_alias(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
     try:
@@ -1473,14 +1462,6 @@ def put_lot_alias(payload: dict[str, Any], _: dict = Depends(require_admin)) -> 
 @router.delete("/lot-costs/aliases/{alias_id}")
 def delete_lot_alias(alias_id: str, _: dict = Depends(require_admin)) -> dict[str, Any]:
     return {"deleted": lot_costs_storage.delete_lot_alias(alias_id)}
-
-
-@router.post("/lot-costs/correct-internal-lot")
-def post_correct_internal_lot(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
-    try:
-        return {"result": lot_costs_storage.correct_internal_lot_to_douano(payload)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/lot-costs")

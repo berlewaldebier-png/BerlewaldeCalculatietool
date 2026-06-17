@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR } from "@/lib/formatters";
@@ -54,62 +54,6 @@ type StockHistoryImport = {
   imported_at: string;
 };
 
-type LotCandidate = {
-  lot_number: string;
-  product_name?: string;
-  sku_code?: string;
-  rows?: number;
-  last_movement_date?: string;
-  source?: string;
-  label?: string;
-  source_date?: string;
-  version_id?: string;
-  year?: number;
-};
-
-type LotSkuDetail = {
-  sku_id?: string;
-  sku_code?: string;
-  sku_name?: string;
-  rows?: number;
-};
-
-type LotReconciliationRow = {
-  sku_code: string;
-  sku_id: string;
-  sku_name: string;
-  internal_lot_number: string;
-  internal_label?: string;
-  internal_labels?: string[];
-  internal_source?: string;
-  internal_version_ids?: string[];
-  douano_lot_number: string;
-  douano_options: LotCandidate[];
-  rows: number;
-  last_movement_date: string;
-  status: "matched" | "near_match" | "missing_douano" | "douano_only";
-  sku_details?: LotSkuDetail[];
-  douano_sku_details?: LotSkuDetail[];
-};
-
-type LotReconciliationGroup = {
-  style_id: string;
-  style_name: string;
-  rows: LotReconciliationRow[];
-  summary: Record<string, number>;
-};
-
-type LotReconciliationLotGroup = {
-  key: string;
-  internal_lot_number: string;
-  label: string;
-  rows: LotReconciliationRow[];
-  status: LotReconciliationRow["status"];
-  douano_lots: string[];
-  douano_rows: number;
-  last_movement_date: string;
-};
-
 const SUPPLIERS = ["Beerselect", "Groenlo", "Wentersch", "Eigen productie"];
 
 function createRowId() {
@@ -157,110 +101,6 @@ function skuLabel(row: GenericRecord) {
   return String(row.name || row.label || row.id || "");
 }
 
-function lotStatusLabel(status: LotReconciliationRow["status"]) {
-  if (status === "matched") return "match";
-  if (status === "near_match") return "bijna-match";
-  if (status === "douano_only") return "alleen Douano";
-  return "niet gekoppeld";
-}
-
-function lotStatusClass(status: LotReconciliationRow["status"]) {
-  if (status === "matched") return "status-ok";
-  if (status === "near_match") return "status-warning";
-  return "status-danger";
-}
-
-function lotRowKey(row: LotReconciliationRow) {
-  return `${row.sku_id || row.sku_code || row.sku_name}|${row.internal_lot_number || "no-internal"}|${row.douano_lot_number || "no-douano"}`;
-}
-
-function internalLotLabel(row: LotReconciliationRow) {
-  const labels = Array.isArray(row.internal_labels) ? row.internal_labels.filter(Boolean) : [];
-  if (labels.length) return labels.join(", ");
-  return row.internal_label || "";
-}
-
-function statusRank(status: LotReconciliationRow["status"]) {
-  if (status === "matched") return 0;
-  if (status === "near_match") return 1;
-  if (status === "missing_douano") return 2;
-  return 3;
-}
-
-function worstStatus(rows: LotReconciliationRow[]): LotReconciliationRow["status"] {
-  return rows.reduce<LotReconciliationRow["status"]>(
-    (worst, row) => (statusRank(row.status) > statusRank(worst) ? row.status : worst),
-    "matched"
-  );
-}
-
-function uniqueTexts(values: unknown[]) {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  values.forEach((value) => {
-    const text = String(value ?? "").trim();
-    const key = text.toLowerCase();
-    if (!text || seen.has(key)) return;
-    seen.add(key);
-    out.push(text);
-  });
-  return out;
-}
-
-function uniqueInternalLotCount(group: LotReconciliationGroup) {
-  return uniqueTexts(group.rows.map((row) => row.internal_lot_number)).length;
-}
-
-function uniqueDouanoLotCount(group: LotReconciliationGroup) {
-  return uniqueTexts(group.rows.map((row) => row.douano_lot_number)).length;
-}
-
-function skuDetailLabel(detail: LotSkuDetail) {
-  const name = String(detail.sku_name || "").trim();
-  const code = String(detail.sku_code || "").trim();
-  const id = String(detail.sku_id || "").trim();
-  if (name && code) return `${name} ${code}`;
-  return name || code || id || "-";
-}
-
-function groupRowsByInternalLot(group: LotReconciliationGroup): LotReconciliationLotGroup[] {
-  const buckets = new Map<string, LotReconciliationRow[]>();
-  group.rows.forEach((row) => {
-    const internalLot = String(row.internal_lot_number || "").trim();
-    const key = internalLot ? `internal:${internalLot.toLowerCase()}` : `douano:${String(row.douano_lot_number || row.sku_code || row.sku_id).toLowerCase()}`;
-    buckets.set(key, [...(buckets.get(key) || []), row]);
-  });
-
-  const out = Array.from(buckets.entries()).map(([key, rows]) => {
-    const first = rows[0];
-    const internalLot = String(first?.internal_lot_number || "").trim();
-    const labels = uniqueTexts(rows.flatMap((row) => (Array.isArray(row.internal_labels) ? row.internal_labels : [row.internal_label])));
-    const douanoLots = uniqueTexts(rows.map((row) => row.douano_lot_number));
-    const lastDate = rows
-      .map((row) => String(row.last_movement_date || ""))
-      .filter(Boolean)
-      .sort()
-      .at(-1) || "";
-    return {
-      key,
-      internal_lot_number: internalLot,
-      label: internalLot ? `${internalLot}${labels.length ? ` ${labels.join(", ")}` : ""}` : `Alleen Douano: ${douanoLots.join(", ") || "zonder interne LOT"}`,
-      rows,
-      status: worstStatus(rows),
-      douano_lots: douanoLots,
-      douano_rows: rows.reduce((sum, row) => sum + Number(row.rows || 0), 0),
-      last_movement_date: lastDate,
-    };
-  });
-
-  out.sort((a, b) => {
-    if (!a.internal_lot_number && b.internal_lot_number) return 1;
-    if (a.internal_lot_number && !b.internal_lot_number) return -1;
-    return a.label.localeCompare(b.label, "nl-NL");
-  });
-  return out;
-}
-
 export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { skus: GenericRecord[]; year?: number }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPayload | null>(null);
@@ -268,10 +108,6 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
   const [openingPreview, setOpeningPreview] = useState<OpeningLotImportPayload | null>(null);
   const [records, setRecords] = useState<GenericRecord[]>([]);
   const [stockImports, setStockImports] = useState<StockHistoryImport[]>([]);
-  const [reconciliationGroups, setReconciliationGroups] = useState<LotReconciliationGroup[]>([]);
-  const [selectedDouanoLots, setSelectedDouanoLots] = useState<Record<string, string>>({});
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [expandedLotGroups, setExpandedLotGroups] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [saving, setSaving] = useState(false);
@@ -320,47 +156,9 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
     }
   }
 
-  async function loadReconciliation() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/reconciliation?year=${encodeURIComponent(String(year))}&limit=1000`, {
-        credentials: "include",
-        cache: "no-store",
-      });
-      const payload = await readJson(response);
-      if (!response.ok) throw new Error(String(payload?.detail || response.statusText));
-      const groups = Array.isArray(payload?.groups) ? payload.groups : [];
-      setReconciliationGroups(groups);
-      setSelectedDouanoLots((prev) => {
-        const next = { ...prev };
-        groups.forEach((group: LotReconciliationGroup) => {
-          group.rows.forEach((row) => {
-            const key = lotRowKey(row);
-            if (!(key in next)) {
-              next[key] = row.douano_lot_number || row.douano_options?.[0]?.lot_number || "";
-            }
-          });
-        });
-        return next;
-      });
-      setExpandedGroups((prev) => {
-        if (Object.keys(prev).length) return prev;
-        const next: Record<string, boolean> = {};
-        groups.slice(0, 5).forEach((group: LotReconciliationGroup) => {
-          const needsAttention = Number(group.summary?.near_match || 0) + Number(group.summary?.missing || 0) + Number(group.summary?.douano_only || 0);
-          next[group.style_id] = needsAttention > 0;
-        });
-        return next;
-      });
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-      setTone("error");
-    }
-  }
-
   useEffect(() => {
     void loadRecords();
     void loadStockImports();
-    void loadReconciliation();
   }, [year]);
 
   async function upload(mode: "preview" | "confirm") {
@@ -561,55 +359,6 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
     }
   }
 
-  async function correctInternalLot(row: LotReconciliationRow) {
-    const internalLot = String(row.internal_lot_number || "").trim();
-    const selectedDouanoLot = String(selectedDouanoLots[lotRowKey(row)] || row.douano_lot_number || "").trim();
-    if (!internalLot) {
-      setStatus("Geen interne LOT gevonden om gelijk te zetten.");
-      setTone("error");
-      return;
-    }
-    if (!selectedDouanoLot) {
-      setStatus("Kies eerst de Douano LOT waar deze interne LOT bij hoort.");
-      setTone("error");
-      return;
-    }
-    if (!window.confirm(`Internal LOT ${internalLot} for ${row.sku_code} will be changed to Douano LOT ${selectedDouanoLot}. Continue?`)) {
-      return;
-    }
-    setSaving(true);
-    setStatus("Interne LOT gelijkzetten aan Douano...");
-    setTone("");
-    try {
-      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/correct-internal-lot`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sku_id: row.sku_id,
-          sku_code: row.sku_code,
-          douano_lot_number: selectedDouanoLot,
-          internal_lot_number: internalLot,
-          internal_version_ids: row.internal_version_ids || [],
-        }),
-      });
-      const payload = await readJson(response);
-      if (!response.ok) throw new Error(String(payload?.detail || response.statusText));
-      const result = payload?.result || {};
-      setStatus(
-        `Internal LOT ${internalLot} updated to ${selectedDouanoLot}: ${Number(result.updated_cost_versions || 0)} cost version(s), ${Number(result.updated_cost_version_lots || 0)} canonical LOT row(s), ${Number(result.updated_lot_cost_records || 0)} LOT cost row(s).`
-      );
-      setTone("success");
-      await loadRecords();
-      await loadReconciliation();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-      setTone("error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   const summary = preview?.summary || {};
   const previewRows = preview?.items || [];
   const openingSummary = openingPreview?.summary || {};
@@ -620,19 +369,6 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
   const missingTargetCount = Number(summary.missing_target ?? 0);
   const hasPreviewSummary = Number(summary.rows ?? 0) > 0;
   const hasEnrichmentSummary = "updated" in summary || "conflicts" in summary || "missing_target" in summary;
-  const reconciliationSummary = useMemo(() => {
-    return reconciliationGroups.reduce(
-      (acc, group) => {
-        acc.total += group.rows.length;
-        acc.matched += Number(group.summary?.matched || 0);
-        acc.near_match += Number(group.summary?.near_match || 0);
-        acc.missing += Number(group.summary?.missing || 0);
-        acc.douano_only += Number(group.summary?.douano_only || 0);
-        return acc;
-      },
-      { total: 0, matched: 0, near_match: 0, missing: 0, douano_only: 0 } as Record<string, number>
-    );
-  }, [reconciliationGroups]);
 
   return (
     <div className="beheer-data-workspace">
@@ -791,209 +527,6 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
               {!stockImports.length ? (
                 <tr>
                   <td colSpan={5}>Nog geen Voorraadhistoriek imports.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="module-card lot-reconciliation-card">
-        <div className="module-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div className="module-card-title">LOT-afstemming Douano naar intern</div>
-            <div className="module-card-text">
-              Douano LOT is the source of truth. Expand a style to compare our internal LOTs from cost prices/invoices with
-              the LOTs Douano used on sales rows. Near matches can be corrected here.
-            </div>
-          </div>
-          <button type="button" className="editor-button editor-button-secondary" disabled={saving} onClick={() => void loadReconciliation()}>
-            Ververs
-          </button>
-        </div>
-        <div className="editor-actions" style={{ marginTop: 12 }}>
-          <div className="editor-actions-group">
-            <span className="pill">Totaal {reconciliationSummary.total}</span>
-            <span className="pill" style={{ background: "#dcfce7" }}>Exact {reconciliationSummary.matched}</span>
-            <span className="pill" style={{ background: "#fef3c7" }}>Bijna-match {reconciliationSummary.near_match}</span>
-            <span className="pill" style={{ background: "#fee2e2" }}>Geen Douano match {reconciliationSummary.missing}</span>
-            <span className="pill" style={{ background: "#fee2e2" }}>Alleen Douano {reconciliationSummary.douano_only}</span>
-          </div>
-        </div>
-        <div className="data-table lot-reconciliation-table" style={{ marginTop: 12, maxWidth: "100%" }}>
-          <table style={{ tableLayout: "fixed", width: "100%" }}>
-            <thead>
-              <tr>
-                <th style={{ width: "52%" }}>Style / SKU</th>
-                <th style={{ width: "14%", textAlign: "right" }}>Internal LOTs</th>
-                <th style={{ width: "14%", textAlign: "right" }}>Douano LOTs</th>
-                <th style={{ width: "20%" }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reconciliationGroups.map((group) => {
-                const open = expandedGroups[group.style_id] ?? false;
-                const issues = Number(group.summary?.near_match || 0) + Number(group.summary?.missing || 0) + Number(group.summary?.douano_only || 0);
-                return (
-                  <Fragment key={group.style_id}>
-                    <tr>
-                      <td>
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.style_id]: !open }))}
-                        >
-                          {open ? "v" : ">"} {group.style_name}
-                        </button>
-                      </td>
-                      <td style={{ textAlign: "right" }}>{uniqueInternalLotCount(group)}</td>
-                      <td style={{ textAlign: "right" }}>{uniqueDouanoLotCount(group)}</td>
-                      <td>
-                        <span className={`status-pill ${issues ? "status-warning" : "status-ok"}`}>
-                          {issues ? `${issues} to check` : "ok"}
-                        </span>
-                      </td>
-                    </tr>
-                    {open ? (
-                      <tr>
-                        <td colSpan={4}>
-                          <div className="data-table nested-table lot-reconciliation-nested" style={{ maxWidth: "100%" }}>
-                            <table style={{ tableLayout: "fixed", width: "100%" }}>
-                              <thead>
-                                <tr>
-                                  <th style={{ width: "42%" }}>Calculation app LOT</th>
-                                  <th style={{ width: "44%" }}>Douano LOTs / SKU details</th>
-                                  <th style={{ width: "14%" }}>Status</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {groupRowsByInternalLot(group).map((lotGroup) => {
-                                  const lotOpen = expandedLotGroups[`${group.style_id}|${lotGroup.key}`] ?? false;
-                                  return (
-                                    <Fragment key={lotGroup.key}>
-                                      <tr className="lot-reconciliation-lot-row">
-                                        <td>
-                                          <button
-                                            type="button"
-                                            className="link-button"
-                                            onClick={() =>
-                                              setExpandedLotGroups((prev) => ({
-                                                ...prev,
-                                                [`${group.style_id}|${lotGroup.key}`]: !lotOpen,
-                                              }))
-                                            }
-                                          >
-                                            {lotOpen ? "v" : ">"} {lotGroup.internal_lot_number ? (
-                                              <>
-                                                <code>{lotGroup.internal_lot_number}</code>
-                                                {lotGroup.label.replace(lotGroup.internal_lot_number, "").trim() ? ` ${lotGroup.label.replace(lotGroup.internal_lot_number, "").trim()}` : ""}
-                                              </>
-                                            ) : (
-                                              lotGroup.label
-                                            )}
-                                          </button>
-                                        </td>
-                                        <td>
-                                          {lotGroup.douano_lots.length ? lotGroup.douano_lots.map((lot) => <code key={lot}>{lot}</code>) : <span className="module-card-text">Geen Douano match</span>}
-                                          <div className="module-card-text">
-                                            {lotGroup.rows.length} SKU-regel{lotGroup.rows.length === 1 ? "" : "s"} - {lotGroup.douano_rows} Douano row{lotGroup.douano_rows === 1 ? "" : "s"}
-                                            {lotGroup.last_movement_date ? ` - ${lotGroup.last_movement_date}` : ""}
-                                          </div>
-                                        </td>
-                                        <td>
-                                          <span className={`status-pill ${lotStatusClass(lotGroup.status)}`}>{lotStatusLabel(lotGroup.status)}</span>
-                                        </td>
-                                      </tr>
-                                      {lotOpen
-                                        ? lotGroup.rows.map((row) => {
-                                            const key = lotRowKey(row);
-                                            const selectedDouanoLot = selectedDouanoLots[key] ?? row.douano_lot_number ?? "";
-                                            const canUpdate = Boolean(row.internal_lot_number && selectedDouanoLot && row.internal_lot_number !== selectedDouanoLot);
-                                            const internalSkuDetails = Array.isArray(row.sku_details) ? row.sku_details : [];
-                                            const douanoSkuDetails = Array.isArray(row.douano_sku_details) ? row.douano_sku_details : [];
-                                            return (
-                                              <tr key={`${lotGroup.key}-${key}`} className="lot-reconciliation-sku-row">
-                                                <td>
-                                                  {internalSkuDetails.length ? (
-                                                    <div className="stack-compact">
-                                                      {internalSkuDetails.map((detail, index) => (
-                                                        <div className="module-card-text" key={`${key}-internal-${detail.sku_id || detail.sku_code || index}`}>
-                                                          <span style={{ overflowWrap: "anywhere" }}>{skuDetailLabel(detail)}</span>
-                                                        </div>
-                                                      ))}
-                                                    </div>
-                                                  ) : (
-                                                    <div className="module-card-text">Geen interne SKU-details</div>
-                                                  )}
-                                                </td>
-                                                <td>
-                                                  {row.status === "matched" ? (
-                                                    <code>{row.douano_lot_number}</code>
-                                                  ) : (
-                                                    <select
-                                                      className="editor-input"
-                                                      style={{ width: "100%" }}
-                                                      value={selectedDouanoLot}
-                                                      onChange={(event) => setSelectedDouanoLots((prev) => ({ ...prev, [key]: event.target.value }))}
-                                                    >
-                                                      <option value="">Select Douano LOT</option>
-                                                      {row.douano_options.map((option) => (
-                                                        <option key={`${key}-${option.lot_number}`} value={option.lot_number}>
-                                                          {option.lot_number} - {option.product_name || row.sku_name} ({Number(option.rows || 0)} rows)
-                                                        </option>
-                                                      ))}
-                                                    </select>
-                                                  )}
-                                                  <div className="module-card-text">
-                                                    {Number(row.rows || 0)} row{Number(row.rows || 0) === 1 ? "" : "s"}
-                                                    {row.last_movement_date ? ` - ${row.last_movement_date}` : ""}
-                                                  </div>
-                                                  {douanoSkuDetails.length ? (
-                                                    <div className="stack-compact" style={{ marginTop: 6 }}>
-                                                      {douanoSkuDetails.map((detail, index) => (
-                                                        <div className="module-card-text" key={`${key}-douano-${detail.sku_id || detail.sku_code || index}`}>
-                                                          <span style={{ overflowWrap: "anywhere" }}>{skuDetailLabel(detail)}</span>
-                                                          {Number(detail.rows || 0) ? ` (${Number(detail.rows || 0)} rows)` : ""}
-                                                        </div>
-                                                      ))}
-                                                    </div>
-                                                  ) : null}
-                                                </td>
-                                                <td>
-                                                  <div className="lot-reconciliation-status-cell">
-                                                    <span className={`status-pill ${lotStatusClass(row.status)}`}>{lotStatusLabel(row.status)}</span>
-                                                    {canUpdate ? (
-                                                      <button
-                                                        type="button"
-                                                        className="editor-button editor-button-secondary"
-                                                        disabled={saving}
-                                                        title={`Update internal LOT ${row.internal_lot_number} to Douano LOT ${selectedDouanoLot}`}
-                                                        onClick={() => void correctInternalLot(row)}
-                                                      >
-                                                        Update
-                                                      </button>
-                                                    ) : null}
-                                                  </div>
-                                                </td>
-                                              </tr>
-                                            );
-                                          })
-                                        : null}
-                                    </Fragment>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-              {!reconciliationGroups.length ? (
-                <tr>
-                  <td colSpan={4}>No LOTs found for this year yet.</td>
                 </tr>
               ) : null}
             </tbody>
