@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR } from "@/lib/formatters";
@@ -464,58 +464,62 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
               {internalLotGroups.map((group) => {
                 const groupKey = group.style_id || group.style_name;
                 return (
-                <tr key={groupKey}>
-                  <td>
-                    <details>
-                      <summary style={{ cursor: "pointer", fontWeight: 800 }}>
-                        {group.style_name || "Onbekende stijl"}{" "}
+                  <Fragment key={groupKey}>
+                    <tr key={`${groupKey}-style`}>
+                      <td colSpan={2}>
+                        <strong>{group.style_name || "Onbekende stijl"}</strong>{" "}
                         <span className="pill" style={{ marginLeft: 8 }}>
                           {Number(group.lot_count || group.lots?.length || 0)} LOTs
                         </span>
-                      </summary>
-                      <div style={{ display: "grid", gap: 8, marginTop: 10, paddingLeft: 18 }}>
-                        {(group.lots || []).map((lot) => (
-                          <details key={`${group.style_id || group.style_name}-${lot.lot_number}`}>
-                            <summary style={{ cursor: "pointer" }}>
-                              <code>{lot.lot_number || "-"}</code>{" "}
-                              <span className="module-card-text">{(lot.versions || []).join("/")}</span>
-                              <span className="pill" style={{ marginLeft: 8 }}>
-                                {Number(lot.sku_count || lot.skus?.length || 0)} SKU&apos;s
-                              </span>
-                            </summary>
-                            <div style={{ display: "grid", gap: 6, marginTop: 8, paddingLeft: 18 }}>
-                              {(lot.skus || []).map((sku) => (
-                                <div key={`${lot.lot_number}-${sku.sku_id || sku.sku_code || sku.label}`}>
-                                  {sku.label || sku.name || sku.sku_code || sku.sku_id || "-"}
-                                  {sku.sku_code ? <span className="module-card-text"> {sku.sku_code}</span> : null}
-                                </div>
-                              ))}
-                              {!lot.skus?.length ? <div className="module-card-text">Geen SKU&apos;s gevonden.</div> : null}
-                            </div>
-                          </details>
-                        ))}
-                        {!group.lots?.length ? <div className="module-card-text">Geen interne LOTs gevonden.</div> : null}
-                      </div>
-                    </details>
-                  </td>
-                  <td style={{ verticalAlign: "top" }}>
-                    <input
-                      className="editor-input"
-                      list="external-lot-options"
-                      placeholder="Zoek externe LOT"
-                      value={selectedExternalLots[groupKey] || ""}
-                      onChange={(event) =>
-                        setSelectedExternalLots((current) => ({
-                          ...current,
-                          [groupKey]: event.target.value,
-                        }))
-                      }
-                    />
-                    <div className="module-card-text" style={{ marginTop: 6 }}>
-                      {externalLots.length} externe LOTs beschikbaar
-                    </div>
-                  </td>
-                </tr>
+                      </td>
+                    </tr>
+                    {(group.lots || []).map((lot) => {
+                      const lotKey = `${groupKey}-${lot.lot_number}`;
+                      return (
+                        <tr key={lotKey}>
+                          <td style={{ verticalAlign: "top", paddingLeft: 28 }}>
+                            <details>
+                              <summary style={{ cursor: "pointer" }}>
+                                <code>{lot.lot_number || "-"}</code>{" "}
+                                <span className="module-card-text">{(lot.versions || []).join("/")}</span>
+                                <span className="pill" style={{ marginLeft: 8 }}>
+                                  {Number(lot.sku_count || lot.skus?.length || 0)} SKU&apos;s
+                                </span>
+                              </summary>
+                              <div style={{ display: "grid", gap: 6, marginTop: 8, paddingLeft: 18 }}>
+                                {(lot.skus || []).map((sku) => (
+                                  <div key={`${lot.lot_number}-${sku.sku_id || sku.sku_code || sku.label}`}>
+                                    {sku.label || sku.name || sku.sku_code || sku.sku_id || "-"}
+                                    {sku.sku_code ? <span className="module-card-text"> {sku.sku_code}</span> : null}
+                                  </div>
+                                ))}
+                                {!lot.skus?.length ? <div className="module-card-text">Geen SKU&apos;s gevonden.</div> : null}
+                              </div>
+                            </details>
+                          </td>
+                          <td style={{ verticalAlign: "top" }}>
+                            <input
+                              className="editor-input"
+                              list="external-lot-options"
+                              placeholder="Zoek externe LOT"
+                              value={selectedExternalLots[lotKey] || ""}
+                              onChange={(event) =>
+                                setSelectedExternalLots((current) => ({
+                                  ...current,
+                                  [lotKey]: event.target.value,
+                                }))
+                              }
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!group.lots?.length ? (
+                      <tr key={`${groupKey}-empty`}>
+                        <td colSpan={2} style={{ paddingLeft: 28 }}>Geen interne LOTs gevonden.</td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
               {!internalLotGroups.length ? (
