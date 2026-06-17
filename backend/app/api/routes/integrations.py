@@ -1480,6 +1480,9 @@ def post_update_internal_lot(payload: dict[str, Any], _: dict = Depends(require_
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Internal LOT update failed")
+        raise HTTPException(status_code=500, detail="Interne LOT kon niet worden bijgewerkt.") from exc
 
 
 @router.put("/lot-costs/aliases")

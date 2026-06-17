@@ -377,6 +377,22 @@ def _lot_exact_key(value: Any) -> str:
     return "".join(ch for ch in str(value or "").strip().upper() if ch.isalnum())
 
 
+def _iso_date_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text[:10]
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            pass
+    try:
+        return datetime.fromisoformat(str(value or "").replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        return ""
+
+
 def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
     """Project LOT numbers from a cost version payload into canonical lot rows.
 
@@ -390,7 +406,7 @@ def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
     source_type = str(version.get("type", "") or "").strip() or "cost_version"
     source_ref = str(version.get("factuurnummer", "") or version.get("invoice_number", "") or version_id).strip()
     supplier = str(version.get("leverancier", "") or version.get("supplier", "") or "").strip()
-    source_date = str(version.get("factuurdatum", "") or version.get("datum", "") or version.get("finalized_at", "") or "").strip()[:10]
+    source_date = _iso_date_text(version.get("factuurdatum", "") or version.get("datum", "") or version.get("finalized_at", ""))
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
 
@@ -404,12 +420,12 @@ def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
                 or source_ref
             ).strip()
             local_supplier = str(value.get("leverancier", "") or value.get("supplier", "") or supplier).strip()
-            local_source_date = str(
+            local_source_date = _iso_date_text(
                 value.get("factuurdatum", "")
                 or value.get("datum", "")
                 or value.get("source_date", "")
                 or source_date
-            ).strip()[:10]
+            )
             for key, child in value.items():
                 key_text = _lot_key_name(key)
                 if key_text in _LOT_KEYS:
