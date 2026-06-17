@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { RefreshCw } from "lucide-react";
 
 import { API_BASE_URL } from "@/lib/api";
 import { formatMoneyEUR } from "@/lib/formatters";
@@ -59,6 +60,8 @@ type ExternalLotItem = {
   rows?: number;
   last_movement_date?: string;
   product_name?: string;
+  style_ids?: string[];
+  style_names?: string[];
 };
 
 type InternalLotSku = {
@@ -72,6 +75,7 @@ type InternalLotSku = {
 type InternalLotItem = {
   lot_number: string;
   versions?: string[];
+  version_ids?: string[];
   years?: number[];
   sources?: string[];
   sku_count?: number;
@@ -130,6 +134,18 @@ async function readJson(response: Response) {
 
 function skuLabel(row: GenericRecord) {
   return String(row.name || row.label || row.id || "");
+}
+
+function lotExactKey(value: unknown) {
+  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function lotNearKey(value: unknown) {
+  return lotExactKey(value).replace(/O/g, "0");
+}
+
+function domId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { skus: GenericRecord[]; year?: number }) {
@@ -217,6 +233,77 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
       setTone("error");
+    }
+  }
+
+  function externalOptionsFor(rowKey: string) {
+    const usedByOtherRows = new Set(
+      Object.entries(selectedExternalLots)
+        .filter(([key]) => key !== rowKey)
+        .map(([, value]) => lotExactKey(value))
+        .filter(Boolean)
+    );
+    return externalLots.filter((lot) => !usedByOtherRows.has(lotExactKey(lot.lot_number)));
+  }
+
+  async function updateInternalLot(group: InternalLotGroup, lot: InternalLotItem, lotKey: string) {
+    const selectedLot = String(selectedExternalLots[lotKey] || "").trim();
+    if (!selectedLot) return;
+    const externalLot = externalLots.find((item) => lotExactKey(item.lot_number) === lotExactKey(selectedLot));
+    const externalStyleIds = externalLot?.style_ids || [];
+    const externalStyleNames = externalLot?.style_names || [];
+    const sameStyle = !externalStyleIds.length || !group.style_id || externalStyleIds.includes(group.style_id);
+    const exactSame = lotExactKey(lot.lot_number) === lotExactKey(selectedLot);
+    const nearSame = lotNearKey(lot.lot_number) === lotNearKey(selectedLot);
+    let message = `Je gaat interne LOT ${lot.lot_number} bijwerken naar ${selectedLot}.`;
+    if (!sameStyle) {
+      message =
+        `Let op: de externe LOT lijkt bij een andere stijl te horen.\n\n` +
+        `Interne stijl: ${group.style_name || "-"}\n` +
+        `Externe stijl: ${externalStyleNames.join(", ") || "onbekend"}\n\n` +
+        `Weet je absoluut zeker dat je ${lot.lot_number} wilt bijwerken naar ${selectedLot}?`;
+    } else if (!exactSame && !nearSame) {
+      message =
+        `Let op: de externe LOT wijkt duidelijk af van de interne LOT.\n\n` +
+        `Intern: ${lot.lot_number}\n` +
+        `Extern: ${selectedLot}\n\n` +
+        `Weet je zeker dat je deze interne LOT wilt bijwerken?`;
+    } else {
+      message =
+        `Je gaat interne LOT ${lot.lot_number} bijwerken naar ${selectedLot}.\n\n` +
+        `Dit past de LOT aan in de gekoppelde kostprijsversie/inkoopfactuur.`;
+    }
+    if (!window.confirm(message)) return;
+
+    setSaving(true);
+    setStatus("Interne LOT bijwerken...");
+    setTone("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/internal-lots/update`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          version_ids: lot.version_ids || [],
+          from_lot: lot.lot_number,
+          to_lot: selectedLot,
+        }),
+      });
+      const payload = await readJson(response);
+      if (!response.ok) throw new Error(String(payload?.detail || response.statusText));
+      setSelectedExternalLots((current) => {
+        const next = { ...current };
+        delete next[lotKey];
+        return next;
+      });
+      setStatus(`Interne LOT bijgewerkt naar ${selectedLot}.`);
+      setTone("success");
+      await loadInternalLotSummary();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -444,15 +531,6 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
           Interne LOTs uit kostprijsversies en inkoopfacturen, gegroepeerd per stijl.
         </div>
         <div className="data-table" style={{ marginTop: 12 }}>
-          <datalist id="external-lot-options">
-            {externalLots.map((lot) => (
-              <option
-                key={lot.lot_number}
-                value={lot.lot_number}
-                label={`${lot.lot_number}${lot.product_name ? ` - ${lot.product_name}` : ""}${lot.rows ? ` (${lot.rows} regels)` : ""}`}
-              />
-            ))}
-          </datalist>
           <table>
             <thead>
               <tr>
@@ -475,6 +553,8 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                     </tr>
                     {(group.lots || []).map((lot) => {
                       const lotKey = `${groupKey}-${lot.lot_number}`;
+                      const selectedLot = selectedExternalLots[lotKey] || "";
+                      const options = externalOptionsFor(lotKey);
                       return (
                         <tr key={lotKey}>
                           <td style={{ verticalAlign: "top", paddingLeft: 28 }}>
@@ -498,19 +578,47 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                             </details>
                           </td>
                           <td style={{ verticalAlign: "top" }}>
-                            <input
-                              className="editor-input"
-                              list="external-lot-options"
-                              placeholder="Zoek externe LOT"
-                              style={{ width: "100%", minWidth: 420 }}
-                              value={selectedExternalLots[lotKey] || ""}
-                              onChange={(event) =>
-                                setSelectedExternalLots((current) => ({
-                                  ...current,
-                                  [lotKey]: event.target.value,
-                                }))
-                              }
-                            />
+                            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 42px", gap: 8, alignItems: "center" }}>
+                              <datalist id={`external-lot-options-${domId(lotKey)}`}>
+                                {options.map((externalLot) => (
+                                  <option
+                                    key={externalLot.lot_number}
+                                    value={externalLot.lot_number}
+                                    label={`${externalLot.lot_number}${externalLot.product_name ? ` - ${externalLot.product_name}` : ""}${
+                                      externalLot.style_names?.length ? ` - ${externalLot.style_names.join(", ")}` : ""
+                                    }${externalLot.rows ? ` (${externalLot.rows} regels)` : ""}`}
+                                  />
+                                ))}
+                              </datalist>
+                              <input
+                                className="editor-input"
+                                list={`external-lot-options-${domId(lotKey)}`}
+                                placeholder="Zoek externe LOT"
+                                style={{ width: "100%", minWidth: 420 }}
+                                value={selectedLot}
+                                onChange={(event) =>
+                                  setSelectedExternalLots((current) => ({
+                                    ...current,
+                                    [lotKey]: event.target.value,
+                                  }))
+                                }
+                              />
+                              {selectedLot.trim() ? (
+                                <button
+                                  type="button"
+                                  className="editor-button editor-button-secondary"
+                                  title="Interne LOT bijwerken"
+                                  aria-label="Interne LOT bijwerken"
+                                  disabled={saving || !(lot.version_ids || []).length}
+                                  onClick={() => void updateInternalLot(group, lot, lotKey)}
+                                  style={{ minWidth: 40, width: 40, paddingInline: 0 }}
+                                >
+                                  <RefreshCw size={15} aria-hidden="true" />
+                                </button>
+                              ) : (
+                                <span aria-hidden="true" />
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

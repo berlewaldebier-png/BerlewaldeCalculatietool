@@ -843,33 +843,64 @@ def list_lot_reconciliation(*, year: int = 0, limit: int = 500) -> list[dict[str
 def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
     """Return distinct Douano/API LOTs from stored stock-history allocations."""
     ensure_schema()
+    try:
+        from app.domain import douano_product_mapping_storage
+
+        douano_product_mapping_storage.ensure_schema()
+    except Exception:
+        pass
     lim = max(1, min(int(limit or 5000), 50000))
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT
-                    lot_number,
+                    a.lot_number,
                     COUNT(*)::int AS rows,
-                    MAX(movement_date) AS last_movement_date,
-                    MAX(product_name) AS product_name
-                FROM sales_lot_allocations
-                WHERE COALESCE(NULLIF(lot_number, ''), '') <> ''
-                GROUP BY lot_number
-                ORDER BY lot_number
+                    MAX(a.movement_date) AS last_movement_date,
+                    MAX(a.product_name) AS product_name,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(s.beer_id, ''), '')), '') AS style_ids
+                FROM sales_lot_allocations a
+                LEFT JOIN douano_products p ON LOWER(p.sku) = LOWER(a.sku_code)
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = p.product_id
+                LEFT JOIN skus s ON s.id = m.sku_id
+                WHERE COALESCE(NULLIF(a.lot_number, ''), '') <> ''
+                GROUP BY a.lot_number
+                ORDER BY a.lot_number
                 LIMIT %s
                 """,
                 (lim,),
             )
             rows = cur.fetchall() or []
+    style_name_by_id: dict[str, str] = {}
+    try:
+        from app.domain import dataset_store
+
+        bieren = dataset_store.load_dataset("bieren")
+        if isinstance(bieren, list):
+            for row in bieren:
+                if not isinstance(row, dict):
+                    continue
+                style_id = _text(row.get("id"))
+                style_name = _text(row.get("biernaam") or row.get("naam") or row.get("name"))
+                if style_id:
+                    style_name_by_id[style_id] = style_name or style_id
+    except Exception:
+        style_name_by_id = {}
     return [
         {
             "lot_number": _text(lot_number),
             "rows": int(count_rows or 0),
             "last_movement_date": last_movement_date.isoformat() if last_movement_date else "",
             "product_name": _text(product_name),
+            "style_ids": [_text(style_id) for style_id in (style_ids or []) if _text(style_id)],
+            "style_names": [
+                style_name_by_id.get(_text(style_id), _text(style_id))
+                for style_id in (style_ids or [])
+                if _text(style_id)
+            ],
         }
-        for lot_number, count_rows, last_movement_date, product_name in rows
+        for lot_number, count_rows, last_movement_date, product_name, style_ids in rows
     ]
 
 

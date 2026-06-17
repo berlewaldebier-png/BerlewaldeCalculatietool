@@ -2024,6 +2024,112 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
     return out
 
 
+def _replace_lot_in_payload(value: Any, *, from_lot: str, to_lot: str) -> tuple[Any, int]:
+    from_key = _lot_exact_key(from_lot)
+    if isinstance(value, dict):
+        changed = 0
+        next_value: dict[str, Any] = {}
+        for key, child in value.items():
+            key_text = _lot_key_name(key)
+            if key_text in _LOT_KEYS and _lot_exact_key(child) == from_key:
+                next_value[key] = to_lot
+                changed += 1
+                continue
+            next_child, child_changed = _replace_lot_in_payload(child, from_lot=from_lot, to_lot=to_lot)
+            next_value[key] = next_child
+            changed += child_changed
+        return next_value, changed
+    if isinstance(value, list):
+        changed = 0
+        next_items: list[Any] = []
+        for child in value:
+            next_child, child_changed = _replace_lot_in_payload(child, from_lot=from_lot, to_lot=to_lot)
+            next_items.append(next_child)
+            changed += child_changed
+        return next_items, changed
+    return value, 0
+
+
+def update_internal_lot_number(*, version_ids: list[str], from_lot: str, to_lot: str) -> dict[str, Any]:
+    """Replace an internal LOT in selected cost version payloads.
+
+    This updates the source cost version payload, then rebuilds normalized LOT
+    rows for those versions. It does not create fuzzy matches or aliases.
+    """
+    ensure_schema()
+    ids = sorted({str(version_id or "").strip() for version_id in version_ids if str(version_id or "").strip()})
+    from_text = str(from_lot or "").strip()
+    to_text = str(to_lot or "").strip()
+    if not ids:
+        raise ValueError("Kostprijsversies ontbreken.")
+    if not from_text:
+        raise ValueError("Interne LOT ontbreekt.")
+    if not to_text:
+        raise ValueError("Externe LOT ontbreekt.")
+    if _lot_exact_key(from_text) == _lot_exact_key(to_text) and from_text == to_text:
+        return {"updated_versions": 0, "updated_fields": 0, "from_lot": from_text, "to_lot": to_text}
+
+    now = datetime.now(UTC)
+    updated_versions: list[dict[str, Any]] = []
+    updated_fields = 0
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload
+                FROM cost_versions
+                WHERE id = ANY(%s)
+                FOR UPDATE
+                """,
+                (ids,),
+            )
+            rows = cur.fetchall() or []
+            found_ids = {str(row[0] or "").strip() for row in rows}
+            missing_ids = [version_id for version_id in ids if version_id not in found_ids]
+            if missing_ids:
+                raise ValueError(f"Kostprijsversie niet gevonden: {', '.join(missing_ids)}")
+            for version_id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload in rows:
+                payload_obj = payload if isinstance(payload, dict) else {}
+                if not isinstance(payload_obj, dict):
+                    payload_obj = {}
+                next_payload, changed = _replace_lot_in_payload(payload_obj, from_lot=from_text, to_lot=to_text)
+                if changed <= 0:
+                    continue
+                next_payload = dict(next_payload)
+                next_payload["id"] = str(version_id or "")
+                next_payload["jaar"] = int(jaar or 0)
+                next_payload["status"] = str(status or "")
+                next_payload["bier_id"] = str(bier_id or "")
+                next_payload["versie_nummer"] = int(versie_nummer or 0)
+                next_payload["created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else str(next_payload.get("created_at", "") or "")
+                next_payload["updated_at"] = now.isoformat()
+                next_payload["finalized_at"] = finalized_at.isoformat() if hasattr(finalized_at, "isoformat") and finalized_at else str(next_payload.get("finalized_at", "") or "")
+                cur.execute(
+                    """
+                    UPDATE cost_versions
+                    SET payload = %s::jsonb,
+                        updated_at = %s,
+                        updated_at_ts = %s
+                    WHERE id = %s
+                    """,
+                    (json.dumps(next_payload, ensure_ascii=False), now, now, str(version_id or "")),
+                )
+                updated_versions.append(next_payload)
+                updated_fields += changed
+            if updated_versions:
+                _upsert_lot_rows(cur, updated_versions, overwrite=True, now=now)
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    return {
+        "updated_versions": len(updated_versions),
+        "updated_fields": updated_fields,
+        "from_lot": from_text,
+        "to_lot": to_text,
+        "version_ids": [str(row.get("id", "") or "") for row in updated_versions],
+    }
+
+
 def load_lot_candidates_by_sku(*, year: int = 0, limit: int = 20000) -> dict[str, list[dict[str, Any]]]:
     """Return internal LOT candidates keyed by SKU id from canonical cost version LOT rows."""
     ensure_schema()

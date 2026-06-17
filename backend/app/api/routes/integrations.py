@@ -27,6 +27,7 @@ from app.domain import dataset_store
 from app.domain import douano_margin_service
 from app.domain import douano_unmapped_rule_storage
 from app.domain import lot_costs_storage
+from app.domain import cost_versions_storage
 from app.domain import douano_unmapped_service
 from app.domain import break_even_planning_service
 from app.domain import break_even_planning_storage
@@ -1462,6 +1463,23 @@ def get_internal_lot_summary(
 @router.get("/lot-costs/external-lots")
 def get_external_lots(limit: int = Query(5000, ge=1, le=50000)) -> dict[str, Any]:
     return {"items": lot_costs_storage.list_external_lots(limit=int(limit))}
+
+
+@router.post("/lot-costs/internal-lots/update")
+def post_update_internal_lot(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        version_ids = payload.get("version_ids", [])
+        if not isinstance(version_ids, list):
+            version_ids = []
+        return {
+            "result": cost_versions_storage.update_internal_lot_number(
+                version_ids=[str(item or "") for item in version_ids],
+                from_lot=str(payload.get("from_lot", "") or ""),
+                to_lot=str(payload.get("to_lot", "") or ""),
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/lot-costs/aliases")
