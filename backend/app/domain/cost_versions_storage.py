@@ -1856,6 +1856,117 @@ def rebuild_lot_rows_from_payloads(*, year: int = 0, only_if_empty: bool = False
     return {"versions": len(versions), "lots": sum(len(_version_lot_records(row)) for row in versions), "rebuilt": 1}
 
 
+def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
+    """Return internal LOTs grouped by beer style directly from cost versions.
+
+    Cost version payloads are the source for internal LOT declarations. The
+    normalized `cost_version_lots` table is useful as an index, but this read
+    path deliberately avoids depending on that index being backfilled.
+    """
+    ensure_schema()
+    lim = max(1, min(int(limit or 5000), 50000))
+    year_value = int(year or 0)
+    where = "WHERE LOWER(status) = 'definitief'"
+    params: list[Any] = []
+    if year_value > 0:
+        where += " AND jaar = %s"
+        params.append(year_value)
+    params.append(lim)
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, jaar, status, bier_id, versie_nummer, payload
+                FROM cost_versions
+                {where}
+                ORDER BY jaar DESC, bier_id, versie_nummer, id
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cur.fetchall() or []
+
+    groups: dict[str, dict[str, Any]] = {}
+    for version_id, version_year, status, beer_id, version_number, payload in rows:
+        version = payload if isinstance(payload, dict) else {}
+        if not isinstance(version, dict):
+            continue
+        version = dict(version)
+        version["id"] = str(version_id or version.get("id", "") or "")
+        version["jaar"] = int(version_year or version.get("jaar", 0) or 0)
+        version["status"] = str(status or version.get("status", "") or "")
+        version["bier_id"] = str(beer_id or version.get("bier_id", "") or "")
+        version["versie_nummer"] = int(version_number or version.get("versie_nummer", 0) or 0)
+        lot_rows = _version_lot_records(version)
+        if not lot_rows:
+            continue
+
+        basis = version.get("basisgegevens") if isinstance(version.get("basisgegevens"), dict) else {}
+        style_id = str(version.get("bier_id", "") or basis.get("bier_id", "") or "").strip()
+        style_name = str(
+            basis.get("biernaam", "")
+            or basis.get("naam", "")
+            or version.get("biernaam", "")
+            or version.get("naam", "")
+            or style_id
+            or "Onbekende stijl"
+        ).strip()
+        group_key = style_id or style_name.lower()
+        group = groups.setdefault(
+            group_key,
+            {
+                "style_id": style_id,
+                "style_name": style_name,
+                "lots": {},
+            },
+        )
+        version_num = int(version.get("versie_nummer", 0) or 0)
+        version_label = f"v{version_num}" if version_num > 0 else "kostprijsversie"
+        for lot_row in lot_rows:
+            lot_number = str(lot_row.get("lot_number", "") or "").strip()
+            lot_key = _lot_exact_key(lot_number)
+            if not lot_number or not lot_key:
+                continue
+            lot_item = group["lots"].setdefault(
+                lot_key,
+                {
+                    "lot_number": lot_number,
+                    "versions": [],
+                    "version_ids": [],
+                    "years": [],
+                    "sources": [],
+                    "source_date": str(lot_row.get("source_date", "") or ""),
+                },
+            )
+            if version_label not in lot_item["versions"]:
+                lot_item["versions"].append(version_label)
+            version_id_text = str(version.get("id", "") or "").strip()
+            if version_id_text and version_id_text not in lot_item["version_ids"]:
+                lot_item["version_ids"].append(version_id_text)
+            year_num = int(version.get("jaar", 0) or 0)
+            if year_num > 0 and year_num not in lot_item["years"]:
+                lot_item["years"].append(year_num)
+            source_label = str(lot_row.get("source_ref", "") or lot_row.get("source_type", "") or "").strip()
+            if source_label and source_label not in lot_item["sources"]:
+                lot_item["sources"].append(source_label)
+
+    out: list[dict[str, Any]] = []
+    for group in groups.values():
+        lots = list(group["lots"].values())
+        lots.sort(key=lambda item: str(item.get("lot_number", "") or "").upper())
+        out.append(
+            {
+                "style_id": group["style_id"],
+                "style_name": group["style_name"],
+                "lot_count": len(lots),
+                "lots": lots,
+            }
+        )
+    out.sort(key=lambda item: str(item.get("style_name", "") or "").lower())
+    return out
+
+
 def load_lot_candidates_by_sku(*, year: int = 0, limit: int = 20000) -> dict[str, list[dict[str, Any]]]:
     """Return internal LOT candidates keyed by SKU id from canonical cost version LOT rows."""
     ensure_schema()
