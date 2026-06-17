@@ -64,6 +64,8 @@ def get_connection() -> Iterator[Any]:
     try:
         yield conn
     finally:
+        if not bool(getattr(conn, "closed", False)):
+            conn.rollback()
         pool.putconn(conn)
 
 

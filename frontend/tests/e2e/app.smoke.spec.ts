@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 
 async function ensureLoggedIn(page: Page) {
   // Prefer reusing the authenticated storageState from globalSetup.
-  await page.goto("/break-even-v2");
+  await page.goto("/break-even");
   if (!/\/login/.test(page.url())) return;
 
   await page.goto("/login");

@@ -9,20 +9,16 @@ async function resolveServerApiBaseUrl() {
     return API_BASE_URL;
   }
 
-  // Server components can't use relative URLs with Node's fetch. Previously we derived the origin from
-  // the incoming Host header, but in containerized setups that host (e.g. "hanshssnk") may not be
-  // resolvable from within the container, causing slow failures/timeouts.
-  //
-  // Use loopback to call this Next.js instance's own API routes by default. This keeps the request
-  // internal and stable regardless of external DNS/reverse proxy config.
-  const explicitOrigin = (process.env.CALCULATIETOOL_SERVER_ORIGIN ?? "").trim();
-  const port = (process.env.PORT ?? "").trim() || "3000";
-  const origin = explicitOrigin || `http://127.0.0.1:${port}`;
+  // Server components cannot use relative URLs with Node's fetch. Call FastAPI directly instead
+  // of looping through this Next.js instance's own /api proxy; in dev this avoids self-call
+  // timeouts when a page is rendering and waiting for its own route handler.
+  const backendBaseUrl =
+    (process.env.CALCULATIETOOL_BACKEND_INTERNAL_URL ?? "").trim() || "http://127.0.0.1:8000/api";
 
-  // Touch headers to preserve existing semantics and ensure this stays request-scoped.
+  // Touch headers to preserve existing request-scoped semantics.
   await headers();
 
-  return `${origin}${API_BASE_URL}`;
+  return backendBaseUrl.replace(/\/$/, "");
 }
 
 export async function apiGetServer<T>(path: string, nextPath: string): Promise<T> {
@@ -34,8 +30,9 @@ export async function apiGetServer<T>(path: string, nextPath: string): Promise<T
     response = await fetch(`${baseUrl}${path}`, {
       cache: "no-store",
       headers: cookieHeader ? { cookie: cookieHeader } : undefined,
-      // Some bootstrap payloads (e.g. ERP dashboard) can take longer than 20s on cold starts / slow DB.
-      signal: AbortSignal.timeout(60_000),
+      // Some bootstrap payloads can be heavy on cold starts / slow DB. Keep SSR routes patient,
+      // while pages that can defer heavy data should fetch it client-side after first paint.
+      signal: AbortSignal.timeout(120_000),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -61,13 +58,12 @@ export async function apiGetServer<T>(path: string, nextPath: string): Promise<T
   return (await response.json()) as T;
 }
 
-export function getBootstrap(
+export function getBootstrap<T extends Record<string, unknown> = Record<string, unknown>>(
   datasets: string[],
   includeNavigation = true,
   nextPath = "/",
   extraParams: Record<string, string> | null = null
-) {
-  const encoded = encodeURIComponent(datasets.join(","));
+): Promise<BootstrapResponse<T>> {
   const nav = includeNavigation ? "true" : "false";
   const params = new URLSearchParams({ datasets: datasets.join(","), navigation: nav });
   if (extraParams) {
@@ -79,5 +75,5 @@ export function getBootstrap(
       params.set(cleanKey, cleanValue);
     }
   }
-  return apiGetServer<BootstrapResponse>(`/meta/bootstrap?${params.toString()}`, nextPath);
+  return apiGetServer<BootstrapResponse<T>>(`/meta/bootstrap?${params.toString()}`, nextPath);
 }

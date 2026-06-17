@@ -186,6 +186,9 @@ export function isDraftValid(factuur: GenericRecord) {
   if (String(factuur.factuurdatum ?? "").trim() === "") {
     return false;
   }
+  if (String((factuur as any).lotnummer ?? "").trim() === "") {
+    return false;
+  }
   const regels = Array.isArray(factuur.factuurregels) ? (factuur.factuurregels as GenericRecord[]) : [];
   if (regels.length === 0) {
     return false;
@@ -205,11 +208,13 @@ export function getProductUnitOptions(basisproducten: GenericRecord[], samengest
       id: String(row.id ?? ""),
       label: String(row.omschrijving ?? ""),
       litersPerUnit: Number(row.inhoud_per_eenheid_liter ?? 0),
+      source: row,
     })),
     ...samengesteldeProducten.map((row) => ({
       id: String(row.id ?? ""),
       label: String(row.omschrijving ?? ""),
       litersPerUnit: Number(row.totale_inhoud_liter ?? 0),
+      source: row,
     })),
   ]
     .filter((option) => option.id && option.label)

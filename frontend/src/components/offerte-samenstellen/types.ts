@@ -12,9 +12,11 @@ export type QuoteBlockContext = "intro" | "standard" | "global";
 export type QuoteProductUnit = "fust" | "doos" | "fles" | "stuk" | "liter";
 
 export type QuoteProductSource = {
+  option_id?: string;
   sku_id?: string;
   bier_id?: string;
   product_id?: string;
+  packaging_component_id?: string;
   kostprijsversie_id?: string;
 };
 

@@ -16,7 +16,6 @@ import {
   Home,
   LogOut,
   PlugZap,
-  Search,
   Sparkles,
   UserRound,
   Users
@@ -24,6 +23,7 @@ import {
 
 import { API_BASE_URL } from "@/lib/api";
 import { fetchMe, logout, type AuthSession } from "@/lib/auth";
+import { SmartGlobalSearch } from "@/components/SmartGlobalSearch";
 
 type Crumb = {
   label: string;
@@ -68,8 +68,8 @@ const settingsItems: AccountMenuItem[] = [
     adminOnly: true
   },
   {
-    label: "Integraties",
-    description: "Douano, ORS, API, import/export",
+    label: "Datakwaliteit",
+    description: "Douano, LOTs, koppelingen, margechecks",
     href: "/beheer/api",
     icon: PlugZap,
     adminOnly: true
@@ -88,7 +88,7 @@ function titleForSegment(segment: string): string {
   if (!normalized) return "";
 
   const map: Record<string, string> = {
-    "break-even-v2": "Break-even",
+    "break-even": "Break-even",
     "nieuwe-kostprijsberekening": "Kostprijs beheren",
     "kostprijs-activatie": "Kostprijs activeren",
     prijsvoorstellen: "Prijsvoorstellen",
@@ -106,7 +106,7 @@ function titleForSegment(segment: string): string {
     users: "Gebruikers",
     devtools: "Devtools",
     handleiding: "Handleiding",
-    api: "API",
+    api: "Datakwaliteit",
     deployment: "Deployment",
     jaarsets: "Jaarsets",
     productclassificatie: "Productclassificatie",
@@ -287,17 +287,7 @@ export function DashboardHeader() {
             ))}
           </nav>
 
-          <div className="dashboard-header__search">
-            <Search size={18} className="dashboard-header__search-icon" aria-hidden="true" />
-            <input
-              type="text"
-              placeholder="Zoek orders, klanten, producten..."
-              className="dashboard-header__search-input"
-            />
-            <span className="dashboard-header__search-kbd" aria-hidden="true">
-              Ctrl K
-            </span>
-          </div>
+          <SmartGlobalSearch />
 
           <div className="dashboard-header__actions">
             <button

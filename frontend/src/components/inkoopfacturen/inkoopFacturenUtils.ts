@@ -37,6 +37,7 @@ export function normalizeFactuur(raw?: GenericRecord): GenericRecord {
     id: String(factuur.id ?? createId()),
     factuurnummer: String(factuur.factuurnummer ?? ""),
     factuurdatum: String(factuur.factuurdatum ?? ""),
+    lotnummer: String((factuur as any).lotnummer ?? (factuur as any).lot_number ?? (factuur as any).lot_nummer ?? ""),
     verzendkosten: Number(factuur.verzendkosten ?? 0),
     overige_kosten: Number(factuur.overige_kosten ?? 0),
     factuurregels: rows,

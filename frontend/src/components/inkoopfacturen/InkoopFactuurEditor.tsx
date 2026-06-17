@@ -27,7 +27,7 @@ export type InkoopFactuurEditorProps = {
   samengesteldeProducten: GenericRecord[];
   fallbackRow?: GenericRecord;
   canEdit?: boolean;
-  onChangeInkoopField: (key: "factuurnummer" | "factuurdatum" | "verzendkosten" | "overige_kosten", value: unknown) => void;
+  onChangeInkoopField: (key: "factuurnummer" | "factuurdatum" | "lotnummer" | "verzendkosten" | "overige_kosten", value: unknown) => void;
   uomValue?: string;
   onChangeUomValue?: (nextUom: string) => void;
   onChangeRegel: (index: number, patch: Partial<GenericRecord>) => void;
@@ -45,6 +45,33 @@ export type InkoopFactuurEditorProps = {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function todayInputValue() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toDateInputValue(value: unknown) {
+  const raw = text(value);
+  if (!raw) return "";
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  const nlMatch = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (nlMatch) {
+    const day = nlMatch[1].padStart(2, "0");
+    const month = nlMatch[2].padStart(2, "0");
+    return `${nlMatch[3]}-${month}-${day}`;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function isFustOption(option: ProductUnitOption | undefined | null) {
@@ -66,6 +93,8 @@ function isFustOption(option: ProductUnitOption | undefined | null) {
 export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
   const canEdit = Boolean(props.canEdit ?? true);
   const [aantalDraftById, setAantalDraftById] = useState<Record<string, string>>({});
+  const maxFactuurdatum = todayInputValue();
+  const factuurdatumValue = toDateInputValue(props.inkoop.factuurdatum);
 
   useEffect(() => {
     // Seed draft values from incoming regels. Don't overwrite existing drafts so typing stays stable.
@@ -81,6 +110,12 @@ export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
       return next;
     });
   }, [props.factuurregels]);
+
+  useEffect(() => {
+    const raw = text(props.inkoop.factuurdatum);
+    if (!raw || !factuurdatumValue || raw === factuurdatumValue) return;
+    props.onChangeInkoopField("factuurdatum", factuurdatumValue);
+  }, [factuurdatumValue, props]);
   const extraKostenPerRegel = props.calculateInkoopExtraKostenPerRegel(
     props.inkoop,
     props.factuurregels.length
@@ -122,23 +157,41 @@ export function InkoopFactuurEditor(props: InkoopFactuurEditorProps) {
   return (
     <div className="wizard-stack">
       <div className="wizard-form-grid">
-        {(
-          [
-            ["Factuurnummer", "factuurnummer"],
-            ["Factuurdatum", "factuurdatum"],
-          ] as const
-        ).map(([label, key]) => (
-          <label key={key} className="nested-field">
-            <span>{label}</span>
-            <input
-              className="dataset-input"
-              type="text"
-              value={String(props.inkoop[key] ?? "")}
-              readOnly={!canEdit}
-              onChange={(event) => props.onChangeInkoopField(key, event.target.value)}
-            />
-          </label>
-        ))}
+        <label className="nested-field">
+          <span>Factuurnummer</span>
+          <input
+            className="dataset-input"
+            type="text"
+            value={String(props.inkoop.factuurnummer ?? "")}
+            readOnly={!canEdit}
+            onChange={(event) => props.onChangeInkoopField("factuurnummer", event.target.value)}
+          />
+        </label>
+        <label className="nested-field">
+          <span>Factuurdatum</span>
+          <input
+            className="dataset-input"
+            type="date"
+            lang="nl-NL"
+            value={factuurdatumValue}
+            max={maxFactuurdatum}
+            readOnly={!canEdit}
+            onChange={(event) => {
+              const next = event.target.value;
+              props.onChangeInkoopField("factuurdatum", next && next > maxFactuurdatum ? maxFactuurdatum : next);
+            }}
+          />
+        </label>
+        <label className="nested-field">
+          <span>LOT-nummer</span>
+          <input
+            className="dataset-input"
+            type="text"
+            value={String(props.inkoop.lotnummer ?? "")}
+            readOnly={!canEdit}
+            onChange={(event) => props.onChangeInkoopField("lotnummer", event.target.value)}
+          />
+        </label>
       </div>
 
       <div className="stats-grid wizard-stats-grid wizard-inkoop-stats-grid">

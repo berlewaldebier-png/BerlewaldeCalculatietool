@@ -55,6 +55,11 @@ export function buildResultaatSnapshotFromWizard(params: {
   const jaar = Number((basisgegevens as any).jaar ?? 0);
   const soort = String(((row.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
   const biernaam = String((basisgegevens as any).biernaam ?? "");
+  const hasBeerContext = Boolean(
+    String((row as any).bier_id ?? (basisgegevens as any).bier_id ?? "").trim() ||
+      String((basisgegevens as any).stijl ?? "").trim() ||
+      biernaam.trim()
+  );
   const variabeleKostenPerLiter =
     calculateVariabeleKostenPerLiter(row, jaar, productie, basisproducten, samengesteldeProducten) ?? 0;
   const productieGegevens = getYearProduction(jaar, productie);
@@ -97,11 +102,15 @@ export function buildResultaatSnapshotFromWizard(params: {
   const basisproductenVanJaar =
     soort === "Inkoop"
       ? geselecteerdeInkoopProducten.filter((item) => Number((item as any).product?.inhoud_per_eenheid_liter ?? 0) > 0)
-      : basisproducten.filter((item) => Number((item as any).jaar ?? 0) === jaar);
+      : hasBeerContext
+        ? basisproducten.filter((item) => Number((item as any).jaar ?? 0) === jaar)
+        : [];
   const samengesteldeVanJaar =
     soort === "Inkoop"
       ? geselecteerdeInkoopProducten.filter((item) => Number((item as any).product?.totale_inhoud_liter ?? 0) > 0)
-      : samengesteldeProducten.filter((item) => Number((item as any).jaar ?? 0) === jaar);
+      : hasBeerContext
+        ? samengesteldeProducten.filter((item) => Number((item as any).jaar ?? 0) === jaar)
+        : [];
 
   const tarievenRow =
     (Array.isArray(tarievenHeffingen)
@@ -181,7 +190,11 @@ export function validateCurrentBeforePersistFromWizard(params: {
   const { current, basisproducten, samengesteldeProducten, getProductUnitOptions, isFustOption } = params;
 
   const basis = (current.basisgegevens as GenericRecord) ?? {};
+  const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
   const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+  if (soort === "Inkoop" && String((inkoop as any).lotnummer ?? "").trim() === "") {
+    return "LOT-nummer is verplicht in de stap Inkoopfactuur.";
+  }
   if (soort !== "Inkoop") {
     return "";
   }
@@ -189,7 +202,6 @@ export function validateCurrentBeforePersistFromWizard(params: {
   if (subjectType !== "bier") {
     return "";
   }
-  const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
   const factuurregels = Array.isArray((inkoop as any).factuurregels) ? ((inkoop as any).factuurregels as GenericRecord[]) : [];
   const jaar = Number(((current.basisgegevens as GenericRecord)?.jaar ?? 0) || 0);
   const unitOptions = getProductUnitOptions(jaar, basisproducten, samengesteldeProducten, current);

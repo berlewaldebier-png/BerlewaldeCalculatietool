@@ -79,7 +79,7 @@ Grootste risico’s:
    - Mobile emulatie laadt routes; maar ergonomie (tabs/modals/tables) nog handmatig te beoordelen.
 
 8. **Low/Medium — Encoding artifacts in UI tekst**
-   - Voorbeeld: “scenarioâ€™s” in break-even subtitle (`break-even-v2/page.tsx`).
+   - Voorbeeld: “scenarioâ€™s” in break-even subtitle (`break-even/page.tsx`).
 
 9. **Low — Security posture naar T/P**
    - Auth secret is local default; in non-local moet dit strict enforced worden (is al zo, maar deployment checklist nodig).
@@ -104,7 +104,7 @@ Friction/risk:
 Error path:
 - Wrong credentials toont `.login-error` (screenshot `13-login-invalid.png`).
 
-### Flow: Break-even analyseren (`/break-even-v2`)
+### Flow: Break-even analyseren (`/break-even`)
 
 Happy path:
 - Page rendert en heading zichtbaar (screenshot `03-break-even-v2.png`).

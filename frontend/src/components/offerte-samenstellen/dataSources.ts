@@ -38,9 +38,59 @@ type BuildProductOptionsParams = {
   verkoopprijzen: GenericRecord[];
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
+  verpakkingsonderdelen?: GenericRecord[];
+  verpakkingsonderdeelPrijzen?: GenericRecord[];
   litersPerUnitOverrides?: Map<string, number>;
   scenarioLabelSuffix?: string;
 };
+
+function asNumber(value: unknown, fallback = 0) {
+  const parsed = typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildQuoteablePackagingComponentOptions(params: BuildProductOptionsParams): ProductOption[] {
+  const pricesByComponentId = new Map<string, GenericRecord>();
+  (Array.isArray(params.verpakkingsonderdeelPrijzen) ? params.verpakkingsonderdeelPrijzen : []).forEach((row) => {
+    const year = asNumber((row as any)?.jaar, 0);
+    if (year !== params.year) return;
+    const componentId = String((row as any)?.verpakkingsonderdeel_id ?? "").trim();
+    if (componentId) pricesByComponentId.set(componentId, row);
+  });
+
+  return (Array.isArray(params.verpakkingsonderdelen) ? params.verpakkingsonderdelen : [])
+    .filter((row) => Boolean((row as any)?.beschikbaar_voor_offertes))
+    .flatMap((row) => {
+      const id = String((row as any)?.id ?? "").trim();
+      const label = String((row as any)?.omschrijving ?? (row as any)?.name ?? id).trim();
+      const priceRow = id ? pricesByComponentId.get(id) ?? null : null;
+      const priceEx = asNumber((priceRow as any)?.prijs_per_stuk, 0);
+      if (!id || !label || priceEx <= 0) return [];
+      const option: ProductOption = {
+        optionId: `packaging:${id}`,
+        bierId: "packaging-components",
+        productId: id,
+        label,
+        bierName: "Verpakkingsonderdelen",
+        packLabel: label,
+        salesUnitLabel: "stuk",
+        unitsPerLayer: null,
+        unitsPerPallet: null,
+        contributesToLiters: false,
+        contributesToMargin: true,
+        litersPerUnit: 0,
+        staffelCompatibilityKey: "packaging::stuk",
+        staffelCompatibilityLabel: "stuk",
+        costPriceEx: priceEx,
+        standardPriceEx: priceEx,
+        standardPriceYear: params.year,
+        vatRatePct: 21,
+        kostprijsversieId: "",
+      };
+      return [option];
+    })
+    .sort((left, right) => left.label.localeCompare(right.label, "nl-NL"));
+}
 
 export function buildQuoteableProductOptions(
   params: BuildProductOptionsParams
@@ -113,6 +163,11 @@ export function buildQuoteableProductOptions(
   for (const serviceOption of toServiceQuoteOptions(central.rows)) {
     if (options.some((opt) => opt.optionId === serviceOption.optionId)) continue;
     options.push(serviceOption);
+  }
+
+  for (const componentOption of buildQuoteablePackagingComponentOptions(params)) {
+    if (options.some((opt) => opt.optionId === componentOption.optionId)) continue;
+    options.push(componentOption);
   }
 
   if (options.length > 0 && options.every((row) => row.vatRatePct === 0)) {

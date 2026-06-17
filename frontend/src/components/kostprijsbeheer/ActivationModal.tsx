@@ -24,11 +24,13 @@ export function ActivationModal({
   activationStatus,
   setPendingActivation,
   setActivationStatus,
+  onActivateVersion,
 }: {
   pendingActivation: PendingActivationState;
   activationStatus: string;
   setPendingActivation: (next: PendingActivationState | null) => void;
   setActivationStatus: (next: string) => void;
+  onActivateVersion: (versionId: string) => Promise<void>;
 }) {
   return (
     <div className="confirm-modal-overlay" role="presentation">
@@ -103,11 +105,21 @@ export function ActivationModal({
           <button
             type="button"
             className="editor-button"
-            onClick={() => {
-              setActivationStatus(
-                "Doorzetten is nog een placeholder. Gebruik voorlopig Nieuw jaar voorbereiden > Kostprijs activeren."
-              );
-              setTimeout(() => setPendingActivation(null), 900);
+            onClick={async () => {
+              const versionId = String(pendingActivation.selectedOptionId ?? "").trim();
+              if (!versionId) {
+                setActivationStatus("Selecteer eerst een kostprijsversie.");
+                return;
+              }
+              try {
+                setActivationStatus("Activatie wordt opgeslagen...");
+                await onActivateVersion(versionId);
+                setActivationStatus("Kostprijsversie is actief gemaakt.");
+                setTimeout(() => setPendingActivation(null), 700);
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                setActivationStatus(message || "Activeren mislukt.");
+              }
             }}
           >
             Doorzetten

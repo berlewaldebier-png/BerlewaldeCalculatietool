@@ -46,6 +46,27 @@ def ensure_schema() -> None:
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_douano_product_mapping_sku ON douano_product_mapping(sku_id)"
                 )
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='skus')
+                           AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_douano_product_mapping_sku') THEN
+                            ALTER TABLE douano_product_mapping
+                            ADD CONSTRAINT fk_douano_product_mapping_sku
+                            FOREIGN KEY (sku_id) REFERENCES skus(id) ON DELETE RESTRICT
+                            NOT VALID;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='douano_products')
+                           AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_douano_product_mapping_product') THEN
+                            ALTER TABLE douano_product_mapping
+                            ADD CONSTRAINT fk_douano_product_mapping_product
+                            FOREIGN KEY (douano_product_id) REFERENCES douano_products(product_id) ON DELETE CASCADE
+                            NOT VALID;
+                        END IF;
+                    END $$;
+                    """
+                )
             if not postgres_storage.in_transaction():
                 conn.commit()
         _SCHEMA_READY = True

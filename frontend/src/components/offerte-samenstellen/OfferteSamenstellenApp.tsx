@@ -151,6 +151,8 @@ export function OfferteSamenstellenApp({
   verkoopprijzen,
   basisproducten,
   samengesteldeProducten,
+  verpakkingsonderdelen,
+  verpakkingsonderdeelPrijzen,
   breakEvenConfiguraties,
   vasteKosten,
   costManagementSettings,
@@ -261,6 +263,8 @@ export function OfferteSamenstellenApp({
       verkoopprijzen,
       basisproducten,
       samengesteldeProducten,
+      verpakkingsonderdelen,
+      verpakkingsonderdeelPrijzen,
       litersPerUnitOverrides,
       scenarioLabelSuffix: appliedScenarioLabel ? ` (${appliedScenarioLabel})` : " (scenario)",
     });
@@ -276,6 +280,8 @@ export function OfferteSamenstellenApp({
     verkoopprijzen,
     basisproducten,
     samengesteldeProducten,
+    verpakkingsonderdelen,
+    verpakkingsonderdeelPrijzen,
     litersPerUnitOverrides,
       appliedScenarioLabel,
   ]);
@@ -1259,7 +1265,9 @@ export function OfferteSamenstellenApp({
       costPriceEx: option.costPriceEx,
       vatRatePct: option.vatRatePct,
       source: {
+        option_id: option.optionId,
         sku_id: optionId.startsWith("sku:") ? optionId.slice("sku:".length) : undefined,
+        packaging_component_id: optionId.startsWith("packaging:") ? optionId.slice("packaging:".length) : undefined,
         bier_id: option.bierId,
         product_id: option.productId,
         kostprijsversie_id: option.kostprijsversieId,

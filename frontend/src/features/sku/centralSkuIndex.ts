@@ -1,5 +1,6 @@
 import { buildSellInLookup, resolveSellInPriceEx } from "@/components/offerte-samenstellen/sellInResolver";
 import { normalizeUom, text, toNumber, type GenericRecord } from "@/features/sku/adapters/common";
+import { normalizeSkuLabel } from "@/lib/skuLabels";
 import {
   normalizeActivation,
   normalizeArticle,
@@ -63,6 +64,18 @@ function readManualRateEx(sku: NormalizedSku, article: NormalizedArticle | null)
 
 function getSnapshotProductRow(version: NormalizedKostprijsVersie | undefined, ids: { skuId: string; productId: string }) {
   if (!version) return null;
+  const canonicalCostLines = (version.raw as any)?.cost_lines ?? (version.raw as any)?.costLines ?? [];
+  if (Array.isArray(canonicalCostLines)) {
+    const skuId = text(ids.skuId);
+    const productId = text(ids.productId);
+    const byCostLine = canonicalCostLines.find((row) => {
+      const rowSkuId = text((row as any)?.sku_id);
+      const rowProductId = text((row as any)?.product_id);
+      return Boolean((skuId && rowSkuId === skuId) || (productId && rowProductId === productId));
+    });
+    if (byCostLine) return byCostLine ?? null;
+  }
+
   const products = (version.resultaatSnapshot as any)?.producten ?? {};
   const rows = [
     ...(Array.isArray(products.basisproducten) ? products.basisproducten : []),
@@ -77,6 +90,10 @@ function getSnapshotProductRow(version: NormalizedKostprijsVersie | undefined, i
   const productId = text(ids.productId);
   if (!productId) return null;
   return rows.find((row) => text(row?.product_id) === productId) ?? null;
+}
+
+function cleanRepeatedName(label: unknown) {
+  return normalizeSkuLabel(text(label));
 }
 
 export function buildCentralSkuIndex(params: {
@@ -176,10 +193,11 @@ export function buildCentralSkuIndex(params: {
     const kostprijsEx = kostprijsFromSnapshot || (skuKind === "article" ? kostprijsFromVersion : 0);
 
     const btwPct = parseBtwPct(version?.basisBtwTarief);
-    const label =
+    const label = cleanRepeatedName(
       text(sku.name) ||
       text(article?.name) ||
-      skuId;
+      skuId
+    );
 
     const warnings: string[] = [];
     if (pricingMethod === "cost_plus") {
@@ -205,7 +223,7 @@ export function buildCentralSkuIndex(params: {
     }
 
     const isActive = Boolean(activation);
-    const hasCost = pricingMethod === "cost_plus" ? kostprijsEx > 0 : false;
+    const hasCost = pricingMethod === "cost_plus" ? isActive && kostprijsEx > 0 : false;
 
     rows.push({
       skuId,

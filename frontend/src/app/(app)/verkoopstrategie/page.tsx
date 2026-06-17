@@ -12,6 +12,7 @@ export default async function VerkoopstrategiePage() {
       "bieren",
       "skus",
       "articles",
+      "bom-lines",
       "berekeningen",
       "channels",
       "kostprijsproductactiveringen"
@@ -27,6 +28,7 @@ export default async function VerkoopstrategiePage() {
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
   const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
   const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
+  const bomLines = (bootstrap.datasets["bom-lines"] as any[]) ?? [];
   const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
   const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
@@ -47,6 +49,7 @@ export default async function VerkoopstrategiePage() {
         bieren={bieren}
         skus={skus}
         articles={articles}
+        bomLines={bomLines}
         berekeningen={berekeningen}
         channels={channels}
         kostprijsproductactiveringen={kostprijsproductactiveringen}

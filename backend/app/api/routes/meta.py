@@ -18,6 +18,8 @@ from app.domain import seed_bundle_service
 from app.domain import douano_sync_storage
 from app.domain import production_storage
 from app.domain import company_distance_storage
+from app.domain import setup_service
+from app.domain import product_model_storage
 from app.domain.ors_client import OrsClient, Coordinate
 from app.domain.auth_dependencies import require_admin, require_user
 from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
@@ -145,6 +147,24 @@ def get_customer_sales_summary(
 
 @router.get("/navigation", response_model=list[NavigationItem])
 def get_navigation() -> list[NavigationItem]:
+    setup_required = not setup_service.has_active_costprices()
+    year_flow_item = (
+        NavigationItem(
+            key="setup",
+            label="Setup",
+            description="Doorloop de eerste inrichting en controleer of Douano, SKU's, LOTs en kostprijzen compleet zijn.",
+            href="/setup",
+            section="Beheer",
+        )
+        if setup_required
+        else NavigationItem(
+            key="nieuw-jaar-voorbereiden",
+            label="Nieuw jaar voorbereiden",
+            description="Kopieer stamdata en berekeningen naar een nieuw jaar.",
+            href="/nieuw-jaar-voorbereiden",
+            section="Beheer",
+        )
+    )
     return [
         NavigationItem(
             key="productie",
@@ -220,7 +240,7 @@ def get_navigation() -> list[NavigationItem]:
             key="break-even",
             label="Break-even analyseren",
             description="Maak break-even scenario's voor productmix, prijs en vaste kosten.",
-            href="/break-even-v2",
+            href="/break-even",
             section="Verkoop",
         ),
         NavigationItem(
@@ -238,12 +258,13 @@ def get_navigation() -> list[NavigationItem]:
             section="Verkoop",
         ),
         NavigationItem(
-            key="nieuw-jaar-voorbereiden",
-            label="Nieuw jaar voorbereiden",
-            description="Kopieer stamdata en berekeningen naar een nieuw jaar.",
-            href="/nieuw-jaar-voorbereiden",
+            key="jaar-afsluiten",
+            label="Jaar afsluiten",
+            description="Controleer realisatie en leg een jaarafsluiting vast.",
+            href="/jaar-afsluiten",
             section="Beheer",
         ),
+        year_flow_item,
         NavigationItem(
             key="beheer",
             label="Beheer",
@@ -1082,6 +1103,29 @@ def post_dev_cleanup_duplicate_skus(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/dev/cleanup-legacy-beer-format-aliases")
+def post_dev_cleanup_legacy_beer_format_aliases(
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets wijzigen."),
+    year: int = Query(0, description="Optioneel jaar om activaties te beperken; 0 = alle jaren."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Local-only dev helper: merge legacy beer_format SKU aliases into canonical SKUs."""
+    if auth_service.environment_name() not in {"local", "dev", "development"}:
+        raise HTTPException(status_code=403, detail="Cleanup is alleen toegestaan in local/dev.")
+    try:
+        from app.domain import skus_storage
+
+        result = skus_storage.cleanup_legacy_beer_format_aliases(dry_run=bool(dry_run), year=int(year or 0))
+        return {
+            "route": "cleanup-legacy-beer-format-aliases",
+            "dry_run": bool(dry_run),
+            "year": int(year or 0),
+            "result": result,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/dev/delete-sellable")
 def post_dev_delete_sellable(
     article_id: str = Query("", description="Article id (bundle/article) to delete."),
@@ -1462,6 +1506,433 @@ def post_delete_sellable(
         _raise_internal_error("Meta endpoint failed", exc)
 
 
+@router.post("/delete-kostprijs-concept")
+def post_delete_kostprijs_concept(
+    kostprijs_id: str = Query(..., description="Concept kostprijsversie om volledig terug te draaien."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen valideren/rapporteren, niets verwijderen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Delete a draft costprice and the sellable model rows created around it.
+
+    This is the reverse path for the costprice wizard. A draft may have already
+    created local sellable SKUs, article rows, BOM rows, SKU composition rows and
+    Douano mappings. Deleting the draft should remove those rows together, but
+    only while they are still unused by activations, quotes or other products.
+    """
+
+    target_id = str(kostprijs_id or "").strip()
+    if not target_id:
+        raise HTTPException(status_code=400, detail="kostprijs_id is verplicht.")
+
+    def _text(value: Any) -> str:
+        return str(value or "").strip()
+
+    def _scan_ids(value: Any, keys: set[str], out: set[str]) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in keys:
+                    sid = _text(item)
+                    if sid:
+                        out.add(sid)
+                _scan_ids(item, keys, out)
+        elif isinstance(value, list):
+            for item in value:
+                _scan_ids(item, keys, out)
+
+    def _snapshot_product_ids(row: dict[str, Any]) -> set[str]:
+        snapshot = row.get("resultaat_snapshot")
+        if not isinstance(snapshot, dict):
+            snapshot = row.get("resultaat")
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        producten = snapshot.get("producten")
+        if not isinstance(producten, dict):
+            producten = {}
+        rows: list[Any] = []
+        for key in ("basisproducten", "samengestelde_producten", "samengesteldeProducten"):
+            value = producten.get(key)
+            if isinstance(value, list):
+                rows.extend(value)
+        out: set[str] = set()
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            pid = _text(item.get("product_id") or item.get("article_id") or item.get("format_article_id"))
+            if pid:
+                out.add(pid)
+        return out
+
+    try:
+        kostprijsversies = postgres_storage.load_dataset("kostprijsversies", [])
+        if not isinstance(kostprijsversies, list):
+            kostprijsversies = []
+        target = next(
+            (
+                row
+                for row in kostprijsversies
+                if isinstance(row, dict) and _text(row.get("id")) == target_id
+            ),
+            None,
+        )
+        if not isinstance(target, dict):
+            raise HTTPException(status_code=404, detail=f"Kostprijsconcept '{target_id}' niet gevonden.")
+
+        status = _text(target.get("status")).lower()
+        if status in {"definitief", "definitive", "active", "actief"}:
+            raise HTTPException(status_code=409, detail="Alleen concept-kostprijzen kunnen via deze route verwijderd worden.")
+
+        basis = target.get("basisgegevens")
+        if not isinstance(basis, dict):
+            basis = {}
+        beer_id = _text(target.get("bier_id") or basis.get("bier_id"))
+        product_ids = _snapshot_product_ids(target)
+
+        skus = postgres_storage.load_dataset("skus", [])
+        if not isinstance(skus, list):
+            skus = []
+        articles = postgres_storage.load_dataset("articles", [])
+        if not isinstance(articles, list):
+            articles = []
+        bom_lines = postgres_storage.load_dataset("bom-lines", [])
+        if not isinstance(bom_lines, list):
+            bom_lines = []
+
+        sku_ids: set[str] = set()
+        article_ids: set[str] = set()
+
+        for row in skus:
+            if not isinstance(row, dict):
+                continue
+            sid = _text(row.get("id"))
+            if not sid:
+                continue
+            kind = _text(row.get("kind")).lower()
+            row_beer_id = _text(row.get("beer_id"))
+            format_article_id = _text(row.get("format_article_id"))
+            article_id = _text(row.get("article_id"))
+            subtype = _text(row.get("sellable_subtype")).lower()
+            belongs_to_target = False
+            if beer_id and row_beer_id == beer_id and format_article_id and format_article_id in product_ids:
+                belongs_to_target = True
+            if beer_id and row_beer_id == beer_id and article_id and article_id in product_ids:
+                belongs_to_target = True
+            if beer_id and row_beer_id == beer_id and kind == "article" and subtype in {"beer_bundle", "bier"}:
+                belongs_to_target = True
+            if sid == _text(basis.get("sku_id")):
+                belongs_to_target = True
+            if belongs_to_target:
+                sku_ids.add(sid)
+                if article_id:
+                    article_ids.add(article_id)
+                if format_article_id and format_article_id in product_ids:
+                    article_ids.add(format_article_id)
+
+        # Include article ids from snapshot rows only when a SKU above owns/uses them.
+        article_ids = {aid for aid in article_ids if aid}
+
+        reasons: list[str] = []
+
+        # Active costprice usage means this is no longer a reversible draft.
+        try:
+            kostprijs_activation_storage.ensure_schema()
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    if sku_ids:
+                        cur.execute(
+                            """
+                            SELECT sku_id, kostprijsversie_id
+                            FROM kostprijs_sku_activations
+                            WHERE kostprijsversie_id = %s OR sku_id = ANY(%s)
+                            LIMIT 10
+                            """,
+                            (target_id, list(sku_ids)),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT sku_id, kostprijsversie_id
+                            FROM kostprijs_sku_activations
+                            WHERE kostprijsversie_id = %s
+                            LIMIT 10
+                            """,
+                            (target_id,),
+                        )
+                    activation_rows = cur.fetchall() or []
+                    if activation_rows:
+                        reasons.append("Kostprijs/SKU is al geactiveerd; concept-delete is geblokkeerd.")
+        except Exception:
+            reasons.append("Kon kostprijsactivaties niet verifieren.")
+
+        # Normalized cost rows may only belong to this target version.
+        if sku_ids:
+            try:
+                with postgres_storage.connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT version_id
+                            FROM cost_version_sku_rows
+                            WHERE sku_id = ANY(%s) AND version_id <> %s
+                            LIMIT 10
+                            """,
+                            (list(sku_ids), target_id),
+                        )
+                        external_versions = [_text(row[0]) for row in (cur.fetchall() or []) if _text(row[0])]
+                        if external_versions:
+                            reasons.append(
+                                "Een of meer SKU's hebben kostprijsregels in andere versies: "
+                                + ", ".join(external_versions[:5])
+                            )
+            except Exception:
+                reasons.append("Kon genormaliseerde kostprijsregels niet verifieren.")
+
+        # Other kostprijs payloads may not reference the same SKU/article ids.
+        for row in kostprijsversies:
+            if not isinstance(row, dict) or _text(row.get("id")) == target_id:
+                continue
+            found_skus: set[str] = set()
+            found_articles: set[str] = set()
+            _scan_ids(row, {"sku_id", "component_sku_id"}, found_skus)
+            _scan_ids(row, {"product_id", "article_id", "format_article_id"}, found_articles)
+            if sku_ids.intersection(found_skus) or article_ids.intersection(found_articles):
+                reasons.append(f"Kostprijsversie '{_text(row.get('id'))}' verwijst nog naar dezelfde SKU/article.")
+                break
+
+        # A SKU may not be a component in something outside the deletion set.
+        for line in bom_lines:
+            if not isinstance(line, dict):
+                continue
+            component_sku_id = _text(line.get("component_sku_id"))
+            parent_article_id = _text(line.get("parent_article_id"))
+            if component_sku_id in sku_ids and parent_article_id not in article_ids:
+                reasons.append("Een SKU wordt gebruikt als component in een andere samenstelling.")
+                break
+
+        # Articles may not be referenced by other SKUs that are not being deleted.
+        for row in skus:
+            if not isinstance(row, dict):
+                continue
+            sid = _text(row.get("id"))
+            if sid in sku_ids:
+                continue
+            if _text(row.get("article_id")) in article_ids or _text(row.get("format_article_id")) in article_ids:
+                reasons.append("Een article/afvuleenheid wordt nog gebruikt door een andere SKU.")
+                break
+
+        # New normalized composition table may not point at a deleted component from outside.
+        if sku_ids:
+            try:
+                product_model_storage.ensure_schema()
+                with postgres_storage.connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT parent_sku_id
+                            FROM sku_composition_lines
+                            WHERE component_sku_id = ANY(%s)
+                              AND parent_sku_id <> ALL(%s)
+                            LIMIT 10
+                            """,
+                            (list(sku_ids), list(sku_ids)),
+                        )
+                        external_composition = [_text(row[0]) for row in (cur.fetchall() or []) if _text(row[0])]
+                        if external_composition:
+                            reasons.append("Een SKU wordt gebruikt in sku_composition_lines buiten dit concept.")
+            except Exception:
+                reasons.append("Kon SKU-composities niet verifieren.")
+
+        # Quote drafts are user-facing documents; never silently mutate them.
+        if sku_ids:
+            try:
+                from app.domain import quote_drafts_storage
+
+                quote_drafts_storage.ensure_schema()
+                referenced_in_quotes = False
+                with postgres_storage.connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT payload FROM quote_drafts")
+                        for (payload,) in cur.fetchall() or []:
+                            found: set[str] = set()
+                            _scan_ids(payload, {"sku_id", "component_sku_id"}, found)
+                            if sku_ids.intersection(found):
+                                referenced_in_quotes = True
+                                break
+                if referenced_in_quotes:
+                    reasons.append("Een SKU komt voor in offertes/prijsvoorstellen.")
+            except Exception:
+                reasons.append("Kon offertes niet verifieren.")
+
+        report: dict[str, Any] = {
+            "kostprijs_id": target_id,
+            "dry_run": bool(dry_run),
+            "can_delete": len(reasons) == 0,
+            "blocked_reasons": reasons,
+            "related": {
+                "beer_id": beer_id,
+                "product_ids": sorted(product_ids),
+                "sku_ids": sorted(sku_ids),
+                "article_ids": sorted(article_ids),
+            },
+            "deleted": {},
+        }
+
+        if reasons:
+            if dry_run:
+                return {"result": report}
+            raise HTTPException(status_code=409, detail={"message": "Concept verwijderen geblokkeerd.", "reasons": reasons})
+
+        if dry_run:
+            return {"result": report}
+
+        from app.domain import douano_product_mapping_storage
+
+        cost_versions_storage.ensure_schema()
+        product_model_storage.ensure_schema()
+        douano_product_mapping_storage.ensure_schema()
+
+        with postgres_storage.transaction():
+            # Remove table-backed references first to satisfy FK restrictions.
+            with postgres_storage.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM cost_version_sku_rows WHERE version_id = %s", (target_id,))
+                    report["deleted"]["cost_version_sku_rows_by_version"] = int(cur.rowcount or 0)
+                    if sku_ids:
+                        cur.execute("DELETE FROM cost_version_sku_rows WHERE sku_id = ANY(%s)", (list(sku_ids),))
+                        report["deleted"]["cost_version_sku_rows_by_sku"] = int(cur.rowcount or 0)
+                        cur.execute("DELETE FROM douano_product_mapping WHERE sku_id = ANY(%s)", (list(sku_ids),))
+                        report["deleted"]["douano_product_mapping"] = int(cur.rowcount or 0)
+                        cur.execute("DELETE FROM sku_family_links WHERE sku_id = ANY(%s)", (list(sku_ids),))
+                        report["deleted"]["sku_family_links"] = int(cur.rowcount or 0)
+                        cur.execute("DELETE FROM sku_composition_lines WHERE parent_sku_id = ANY(%s)", (list(sku_ids),))
+                        report["deleted"]["sku_composition_lines"] = int(cur.rowcount or 0)
+
+            if sku_ids:
+                before = len(skus)
+                skus = [
+                    row
+                    for row in skus
+                    if not (isinstance(row, dict) and _text(row.get("id")) in sku_ids)
+                ]
+                report["deleted"]["skus"] = before - len(skus)
+                postgres_storage.save_dataset("skus", skus, overwrite=True)
+
+            if article_ids:
+                before = len(bom_lines)
+                bom_lines = [
+                    row
+                    for row in bom_lines
+                    if not (
+                        isinstance(row, dict)
+                        and (
+                            _text(row.get("parent_article_id")) in article_ids
+                            or _text(row.get("component_sku_id")) in sku_ids
+                        )
+                    )
+                ]
+                report["deleted"]["bom-lines"] = before - len(bom_lines)
+                postgres_storage.save_dataset("bom-lines", bom_lines, overwrite=True)
+
+                before = len(articles)
+                articles = [
+                    row
+                    for row in articles
+                    if not (isinstance(row, dict) and _text(row.get("id")) in article_ids)
+                ]
+                report["deleted"]["articles"] = before - len(articles)
+                postgres_storage.save_dataset("articles", articles, overwrite=True)
+
+            before = len(kostprijsversies)
+            kostprijsversies = [
+                row
+                for row in kostprijsversies
+                if not (isinstance(row, dict) and _text(row.get("id")) == target_id)
+            ]
+            report["deleted"]["kostprijsversies"] = before - len(kostprijsversies)
+            postgres_storage.save_dataset("kostprijsversies", kostprijsversies, overwrite=True)
+
+        return {"result": report}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Delete kostprijs concept failed", exc)
+
+
+@router.post("/repair/format-article-names")
+def post_repair_format_article_names(
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Repair polluted afvuleenheid names that accidentally include a beer/style prefix."""
+
+    def _text(value: Any) -> str:
+        return str(value or "").strip()
+
+    def _normalize_space(value: str) -> str:
+        return " ".join(value.replace(" - ", " ").split()).strip()
+
+    try:
+        articles = postgres_storage.load_dataset("articles", [])
+        if not isinstance(articles, list):
+            articles = []
+        bieren = postgres_storage.load_dataset("bieren", [])
+        if not isinstance(bieren, list):
+            bieren = []
+
+        prefixes: set[str] = set()
+        for row in bieren:
+            if not isinstance(row, dict):
+                continue
+            for key in ("biernaam", "naam", "name", "stijl"):
+                value = _normalize_space(_text(row.get(key)))
+                if value:
+                    prefixes.add(value)
+
+        # Longer prefixes first: "Berlewalde Blond" before "Blond".
+        ordered_prefixes = sorted(prefixes, key=len, reverse=True)
+
+        repaired: list[dict[str, Any]] = []
+        next_articles: list[dict[str, Any]] = []
+        for row in articles:
+            if not isinstance(row, dict):
+                continue
+            next_row = dict(row)
+            kind = _text(row.get("kind")).lower()
+            name = _normalize_space(_text(row.get("name") or row.get("naam")))
+            if kind == "format" and name:
+                for prefix in ordered_prefixes:
+                    normalized_prefix = _normalize_space(prefix)
+                    lower_name = name.lower()
+                    lower_prefix = normalized_prefix.lower()
+                    if lower_name == lower_prefix:
+                        continue
+                    if lower_name.startswith(lower_prefix + " "):
+                        repaired_name = name[len(normalized_prefix) :].strip(" -")
+                        if repaired_name and repaired_name != name:
+                            next_row["name"] = repaired_name
+                            next_row["naam"] = repaired_name
+                            repaired.append(
+                                {
+                                    "id": _text(row.get("id")),
+                                    "old_name": name,
+                                    "new_name": repaired_name,
+                                    "removed_prefix": normalized_prefix,
+                                }
+                            )
+                        break
+            next_articles.append(next_row)
+
+        report = {"dry_run": bool(dry_run), "count": len(repaired), "repaired": repaired}
+        if not dry_run and repaired:
+            postgres_storage.save_dataset("articles", next_articles, overwrite=True)
+        return {"result": report}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Repair format article names failed", exc)
+
+
 @router.post("/dev/delete-kostprijs-activation")
 def post_dev_delete_kostprijs_activation(
     sku_id: str = Query(..., description="SKU id waarvan de kostprijs-activatie verwijderd moet worden."),
@@ -1597,6 +2068,29 @@ def get_audit_cost_lines(
         _raise_internal_error("Meta endpoint failed", exc)
 
 
+@router.get("/audit/costprice-planning-state")
+def get_audit_costprice_planning_state(
+    year: int = Query(0, description="0 = alle jaren, anders alleen het gekozen jaar."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"result": cost_versions_storage.audit_planning_state(year=int(year))}
+    except Exception as exc:
+        _raise_internal_error("Meta endpoint failed", exc)
+
+
+@router.post("/reset/costprice-planning-state")
+def post_reset_costprice_planning_state(
+    year: int = Query(0, description="0 = alle jaren, anders alleen het gekozen jaar."),
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets verwijderen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"result": cost_versions_storage.reset_planning_state(year=int(year), dry_run=bool(dry_run))}
+    except Exception as exc:
+        _raise_internal_error("Meta endpoint failed", exc)
+
+
 @router.post("/repair/cost-lines")
 def post_repair_cost_lines(
     year: int = Query(2025, description="Jaar om te repareren (default 2025)."),
@@ -1619,11 +2113,67 @@ def post_rebuild_overhead_cost_versions(
     year: int = Query(2025, description="Jaar om te herberekenen (default 2025)."),
     dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets opslaan."),
     activate: bool = Query(True, description="Wanneer true: activeer nieuw aangemaakte versies direct."),
+    active_only: bool = Query(True, description="Wanneer true: herbereken alleen versies die actief zijn in dit jaar."),
+    force: bool = Query(False, description="Expliciete dev override; standaard blokkeren we muterende bulk rebuilds."),
     session: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Phase 4: bulk rebuild overhead by minting new cost versions for a year and (optionally) activating them."""
+    if not dry_run and not force:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Deze bulk-rebuild is gedeactiveerd voor mutaties omdat hij duplicate definitieve versies kan maken. "
+                "Gebruik de planning-correctieflow of force=true alleen bewust in dev."
+            ),
+        )
     owner = str(session.get("username", "") or "").strip() or "admin"
-    report = cost_versions_storage.rebuild_overhead_versions_for_year(year=int(year), owner=owner, dry_run=bool(dry_run))
+    source_version_ids: list[str] | None = None
+    if active_only:
+        activations = dataset_store.load_dataset("kostprijsproductactiveringen")
+        source_version_ids = sorted(
+            {
+                str(row.get("kostprijsversie_id", "") or "").strip()
+                for row in (activations if isinstance(activations, list) else [])
+                if isinstance(row, dict)
+                and int(row.get("jaar", 0) or 0) == int(year)
+                and str(row.get("kostprijsversie_id", "") or "").strip()
+            }
+        )
+    report = cost_versions_storage.rebuild_overhead_versions_for_year(
+        year=int(year),
+        owner=owner,
+        dry_run=bool(dry_run),
+        source_version_ids=source_version_ids,
+    )
+
+
+@router.get("/setup/status")
+def get_setup_status(
+    year: int = Query(2025, ge=2000, le=2100),
+) -> dict[str, Any]:
+    try:
+        return {"result": setup_service.build_setup_status(year=int(year))}
+    except Exception as exc:
+        _raise_internal_error("Setup status failed", exc)
+
+
+@router.post("/setup/reset-rebuildable")
+def post_setup_reset_rebuildable(
+    dry_run: bool = Query(True, description="Wanneer true: alleen rapporteren, niets verwijderen."),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"result": setup_service.reset_setup_rebuildable_data(dry_run=bool(dry_run))}
+    except Exception as exc:
+        _raise_internal_error("Setup reset failed", exc)
+
+
+@router.get("/datamodel/audit")
+def get_datamodel_audit(_: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return {"result": product_model_storage.audit_model_integrity()}
+    except Exception as exc:
+        _raise_internal_error("Datamodel audit failed", exc)
     if dry_run:
         return {"result": report}
 

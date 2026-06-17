@@ -14,7 +14,7 @@ async function screenshot(page: Page, name: string) {
 }
 
 async function ensureLoggedIn(page: Page) {
-  await page.goto("/break-even-v2");
+  await page.goto("/break-even");
   if (!/\/login/.test(page.url())) return;
 
   await page.goto("/login");
@@ -32,7 +32,7 @@ test.describe("Maturity audit (read-only)", () => {
     await page.goto("/");
     await screenshot(page, "02-home.png");
 
-    await page.goto("/break-even-v2");
+    await page.goto("/break-even");
     await expect(page.getByRole("heading", { name: /Break-even analyseren/i })).toBeVisible();
     await screenshot(page, "03-break-even-v2.png");
 
@@ -67,7 +67,7 @@ test.describe("Maturity audit (read-only)", () => {
     await page.reload();
     await expect(page.getByRole("heading", { name: /Kostprijs beheren/i })).toBeVisible();
 
-    await page.goto("/break-even-v2");
+    await page.goto("/break-even");
     await expect(page.getByRole("heading", { name: /Break-even analyseren/i })).toBeVisible();
     await page.goBack();
     await expect(page.getByRole("heading", { name: /Kostprijs beheren/i })).toBeVisible();
@@ -78,7 +78,7 @@ test.describe("Maturity audit (read-only)", () => {
     await ensureLoggedIn(page);
 
     // Navigate online first so we can test recovery behavior on reload.
-    await page.goto("/break-even-v2");
+    await page.goto("/break-even");
     await expect(page.getByRole("heading", { name: /Break-even analyseren/i })).toBeVisible();
 
     await context.setOffline(true);

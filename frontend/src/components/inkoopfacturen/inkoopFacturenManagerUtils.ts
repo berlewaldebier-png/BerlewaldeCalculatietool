@@ -65,6 +65,7 @@ export function normalizeBerekening(raw: GenericRecord): GenericRecord {
         : [],
       factuurnummer: String((inkoop as any).factuurnummer ?? ""),
       factuurdatum: String((inkoop as any).factuurdatum ?? ""),
+      lotnummer: String((inkoop as any).lotnummer ?? (inkoop as any).lot_number ?? (inkoop as any).lot_nummer ?? ""),
       verzendkosten: Number((inkoop as any).verzendkosten ?? 0),
       overige_kosten: Number((inkoop as any).overige_kosten ?? 0),
       factuurregels: Array.isArray((inkoop as any).factuurregels)

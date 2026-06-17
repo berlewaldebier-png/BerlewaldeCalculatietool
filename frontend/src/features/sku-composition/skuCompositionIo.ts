@@ -142,3 +142,55 @@ export async function saveAfvuleenheidFormat({
   return { articleId: parsed.article_id };
 }
 
+export async function saveBaseBeerSku({
+  apiBaseUrl,
+  name,
+  formatName,
+  uom,
+  totalsLiters,
+  beerId,
+  productGroup,
+  alcoholCategory,
+  packagingType,
+  code,
+  editFormatId,
+  editSkuId,
+}: {
+  apiBaseUrl: string;
+  name: string;
+  formatName?: string;
+  uom: string;
+  totalsLiters: number;
+  beerId: string;
+  productGroup: string;
+  alcoholCategory: string;
+  packagingType: string;
+  code?: string;
+  editFormatId?: string;
+  editSkuId?: string;
+}) {
+  const res = await fetch(`${apiBaseUrl}/data/sku-composition/upsert-base-sku`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      format_name: text(formatName),
+      uom,
+      totals_liters: Math.max(0, toNumber(totalsLiters, 0)),
+      beer_id: text(beerId),
+      product_group: text(productGroup),
+      alcohol_category: text(alcoholCategory),
+      packaging_type: text(packagingType),
+      code: text(code),
+      edit_format_id: text(editFormatId),
+      edit_sku_id: text(editSkuId),
+    }),
+  });
+  if (!res.ok) {
+    const msg = await readApiErrorMessage(res);
+    throw new Error(msg || "Opslaan mislukt (upsert-base-sku)");
+  }
+  const json = await res.json().catch(() => ({}));
+  return { skuId: text((json as any).sku_id), articleId: text((json as any).article_id) };
+}
+

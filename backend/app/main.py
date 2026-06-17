@@ -24,6 +24,7 @@ from app.rate_limits import limiter
 setup_logging()
 logger = get_logger(__name__)
 
+
 app = FastAPI(
     title="CalculatieTool API",
     version="0.1.0",
@@ -56,10 +57,12 @@ async def _open_request_connection() -> tuple[Any, Any]:
 
 async def _rollback_and_close_request_connection(connection_manager: Any, conn: Any) -> None:
     try:
-        await run_in_threadpool(conn.rollback)
+        if not bool(getattr(conn, "closed", False)):
+            await run_in_threadpool(conn.rollback)
     except Exception:
-        logger.exception("Failed to rollback request database connection")
-    await run_in_threadpool(connection_manager.__exit__, None, None, None)
+        logger.warning("Request database connection was already lost before rollback")
+    finally:
+        await run_in_threadpool(connection_manager.__exit__, None, None, None)
 
 
 @app.on_event("startup")
@@ -106,6 +109,9 @@ def shutdown_event():
 @app.middleware("http")
 async def postgres_request_connection(request, call_next):
     """Bind a database connection to the request context for transaction support."""
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return await call_next(request)
+
     if postgres_storage.uses_postgres() and postgres_storage.database_url():
         connection_manager, conn = await _open_request_connection()
         token = postgres_storage.set_request_connection(conn)

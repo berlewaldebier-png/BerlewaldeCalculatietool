@@ -4,6 +4,7 @@ import {
   resolveSellInPriceEx,
 } from "@/components/offerte-samenstellen/sellInResolver";
 import { getPackagingDefaultsForLabel } from "@/lib/packagingConfig";
+import { normalizeSkuLabel } from "@/lib/skuLabels";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -71,13 +72,13 @@ export function buildProductFacts(params: BuildProductFactsParams) {
   params.bieren.forEach((row) => {
     const id = text((row as any).id);
     if (!id) return;
-    bierNameById.set(id, text((row as any).biernaam || (row as any).naam || id));
+    bierNameById.set(id, normalizeSkuLabel((row as any).biernaam || (row as any).naam || id));
   });
   const articleNameById = new Map<string, string>();
   (params.articles ?? []).forEach((row) => {
     const id = text((row as any).id);
     if (!id) return;
-    const name = text((row as any).name || (row as any).naam || id);
+    const name = normalizeSkuLabel((row as any).name || (row as any).naam || id);
     articleNameById.set(id, name);
   });
   const articleById = new Map<string, GenericRecord>();
@@ -104,7 +105,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
     if (!id) return;
     const kind = text((row as any).kind).toLowerCase();
     if (kind !== "format") return;
-    const packLabel = text((row as any).name || (row as any).naam || id);
+    const packLabel = normalizeSkuLabel((row as any).name || (row as any).naam || id);
     const rawUom = text((row as any).uom || (row as any).eenheid).toLowerCase();
     // In our DB the format rows often have uom/eenheid="stuk". That's a technical UoM, not the logistic pack type.
     // We therefore only trust uom/eenheid when it is a meaningful pack type; otherwise infer from the format id/name.
@@ -219,10 +220,12 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         bierId && articleNameRaw && articleNameRaw.toLowerCase().includes(beerNameFromMaster.toLowerCase())
           ? articleNameRaw.split(" - ").slice(1).join(" - ").trim()
           : "";
-      const packLabel =
+      const skuLabel = normalizeSkuLabel((skuRow as any)?.name || "");
+      const packLabel = normalizeSkuLabel(
         master?.packLabel ||
         (isArticleSku && bierId ? (packLabelFromArticleName || skuPackagingType) : "") ||
-        text((costLineRow as any).verpakking_label || (costLineRow as any).verpakking || productId);
+        text((costLineRow as any).verpakking_label || (costLineRow as any).verpakking || productId)
+      );
       const litersPerUnit =
         master?.litersPerUnit ||
         toNumber(
@@ -330,11 +333,12 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         return;
       }
 
-      const bierName = isArticleSku && bierId
+      const bierName = normalizeSkuLabel(isArticleSku && bierId
         ? bierNameById.get(bierId) || bierId
         : isArticleSku
           ? articleNameById.get(text((skuRow as any)?.article_id) || productId) || packLabel
-          : bierNameById.get(bierId) || bierId;
+          : bierNameById.get(bierId) || bierId);
+      const label = normalizeSkuLabel(skuLabel || `${bierName} - ${packLabel}`);
       facts.push({
         ref,
         bierId: effectiveBierId,
@@ -348,7 +352,7 @@ export function buildProductFacts(params: BuildProductFactsParams) {
         unitsPerPallet,
         contributesToLiters,
         contributesToMargin,
-        label: `${bierName} · ${packLabel}${effectiveLabelSuffix}`,
+        label: `${label}${effectiveLabelSuffix}`,
         litersPerUnit: effectiveLitersPerUnit,
         costPriceEx: effectiveCostPriceEx,
         fixedCostAllocationEx: effectiveFixedCostAllocationEx,
@@ -387,7 +391,7 @@ function buildProductMasterById(
   basisproducten.forEach((row) => {
     const id = text((row as any).id);
     if (!id) return;
-    const packLabel = text((row as any).omschrijving || (row as any).verpakking || id);
+    const packLabel = normalizeSkuLabel((row as any).omschrijving || (row as any).verpakking || id);
     map.set(id, {
       packLabel,
       packType: inferPackTypeFromFormatId(id) || inferPackType(packLabel),
@@ -401,7 +405,7 @@ function buildProductMasterById(
   samengesteldeProducten.forEach((row) => {
     const id = text((row as any).id);
     if (!id) return;
-    const packLabel = text((row as any).omschrijving || (row as any).verpakking || id);
+    const packLabel = normalizeSkuLabel((row as any).omschrijving || (row as any).verpakking || id);
     map.set(id, {
       packLabel,
       packType: inferPackTypeFromFormatId(id) || inferPackType(packLabel),

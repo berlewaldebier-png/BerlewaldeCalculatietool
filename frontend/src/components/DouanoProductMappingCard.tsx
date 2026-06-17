@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { SectionCard } from "@/components/SectionCard";
 import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
+import { normalizeSkuLabel } from "@/lib/skuLabels";
 import { clampPage, compareNullableNumber, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
 import { useRouter } from "next/navigation";
 
@@ -40,6 +41,10 @@ type Verpakkingstype = {
   active?: boolean;
   allowed_product_groups?: string[];
 };
+
+function normalizePackLabel(value: unknown): string {
+  return normalizeSkuLabel(value);
+}
 
 async function readJson(path: string) {
   const response = await fetch(path, { cache: "no-store" });
@@ -201,13 +206,14 @@ export function DouanoProductMappingCard({
   initialSkuId?: string;
 }) {
   const router = useRouter();
+  const initialViewMode: ViewMode = String(initialSkuId ?? "").trim() ? "skus" : "douano";
   const [status, setStatus] = useState<string>("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [filter, setFilter] = useState<string>(String(initialFilter ?? ""));
-  const [viewMode, setViewMode] = useState<ViewMode>(String(initialSkuId ?? "").trim() ? "skus" : "douano");
+  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
   const [showIgnored, setShowIgnored] = useState<boolean>(false);
   const [showGekoppeld, setShowGekoppeld] = useState<boolean>(true);
-  const [showOngekoppeld, setShowOngekoppeld] = useState<boolean>(true);
+  const [showOngekoppeld, setShowOngekoppeld] = useState<boolean>(initialViewMode === "skus");
   const [products, setProducts] = useState<DouanoProduct[]>([]);
   const [combos, setCombos] = useState<ActiveCombo[]>([]);
   const [mappings, setMappings] = useState<Mapping[]>([]);
@@ -438,18 +444,34 @@ export function DouanoProductMappingCard({
         readDataset<Verpakkingstype>("verpakkingstypen"),
         readDataset<any>("skus"),
       ]);
-      setProducts(Array.isArray(p?.items) ? p.items : []);
-      setCombos(Array.isArray(c?.items) ? c.items : []);
+      setProducts(
+        (Array.isArray(p?.items) ? p.items : []).map((row: any) => ({
+          ...row,
+          name: normalizePackLabel(row?.name),
+        }))
+      );
+      setCombos(
+        (Array.isArray(c?.items) ? c.items : []).map((row: any) => ({
+          ...row,
+          label: normalizePackLabel(row?.label),
+          naam: normalizePackLabel(row?.naam),
+        }))
+      );
       setMappings(Array.isArray(m?.items) ? m.items : []);
       setIgnored(Array.isArray(ig?.items) ? ig.items : []);
       setProductgroepen(pg);
       setAlcoholcategorieen(ac);
-      setVerpakkingstypen(vt);
+      setVerpakkingstypen(
+        (Array.isArray(vt) ? vt : []).map((row: any) => ({
+          ...row,
+          label: normalizePackLabel(row?.label),
+        }))
+      );
       setSkus(
         (Array.isArray(skuRows) ? skuRows : [])
           .map((row: any) => ({
             id: String(row?.id ?? "").trim(),
-            name: String(row?.name ?? row?.naam ?? "").trim(),
+            name: normalizePackLabel(row?.name ?? row?.naam ?? ""),
             kind: String(row?.kind ?? "").trim().toLowerCase(),
             active: row?.active !== false && row?.actief !== false,
           }))
@@ -685,7 +707,8 @@ export function DouanoProductMappingCard({
   }
 
   async function save(productId: number) {
-    const selected = String(draft[productId] ?? "").trim();
+    const mappedKey = String((mappingsById.get(Number(productId || 0)) as any)?.sku_id ?? "").trim();
+    const selected = String(draft[productId] ?? mappedKey ?? "").trim();
     if (!selected) {
       setStatus("Selecteer eerst een SKU-kostprijscombinatie.");
       setTone("error");
@@ -785,7 +808,10 @@ export function DouanoProductMappingCard({
             <button
               type="button"
               className={`editor-button editor-button-secondary${viewMode === "skus" ? " active" : ""}`}
-              onClick={() => setViewMode("skus")}
+              onClick={() => {
+                setViewMode("skus");
+                setShowOngekoppeld(true);
+              }}
               title="Koppel SKUs die nog niet aan Douano gekoppeld zijn."
             >
               SKUs
@@ -884,7 +910,7 @@ export function DouanoProductMappingCard({
       </div>
 
       <div className="module-card-text" style={{ marginTop: 8 }}>
-        Productgroep is leidend voor het dashboard. Wijzigingen werken met terugwerkende kracht (ook voor eerdere jaren).
+        {mappings.length} echte productkoppelingen op {products.length} Douano producten. Productgroep is leidend voor het dashboard.
       </div>
 
       {status ? (

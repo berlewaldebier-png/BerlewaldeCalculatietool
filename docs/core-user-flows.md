@@ -16,7 +16,7 @@ Doel: dit zijn de flows die altijd stabiel moeten zijn (UX, data, performance, r
 
 ## Break-even & omzet
 
-- Break-even v2: `GET /break-even-v2`
+- Break-even v2: `GET /break-even`
 - Omzet & marge: `GET /omzet-en-marge`
 - Douano integratie: `GET /api/integrations/douano/*`
 

@@ -13,11 +13,13 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.api.utils import create_dataset_crud_router
-from app.domain import dataset_store, postgres_storage
+from app.domain import dataset_store, postgres_storage, product_model_storage
 from app.domain.auth_dependencies import require_admin
 from app.schemas.sku_composition import (
     UpsertBundleRequest,
     UpsertBundleResponse,
+    UpsertBaseSkuRequest,
+    UpsertBaseSkuResponse,
     UpsertFormatRequest,
     UpsertFormatResponse,
 )
@@ -245,6 +247,31 @@ def _slugify_id(value: str) -> str:
     return normalized or "new"
 
 
+def _clean_repeated_name(value: str) -> str:
+    text = str(value or "").strip()
+    parts = [part.strip() for part in text.split(" - ") if part.strip()]
+    if len(parts) >= 3 and parts[0].lower() == parts[1].lower():
+        text = " - ".join([parts[0], *parts[2:]])
+    return re.sub(r"\b(\d+)\s*[x×*]\s*(\d+)\s*cl\b", r"\1 * \2cl", text, flags=re.IGNORECASE)
+
+
+def _strip_prefix(value: str, prefix: str) -> str:
+    text = _clean_repeated_name(value)
+    prefix_text = str(prefix or "").strip()
+    if not text or not prefix_text:
+        return text
+    stripped = re.sub(rf"^{re.escape(prefix_text)}\s*[-–—:]?\s*", "", text, flags=re.IGNORECASE).strip()
+    return stripped or text
+
+
+def _canonical_sku_name(beer_name: str, unit_name: str) -> str:
+    beer = str(beer_name or "").strip()
+    unit = _strip_prefix(unit_name, beer)
+    if beer and unit:
+        return f"{beer} - {unit}"
+    return beer or unit
+
+
 def _raise_validation_error(message: str, *, field_errors: list[dict[str, Any]] | None = None) -> None:
     raise HTTPException(
         status_code=400,
@@ -262,7 +289,7 @@ def post_upsert_format(
 ) -> UpsertFormatResponse:
     """Atomisch opslaan: format article + bijbehorende bom-lines."""
     try:
-        name = str(payload.name or "").strip()
+        name = _clean_repeated_name(str(payload.name or "").strip())
         if not name:
             raise HTTPException(status_code=400, detail="Naam ontbreekt.")
 
@@ -379,6 +406,126 @@ def post_upsert_format(
         raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
+@router.post("/sku-composition/upsert-base-sku", response_model=UpsertBaseSkuResponse)
+def post_upsert_base_sku(
+    payload: UpsertBaseSkuRequest,
+    _: dict = Depends(require_admin),
+) -> UpsertBaseSkuResponse:
+    """Atomisch opslaan: basis format article + beer_format SKU.
+
+    This is the setup/costprice-wizard path for an empty app:
+    first create the base sellable unit (e.g. Blond 33cl), then variants can
+    reference it through the existing bundle/BOM path.
+    """
+    try:
+        raw_name = str(payload.name or "").strip()
+        beer_id = str(payload.beer_id or "").strip()
+        if not raw_name:
+            raise HTTPException(status_code=400, detail="Naam ontbreekt.")
+        if not beer_id:
+            raise HTTPException(status_code=400, detail="Bier ontbreekt.")
+
+        format_name = str(getattr(payload, "format_name", "") or "").strip() or raw_name
+        beer_name = ""
+        try:
+            beer_rows = dataset_store.load_dataset("bieren")
+            if isinstance(beer_rows, list):
+                beer_row = next(
+                    (
+                        row
+                        for row in beer_rows
+                        if isinstance(row, dict) and str(row.get("id", "") or "").strip() == beer_id
+                    ),
+                    None,
+                )
+                beer_name = str((beer_row or {}).get("biernaam") or (beer_row or {}).get("naam") or "").strip()
+        except Exception:
+            beer_name = ""
+        if not beer_name:
+            beer_name = _strip_prefix(raw_name, format_name)
+            if beer_name == raw_name:
+                beer_name = raw_name
+        format_name = _strip_prefix(format_name, beer_name)
+        name = _canonical_sku_name(beer_name, format_name)
+        article_id = str(payload.edit_format_id or "").strip() or f"fmt-{_slugify_id(format_name)}"
+        requested_sku_id = str(payload.edit_sku_id or "").strip()
+        sku_id = requested_sku_id or f"sku-{beer_id}-{article_id}"
+        code = str(payload.code or "").strip()
+
+        article_payload: dict[str, Any] = {
+            "id": article_id,
+            "name": format_name,
+            "kind": "format",
+            "uom": "stuk" if payload.uom in {"pakket", "uur"} else str(payload.uom or "stuk"),
+            "content_liter": max(float(payload.totals_liters or 0.0), 0.0),
+            "active": True,
+            "actief": True,
+        }
+        sku_payload: dict[str, Any] = {
+            "id": sku_id,
+            "kind": "beer_format",
+            "beer_id": beer_id,
+            "format_article_id": article_id,
+            "article_id": "",
+            "code": code,
+            "name": name,
+            "active": True,
+            "actief": True,
+            "sellable_subtype": "bier",
+            "pricing_method": "cost_plus",
+            "product_group": str(payload.product_group or "").strip(),
+            "alcohol_category": str(payload.alcohol_category or "").strip(),
+            "packaging_type": str(payload.packaging_type or "").strip(),
+        }
+
+        with postgres_storage.transaction():
+            existing_articles = dataset_store.load_dataset("articles")
+            existing_skus = dataset_store.load_dataset("skus")
+            articles = [
+                row
+                for row in (existing_articles if isinstance(existing_articles, list) else [])
+                if isinstance(row, dict)
+            ]
+            skus = [row for row in (existing_skus if isinstance(existing_skus, list) else []) if isinstance(row, dict)]
+            existing_same_scope = next(
+                (
+                    row
+                    for row in skus
+                    if str(row.get("kind", "") or "").strip().lower() == "beer_format"
+                    and str(row.get("beer_id", "") or "").strip() == beer_id
+                    and str(row.get("format_article_id", "") or "").strip() == article_id
+                    and str(row.get("article_id", "") or "").strip() == ""
+                ),
+                None,
+            )
+            if existing_same_scope and not requested_sku_id:
+                sku_id = str(existing_same_scope.get("id", "") or "").strip() or sku_id
+            sku_payload["id"] = sku_id
+            kept_articles = [row for row in articles if str(row.get("id", "") or "").strip() != article_id]
+            kept_skus = [
+                row
+                for row in skus
+                if str(row.get("id", "") or "").strip() != sku_id
+                and not (
+                    str(row.get("kind", "") or "").strip().lower() == "beer_format"
+                    and str(row.get("beer_id", "") or "").strip() == beer_id
+                    and str(row.get("format_article_id", "") or "").strip() == article_id
+                    and str(row.get("article_id", "") or "").strip() == ""
+                )
+            ]
+            dataset_store.save_dataset("articles", [*kept_articles, article_payload])
+            dataset_store.save_dataset("skus", [*kept_skus, sku_payload])
+
+        return UpsertBaseSkuResponse(sku_id=sku_id, article_id=article_id)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Error upserting base sku")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
 @router.post("/sku-composition/upsert-bundle", response_model=UpsertBundleResponse)
 def post_upsert_bundle(
     payload: UpsertBundleRequest,
@@ -386,7 +533,7 @@ def post_upsert_bundle(
 ) -> UpsertBundleResponse:
     """Atomisch opslaan: bundle article + SKU + bom-lines."""
     try:
-        name = str(payload.name or "").strip()
+        name = _clean_repeated_name(str(payload.name or "").strip())
         if not name:
             raise HTTPException(status_code=400, detail="Naam ontbreekt.")
 
@@ -608,6 +755,11 @@ def post_upsert_bundle(
             dataset_store.save_dataset("articles", [*kept_articles, article_payload])
             dataset_store.save_dataset("skus", [*kept_skus, sku_payload])
             dataset_store.save_dataset("bom-lines", [*kept_bom, *next_bom_lines])
+            product_model_storage.replace_sku_composition_lines(
+                parent_sku_id=sku_id,
+                lines=next_bom_lines,
+                source="sku-composition-endpoint",
+            )
 
         return UpsertBundleResponse(sku_id=sku_id, article_id=article_id)
     except HTTPException:

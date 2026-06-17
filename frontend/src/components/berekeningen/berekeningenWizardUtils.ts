@@ -59,6 +59,7 @@ export function syncPrimaryInkoopFactuur(row: GenericRecord) {
     id: String(primaryFactuur.id ?? createId()),
     factuurnummer: String(inkoop.factuurnummer ?? ""),
     factuurdatum: String(inkoop.factuurdatum ?? ""),
+    lotnummer: String(inkoop.lotnummer ?? ""),
     verzendkosten: Number(inkoop.verzendkosten ?? 0),
     overige_kosten: Number(inkoop.overige_kosten ?? 0),
     factuurregels: cloneRecord(topLevelFactuurregels),

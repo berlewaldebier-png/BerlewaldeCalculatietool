@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
 import { moneyEUR, type GenericRecord } from "@/features/sku/adapters/common";
-import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
-import { clampPage, compareNullableNumber, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
+import { SortButton } from "@/components/table/TableControls";
+import { compareNullableNumber, compareText } from "@/lib/tableControls";
 import {
   toSellableTableRows,
   type PricingMethod,
@@ -65,6 +65,9 @@ export function VerkoopbareArtikelenWorkspace({
   verkoopprijzen,
   skus,
   articles,
+  bomLines,
+  bieren,
+  skuStyleLinks,
   kostprijsversies,
   kostprijsproductactiveringen,
 }: {
@@ -73,20 +76,21 @@ export function VerkoopbareArtikelenWorkspace({
   verkoopprijzen: GenericRecord[];
   skus: GenericRecord[];
   articles: GenericRecord[];
+  bomLines: GenericRecord[];
+  bieren: GenericRecord[];
+  skuStyleLinks: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
 }) {
   const [query, setQuery] = useState("");
   const [showOnlyMissing, setShowOnlyMissing] = useState(false);
-  const [pageSize, setPageSize] = useState<PageSizeValue>(20);
-  const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<"label" | "subtype" | "uom" | "content" | "price" | "status">("label");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [deletingSkuId, setDeletingSkuId] = useState("");
-
-  useEffect(() => {
-    setPage(1);
-  }, [pageSize, query, showOnlyMissing, sortDir, sortKey]);
+  const [openStyleIds, setOpenStyleIds] = useState<Record<string, boolean>>({});
+  const [localSkuStyleLinks, setLocalSkuStyleLinks] = useState<GenericRecord[]>(
+    Array.isArray(skuStyleLinks) ? skuStyleLinks : []
+  );
 
   const central = useCentralSkuIndex({
     year,
@@ -102,6 +106,10 @@ export function VerkoopbareArtikelenWorkspace({
   const rows = useMemo(() => {
     return toSellableTableRows(central.rows);
   }, [central.rows]);
+
+  useEffect(() => {
+    setLocalSkuStyleLinks(Array.isArray(skuStyleLinks) ? skuStyleLinks : []);
+  }, [skuStyleLinks]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -138,10 +146,6 @@ export function VerkoopbareArtikelenWorkspace({
     });
     return copy;
   }, [filtered, sortDir, sortKey]);
-
-  const totalPages = useMemo(() => computeTotalPages(sorted.length, pageSize), [pageSize, sorted.length]);
-  const currentPage = clampPage(page, totalPages);
-  const pageRows = useMemo(() => slicePage(sorted, currentPage, pageSize), [currentPage, pageSize, sorted]);
 
   async function deleteSellableSku(skuId: string) {
     const id = String(skuId || "").trim();
@@ -236,6 +240,118 @@ export function VerkoopbareArtikelenWorkspace({
     return map;
   }, [kostprijsproductactiveringen, year]);
 
+  const styleOptions = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string }>();
+    (Array.isArray(bieren) ? bieren : []).forEach((row) => {
+      const raw = String((row as any)?.stijl ?? (row as any)?.style ?? "").trim();
+      if (!raw) return;
+      const key = `style:${raw.toLowerCase()}`;
+      if (!seen.has(key)) seen.set(key, { id: key, name: raw });
+    });
+    return Array.from(seen.values())
+      .filter((row) => row.id)
+      .sort((a, b) => a.name.localeCompare(b.name, "nl-NL"));
+  }, [bieren]);
+
+  const styleById = useMemo(() => {
+    return new Map(styleOptions.map((style) => [style.id, style]));
+  }, [styleOptions]);
+
+  const skuRawById = useMemo(() => {
+    const map = new Map<string, GenericRecord>();
+    (Array.isArray(skus) ? skus : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "").trim();
+      if (id) map.set(id, row);
+    });
+    return map;
+  }, [skus]);
+
+  const styleKeyByBeerId = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(bieren) ? bieren : []).forEach((row) => {
+      const beerId = String((row as any)?.id ?? "").trim();
+      const styleName = String((row as any)?.stijl ?? (row as any)?.style ?? "").trim();
+      if (beerId && styleName) map.set(beerId, `style:${styleName.toLowerCase()}`);
+    });
+    return map;
+  }, [bieren]);
+
+  const componentStyleIdsByParentArticle = useMemo(() => {
+    const out = new Map<string, Set<string>>();
+    (Array.isArray(bomLines) ? bomLines : []).forEach((line) => {
+      const parentArticleId = String((line as any)?.parent_article_id ?? "").trim();
+      if (!parentArticleId) return;
+      const componentSkuId = String((line as any)?.component_sku_id ?? "").trim();
+      const componentSku = componentSkuId ? skuRawById.get(componentSkuId) : null;
+      const beerId = String((componentSku as any)?.beer_id ?? "").trim();
+      const styleKey = beerId ? styleKeyByBeerId.get(beerId) : "";
+      if (!styleKey) return;
+      if (!out.has(parentArticleId)) out.set(parentArticleId, new Set());
+      out.get(parentArticleId)?.add(styleKey);
+    });
+    return out;
+  }, [bomLines, skuRawById, styleKeyByBeerId]);
+
+  const explicitStyleIdsBySku = useMemo(() => {
+    const out = new Map<string, Set<string>>();
+    (Array.isArray(localSkuStyleLinks) ? localSkuStyleLinks : []).forEach((row) => {
+      const skuId = String((row as any)?.sku_id ?? "").trim();
+      const rawStyleId = String((row as any)?.style_id ?? "").trim();
+      const styleId = styleKeyByBeerId.get(rawStyleId) ?? rawStyleId;
+      if (!skuId || !styleId) return;
+      if (!out.has(skuId)) out.set(skuId, new Set());
+      out.get(skuId)?.add(styleId);
+    });
+    return out;
+  }, [localSkuStyleLinks, styleKeyByBeerId]);
+
+  function inferStyleIdsForSku(skuId: string) {
+    const explicit = explicitStyleIdsBySku.get(skuId);
+    if (explicit && explicit.size > 0) return Array.from(explicit);
+    const sku = skuRawById.get(skuId) as any;
+    const beerId = String(sku?.beer_id ?? "").trim();
+    const styleKey = beerId ? styleKeyByBeerId.get(beerId) : "";
+    if (styleKey) return [styleKey];
+    const articleId = String(sku?.article_id ?? "").trim();
+    const componentStyles = articleId ? componentStyleIdsByParentArticle.get(articleId) : null;
+    if (componentStyles && componentStyles.size > 0) return Array.from(componentStyles);
+    return ["__zonder_stijl__"];
+  }
+
+  const treeGroups = useMemo(() => {
+    const groups = new Map<string, { styleId: string; styleName: string; rows: typeof sorted; inferred: number; mixed: number }>();
+    sorted.forEach((row) => {
+      const ids = inferStyleIdsForSku(row.skuId);
+      const isMixed = ids.filter((id) => id !== "__zonder_stijl__").length > 1;
+      ids.forEach((styleId) => {
+        const styleName = styleId === "__zonder_stijl__" ? "Zonder stijl" : styleById.get(styleId)?.name || styleId;
+        const group = groups.get(styleId) ?? { styleId, styleName, rows: [], inferred: 0, mixed: 0 };
+        group.rows.push(row);
+        if (!explicitStyleIdsBySku.has(row.skuId)) group.inferred += 1;
+        if (isMixed) group.mixed += 1;
+        groups.set(styleId, group);
+      });
+    });
+    const preferredOrder = new Map(styleOptions.map((style, index) => [style.id, index]));
+    return Array.from(groups.values()).sort((a, b) => {
+      const ai = preferredOrder.has(a.styleId) ? preferredOrder.get(a.styleId)! : 9999;
+      const bi = preferredOrder.has(b.styleId) ? preferredOrder.get(b.styleId)! : 9999;
+      if (ai !== bi) return ai - bi;
+      return a.styleName.localeCompare(b.styleName, "nl-NL");
+    });
+  }, [sorted, styleById, styleOptions, explicitStyleIdsBySku, skuRawById, componentStyleIdsByParentArticle, styleKeyByBeerId]);
+
+  useEffect(() => {
+    setOpenStyleIds((current) => {
+      if (Object.keys(current).length > 0) return current;
+      const next: Record<string, boolean> = {};
+      treeGroups.slice(0, 8).forEach((group) => {
+        next[group.styleId] = true;
+      });
+      return next;
+    });
+  }, [treeGroups]);
+
   return (
     <section className="module-card">
       <div className="module-card-header">
@@ -268,150 +384,154 @@ export function VerkoopbareArtikelenWorkspace({
         </div>
       </div>
 
-      <div className="dataset-editor-scroll">
-        <table className="dataset-editor-table">
-          <thead>
-            <tr>
-              <th style={{ width: 360 }}>
-                <SortButton label="Naam" active={sortKey === "label"} dir={sortDir} onClick={() => toggleSort("label")} />
-              </th>
-              <th style={{ width: 140 }}>
-                <SortButton label="Type" active={sortKey === "subtype"} dir={sortDir} onClick={() => toggleSort("subtype")} />
-              </th>
-              <th style={{ width: 140 }}>
-                <SortButton label="UoM" active={sortKey === "uom"} dir={sortDir} onClick={() => toggleSort("uom")} />
-              </th>
-              <th style={{ width: 140 }}>
-                <SortButton label="Inhoud (L)" active={sortKey === "content"} dir={sortDir} onClick={() => toggleSort("content")} />
-              </th>
-              <th style={{ width: 170 }}>
-                <SortButton label={methodLabel("cost_plus")} active={sortKey === "price"} dir={sortDir} onClick={() => toggleSort("price")} />
-              </th>
-              <th style={{ width: 220 }}>
-                <SortButton label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggleSort("status")} />
-              </th>
-              <th style={{ width: 220 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {pageRows.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="muted" style={{ padding: "1rem" }}>
-                  Geen resultaten.
-                </td>
-              </tr>
-            ) : (
-              pageRows.map((row) => {
-                const status =
-                  row.pricingMethod === "manual_rate"
-                    ? row.manualRateEx > 0
-                      ? `Tarief: ${moneyEUR(row.manualRateEx)}`
-                      : "Tarief ontbreekt"
-                    : row.hasActiveCost
-                      ? `Actief (kostprijs: ${moneyEUR(row.kostprijsEx)})`
-                      : row.kostprijsEx > 0
-                        ? `Concept (kostprijs: ${moneyEUR(row.kostprijsEx)})`
-                        : "Nog te activeren";
-                const canDelete = row.pricingMethod === "cost_plus" && !row.hasActiveCost && row.kostprijsEx <= 0;
-                const actionHref =
-                  row.pricingMethod === "cost_plus"
-                    ? (() => {
-                        const activationVersionId = activationVersionBySkuId.get(row.skuId)?.versionId ?? "";
-                        const existingId = activationVersionId || (kostprijsBySkuId.get(row.skuId) ?? "");
-                        if (existingId) {
-                          return {
-                            pathname: "/nieuwe-kostprijsberekening",
-                            query: { mode: "wizard-edit", selected_id: existingId },
-                          } as any;
-                        }
-                        const kind = row.subtype === "bier" ? "beer" : "article";
-                        return {
-                          pathname: "/nieuwe-kostprijsberekening",
-                          query: { mode: "wizard-new", kind, sku_id: row.skuId },
-                        } as any;
-                      })()
-                    : null;
-                const editBundleHref = (() => {
-                  const skuRow = skuById.get(row.skuId) as any;
-                  if (!skuRow) return null;
-                  const kind = String(skuRow?.kind ?? "").trim().toLowerCase();
-                  if (kind !== "article") return null;
-                  const articleId = String(skuRow?.article_id ?? "").trim();
-                  if (!articleId) return null;
-                  return {
-                    pathname: "/product-samenstellen",
-                    query: { mode: "verkoopbaar", article_id: articleId },
-                  } as any;
-                })();
-                return (
-                  <tr key={row.skuId}>
-                    <td style={{ fontWeight: 600 }}>{row.label}</td>
-                    <td>{subtypeLabel(row.subtype)}</td>
-                    <td>{row.uom}</td>
-                    <td>{row.contentLiter ? row.contentLiter.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}</td>
-                    <td>{row.pricingMethod === "cost_plus" ? moneyEUR(row.kostprijsEx) : "—"}</td>
-                    <td>{status}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-                        {editBundleHref ? (
-                          <Link
-                            className="icon-button-table icon-button-neutral"
-                            href={editBundleHref}
-                            title="Bewerken"
-                            aria-label="Bewerken"
-                          >
-                            <PencilIcon />
-                          </Link>
-                        ) : null}
-                        {actionHref ? (
-                          <Link
-                            className="icon-button-table icon-button-primary"
-                            href={actionHref}
-                            title="Kostprijs beheren"
-                            aria-label="Kostprijs beheren"
-                          >
-                            <CalculatorIcon />
-                          </Link>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                        {canDelete ? (
-                          <button
-                            type="button"
-                            className="icon-button-table"
-                            title="Verwijder verkoopbaar artikel"
-                            aria-label="Verwijder verkoopbaar artikel"
-                            onClick={() => deleteSellableSku(row.skuId)}
-                            disabled={Boolean(deletingSkuId)}
-                          >
-                            <TrashIcon />
-                          </button>
-                        ) : null}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+      <div className="editor-actions" style={{ marginBottom: 12 }}>
+        <div className="editor-actions-group">
+          <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenStyleIds(Object.fromEntries(treeGroups.map((group) => [group.styleId, true])))}>
+            Alles openen
+          </button>
+          <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenStyleIds({})}>
+            Alles sluiten
+          </button>
+        </div>
+        <div className="editor-toolbar-actions" style={{ gap: 8, display: "flex", alignItems: "center" }}>
+          <SortButton label="Naam" active={sortKey === "label"} dir={sortDir} onClick={() => toggleSort("label")} />
+          <SortButton label="Status" active={sortKey === "status"} dir={sortDir} onClick={() => toggleSort("status")} />
+          <SortButton label="Kostprijs" active={sortKey === "price"} dir={sortDir} onClick={() => toggleSort("price")} />
+        </div>
       </div>
 
-      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-        <div style={{ opacity: 0.75 }}>
-          Pagina {currentPage} / {totalPages} (totaal {sorted.length} artikelen)
+      {treeGroups.length === 0 ? (
+        <div className="dataset-empty" style={{ padding: "1rem" }}>
+          Geen resultaten.
         </div>
-        <div style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
-          <PageSizeSelect
-            value={pageSize}
-            onChange={(next) => {
-              setPage(1);
-              setPageSize(next);
-            }}
-            title="Aantal rijen per pagina"
-          />
-          <PaginationBar page={currentPage} totalPages={totalPages} onChange={setPage} />
+      ) : (
+        <div className="wizard-stack">
+          {treeGroups.map((group) => {
+            const isOpen = openStyleIds[group.styleId] ?? false;
+            return (
+              <section key={group.styleId} className="module-card compact-card" style={{ marginBottom: 12 }}>
+                <button
+                  type="button"
+                  className="module-card-title"
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: "transparent", border: 0, padding: 0, textAlign: "left" }}
+                  onClick={() => setOpenStyleIds((current) => ({ ...current, [group.styleId]: !isOpen }))}
+                >
+                  <span>{isOpen ? "▾" : "▸"} {group.styleName}</span>
+                  <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                    {group.mixed ? <span className="pill">mixartikelen {group.mixed}</span> : null}
+                    <span className="editor-pill">{group.rows.length} SKU&apos;s</span>
+                  </span>
+                </button>
+
+                {isOpen ? (
+                  <div className="dataset-editor-scroll" style={{ marginTop: 12 }}>
+                    <table className="dataset-editor-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: 320 }}>Artikel</th>
+                          <th style={{ width: 130 }}>Type</th>
+                          <th style={{ width: 110 }}>UoM</th>
+                          <th style={{ width: 120 }}>Inhoud</th>
+                          <th style={{ width: 150 }}>Kostprijs</th>
+                          <th style={{ width: 210 }}>Status</th>
+                          <th style={{ width: 180 }} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row) => {
+                          const status =
+                            row.pricingMethod === "manual_rate"
+                              ? row.manualRateEx > 0
+                                ? `Tarief: ${moneyEUR(row.manualRateEx)}`
+                                : "Tarief ontbreekt"
+                              : row.hasActiveCost
+                                ? `Actief (${moneyEUR(row.kostprijsEx)})`
+                                : row.kostprijsEx > 0
+                                  ? `Concept (${moneyEUR(row.kostprijsEx)})`
+                                  : "Nog te activeren";
+                          const canDelete = row.pricingMethod === "cost_plus" && !row.hasActiveCost && row.kostprijsEx <= 0;
+                          const styleIds = inferStyleIdsForSku(row.skuId).filter((id) => id !== "__zonder_stijl__");
+                          const isMixed = styleIds.length > 1;
+                          const actionHref =
+                            row.pricingMethod === "cost_plus"
+                              ? (() => {
+                                  const activationVersionId = activationVersionBySkuId.get(row.skuId)?.versionId ?? "";
+                                  const existingId = activationVersionId || (kostprijsBySkuId.get(row.skuId) ?? "");
+                                  if (existingId) {
+                                    return {
+                                      pathname: "/nieuwe-kostprijsberekening",
+                                      query: { mode: "wizard-edit", selected_id: existingId },
+                                    } as any;
+                                  }
+                                  const kind = row.subtype === "bier" ? "beer" : "article";
+                                  return {
+                                    pathname: "/nieuwe-kostprijsberekening",
+                                    query: { mode: "wizard-new", kind, sku_id: row.skuId },
+                                  } as any;
+                                })()
+                              : null;
+                          const editBundleHref = (() => {
+                            const skuRow = skuById.get(row.skuId) as any;
+                            if (!skuRow) return null;
+                            const kind = String(skuRow?.kind ?? "").trim().toLowerCase();
+                            if (kind !== "article") return null;
+                            const articleId = String(skuRow?.article_id ?? "").trim();
+                            if (!articleId) return null;
+                            return {
+                              pathname: "/product-samenstellen",
+                              query: { mode: "verkoopbaar", article_id: articleId },
+                            } as any;
+                          })();
+                          return (
+                            <tr key={`${group.styleId}-${row.skuId}`}>
+                              <td style={{ fontWeight: 600 }}>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                  <span>{row.label}</span>
+                                  {isMixed ? <span className="pill">mixartikel</span> : null}
+                                </div>
+                                <div className="muted" style={{ marginTop: 3 }}>{row.skuId}</div>
+                              </td>
+                              <td>{subtypeLabel(row.subtype)}</td>
+                              <td>{row.uom}</td>
+                              <td>{row.contentLiter ? row.contentLiter.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}</td>
+                              <td>{row.pricingMethod === "cost_plus" ? moneyEUR(row.kostprijsEx) : "-"}</td>
+                              <td>{status}</td>
+                              <td style={{ textAlign: "right" }}>
+                                <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
+                                  {editBundleHref ? (
+                                    <Link className="icon-button-table icon-button-neutral" href={editBundleHref} title="Bewerken" aria-label="Bewerken">
+                                      <PencilIcon />
+                                    </Link>
+                                  ) : null}
+                                  {actionHref ? (
+                                    <Link className="icon-button-table icon-button-primary" href={actionHref} title="Kostprijs beheren" aria-label="Kostprijs beheren">
+                                      <CalculatorIcon />
+                                    </Link>
+                                  ) : (
+                                    <span className="muted">-</span>
+                                  )}
+                                  {canDelete ? (
+                                    <button type="button" className="icon-button-table" title="Verwijder verkoopbaar artikel" aria-label="Verwijder verkoopbaar artikel" onClick={() => deleteSellableSku(row.skuId)} disabled={Boolean(deletingSkuId)}>
+                                      <TrashIcon />
+                                    </button>
+                                  ) : null}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </section>
+            );
+          })}
         </div>
+      )}
+
+      <div style={{ marginTop: 10, opacity: 0.75 }}>
+        Totaal {sorted.length} unieke artikelen, zichtbaar in {treeGroups.length} stijlgroepen.
       </div>
     </section>
   );

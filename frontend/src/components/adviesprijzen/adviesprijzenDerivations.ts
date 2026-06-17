@@ -1,5 +1,6 @@
 import { buildSellInLookup, resolveSellInPriceEx } from "@/components/offerte-samenstellen/sellInResolver";
 import { clampNumber } from "@/components/adviesprijzen/adviesprijzenUtils";
+import { normalizeSkuLabel } from "@/lib/skuLabels";
 
 type Channel = {
   code: string;
@@ -115,10 +116,10 @@ export function buildProductCostRows({
 
     const bierId = isArticle ? "" : String((sku as any)?.beer_id ?? "");
     const bierSnapshot = bierId ? beerById.get(bierId) : null;
-    const biernaam = isArticle ? item.label : (bierSnapshot?.biernaam || bierId || item.label);
+    const biernaam = normalizeSkuLabel(isArticle ? item.label : (bierSnapshot?.biernaam || bierId || item.label));
 
     const productId = isArticle ? String((sku as any)?.article_id ?? "") : String((sku as any)?.format_article_id ?? "");
-    const verpakking = articleNameById.get(productId) ?? productId ?? "";
+    const verpakking = normalizeSkuLabel(articleNameById.get(productId) ?? productId ?? "");
 
     out.push({
       skuId: item.skuId,
@@ -128,7 +129,7 @@ export function buildProductCostRows({
       kostprijsversieId: "",
       productId,
       productType: isArticle ? ("catalog" as const) : ("basis" as const),
-      verpakking: verpakking || item.label,
+      verpakking: verpakking || normalizeSkuLabel(item.label),
       kostprijsEx: item.kostprijsEx,
     });
   }

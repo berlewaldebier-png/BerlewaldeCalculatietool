@@ -1,6 +1,7 @@
 "use client";
 
 import type { StrategyRow } from "@/components/verkoopstrategie/verkoopstrategieWorkspaceUtils";
+import { normalizeUnitLabel } from "@/lib/skuLabels";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -52,76 +53,30 @@ export function buildArticleLabelMap(rows: GenericRecord[] | undefined, kindFilt
 }
 
 export function buildProductSources({
-  basisproducten,
-  samengesteldeProducten,
-  centralSkuRows,
-  skuById,
-  bundleArticleById,
   formatArticleById,
-  kostprijsproductactiveringen,
 }: {
-  basisproducten: GenericRecord[];
-  samengesteldeProducten: GenericRecord[];
-  centralSkuRows: Array<{ skuId: string; label: string; pricingMethod: string; subtype: string; productId?: string }>;
-  skuById: Map<string, GenericRecord>;
-  bundleArticleById: Map<string, { id: string; label: string }>;
   formatArticleById: Map<string, { id: string; label: string }>;
-  kostprijsproductactiveringen: GenericRecord[];
 }) {
   const seen = new Map<string, { id: string; label: string; type: "basis" | "samengesteld" }>();
-  basisproducten.forEach((row) => {
-    const id = String(row.id ?? "");
-    const label = String(row.omschrijving ?? "");
-    if (id && label) seen.set(`basis:${id}`, { id, label, type: "basis" });
-  });
-  samengesteldeProducten.forEach((row) => {
-    const id = String(row.id ?? "");
-    const label = String(row.omschrijving ?? "");
-    if (id && label) seen.set(`samengesteld:${id}`, { id, label, type: "samengesteld" });
-  });
-
   // SKU-aanpak: voeg ook verkoopbare artikelen (bundle/article SKUs) toe als "producttype" bron.
   // Dit is géén fallback: verkoopstrategie moet dezelfde centrale verkoopbare lijst kunnen beprijzen
   // als adviesprijzen/offertes (cost_plus items met actieve kostprijs).
-  centralSkuRows
-    .filter((row) => row.pricingMethod === "cost_plus")
-    .filter((row) => row.subtype === "product")
-    .forEach((row) => {
-      const sku = skuById.get(row.skuId);
-      const kind = String((sku as any)?.kind ?? "").toLowerCase();
-      if (kind !== "article") return;
-      const articleId = String((sku as any)?.article_id ?? "").trim() || String((row as any)?.productId ?? "").trim();
-      if (!articleId) return;
-      const label = bundleArticleById.get(articleId)?.label ?? row.label ?? articleId;
-      if (!label) return;
-      seen.set(`basis:${articleId}`, { id: articleId, label, type: "basis" });
-    });
+  formatArticleById.forEach((row) => {
+    const id = String(row.id ?? "").trim();
+    const label = normalizeUnitLabel(row.label || id);
+    if (!id || !label) return;
+    seen.set(`basis:${id}`, { id, label, type: "basis" });
+  });
 
-  // SKU-aanpak: na hard reset zijn basis-/samengestelde productlijsten leeg.
-  // Gebruik dan de actieve activaties om de beschikbare formats (verpakking) te tonen.
-  if (seen.size === 0 && formatArticleById.size > 0) {
-    (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).forEach((act) => {
-      const skuId = String((act as any)?.sku_id ?? "").trim();
-      const sku = skuId ? (skuById.get(skuId) ?? null) : null;
-      const formatId = String((sku as any)?.format_article_id ?? "").trim();
-      const articleId = String((sku as any)?.article_id ?? "").trim();
-      if (formatId) {
-        const format = formatArticleById.get(formatId);
-        if (format) {
-          seen.set(`basis:${format.id}`, { id: format.id, label: format.label, type: "basis" });
-        }
-        return;
-      }
-      if (articleId) {
-        const bundle = bundleArticleById.get(articleId);
-        if (bundle) {
-          seen.set(`basis:${bundle.id}`, { id: bundle.id, label: bundle.label, type: "basis" });
-        }
-      }
-    });
-  }
+  const uniqueByVisibleLabel = new Map<string, { id: string; label: string; type: "basis" | "samengesteld" }>();
+  [...seen.values()].forEach((row) => {
+    const label = normalizeUnitLabel(row.label);
+    const key = label.trim().toLowerCase();
+    if (!key) return;
+    uniqueByVisibleLabel.set(key, { ...row, label });
+  });
 
-  return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  return [...uniqueByVisibleLabel.values()].sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
 }
 
 export function buildBasisProductParentMap(samengesteldeProducten: GenericRecord[]) {

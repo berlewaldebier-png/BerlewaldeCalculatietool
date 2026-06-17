@@ -25,6 +25,8 @@ export default async function ProductenVerpakkingPage() {
       "articles",
       "skus",
       "bom-lines",
+      "bieren",
+      "sku-style-links",
       "kostprijsversies",
       "kostprijsproductactiveringen"
     ],
@@ -42,6 +44,8 @@ export default async function ProductenVerpakkingPage() {
   const articles = unwrapList(bootstrap.datasets["articles"]);
   const skus = unwrapList(bootstrap.datasets["skus"]);
   const bomLines = unwrapList(bootstrap.datasets["bom-lines"]);
+  const bieren = unwrapList(bootstrap.datasets["bieren"]);
+  const skuStyleLinks = unwrapList(bootstrap.datasets["sku-style-links"]);
   const kostprijsversies = unwrapList(bootstrap.datasets["kostprijsversies"]);
   const kostprijsproductactiveringen = unwrapList(bootstrap.datasets["kostprijsproductactiveringen"]);
 
@@ -62,6 +66,8 @@ export default async function ProductenVerpakkingPage() {
         articles={articles}
         skus={skus}
         bomLines={bomLines}
+        bieren={bieren}
+        skuStyleLinks={skuStyleLinks}
         kostprijsversies={kostprijsversies}
         kostprijsproductactiveringen={kostprijsproductactiveringen}
       />

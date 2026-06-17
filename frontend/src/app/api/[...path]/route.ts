@@ -28,12 +28,12 @@ async function proxy(request: NextRequest, context: RouteContext) {
     headers.delete("expect");
 
     const method = request.method.toUpperCase();
-    const bodyText = method === "GET" || method === "HEAD" ? undefined : await request.text();
+    const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
 
     const response = await fetch(targetUrl, {
       method,
       headers,
-      body: bodyText && bodyText.length > 0 ? bodyText : undefined,
+      body: body && body.byteLength > 0 ? body : undefined,
       redirect: "manual"
     });
 

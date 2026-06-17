@@ -137,6 +137,7 @@ def get_sales_by_sku_summary(
             mapped_daily = cur.fetchall() or []
 
     buckets: dict[str, dict[str, Any]] = {}
+    period_buckets: dict[tuple[str, str], dict[str, Any]] = {}
     missing_cost_lines = 0
 
     # Cache per (sku_id, date) to avoid repeated activation lookups for same day.
@@ -172,6 +173,27 @@ def get_sales_by_sku_summary(
                 "net_revenue_ex": 0.0,
                 "first_date": "",
                 "last_date": "",
+                "inkoop_total_ex": 0.0,
+                "packaging_total_ex": 0.0,
+                "excise_total_ex": 0.0,
+                "cost_total_ex": 0.0,
+                "fixed_total_ex": 0.0,
+                "missing_cost_lines": 0,
+            },
+        )
+
+        iso = line_date.isoformat()
+        period = iso[:7]
+        period_bucket = period_buckets.setdefault(
+            (period, sku_id),
+            {
+                "period": period,
+                "sku_id": sku_id,
+                "units": 0.0,
+                "net_revenue_ex": 0.0,
+                "inkoop_total_ex": 0.0,
+                "packaging_total_ex": 0.0,
+                "excise_total_ex": 0.0,
                 "cost_total_ex": 0.0,
                 "fixed_total_ex": 0.0,
                 "missing_cost_lines": 0,
@@ -180,8 +202,9 @@ def get_sales_by_sku_summary(
 
         bucket["units"] = float(bucket["units"] or 0.0) + qty
         bucket["net_revenue_ex"] = float(bucket["net_revenue_ex"] or 0.0) + revenue
+        period_bucket["units"] = float(period_bucket["units"] or 0.0) + qty
+        period_bucket["net_revenue_ex"] = float(period_bucket["net_revenue_ex"] or 0.0) + revenue
 
-        iso = line_date.isoformat()
         if not bucket["first_date"] or iso < str(bucket["first_date"]):
             bucket["first_date"] = iso
         if not bucket["last_date"] or iso > str(bucket["last_date"]):
@@ -189,13 +212,25 @@ def get_sales_by_sku_summary(
 
         if components is None:
             bucket["missing_cost_lines"] = int(bucket["missing_cost_lines"] or 0) + 1
+            period_bucket["missing_cost_lines"] = int(period_bucket["missing_cost_lines"] or 0) + 1
             missing_cost_lines += 1
             continue
 
         kostprijs = float(components.get("kostprijs", 0.0) or 0.0)
         fixed_alloc = float(components.get("indirecte_kosten", 0.0) or 0.0)
+        inkoop = float(components.get("inkoop", 0.0) or 0.0)
+        packaging = float(components.get("verpakkingskosten", 0.0) or 0.0)
+        excise = float(components.get("accijns", 0.0) or 0.0)
+        bucket["inkoop_total_ex"] = float(bucket["inkoop_total_ex"] or 0.0) + qty * inkoop
+        bucket["packaging_total_ex"] = float(bucket["packaging_total_ex"] or 0.0) + qty * packaging
+        bucket["excise_total_ex"] = float(bucket["excise_total_ex"] or 0.0) + qty * excise
         bucket["cost_total_ex"] = float(bucket["cost_total_ex"] or 0.0) + qty * kostprijs
         bucket["fixed_total_ex"] = float(bucket["fixed_total_ex"] or 0.0) + qty * fixed_alloc
+        period_bucket["inkoop_total_ex"] = float(period_bucket["inkoop_total_ex"] or 0.0) + qty * inkoop
+        period_bucket["packaging_total_ex"] = float(period_bucket["packaging_total_ex"] or 0.0) + qty * packaging
+        period_bucket["excise_total_ex"] = float(period_bucket["excise_total_ex"] or 0.0) + qty * excise
+        period_bucket["cost_total_ex"] = float(period_bucket["cost_total_ex"] or 0.0) + qty * kostprijs
+        period_bucket["fixed_total_ex"] = float(period_bucket["fixed_total_ex"] or 0.0) + qty * fixed_alloc
 
     items = list(buckets.values())
     items.sort(key=lambda r: float(r.get("net_revenue_ex", 0.0) or 0.0), reverse=True)
@@ -293,6 +328,7 @@ def get_sales_by_sku_summary(
         "year": int(year or 0),
         "basis": basis_norm,
         "items": items,
+        "periods": sorted(period_buckets.values(), key=lambda r: (str(r.get("period", "")), str(r.get("sku_id", "")))),
         "meta": {"missing_cost_lines": int(missing_cost_lines)},
         "unmapped": unmapped,
     }

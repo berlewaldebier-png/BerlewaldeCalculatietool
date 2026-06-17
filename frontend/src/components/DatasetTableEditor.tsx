@@ -180,9 +180,13 @@ export function DatasetTableEditor({
   function buildPayload() {
     const cleanRows = rows.map((row) => {
       const stripped = stripInternal(row);
-      return Object.fromEntries(
+      const cleaned = Object.fromEntries(
         Object.entries(stripped).filter(([key]) => !readOnlyKeys.has(key))
       ) as EditorRow;
+      if (saveShape === "array" && String(cleaned.id ?? "").trim() === "") {
+        cleaned.id = row._uiId;
+      }
+      return cleaned;
     });
 
     if (saveShape === "array") {
@@ -234,13 +238,14 @@ export function DatasetTableEditor({
       });
 
       if (!response.ok) {
-        throw new Error("Opslaan mislukt");
+        const message = await response.text().catch(() => "");
+        throw new Error(message || "Opslaan mislukt");
       }
 
       setStatus("Opgeslagen.");
       router.refresh();
-    } catch {
-      setStatus("Opslaan mislukt.");
+    } catch (error) {
+      setStatus(error instanceof Error ? `Opslaan mislukt: ${error.message}` : "Opslaan mislukt.");
     } finally {
       setIsSaving(false);
     }

@@ -16,6 +16,7 @@ export function inferUnitFromPack(pack: string): QuoteProductUnit {
   if (text.includes("liter") || text === "l") return "liter";
   if (text.includes("fust")) return "fust";
   if (text.includes("doos")) return "doos";
+  if (text.includes("glas") || text.includes("stuk")) return "stuk";
   return "fles";
 }
 
@@ -143,6 +144,12 @@ export function createInitialQuoteFormState(): QuoteFormState {
 }
 
 export function getProductRef(product: QuoteProduct) {
+  if (product.source?.option_id) {
+    return String(product.source.option_id);
+  }
+  if (product.source?.packaging_component_id) {
+    return `packaging:${String(product.source.packaging_component_id)}`;
+  }
   if (product.source?.sku_id) {
     return `sku:${String(product.source.sku_id)}`;
   }

@@ -230,6 +230,27 @@ export function KostprijsBeheerWorkspace({
     }
   }
 
+  async function activateVersionFromOverview(versionId: string) {
+    const cleanId = String(versionId ?? "").trim();
+    if (!cleanId) {
+      throw new Error("Geen kostprijsversie geselecteerd.");
+    }
+    const response = await fetch(`${API_BASE_URL}/data/kostprijsversies/${encodeURIComponent(cleanId)}/activate`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const payload = await response.json();
+        detail = String((payload as any)?.detail ?? "");
+      } catch {
+        detail = await response.text().catch(() => "");
+      }
+      throw new Error(detail || "Activeren mislukt.");
+    }
+    await refreshActivations();
+  }
+
   function handleRowsChange(rows: GenericRecord[]) {
     setCurrentBerekeningen(Array.isArray(rows) ? rows : []);
     void refreshBieren();
@@ -243,6 +264,8 @@ export function KostprijsBeheerWorkspace({
     }
     if (result.id) {
       setSelectedId(result.id);
+      setMode("wizard-edit");
+      router.replace(`/nieuwe-kostprijsberekening?mode=wizard-edit&selected_id=${encodeURIComponent(result.id)}`);
     }
     setExistingFilterMode(result.status === "definitief" ? "definitief" : "concept");
   }
@@ -253,8 +276,16 @@ export function KostprijsBeheerWorkspace({
     }
     if (result.id) {
       setSelectedId(result.id);
+      setMode("wizard-edit");
+      router.replace(`/nieuwe-kostprijsberekening?mode=wizard-edit&selected_id=${encodeURIComponent(result.id)}`);
     }
     setExistingFilterMode(result.status === "definitief" ? "definitief" : "concept");
+  }
+
+  function returnToLanding() {
+    setMode("landing");
+    setSelectedId(null);
+    router.replace("/nieuwe-kostprijsberekening");
   }
 
   const bierenById = useMemo(() => {
@@ -353,6 +384,7 @@ export function KostprijsBeheerWorkspace({
   }, [
     activeSort.direction,
     activeSort.key,
+    articleById,
     basisById,
     berekeningenById,
     bierenById,
@@ -361,6 +393,7 @@ export function KostprijsBeheerWorkspace({
     search,
     samengesteldById,
     selectedYear,
+    skuById,
   ]);
 
   if (mode === "wizard-new") {
@@ -377,8 +410,8 @@ export function KostprijsBeheerWorkspace({
           startWithNew
           onRowsChange={handleRowsChange}
           onPersisted={handleArticlePersisted}
-          onFinish={() => setMode("landing")}
-          onBackToLanding={() => setMode("landing")}
+          onFinish={returnToLanding}
+          onBackToLanding={returnToLanding}
         />
       );
     }
@@ -403,8 +436,8 @@ export function KostprijsBeheerWorkspace({
         startWithNew
         onRowsChange={handleRowsChange}
         onPersisted={handlePersisted}
-        onFinish={() => setMode("landing")}
-        onBackToLanding={() => setMode("landing")}
+        onFinish={returnToLanding}
+        onBackToLanding={returnToLanding}
       />
     );
   }
@@ -434,8 +467,8 @@ export function KostprijsBeheerWorkspace({
           initialSelectedId={selectedId}
           onRowsChange={handleRowsChange}
           onPersisted={handleArticlePersisted}
-          onFinish={() => setMode("landing")}
-          onBackToLanding={() => setMode("landing")}
+          onFinish={returnToLanding}
+          onBackToLanding={returnToLanding}
         />
       );
     }
@@ -462,8 +495,8 @@ export function KostprijsBeheerWorkspace({
           initialSelectedId={selectedId}
           onRowsChange={handleRowsChange}
           onPersisted={handlePersisted}
-          onFinish={() => setMode("landing")}
-          onBackToLanding={() => setMode("landing")}
+          onFinish={returnToLanding}
+          onBackToLanding={returnToLanding}
         />
       );
     }
@@ -488,8 +521,8 @@ export function KostprijsBeheerWorkspace({
         initialSelectedId={selectedId}
         onRowsChange={handleRowsChange}
         onPersisted={handlePersisted}
-        onFinish={() => setMode("landing")}
-        onBackToLanding={() => setMode("landing")}
+        onFinish={returnToLanding}
+        onBackToLanding={returnToLanding}
       />
     );
   }
@@ -507,6 +540,7 @@ export function KostprijsBeheerWorkspace({
         onStartNew={() => {
           setNewWizardKind("beer");
           setMode("wizard-new");
+          router.replace("/nieuwe-kostprijsberekening?mode=wizard-new");
         }}
       />
 
@@ -527,6 +561,7 @@ export function KostprijsBeheerWorkspace({
         activationStatus={activationStatus}
         setPendingActivation={setPendingActivation}
         setActivationStatus={setActivationStatus}
+        onActivateVersion={activateVersionFromOverview}
       />
 
       <ExistingBerekeningenSection

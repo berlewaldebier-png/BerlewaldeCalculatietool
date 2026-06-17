@@ -28,6 +28,25 @@ class UpsertFormatResponse(BaseModel):
     article_id: str
 
 
+class UpsertBaseSkuRequest(BaseModel):
+    name: str
+    format_name: str = ""
+    uom: str = "stuk"
+    totals_liters: float = Field(0, ge=0)
+    beer_id: str
+    product_group: str = ""
+    alcohol_category: str = ""
+    packaging_type: str = ""
+    code: str = ""
+    edit_format_id: str | None = None
+    edit_sku_id: str | None = None
+
+
+class UpsertBaseSkuResponse(BaseModel):
+    sku_id: str
+    article_id: str
+
+
 class UpsertBundleRequest(BaseModel):
     name: str
     uom: str = "stuk"

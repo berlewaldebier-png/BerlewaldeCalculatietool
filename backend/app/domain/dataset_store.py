@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from app.domain import dashboard_service
-from app.domain import fixed_costs_storage, postgres_storage, production_storage
+from app.domain import fixed_costs_storage, postgres_storage, production_storage, product_model_storage
 from app.domain import kostprijs_activation_storage
 from app.utils import json_seed
 from app.utils.storage import (
@@ -134,6 +134,9 @@ DATASET_DEFAULTS: dict[str, Any] = {
     "articles": [],
     "skus": [],
     "bom-lines": [],
+    # Many-to-many grouping for Verkoopbare artikelen. One SKU can be visible under multiple beer styles.
+    # Shape: [{id, sku_id, style_id, primary, source, updated_at}]
+    "sku-style-links": [],
     "products": [],
     "product-years": [],
     "product-year-components": [],
@@ -495,6 +498,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "articles",
         "skus",
         "bom-lines",
+        "sku-style-links",
         *MODEL_A_DATASET_NAMES,
         "productgroepen",
         "alcoholcategorieen",
@@ -583,6 +587,20 @@ def load_dataset(name: str) -> Any:
         return load_kostprijsversies()
     if name == "kostprijsproductactiveringen":
         return load_kostprijsproductactiveringen()
+    if name == "sku-style-links":
+        links = product_model_storage.load_sku_family_links(deepcopy(DATASET_DEFAULTS["sku-style-links"]))
+        if not links:
+            legacy = postgres_storage.load_app_dataset_payload("sku-style-links")
+            if isinstance(legacy, list) and legacy:
+                product_model_storage.save_sku_family_links([row for row in legacy if isinstance(row, dict)])
+                postgres_storage.delete_app_dataset_row("sku-style-links")
+                links = product_model_storage.load_sku_family_links(deepcopy(DATASET_DEFAULTS["sku-style-links"]))
+        return links
+    if name == "bieren":
+        payload = postgres_storage.load_dataset(name, default_value)
+        if isinstance(payload, list):
+            product_model_storage.sync_product_families_from_beers([row for row in payload if isinstance(row, dict)])
+        return payload
     if name == "adviesprijzen":
         return postgres_storage.load_dataset("adviesprijzen", deepcopy(DATASET_DEFAULTS["adviesprijzen"]))
     payload = postgres_storage.load_dataset(name, default_value)
@@ -659,6 +677,14 @@ def save_dataset(name: str, data: Any) -> bool:
         saved = postgres_storage.save_dataset(name, payload, overwrite=True)
         if saved:
             dashboard_service.invalidate_dashboard_summary_cache()
+        return saved
+    if name == "sku-style-links" and isinstance(data, list):
+        return product_model_storage.save_sku_family_links([row for row in data if isinstance(row, dict)])
+    if name == "bieren" and isinstance(data, list):
+        payload = [row for row in data if isinstance(row, dict)]
+        saved = postgres_storage.save_dataset(name, payload)
+        if saved:
+            product_model_storage.sync_product_families_from_beers(payload)
         return saved
     if name == "verkoopprijzen" and isinstance(data, list):
         payload = ensure_complete_verkoop_records(

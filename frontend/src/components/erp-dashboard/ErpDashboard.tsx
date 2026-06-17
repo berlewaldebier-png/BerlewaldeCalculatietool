@@ -169,10 +169,12 @@ function EmptyState({ title, body, href, hrefLabel }: { title: string; body: str
 export function ErpDashboard({ navigation, payload: initialPayload, breakEvenContext, initialFilters }: Props) {
   const router = useRouter();
   const [remotePayload, setRemotePayload] = useState<ErpDashboardPayload | null>(null);
+  const [remoteBreakEvenContext, setRemoteBreakEvenContext] = useState<Props["breakEvenContext"] | null>(null);
   const [remoteError, setRemoteError] = useState<string>("");
   const [isRemoteLoading, setIsRemoteLoading] = useState<boolean>(true);
 
   const payload = remotePayload ?? initialPayload;
+  const effectiveBreakEvenContext = remoteBreakEvenContext ?? breakEvenContext;
   const [showFilters, setShowFilters] = useState(false);
   const [chartView, setChartView] = useState<"revenue" | "orders">("revenue");
   const [sinceInput, setSinceInput] = useState((initialFilters?.since || payload.range?.since || "").trim());
@@ -235,10 +237,63 @@ export function ErpDashboard({ navigation, payload: initialPayload, breakEvenCon
     return () => controller.abort();
   }, [initialFilters?.since, initialFilters?.until, initialFilters?.year, initialFilters?.basis, initialFilters?.sku_id]);
 
+  useEffect(() => {
+    const params = new URLSearchParams();
+    params.set(
+      "datasets",
+      [
+        "break-even-configuraties",
+        "vaste-kosten",
+        "channels",
+        "bieren",
+        "kostprijsversies",
+        "kostprijsproductactiveringen",
+        "verkoopprijzen",
+        "skus",
+        "articles",
+        "basisproducten",
+        "samengestelde-producten",
+      ].join(",")
+    );
+    params.set("navigation", "false");
+
+    const controller = new AbortController();
+    async function loadContext() {
+      try {
+        const response = await fetch(`/api/meta/bootstrap?${params.toString()}`, {
+          cache: "no-store",
+          credentials: "include",
+          signal: controller.signal,
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) return;
+        const datasets = (json as any)?.datasets ?? {};
+        if (controller.signal.aborted) return;
+        setRemoteBreakEvenContext({
+          configs: datasets["break-even-configuraties"],
+          vasteKosten: datasets["vaste-kosten"],
+          channels: datasets["channels"],
+          bieren: datasets["bieren"],
+          kostprijsversies: datasets["kostprijsversies"],
+          kostprijsproductactiveringen: datasets["kostprijsproductactiveringen"],
+          verkoopprijzen: datasets["verkoopprijzen"],
+          skus: datasets["skus"],
+          articles: datasets["articles"],
+          basisproducten: datasets["basisproducten"],
+          samengesteldeProducten: datasets["samengestelde-producten"],
+        });
+      } catch {
+        if (!controller.signal.aborted) setRemoteBreakEvenContext(null);
+      }
+    }
+    void loadContext();
+    return () => controller.abort();
+  }, []);
+
   const availableYears = (payload.available_years ?? []).filter((y) => Number.isFinite(y) && y > 0);
 
   const availableSkus = useMemo(() => {
-    const rows = Array.isArray((breakEvenContext as any)?.skus) ? ((breakEvenContext as any).skus as any[]) : [];
+    const rows = Array.isArray((effectiveBreakEvenContext as any)?.skus) ? ((effectiveBreakEvenContext as any).skus as any[]) : [];
     return rows
       .filter((row) => row && typeof row === "object")
       .map((row) => ({
@@ -247,7 +302,7 @@ export function ErpDashboard({ navigation, payload: initialPayload, breakEvenCon
       }))
       .filter((row) => row.id)
       .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-  }, [breakEvenContext]);
+  }, [effectiveBreakEvenContext]);
 
   const applyFilters = (next?: { since?: string; until?: string; year?: string; basis?: string; sku_id?: string }) => {
     const params = new URLSearchParams();
@@ -293,7 +348,7 @@ export function ErpDashboard({ navigation, payload: initialPayload, breakEvenCon
   }, [sinceInput, untilInput]);
 
   const breakEvenTrend = useMemo(() => {
-    const ctx = breakEvenContext ?? {};
+    const ctx = effectiveBreakEvenContext ?? {};
     const configsRaw = ctx.configs;
     const vasteKostenRaw = ctx.vasteKosten;
     const channels = Array.isArray(ctx.channels) ? (ctx.channels as any[]) : [];
@@ -349,7 +404,7 @@ export function ErpDashboard({ navigation, payload: initialPayload, breakEvenCon
     }));
 
     return { breakEvenRevenue: breakEvenRevenueYear, scaled, line };
-  }, [breakEvenContext, payload.range?.since, payload.range?.until, payload.trends?.revenue, yearInput]);
+  }, [effectiveBreakEvenContext, payload.range?.since, payload.range?.until, payload.trends?.revenue, yearInput]);
 
   const kpis = useMemo<KpiDef[]>(() => {
     const k = payload.kpis;

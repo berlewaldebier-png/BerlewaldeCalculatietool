@@ -28,25 +28,7 @@ export default async function HomePage({
   const nextPath = Object.keys(extraParams).length
     ? `/?${new URLSearchParams(extraParams).toString()}`
     : "/";
-  const bootstrap = await getBootstrap(
-    [
-      // Break-even context for dashboard target line (reuse existing frontend compute).
-      "break-even-configuraties",
-      "vaste-kosten",
-      "channels",
-      "bieren",
-      "kostprijsversies",
-      "kostprijsproductactiveringen",
-      "verkoopprijzen",
-      "skus",
-      "articles",
-      "basisproducten",
-      "samengestelde-producten",
-    ],
-    true,
-    nextPath,
-    extraParams
-  );
+  const bootstrap = await getBootstrap([], true, nextPath, extraParams);
   const navigation = bootstrap.navigation ?? [];
   // ERP dashboard data is fetched client-side to avoid long SSR bootstrap timeouts.
   const payload: ErpDashboardPayload = {
@@ -58,25 +40,11 @@ export default async function HomePage({
     alerts: []
   };
 
-  const breakEvenContext = {
-    configs: bootstrap.datasets["break-even-configuraties"],
-    vasteKosten: bootstrap.datasets["vaste-kosten"],
-    channels: bootstrap.datasets["channels"],
-    bieren: bootstrap.datasets["bieren"],
-    kostprijsversies: bootstrap.datasets["kostprijsversies"],
-    kostprijsproductactiveringen: bootstrap.datasets["kostprijsproductactiveringen"],
-    verkoopprijzen: bootstrap.datasets["verkoopprijzen"],
-    skus: bootstrap.datasets["skus"],
-    articles: bootstrap.datasets["articles"],
-    basisproducten: bootstrap.datasets["basisproducten"],
-    samengesteldeProducten: bootstrap.datasets["samengestelde-producten"],
-  };
-
   return (
     <ErpDashboard
       navigation={navigation}
       payload={payload}
-      breakEvenContext={breakEvenContext}
+      breakEvenContext={{}}
       initialFilters={{
         since: since ? String(since) : "",
         until: until ? String(until) : "",

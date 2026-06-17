@@ -53,6 +53,43 @@ export async function createDatasetItem<T extends DatasetRow>(datasetName: strin
   return result.item;
 }
 
+async function fetchDatasetItem<T extends DatasetRow>(
+  datasetName: string,
+  id: string
+): Promise<{ item: T; etag: string } | null> {
+  const response = await fetch(
+    `${API_BASE_URL}/data/${encodeURIComponent(datasetName)}/items/${encodeURIComponent(id)}`,
+    { cache: "no-store" }
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(await readError(response, "API request mislukt"));
+  }
+  const result = (await response.json()) as { item: T; etag?: string };
+  return { item: result.item, etag: String(result.etag ?? response.headers.get("ETag") ?? "") };
+}
+
+export async function upsertDatasetItem<T extends DatasetRow>(datasetName: string, row: T): Promise<T> {
+  const id = rowId(row);
+  if (!id) throw new Error("Record mist id.");
+
+  const current = await fetchDatasetItem<T>(datasetName, id);
+  if (!current) return createDatasetItem(datasetName, row);
+
+  const result = await requestJson<{ item: T }>(
+    `${API_BASE_URL}/data/${encodeURIComponent(datasetName)}/items/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "If-Match": current.etag,
+      },
+      body: JSON.stringify(row),
+    }
+  );
+  return result.item;
+}
+
 export async function reconcileDatasetItems<T extends DatasetRow>(datasetName: string, nextRows: T[]): Promise<void> {
   const seen = new Set<string>();
   for (const row of nextRows) {

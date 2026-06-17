@@ -83,7 +83,8 @@ export function InkoopInputStep({
       fallbackRow={current}
       onChangeInkoopField={(key, value) =>
         updateCurrent((draft) => {
-          (((draft.invoer as GenericRecord).inkoop as GenericRecord) as any)[key] = value as any;
+          const draftInkoop = ((draft.invoer as GenericRecord).inkoop as GenericRecord) as any;
+          draftInkoop[key] = value as any;
         })
       }
       onChangeRegel={(index, patch) =>

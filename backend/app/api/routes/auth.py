@@ -141,6 +141,13 @@ def post_logout(response: Response) -> dict[str, bool]:
 @router.get("/me", response_model=MeResponse)
 def get_me(request: Request) -> MeResponse:
     """Get current user information."""
+    if not auth_service.auth_enabled():
+        return MeResponse(
+            authenticated=True,
+            username="local-admin",
+            display_name="Local admin",
+            role="admin",
+        )
     token = request.cookies.get(auth_service.SESSION_COOKIE_NAME, "")
     session = auth_service.verify_session_token(token)
     if not session:

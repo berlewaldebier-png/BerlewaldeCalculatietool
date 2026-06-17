@@ -30,6 +30,8 @@ export function ProductenVerpakkingWorkspace({
   articles,
   skus,
   bomLines,
+  bieren,
+  skuStyleLinks,
   kostprijsversies,
   kostprijsproductactiveringen,
 }: {
@@ -42,6 +44,8 @@ export function ProductenVerpakkingWorkspace({
   articles: GenericRecord[];
   skus: GenericRecord[];
   bomLines: GenericRecord[];
+  bieren: GenericRecord[];
+  skuStyleLinks: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
 }) {
@@ -138,6 +142,9 @@ export function ProductenVerpakkingWorkspace({
             verkoopprijzen={Array.isArray(verkoopprijzen) ? verkoopprijzen : []}
             skus={Array.isArray(skus) ? skus : []}
             articles={Array.isArray(articles) ? articles : []}
+            bomLines={Array.isArray(bomLines) ? bomLines : []}
+            bieren={Array.isArray(bieren) ? bieren : []}
+            skuStyleLinks={Array.isArray(skuStyleLinks) ? skuStyleLinks : []}
             kostprijsversies={Array.isArray(kostprijsversies) ? kostprijsversies : []}
             kostprijsproductactiveringen={
               Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []
@@ -154,13 +161,15 @@ export function ProductenVerpakkingWorkspace({
             description="Onderdelen die je gebruikt in afvuleenheden en samengestelde artikelen (bijv. dop, doos, giftbox)."
             columns={[
               { key: "omschrijving", label: "Omschrijving", type: "text" },
-              { key: "beschikbaar_voor_samengesteld", label: "Beschikbaar", type: "checkbox", width: "140px" },
+              { key: "beschikbaar_voor_samengesteld", label: "In samenstellingen", type: "checkbox", width: "170px" },
+              { key: "beschikbaar_voor_offertes", label: "In offertes", type: "checkbox", width: "140px" },
             ]}
             initialRows={Array.isArray(verpakkingsonderdelen) ? (verpakkingsonderdelen as any) : []}
             addRowTemplate={{
               id: "",
               omschrijving: "",
               beschikbaar_voor_samengesteld: true,
+              beschikbaar_voor_offertes: false,
             }}
           />
         </div>

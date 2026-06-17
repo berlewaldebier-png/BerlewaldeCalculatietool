@@ -1,11 +1,15 @@
 "use client";
 
 import { ApiRequestError, apiGetClient, apiRequestTextClient } from "@/lib/apiClient";
-import { reconcileDatasetItems } from "@/lib/datasetItems";
+import { reconcileDatasetItems, upsertDatasetItem } from "@/lib/datasetItems";
 import type { GenericRecord } from "@/components/berekeningen/berekeningenWizardUtils";
 
 export async function saveKostprijsversies(payload: GenericRecord[]) {
   await reconcileDatasetItems("kostprijsversies", payload);
+}
+
+export async function saveKostprijsversie(payload: GenericRecord): Promise<GenericRecord> {
+  return upsertDatasetItem("kostprijsversies", payload);
 }
 
 export async function activateKostprijsversie(versionId: string, effectiveFrom?: string) {
@@ -21,8 +25,26 @@ export async function activateKostprijsversie(versionId: string, effectiveFrom?:
   });
 }
 
+export async function activateKostprijsversieProducts(versionId: string, productIds: string[]) {
+  await apiRequestTextClient(`/data/kostprijsversies/${encodeURIComponent(versionId)}/activate-products`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ product_ids: productIds }),
+  });
+}
+
 export async function loadSkus(): Promise<GenericRecord[]> {
   const result = await apiGetClient<{ data?: unknown }>(`/data/skus`);
+  return Array.isArray(result?.data) ? (result.data as GenericRecord[]) : [];
+}
+
+export async function loadArticles(): Promise<GenericRecord[]> {
+  const result = await apiGetClient<{ data?: unknown }>(`/data/articles`);
+  return Array.isArray(result?.data) ? (result.data as GenericRecord[]) : [];
+}
+
+export async function loadBomLines(): Promise<GenericRecord[]> {
+  const result = await apiGetClient<{ data?: unknown }>(`/data/bom-lines`);
   return Array.isArray(result?.data) ? (result.data as GenericRecord[]) : [];
 }
 

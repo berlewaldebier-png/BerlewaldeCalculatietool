@@ -9,6 +9,9 @@ export type BomCostLine = {
   id: string;
   label: string;
   qty: number;
+  componentSkuId?: string;
+  componentArticleId?: string;
+  activeVersionId?: string;
   productkosten: number;
   verpakkingskosten: number;
   opslag: number;
@@ -24,6 +27,25 @@ export type Summary = {
   accijnzen: number;
   kostprijs: number;
   warnings: string[];
+  componentVersionRefs: Array<{
+    componentSkuId: string;
+    componentLabel: string;
+    quantity: number;
+    activeVersionId: string;
+  }>;
+  compositionSnapshot: Array<{
+    type: "sku" | "packaging" | "unknown";
+    label: string;
+    quantity: number;
+    componentSkuId?: string;
+    componentArticleId?: string;
+    activeVersionId?: string;
+    productkosten: number;
+    verpakkingskosten: number;
+    opslag: number;
+    accijnzen: number;
+    kostprijs: number;
+  }>;
 };
 
 export function buildSkuById(skus: GenericRecord[]) {
@@ -216,6 +238,8 @@ export function buildBomCostLines(args: {
         id: text((line as any).id) || createId(),
         label,
         qty,
+        componentSkuId,
+        activeVersionId: activeVid,
         productkosten: qty * productkosten,
         verpakkingskosten: qty * verpakkingskosten,
         opslag: qty * opslag,
@@ -236,6 +260,7 @@ export function buildBomCostLines(args: {
         id: text((line as any).id) || createId(),
         label,
         qty,
+        componentArticleId,
         productkosten: 0,
         verpakkingskosten: qty * unit,
         opslag: 0,
@@ -270,17 +295,49 @@ export function summarizeBomCostLines(args: { bomCostLines: BomCostLine[]; selec
   let opslag = 0;
   let accijnzen = 0;
   const warnings: string[] = [];
+  const componentVersionRefs: Summary["componentVersionRefs"] = [];
+  const compositionSnapshot: Summary["compositionSnapshot"] = [];
   bomCostLines.forEach((line) => {
     productkosten += line.productkosten;
     verpakkingskosten += line.verpakkingskosten;
     opslag += line.opslag;
     accijnzen += line.accijnzen;
     warnings.push(...line.warnings);
+    if (line.componentSkuId) {
+      componentVersionRefs.push({
+        componentSkuId: line.componentSkuId,
+        componentLabel: line.label,
+        quantity: line.qty,
+        activeVersionId: line.activeVersionId ?? "",
+      });
+    }
+    compositionSnapshot.push({
+      type: line.componentSkuId ? "sku" : line.componentArticleId ? "packaging" : "unknown",
+      label: line.label,
+      quantity: line.qty,
+      componentSkuId: line.componentSkuId,
+      componentArticleId: line.componentArticleId,
+      activeVersionId: line.activeVersionId,
+      productkosten: line.productkosten,
+      verpakkingskosten: line.verpakkingskosten,
+      opslag: line.opslag,
+      accijnzen: line.accijnzen,
+      kostprijs: line.kostprijs,
+    });
   });
   const kostprijs = productkosten + verpakkingskosten + opslag + accijnzen;
   if (!selectedBundleSkuId) warnings.push("Selecteer eerst een artikel.");
   if (bomCostLines.length === 0) warnings.push("Samenstelling (BOM) is leeg.");
-  return { productkosten, verpakkingskosten, opslag, accijnzen, kostprijs, warnings } satisfies Summary;
+  return {
+    productkosten,
+    verpakkingskosten,
+    opslag,
+    accijnzen,
+    kostprijs,
+    warnings,
+    componentVersionRefs,
+    compositionSnapshot,
+  } satisfies Summary;
 }
 
 export function buildBundleKostprijsversieRecord(args: {
@@ -346,6 +403,11 @@ export function buildBundleKostprijsversieRecord(args: {
       btw_tarief: "21%",
       article_id: selectedArticleId,
       sku_id: selectedBundleSkuId,
+      source_component_versions: summary.componentVersionRefs,
+      composition_snapshot: summary.compositionSnapshot,
+    },
+    invoer: {
+      samenstelling_snapshot: summary.compositionSnapshot,
     },
     resultaat_snapshot:
       nextStatus === "definitief"

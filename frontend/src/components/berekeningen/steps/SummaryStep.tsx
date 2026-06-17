@@ -1,6 +1,7 @@
 "use client";
 
 import type { SummaryProductRow } from "@/lib/kostprijsSnapshotEngine";
+import { normalizeUnitLabel } from "@/lib/skuLabels";
 
 type GenericRecord = Record<string, unknown>;
 type BerekeningSubjectType = "bier" | "artikel" | "dienst";
@@ -30,6 +31,18 @@ function EyeOffIcon() {
       <path d="M3 3l18 18" />
     </svg>
   );
+}
+
+function cleanUnitLabel(label: unknown, beerName: unknown) {
+  const raw = normalizeUnitLabel(label);
+  const beer = String(beerName ?? "").trim();
+  if (!raw) return "-";
+  if (!beer) return raw;
+  const escaped = beer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return raw
+    .replace(new RegExp(`^${escaped}\\s*[-–—:]?\\s*`, "i"), "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || raw;
 }
 
 export function SummaryStep({
@@ -232,7 +245,7 @@ export function SummaryStep({
                       </td>
                       <td>{String((row as any).biernaam ?? "-")}</td>
                       <td>{String((row as any).soort ?? "-")}</td>
-                      <td>{String((row as any).verpakkingseenheid ?? "-")}</td>
+                      <td>{cleanUnitLabel((row as any).verpakkingseenheid, (row as any).biernaam)}</td>
                       <td>{formatCurrencyDisplay((row as any).primaire_kosten)}</td>
                       <td>{formatCurrencyDisplay((row as any).verpakkingskosten)}</td>
                       {(() => {

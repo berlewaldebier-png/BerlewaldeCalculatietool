@@ -2,7 +2,7 @@
 
 Doel: controleren dat Break-even (v2) correct break-even liters/omzet berekent op basis van **gerealiseerde Douano factuurregels** (SSOT) + **verkoopstrategie (sell‑in)** + **kostprijs activaties (as‑of datum)**.
 
-URL: `/break-even-v2`
+URL: `/break-even`
 
 ## A. Voorwaarden (data)
 

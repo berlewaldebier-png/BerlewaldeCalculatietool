@@ -3,12 +3,16 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import io
+import json
+import zipfile
 from datetime import UTC, datetime, timedelta
 import urllib.parse
 from typing import Any
+from xml.sax.saxutils import escape as _xml_escape
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse, StreamingResponse
 
 from app.domain.douano_client import parse_json_payload as _client_parse_json_payload
 from app.domain.douano_client import probe_url as _probe_url
@@ -22,11 +26,80 @@ from app.domain import douano_product_ignore_storage
 from app.domain import dataset_store
 from app.domain import douano_margin_service
 from app.domain import douano_unmapped_rule_storage
+from app.domain import lot_costs_storage
 from app.domain import douano_unmapped_service
+from app.domain import break_even_planning_service
+from app.domain import break_even_planning_storage
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
 logger = logging.getLogger(__name__)
+
+
+def _xlsx_cell(value: Any, row_idx: int, col_idx: int) -> str:
+    letters = ""
+    n = col_idx
+    while n:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(65 + rem) + letters
+    ref = f"{letters}{row_idx}"
+    text = _xml_escape(str(value if value is not None else ""))
+    return f'<c r="{ref}" t="inlineStr"><is><t>{text}</t></is></c>'
+
+
+def _xlsx_example_response(*, filename: str, sheet_name: str, headers: list[str], example_row: list[Any]) -> StreamingResponse:
+    rows = [headers, example_row]
+    sheet_rows = []
+    for row_idx, row in enumerate(rows, start=1):
+        cells = "".join(_xlsx_cell(value, row_idx, col_idx) for col_idx, value in enumerate(row, start=1))
+        sheet_rows.append(f'<row r="{row_idx}">{cells}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<sheetData>{''.join(sheet_rows)}</sheetData>"
+        "</worksheet>"
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f'<sheets><sheet name="{_xml_escape(sheet_name)}" sheetId="1" r:id="rId1"/></sheets>'
+        "</workbook>"
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        "</Types>"
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+    workbook_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        "</Relationships>"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", root_rels)
+        archive.writestr("xl/workbook.xml", workbook_xml)
+        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _douano_base_url() -> str:
@@ -172,6 +245,20 @@ def _parse_json_payload(raw: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail="Douano response is geen geldige JSON.") from exc
 
 
+def _parse_exporter_payload(raw: str) -> Any:
+    try:
+        return json.loads(raw or "")
+    except ValueError as exc:
+        snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+        if len(snippet) > 500:
+            snippet = snippet[:500] + "..."
+        logger.exception("Douano exporter response JSON parsing failed")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Douano exporter response is geen geldige JSON: {snippet}",
+        ) from exc
+
+
 def _extract_result_list(payload: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
     result = payload.get("result")
     if not isinstance(result, dict):
@@ -182,6 +269,26 @@ def _extract_result_list(payload: dict[str, Any]) -> tuple[int, list[dict[str, A
         return current_page, []
     cleaned: list[dict[str, Any]] = [row for row in data if isinstance(row, dict)]
     return current_page, cleaned
+
+
+def _extract_exporter_list(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if not isinstance(payload, dict):
+        return []
+    candidates = [
+        payload.get("data"),
+        payload.get("items"),
+        payload.get("result"),
+        payload.get("results"),
+    ]
+    result = payload.get("result")
+    if isinstance(result, dict):
+        candidates.extend([result.get("data"), result.get("items")])
+    for candidate in candidates:
+        if isinstance(candidate, list):
+            return [row for row in candidate if isinstance(row, dict)]
+    return []
 
 
 async def _fetch_paged_resource(
@@ -237,6 +344,36 @@ async def _fetch_paged_resource(
         "max_pages_reached": bool(stop_reason == "max_pages" and pages_fetched >= int(max_pages)),
     }
     return items, meta
+
+
+async def _fetch_exporter_resource(
+    *,
+    tokens: dict[str, Any],
+    data_collector: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    expires_at = _parse_iso_ts(tokens.get("expires_at"))
+    if expires_at is not None:
+        now = datetime.now(UTC)
+        if expires_at <= now + timedelta(seconds=60):
+            tokens = await _refresh_douano_tokens(tokens)
+
+    base = _douano_api_base_url(tokens)
+    path = f"/api/public/v1/exporter/{urllib.parse.quote(data_collector.strip())}"
+    url = f"{base}{path}"
+    status, _, raw = await _douano_request(tokens=tokens, method="GET", url=url)
+    if status == 401:
+        tokens = await _refresh_douano_tokens(tokens)
+        status, _, raw = await _douano_request(tokens=tokens, method="GET", url=url)
+    if status <= 0:
+        raise HTTPException(status_code=502, detail="Douano exporter request faalde.")
+    if status >= 400:
+        snippet = raw.strip().replace("\r", " ").replace("\n", " ")
+        if len(snippet) > 300:
+            snippet = snippet[:300] + "..."
+        raise HTTPException(status_code=502, detail=f"Douano exporter fetch faalde ({status}) voor {path}: {snippet}")
+    payload = _parse_exporter_payload(raw)
+    items = _extract_exporter_list(payload)
+    return items, {"path": path, "data_collector": data_collector, "response_shape": type(payload).__name__}
 
 
 def _set_state_cookie(response: Response, state: str) -> None:
@@ -483,13 +620,13 @@ def get_douano_sync_status() -> dict[str, Any]:
 
 
 @router.post("/douano/sync/companies")
-def post_douano_sync_companies(
+async def post_douano_sync_companies(
     max_pages: int = Query(10, ge=1, le=200),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
-        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/companies", max_pages=max_pages)
+        items, fetch_meta = await _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/companies", max_pages=max_pages)
         for row in items:
             douano_sync_storage.upsert_raw_object(
                 resource="companies",
@@ -510,7 +647,7 @@ def post_douano_sync_companies(
 
 
 @router.post("/douano/sync/products")
-def post_douano_sync_products(
+async def post_douano_sync_products(
     max_pages: int = Query(10, ge=1, le=200),
     is_sellable: bool = Query(True, description="Wanneer true: filter_by_is_sellable=true"),
     _: dict = Depends(require_admin),
@@ -520,7 +657,7 @@ def post_douano_sync_products(
     if is_sellable:
         query["filter_by_is_sellable"] = "true"
     try:
-        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/products", query=query, max_pages=max_pages)
+        items, fetch_meta = await _fetch_paged_resource(tokens=tokens, path="/api/public/v1/core/products", query=query, max_pages=max_pages)
         for row in items:
             douano_sync_storage.upsert_raw_object(
                 resource="products",
@@ -556,14 +693,16 @@ def post_douano_sync_products(
 
 
 @router.post("/douano/sync/sales-orders")
-def post_douano_sync_sales_orders(
+async def post_douano_sync_sales_orders(
     max_pages: int = Query(200, ge=1, le=500),
     since_date: str = Query("", description="Optioneel: filter orders client-side op date >= since_date (YYYY-MM-DD)."),
+    recompute_snapshots: bool = Query(True, description="Herbereken opgeslagen omzet/marge kostprijssnapshots na orders-sync."),
+    snapshot_limit: int = Query(50000, ge=1, le=50000),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
-        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-orders", max_pages=max_pages)
+        items, fetch_meta = await _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-orders", max_pages=max_pages)
         filtered: list[dict[str, Any]] = []
         since = since_date.strip()
         for row in items:
@@ -613,6 +752,12 @@ def post_douano_sync_sales_orders(
             "returned_items_count": int(returned_count),
             "misc_items_count": int(misc_count),
         }
+        if recompute_snapshots:
+            out_stats["snapshot_backfill"] = douano_margin_service.backfill_line_snapshots(
+                since=since or min_date,
+                basis="order",
+                limit=int(snapshot_limit),
+            )
         douano_sync_storage.set_sync_state(resource="sales_orders", success=True, since_date=since or None, stats=out_stats, error="")
         return {"resource": "sales_orders", **out_stats}
     except HTTPException as exc:
@@ -624,14 +769,16 @@ def post_douano_sync_sales_orders(
 
 
 @router.post("/douano/sync/sales-invoices")
-def post_douano_sync_sales_invoices(
+async def post_douano_sync_sales_invoices(
     max_pages: int = Query(200, ge=1, le=500),
     since_date: str = Query("", description="Optioneel: filter invoices client-side op date >= since_date (YYYY-MM-DD)."),
+    recompute_snapshots: bool = Query(True, description="Herbereken opgeslagen omzet/marge kostprijssnapshots na invoices-sync."),
+    snapshot_limit: int = Query(50000, ge=1, le=50000),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
-        items, fetch_meta = _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-invoices", max_pages=max_pages)
+        items, fetch_meta = await _fetch_paged_resource(tokens=tokens, path="/api/public/v1/trade/sales-invoices", max_pages=max_pages)
         filtered: list[dict[str, Any]] = []
         since = since_date.strip()
         for row in items:
@@ -675,6 +822,12 @@ def post_douano_sync_sales_invoices(
             "invoice_line_items_count": int(line_count),
             "invoiced_transaction_numbers_count": int(invoiced_numbers_count),
         }
+        if recompute_snapshots:
+            out_stats["snapshot_backfill"] = douano_margin_service.backfill_line_snapshots(
+                since=since or min_date,
+                basis="invoice",
+                limit=int(snapshot_limit),
+            )
         douano_sync_storage.set_sync_state(
             resource="sales_invoices",
             success=True,
@@ -695,6 +848,48 @@ def post_douano_sync_sales_invoices(
     except Exception as exc:
         douano_sync_storage.set_sync_state(resource="sales_invoices", success=False, since_date=since_date.strip() or None, stats={}, error=str(exc))
         raise HTTPException(status_code=500, detail="Sales-invoices sync faalde.") from exc
+
+
+@router.post("/douano/sync/stock-history-lots")
+async def post_douano_sync_stock_history_lots(
+    data_collector: str = Query("stock_history_data"),
+    recompute_snapshots: bool = Query(True, description="Herbereken opgeslagen omzet/marge kostprijssnapshots na LOT-sync."),
+    snapshot_limit: int = Query(50000, ge=1, le=50000),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    resource = "stock_history_lots"
+    try:
+        items, fetch_meta = await _fetch_exporter_resource(tokens=tokens, data_collector=data_collector)
+        stats = lot_costs_storage.upsert_douano_sales_lot_rows(items, source_ref=data_collector)
+        out_stats = {
+            **stats,
+            "fetch": fetch_meta,
+            "filters": {
+                "transaction_type": "Verkoop",
+                "stock_document_type": "Verzending",
+                "cause": "Verwijderd",
+            },
+        }
+        if recompute_snapshots:
+            out_stats["snapshot_backfill"] = douano_margin_service.backfill_line_snapshots(
+                basis="both",
+                limit=int(snapshot_limit),
+            )
+        douano_sync_storage.set_sync_state(resource=resource, success=True, since_date=None, stats=out_stats, error="")
+        return {"resource": resource, **out_stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(
+            resource=resource,
+            success=False,
+            since_date=None,
+            stats={"fetch": {"path": f"/api/public/v1/exporter/{data_collector}", "data_collector": data_collector}},
+            error=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource=resource, success=False, since_date=None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail="Stock-history LOT sync faalde.") from exc
 
 
 @router.get("/douano/companies")
@@ -956,6 +1151,7 @@ def post_douano_backfill_line_snapshots(
     since: str = Query("", description="Optioneel: filter op order_date >= since (YYYY-MM-DD)"),
     company_id: int = Query(0, ge=0, description="Optioneel: alleen deze company_id backfillen"),
     limit: int = Query(5000, ge=1, le=50000),
+    basis: str = Query("both", pattern="^(order|invoice|both)$"),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     return {
@@ -963,6 +1159,7 @@ def post_douano_backfill_line_snapshots(
             since=since,
             company_id=int(company_id or 0),
             limit=int(limit),
+            basis=basis,
         )
     }
 
@@ -1146,6 +1343,274 @@ def delete_douano_product_mapping(
 @router.get("/douano/product-ignored")
 def get_douano_product_ignored(limit: int = Query(10000, ge=1, le=50000)) -> dict[str, Any]:
     return {"items": douano_product_ignore_storage.list_ignored(limit=int(limit))}
+
+
+@router.get("/break-even/plans")
+def get_break_even_plans(
+    year: int = Query(0),
+    include_archived: bool = Query(False),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"items": break_even_planning_storage.list_plan_snapshots(year=int(year), include_archived=bool(include_archived))}
+    except Exception as exc:
+        logger.exception("Break-even plan listing failed")
+        raise HTTPException(status_code=500, detail="Break-even plannen konden niet worden geladen.") from exc
+
+
+@router.post("/break-even/plans")
+def post_break_even_plan(
+    payload: dict[str, Any] = Body(default={}),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        year = int(payload.get("year", payload.get("jaar", 0)) or 0)
+        scenario_name = str(payload.get("scenario_name", payload.get("naam", "Basis")) or "Basis")
+        replace_active = bool(payload.get("replace_active", False))
+        return {
+            "item": break_even_planning_service.create_plan_from_active_costs(
+                year=year,
+                scenario_name=scenario_name,
+                replace_active=replace_active,
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even plan creation failed")
+        raise HTTPException(status_code=500, detail="Break-even plan kon niet worden opgeslagen.") from exc
+
+
+@router.post("/break-even/reforecast")
+def post_break_even_reforecast(
+    payload: dict[str, Any] = Body(default={}),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "item": break_even_planning_service.create_reforecast(
+                year=int(payload.get("year", payload.get("jaar", 0)) or 0),
+                plan_snapshot_id=str(payload.get("plan_snapshot_id", "") or ""),
+                as_of_date=str(payload.get("as_of_date", "") or ""),
+                basis=str(payload.get("basis", "invoice") or "invoice"),
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even reforecast failed")
+        raise HTTPException(status_code=500, detail="Break-even prognose kon niet worden geactualiseerd.") from exc
+
+
+@router.post("/break-even/close-year")
+def post_break_even_close_year(
+    payload: dict[str, Any] = Body(default={}),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "item": break_even_planning_service.close_year(
+                year=int(payload.get("year", payload.get("jaar", 0)) or 0),
+                basis=str(payload.get("basis", "invoice") or "invoice"),
+                overwrite=bool(payload.get("overwrite", False)),
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even year close failed")
+        raise HTTPException(status_code=500, detail="Jaar kon niet worden afgesloten.") from exc
+
+
+@router.get("/break-even/year-close-preview")
+def get_break_even_year_close_preview(
+    year: int = Query(...),
+    basis: str = Query("invoice"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"preview": break_even_planning_service.build_year_close_payload(year=int(year), basis=str(basis or "invoice"))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even year close preview failed")
+        raise HTTPException(status_code=500, detail="Jaarafsluiting preview kon niet worden geladen.") from exc
+
+
+@router.get("/break-even/model-review")
+def get_break_even_model_review(_: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return {"result": break_even_planning_service.model_review()}
+    except Exception as exc:
+        logger.exception("Break-even model review failed")
+        raise HTTPException(status_code=500, detail="Datamodel review kon niet worden geladen.") from exc
+
+
+@router.get("/lot-costs")
+def get_lot_costs(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
+    return {"items": lot_costs_storage.list_lot_cost_records(limit=int(limit))}
+
+
+@router.get("/lot-costs/reconciliation")
+def get_lot_reconciliation(
+    year: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=5000),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    groups = lot_costs_storage.list_lot_master_reconciliation(year=int(year or 0), limit=int(limit))
+    items = [row for group in groups for row in group.get("rows", [])]
+    return {"groups": groups, "items": items}
+
+
+@router.put("/lot-costs/aliases")
+def put_lot_alias(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return {"record": lot_costs_storage.upsert_lot_alias(payload)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/lot-costs/aliases/{alias_id}")
+def delete_lot_alias(alias_id: str, _: dict = Depends(require_admin)) -> dict[str, Any]:
+    return {"deleted": lot_costs_storage.delete_lot_alias(alias_id)}
+
+
+@router.post("/lot-costs/correct-internal-lot")
+def post_correct_internal_lot(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return {"result": lot_costs_storage.correct_internal_lot_to_douano(payload)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/lot-costs")
+def post_lot_cost(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return {"record": lot_costs_storage.upsert_lot_cost_record(payload)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/lot-costs/stock-history/preview")
+async def post_stock_history_preview(
+    request: Request,
+    filename: str = Query("voorraadhistoriek.xlsx"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=400, detail="Bestand ontbreekt.")
+        return lot_costs_storage.preview_stock_history_import(content, filename)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/lot-costs/stock-history/confirm")
+async def post_stock_history_confirm(
+    request: Request,
+    filename: str = Query("voorraadhistoriek.xlsx"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=400, detail="Bestand ontbreekt.")
+        return lot_costs_storage.confirm_stock_history_import(content, filename)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/lot-costs/stock-history/enrich-missing")
+async def post_stock_history_enrich_missing(
+    request: Request,
+    filename: str = Query("lot-verrijking.xlsx"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=400, detail="Bestand ontbreekt.")
+        return lot_costs_storage.enrich_missing_sales_lots_from_excel(content, filename)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/lot-costs/stock-history/example")
+def get_stock_history_example(_: dict = Depends(require_admin)) -> StreamingResponse:
+    return _xlsx_example_response(
+        filename="voorraadhistoriek-voorbeeld.xlsx",
+        sheet_name="Voorraadhistoriek",
+        headers=lot_costs_storage.STOCK_HISTORY_COLUMNS,
+        example_row=["2025-01-15", "202500123", "301002", "Berlewalde Blond 24 x 33cl", "LOT-2025-001", "Voorbeeld klant", 10],
+    )
+
+
+@router.get("/lot-costs/stock-history/imports")
+def get_stock_history_imports(
+    limit: int = Query(100, ge=1, le=1000),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    return {"items": lot_costs_storage.list_stock_history_imports(limit=int(limit))}
+
+
+@router.delete("/lot-costs/stock-history/imports/{import_batch_id}")
+def delete_stock_history_import(import_batch_id: str, _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        deleted = lot_costs_storage.delete_stock_history_import(import_batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": deleted}
+
+
+@router.get("/lot-costs/opening-lots/example")
+def get_opening_lots_example(_: dict = Depends(require_admin)) -> StreamingResponse:
+    return _xlsx_example_response(
+        filename="opening-lot-voorbeeld.xlsx",
+        sheet_name="Opening LOT",
+        headers=lot_costs_storage.OPENING_LOT_COLUMNS,
+        example_row=["Wentersch", "wenterschBlond", "301002", "Berlewalde Blond 24 x 33cl", "2024-12-31", 120, 24.0, 1.0, "Ja"],
+    )
+
+
+@router.post("/lot-costs/opening-lots/preview")
+async def post_opening_lots_preview(
+    request: Request,
+    filename: str = Query("opening-lots.xlsx"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=400, detail="Bestand ontbreekt.")
+        return lot_costs_storage.preview_opening_lot_import(content, filename)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/lot-costs/opening-lots/confirm")
+async def post_opening_lots_confirm(
+    request: Request,
+    filename: str = Query("opening-lots.xlsx"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=400, detail="Bestand ontbreekt.")
+        return lot_costs_storage.confirm_opening_lot_import(content, filename)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.put("/douano/product-ignored/{douano_product_id}")

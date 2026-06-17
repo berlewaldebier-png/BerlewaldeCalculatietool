@@ -7,6 +7,7 @@ import { useMemo } from "react";
 
 import {
   BarChart3,
+  ChartNoAxesCombined,
   FileText,
   Scale,
   GitBranch,
@@ -22,10 +23,13 @@ import {
   SlidersHorizontal,
   Coins,
   Layers3,
+  Boxes,
   Factory,
   Percent,
   Settings,
+  ListChecks,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import type { NavigationItem } from "@/lib/apiShared";
 
@@ -36,28 +40,12 @@ type DashboardNavItem = {
 };
 
 type DashboardNavGroup = {
-  title?: string;
+  title: string;
+  icon: LucideIcon;
   items: DashboardNavItem[];
-  collapsible?: boolean;
-  defaultOpen?: boolean;
 };
 
 function buildNavGroups(navigation: NavigationItem[], activePath: string): DashboardNavGroup[] {
-  const preferredOrder = [
-    "/",
-    "/prijsvoorstellen",
-    "/break-even-v2",
-    "/scenario-analyse",
-    "/omzet-en-marge",
-    "/bieren",
-    "/recept-hercalculatie",
-    "/inkoopfacturen",
-    "/verkoopstrategie",
-    "/adviesprijzen",
-    "/nieuw-jaar-voorbereiden",
-    "/beheer"
-  ];
-
   const normalized = navigation.map((item) => ({
     label: item.label,
     href: item.href
@@ -67,100 +55,106 @@ function buildNavGroups(navigation: NavigationItem[], activePath: string): Dashb
   const activeNormalized = String(activePath || "/").trim() || "/";
 
   // Frontend-owned entries that the backend navigation may not contain (yet).
-  if (!byHref.has("/prijsvoorstellen")) {
-    byHref.set("/prijsvoorstellen", { label: "Prijsvoorstel maken", href: "/prijsvoorstellen" });
-  }
-  if (!byHref.has("/break-even-v2")) {
-    byHref.set("/break-even-v2", { label: "Break-even analyseren", href: "/break-even-v2" });
-  }
-  if (!byHref.has("/omzet-en-marge")) {
-    byHref.set("/omzet-en-marge", { label: "Omzet & marge", href: "/omzet-en-marge" });
-  }
-  if (!byHref.has("/scenario-analyse")) {
-    byHref.set("/scenario-analyse", { label: "Scenario analyse", href: "/scenario-analyse" });
-  }
-  if (!byHref.has("/producten-verpakking")) {
-    byHref.set("/producten-verpakking", { label: "Producten & verpakkingen", href: "/producten-verpakking" });
-  }
-  if (!byHref.has("/instellingen")) {
-    byHref.set("/instellingen", { label: "Instellingen", href: "/instellingen" });
-  }
-  if (!byHref.has("/diensten")) {
-    byHref.set("/diensten", { label: "Diensten", href: "/diensten" });
+  const fallbackItems = [
+    { label: "Break-even analyseren", href: "/break-even" },
+    { label: "Scenario analyse", href: "/scenario-analyse" },
+    { label: "Omzet & marge", href: "/omzet-en-marge" },
+    { label: "Prijsvoorstel maken", href: "/prijsvoorstellen" },
+    { label: "Verkoopstrategie", href: "/verkoopstrategie" },
+    { label: "Adviesprijzen", href: "/adviesprijzen" },
+    { label: "Bieren", href: "/bieren" },
+    { label: "Producten en verpakkingen", href: "/producten-verpakking" },
+    { label: "Diensten", href: "/diensten" },
+    { label: "Kostprijs beheer", href: "/nieuwe-kostprijsberekening" },
+    { label: "Vaste kosten (ABC)", href: "/vaste-kosten" },
+    { label: "Productie en drivers", href: "/productie" },
+    { label: "Tarieven en heffingen", href: "/tarieven-heffingen" },
+    { label: "Recept hercalculeren", href: "/recept-hercalculatie" },
+    { label: "Inkoopfacturen", href: "/inkoopfacturen" },
+    { label: "Instellingen", href: "/instellingen" },
+    { label: "Jaar afsluiten", href: "/jaar-afsluiten" },
+    { label: "Nieuw jaar voorbereiden", href: "/nieuw-jaar-voorbereiden" },
+    { label: "Beheer", href: "/beheer" },
+    { label: "Productkoppeling", href: "/beheer/productkoppeling" },
+  ];
+  for (const item of fallbackItems) {
+    if (!byHref.has(item.href)) {
+      byHref.set(item.href, item);
+    }
   }
 
-  // Kostprijs management group (Phase 6.1): keep costing-related flows together.
-  const costingOrder = [
-    "/nieuwe-kostprijsberekening",
-    "/vaste-kosten",
-    "/productie",
-    "/tarieven-heffingen",
-    "/instellingen",
+  const sectionSpecs: Array<{
+    title: string;
+    icon: LucideIcon;
+    items: Array<{ href: string; label: string }>;
+  }> = [
+    {
+      title: "Analyse",
+      icon: ChartNoAxesCombined,
+      items: [
+        { href: "/break-even", label: "Break-even analyseren" },
+        { href: "/scenario-analyse", label: "Scenario analyseren" },
+        { href: "/omzet-en-marge", label: "Omzet en marge" },
+      ],
+    },
+    {
+      title: "Prijsbeheer",
+      icon: Target,
+      items: [
+        { href: "/prijsvoorstellen", label: "Prijsvoorstel maken" },
+        { href: "/verkoopstrategie", label: "Verkoopstrategie" },
+        { href: "/adviesprijzen", label: "Adviesprijzen" },
+      ],
+    },
+    {
+      title: "Aanbod",
+      icon: Boxes,
+      items: [
+        { href: "/bieren", label: "Bieren" },
+        { href: "/producten-verpakking", label: "Producten en verpakkingen" },
+        { href: "/diensten", label: "Diensten" },
+      ],
+    },
+    {
+      title: "Kostenstructuur",
+      icon: Layers3,
+      items: [
+        { href: "/nieuwe-kostprijsberekening", label: "Kostprijs beheer" },
+        { href: "/vaste-kosten", label: "Vaste kosten (ABC)" },
+        { href: "/productie", label: "Productie en drivers" },
+        { href: "/tarieven-heffingen", label: "Tarieven en heffingen" },
+        { href: "/recept-hercalculatie", label: "Recept hercalculeren" },
+        { href: "/inkoopfacturen", label: "Inkoopfacturen" },
+        { href: "/instellingen", label: "Instellingen" },
+      ],
+    },
+    {
+      title: "Beheren",
+      icon: Settings,
+      items: [
+        { href: "/jaar-afsluiten", label: "Jaar afsluiten" },
+        { href: "/setup", label: "Setup" },
+        { href: "/nieuw-jaar-voorbereiden", label: "Nieuw jaar voorbereiden" },
+        { href: "/beheer/productkoppeling", label: "Productkoppeling" },
+        { href: "/beheer", label: "Beheer" },
+      ],
+    },
   ];
 
-  const costItems: DashboardNavItem[] = [];
-  for (const href of costingOrder) {
-    const found = byHref.get(href);
-    if (!found) continue;
-    const label =
-      href === "/nieuwe-kostprijsberekening"
-        ? "Kostprijs beheer"
-        : href === "/vaste-kosten"
-          ? "Vaste kosten (ABC)"
-          : href === "/productie"
-            ? "Productie en drivers"
-            : href === "/tarieven-heffingen"
-              ? "Tarieven en heffingen"
-              : found.label;
-    costItems.push({
-      ...found,
-      label,
-      active: activeNormalized === href || (href !== "/" && activeNormalized.startsWith(`${href}/`)),
-    });
-  }
-
-  const mainItems: DashboardNavItem[] = [];
-
-  for (const href of preferredOrder) {
-    const found = byHref.get(href);
-    if (!found) continue;
-    mainItems.push({
-      ...found,
-      active: activeNormalized === href || (href !== "/" && activeNormalized.startsWith(`${href}/`))
-    });
-  }
-
-  // Fallback: ensure overview is always present.
-  if (!mainItems.some((item) => item.href === "/")) {
-    mainItems.unshift({ label: "Overzicht", href: "/", active: activeNormalized === "/" });
-  }
-
-  const groups: DashboardNavGroup[] = [];
-  groups.push({ items: mainItems });
-
-  const productsItems: DashboardNavItem[] = [];
-  for (const href of ["/producten-verpakking", "/diensten"]) {
-    const found = byHref.get(href);
-    if (!found) continue;
-    const label =
-      href === "/producten-verpakking"
-        ? "Producten & verpakkingen"
-        : href === "/diensten"
-          ? "Diensten"
-          : found.label;
-    productsItems.push({
-      ...found,
-      label,
-      active: activeNormalized === href || (href !== "/" && activeNormalized.startsWith(`${href}/`)),
-    });
-  }
-  if (productsItems.length > 0) {
-    groups.push({ title: "Producten & diensten \u25BC", items: productsItems, collapsible: true, defaultOpen: true });
-  }
-  if (costItems.length > 0) {
-    groups.push({ title: "Kostprijs management \u25BC", items: costItems, collapsible: true, defaultOpen: true });
-  }
-  return groups;
+  return sectionSpecs.map((section) => {
+    const items: DashboardNavItem[] = [];
+    for (const spec of section.items) {
+      const found = byHref.get(spec.href);
+      if (!found) continue;
+      const href = found.href;
+      items.push({
+        ...found,
+        label: spec.label,
+        active: activeNormalized === href || (href !== "/" && activeNormalized.startsWith(`${href}/`)),
+      });
+    }
+    return { title: section.title, icon: section.icon, items };
+  }).filter((group) => group.items.length > 0);
 }
 
 function MenuIcon() {
@@ -176,24 +170,25 @@ function MenuIcon() {
 function getNavIcon(href: string) {
   const key = String(href || "").trim() || "/";
 
-  // Main nav
-  if (key === "/") return BarChart3;
-  if (key === "/prijsvoorstellen") return FileText;
-  if (key === "/break-even-v2") return Scale;
+  if (key === "/break-even") return Scale;
   if (key === "/scenario-analyse") return GitBranch;
   if (key === "/omzet-en-marge") return TrendingUp;
-  if (key === "/producten-verpakking") return Package;
-  if (key === "/diensten") return Briefcase;
-  if (key === "/bieren") return Beer;
-  if (key === "/recept-hercalculatie") return Calculator;
-  if (key === "/inkoopfacturen") return Receipt;
+  if (key === "/prijsvoorstellen") return FileText;
   if (key === "/verkoopstrategie") return Target;
   if (key === "/adviesprijzen") return Tag;
-  if (key === "/nieuw-jaar-voorbereiden") return CalendarCheck;
+  if (key === "/bieren") return Beer;
+  if (key === "/producten-verpakking") return Package;
+  if (key === "/diensten") return Briefcase;
+  if (key === "/nieuwe-kostprijsberekening") return Coins;
+  if (key === "/recept-hercalculatie") return Calculator;
+  if (key === "/inkoopfacturen") return Receipt;
+  if (key === "/jaar-afsluiten") return CalendarCheck;
+  if (key === "/setup") return ListChecks;
+  if (key === "/nieuw-jaar-voorbereiden") return ListChecks;
+  if (key === "/beheer/productkoppeling") return Package;
   if (key === "/beheer") return SlidersHorizontal;
 
-  // Kostprijs management
-  if (key === "/nieuwe-kostprijsberekening") return Coins;
+  // Existing costing/admin routes can still arrive from backend navigation.
   if (key === "/vaste-kosten") return Layers3;
   if (key === "/productie") return Factory;
   if (key === "/tarieven-heffingen") return Percent;
@@ -214,6 +209,7 @@ export function NavigationSidebar({
   footer?: ReactNode;
 }) {
   const groups = useMemo(() => buildNavGroups(navigation, activePath), [navigation, activePath]);
+  const activeNormalized = String(activePath || "/").trim() || "/";
 
   return (
     <aside className={`dashboard-sidebar${variant === "pageShell" ? " page-shell-sidebar" : ""}`}>
@@ -223,51 +219,42 @@ export function NavigationSidebar({
       </div>
 
       <nav className="dashboard-sidebar-nav" aria-label="Hoofdnavigatie">
+        <Link
+          href={"/" as Route}
+          className={`dashboard-sidebar-link dashboard-sidebar-overview${activeNormalized === "/" ? " is-active" : ""}`}
+          aria-label="Overzicht"
+          title="Overzicht"
+        >
+          <span className="dashboard-sidebar-icon">
+            <BarChart3 className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <span className="dashboard-sidebar-label">Overzicht</span>
+        </Link>
         {groups.map((group, groupIndex) => (
           <div key={`group-${groupIndex}`} className="dashboard-sidebar-group">
-            {group.title && group.collapsible ? (
-              <details className="dashboard-sidebar-group-details" open={group.defaultOpen}>
-                <summary className="dashboard-sidebar-group-title">{group.title}</summary>
-                {group.items.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href as Route}
-                    className={`dashboard-sidebar-link${item.active ? " is-active" : ""}`}
-                    aria-label={item.label}
-                    title={item.label}
-                  >
-                    <span className="dashboard-sidebar-icon">
-                      {(() => {
-                        const Icon = getNavIcon(item.href);
-                        return Icon ? <Icon className="h-5 w-5" /> : <MenuIcon />;
-                      })()}
-                    </span>
-                    <span className="dashboard-sidebar-label">{item.label}</span>
-                  </Link>
-                ))}
-              </details>
-            ) : (
-              <>
-                {group.title ? <div className="dashboard-sidebar-group-title">{group.title}</div> : null}
-                {group.items.map((item) => (
-                  <Link
-                    key={item.href}
-                    href={item.href as Route}
-                    className={`dashboard-sidebar-link${item.active ? " is-active" : ""}`}
-                    aria-label={item.label}
-                    title={item.label}
-                  >
-                    <span className="dashboard-sidebar-icon">
-                      {(() => {
-                        const Icon = getNavIcon(item.href);
-                        return Icon ? <Icon className="h-5 w-5" /> : <MenuIcon />;
-                      })()}
-                    </span>
-                    <span className="dashboard-sidebar-label">{item.label}</span>
-                  </Link>
-                ))}
-              </>
-            )}
+            <div className="dashboard-sidebar-group-title">
+              <span className="dashboard-sidebar-group-icon">
+                <group.icon className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <span>{group.title}</span>
+            </div>
+            {group.items.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href as Route}
+                className={`dashboard-sidebar-link${item.active ? " is-active" : ""}`}
+                aria-label={item.label}
+                title={item.label}
+              >
+                <span className="dashboard-sidebar-icon">
+                  {(() => {
+                    const Icon = getNavIcon(item.href);
+                    return Icon ? <Icon className="h-5 w-5" aria-hidden="true" /> : <MenuIcon />;
+                  })()}
+                </span>
+                <span className="dashboard-sidebar-label">{item.label}</span>
+              </Link>
+            ))}
           </div>
         ))}
       </nav>

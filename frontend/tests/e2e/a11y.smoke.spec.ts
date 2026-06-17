@@ -5,7 +5,7 @@ const TEST_USERNAME = process.env.TEST_USERNAME || "";
 const TEST_PASSWORD = process.env.TEST_PASSWORD || "";
 
 async function login(page: Page) {
-  await page.goto("/break-even-v2");
+  await page.goto("/break-even");
   if (!/\/login/.test(page.url())) return;
 
   await page.goto("/login");
@@ -21,7 +21,7 @@ test.describe("a11y smoke", () => {
   test("core pages have no critical/serious a11y violations", async ({ page }) => {
     await login(page);
 
-    const routes = ["/", "/break-even-v2", "/omzet-en-marge", "/beheer/productkoppeling", "/offerte-samenstellen"];
+    const routes = ["/", "/break-even", "/omzet-en-marge", "/beheer/productkoppeling", "/offerte-samenstellen"];
 
     for (const route of routes) {
       // Some routes can redirect or re-render server components; avoid flaky "load" waits.

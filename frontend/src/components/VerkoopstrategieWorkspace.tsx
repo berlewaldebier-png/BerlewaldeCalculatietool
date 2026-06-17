@@ -13,6 +13,7 @@ import { VerkoopstrategiePrijsinstellingenAccordion } from "@/components/verkoop
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
 import type { BeerViewRow, ProductViewRow } from "@/components/verkoopstrategie/verkoopstrategieTypes";
 import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
+import { normalizeSkuLabel } from "@/lib/skuLabels";
 import {
   DEFAULT_CHANNELS,
   STRATEGY_RECORD_TYPES,
@@ -25,7 +26,7 @@ import {
   type ChannelRow,
   type StrategyRow,
 } from "@/components/verkoopstrategie/verkoopstrategieWorkspaceUtils";
-import { buildArticleLabelMap, buildBasisProductParentMap, buildProductSources, stripInternal } from "@/components/verkoopstrategie/verkoopstrategieWorkspaceDerivations";
+import { buildArticleLabelMap, buildProductSources, stripInternal } from "@/components/verkoopstrategie/verkoopstrategieWorkspaceDerivations";
 
 type GenericRecord = Record<string, unknown>;
 type Props = {
@@ -36,6 +37,7 @@ type Props = {
   bieren: GenericRecord[];
   skus?: GenericRecord[];
   articles?: GenericRecord[];
+  bomLines?: GenericRecord[];
   berekeningen: GenericRecord[];
   /** Authoritative list of available years comes from productie. */
   productie?: unknown;
@@ -65,6 +67,7 @@ export function VerkoopstrategieWorkspace({
   bieren,
   skus,
   articles,
+  bomLines,
   berekeningen,
   productie,
   channels,
@@ -109,6 +112,27 @@ export function VerkoopstrategieWorkspace({
     });
     return map;
   }, [skus]);
+  const beerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(bieren) ? bieren : []).forEach((row) => {
+      const id = String((row as any)?.id ?? "").trim();
+      if (!id) return;
+      map.set(id, String((row as any)?.biernaam ?? (row as any)?.naam ?? id).trim() || id);
+    });
+    return map;
+  }, [bieren]);
+  const componentBeerIdByArticleId = useMemo(() => {
+    const map = new Map<string, string>();
+    (Array.isArray(bomLines) ? bomLines : []).forEach((line) => {
+      const parentArticleId = String((line as any)?.parent_article_id ?? "").trim();
+      const componentSkuId = String((line as any)?.component_sku_id ?? "").trim();
+      if (!parentArticleId || !componentSkuId || map.has(parentArticleId)) return;
+      const componentSku = skuById.get(componentSkuId);
+      const beerId = String((componentSku as any)?.beer_id ?? "").trim();
+      if (beerId) map.set(parentArticleId, beerId);
+    });
+    return map;
+  }, [bomLines, skuById]);
 
   // Year selection must be available before we derive SKU-driven product sources.
   const productieYears = useMemo(() => {
@@ -171,33 +195,13 @@ export function VerkoopstrategieWorkspace({
   ]);
   const productSources = useMemo(() => {
     return buildProductSources({
-      basisproducten,
-      samengesteldeProducten,
-      centralSkuRows: centralSkuIndex.rows as any,
-      skuById,
-      bundleArticleById,
       formatArticleById,
-      kostprijsproductactiveringen: Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [],
     });
 
   }, [
-    basisproducten,
-    berekeningen,
-    channels,
-    verkoopprijzen,
-    skus,
     articles,
-    effectiveSelectedYear,
-    samengesteldeProducten,
-    bundleArticleById,
     formatArticleById,
-    kostprijsproductactiveringen,
-    skuById,
   ]);
-  const basisProductParentMap = useMemo(() => {
-    return buildBasisProductParentMap(samengesteldeProducten);
-
-  }, [samengesteldeProducten]);
   const [rows, setRows] = useState<StrategyRow[]>(() => verkoopStrategyRows.map((row) => normalizeStrategyRow(row, channelCodes)));
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -347,8 +351,7 @@ export function VerkoopstrategieWorkspace({
       if (!current || current.jaar === 0) byProduct.set(row.product_id, row);
     });
     return productSources.map((product) => {
-      const parentComposite = product.type === "basis" ? basisProductParentMap.get(product.id) : undefined;
-      const effectiveProductId = parentComposite?.productId ?? product.id;
+      const effectiveProductId = product.id;
       const found = byProduct.get(effectiveProductId) ?? null;
       const opslagOverrides = Object.fromEntries(channelCodes.map((code) => {
         const value = found?.sell_in_margins?.[code];
@@ -367,12 +370,12 @@ export function VerkoopstrategieWorkspace({
         opslagOverrides,
         sellInPriceOverrides,
         activeOpslags: Object.fromEntries(channelCodes.map((code) => [code, opslagOverrides[code] === "" ? channelYearDefaults[code]?.opslag ?? 50 : Number(opslagOverrides[code])])) as Record<string, number>,
-        isReadOnly: Boolean(parentComposite),
-        followsProductId: parentComposite?.productId ?? "",
-        followsProductLabel: parentComposite?.label ?? ""
+        isReadOnly: false,
+        followsProductId: "",
+        followsProductLabel: ""
       };
     });
-  }, [basisProductParentMap, channelCodes, channelYearDefaults, productSources, rows, effectiveSelectedYear]);
+  }, [channelCodes, channelYearDefaults, productSources, rows, effectiveSelectedYear]);
 
   const sellRows = useMemo<BeerViewRow[]>(() => {
     if (mode === "draft" && Array.isArray(draftKostprijsPreviewRows) && draftKostprijsPreviewRows.length > 0) {
@@ -470,15 +473,23 @@ export function VerkoopstrategieWorkspace({
 
     const out: BeerViewRow[] = [];
     centralSkuIndex.rows
-      .filter((row) => row.subtype === "bier")
+      .filter((row) => row.subtype === "bier" || row.subtype === "product")
       .filter((row) => row.pricingMethod === "cost_plus")
       .filter((row) => row.isActive)
+      .filter((row) => row.kostprijsEx > 0)
       .forEach((centralRow) => {
         const sku = skuById.get(centralRow.skuId) ?? null;
-        const bierId = String((sku as any)?.beer_id ?? "").trim();
-        const productId = String((sku as any)?.format_article_id ?? "").trim();
+        const skuKind = String((sku as any)?.kind ?? "").trim().toLowerCase();
+        const bierIdRaw = String((sku as any)?.beer_id ?? "").trim();
+        const articleId = String((sku as any)?.article_id ?? "").trim();
+        const formatId = String((sku as any)?.format_article_id ?? "").trim();
+        const productId = skuKind === "article" ? articleId : formatId;
+        const componentBeerId = skuKind === "article" ? componentBeerIdByArticleId.get(articleId) ?? "" : "";
+        const bierId = bierIdRaw || componentBeerId || (skuKind === "article" ? `sku:${centralRow.skuId}` : "");
         if (!bierId || !productId) return;
-        const biernaam = String((sku as any)?.name ?? "").split(" - ")[0]?.trim() || bierId;
+        const rawSkuName = normalizeSkuLabel((sku as any)?.name ?? centralRow.label ?? "");
+        const fallbackBeerName = rawSkuName.split(" - ")[0]?.trim() || bierId;
+        const biernaam = beerNameById.get(bierId) || fallbackBeerName;
         const productDefaults = productById.get(productId);
         const followProductId = productDefaults?.followsProductId ?? "";
         const productOpslags =
@@ -517,14 +528,18 @@ export function VerkoopstrategieWorkspace({
           })
         ) as Record<string, number>;
 
-        const formatLabel = formatArticleById.get(productId)?.label ?? productId;
+        const productLabel =
+          normalizeSkuLabel(centralRow.label) ||
+          (skuKind === "article"
+            ? normalizeSkuLabel(bundleArticleById.get(productId)?.label ?? productId)
+            : normalizeSkuLabel(formatArticleById.get(productId)?.label ?? productId));
         out.push({
           id: override?.id || `${bierId}:${productId}`,
           bierId,
           biernaam,
           productId,
-          productType: (productDefaults?.productType ?? "basis") as any,
-          product: formatLabel,
+          productType: (productDefaults?.productType ?? (skuKind === "article" ? "samengesteld" : "basis")) as any,
+          product: productLabel,
           kostprijs,
           productOpslags,
           opslagOverrides,
@@ -549,6 +564,9 @@ export function VerkoopstrategieWorkspace({
     kostprijsproductactiveringen,
     skuById,
     formatArticleById,
+    bundleArticleById,
+    beerNameById,
+    componentBeerIdByArticleId,
     channelCodes,
     channelYearDefaults,
     draftKostprijsPreviewRows,

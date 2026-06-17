@@ -127,6 +127,18 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
     typeof invoer.inkoop === "object" && invoer.inkoop !== null
       ? (invoer.inkoop as GenericRecord)
       : {};
+  const facturen = Array.isArray(inkoop.facturen) ? inkoop.facturen : [];
+  const primaryFactuur =
+    facturen[0] && typeof facturen[0] === "object" ? (facturen[0] as GenericRecord) : {};
+  const lotnummer = String(
+    (inkoop as any).lotnummer ??
+      (primaryFactuur as any).lotnummer ??
+      (inkoop as any).lot_number ??
+      (primaryFactuur as any).lot_number ??
+      (inkoop as any).lot_nummer ??
+      (primaryFactuur as any).lot_nummer ??
+      ""
+  ).trim();
 
   row.invoer = {
     ingredienten: {
@@ -138,10 +150,11 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
       factuurregels: Array.isArray(inkoop.factuurregels) ? inkoop.factuurregels : [],
       factuurnummer: String(inkoop.factuurnummer ?? ""),
       factuurdatum: String(inkoop.factuurdatum ?? ""),
+      lotnummer,
       notities: String(inkoop.notities ?? ""),
       verzendkosten: Number(inkoop.verzendkosten ?? 0),
       overige_kosten: Number(inkoop.overige_kosten ?? 0),
-      facturen: Array.isArray(inkoop.facturen) ? inkoop.facturen : []
+      facturen
     }
   };
 
@@ -284,18 +297,30 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
   }
 
   steps.push({
-    id: "classificeren",
-    label: "Classificeren",
-    description: "Koppel productgroep, alcoholcategorie en verpakkingstype"
+    id: "kostprijs",
+    label: processType === "Inkoop" ? "Kostprijs o.b.v. inkoop" : "Kostprijs o.b.v. recept",
+    description:
+      processType === "Inkoop"
+        ? "Controleer de berekende kostprijs op basis van de inkoopinvoer"
+        : "Controleer de berekende kostprijs op basis van het recept"
+  });
+
+  steps.push({
+    id: "varianten",
+    label: "Verkoopbare varianten",
+    description: "Maak afgeleide SKU's zoals doos 12 x 33cl"
+  });
+
+  steps.push({
+    id: "koppelen",
+    label: "Koppelen",
+    description: "Koppel verkoopbare SKU's aan Douano producten"
   });
 
   steps.push({
     id: "summary",
     label: "Samenvatting",
-    description:
-      processType === "Inkoop"
-        ? "Controleer inkoop, accijns en kostprijs per verpakking"
-        : "Controleer ingredienten, verpakking en kostprijs per verpakking"
+    description: "Controleer kostprijs, varianten en Douano-koppelingen"
   });
 
   return steps;
@@ -329,6 +354,23 @@ function getIngredientType(row: GenericRecord) {
 
 function getProductDisplayName(row: GenericRecord) {
   return String(row.verpakking ?? row.omschrijving ?? "").trim();
+}
+
+function cleanUnitLabelForCurrentBeer(label: string, fallbackRow?: GenericRecord) {
+  const raw = String(label ?? "").trim();
+  if (!raw) return "";
+  const unitMatch = raw.match(/\b(fles(?:je)?|doos|fust|vat|blik|can|sixpack|krat|pakket)\b.*$/i);
+  if (unitMatch?.[0]) {
+    return unitMatch[0].replace(/\s{2,}/g, " ").trim();
+  }
+  const basis = (fallbackRow?.basisgegevens as GenericRecord | undefined) ?? {};
+  const beerName = String((basis as any)?.biernaam ?? "").trim();
+  if (!beerName) return raw;
+  const escaped = beerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return raw
+    .replace(new RegExp(`^${escaped}\\s*[-–—:]?\\s*`, "i"), "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || raw;
 }
 
 function getProductUnitLabel(
@@ -365,20 +407,36 @@ function getProductUnitOptions(
   fallbackRow?: GenericRecord
 ): ProductUnitOption[] {
   const basis = basisproducten
-    .map((row) => ({
-      id: String(row.id ?? ""),
-      label: String(row.omschrijving ?? ""),
-      litersPerUnit: Number(row.inhoud_per_eenheid_liter ?? 0),
-      source: row
-    }));
+    .map((row) => {
+      const label = cleanUnitLabelForCurrentBeer(String(row.omschrijving ?? ""), fallbackRow);
+      return {
+        id: String(row.id ?? ""),
+        label,
+        litersPerUnit: Number(row.inhoud_per_eenheid_liter ?? 0),
+        source: {
+          ...row,
+          omschrijving: label,
+          verpakking: label,
+          verpakkingseenheid: label
+        }
+      };
+    });
 
   const samengesteld = samengesteldeProducten
-    .map((row) => ({
-      id: String(row.id ?? ""),
-      label: String(row.omschrijving ?? ""),
-      litersPerUnit: Number(row.totale_inhoud_liter ?? 0),
-      source: row
-    }));
+    .map((row) => {
+      const label = cleanUnitLabelForCurrentBeer(String(row.omschrijving ?? ""), fallbackRow);
+      return {
+        id: String(row.id ?? ""),
+        label,
+        litersPerUnit: Number(row.totale_inhoud_liter ?? 0),
+        source: {
+          ...row,
+          omschrijving: label,
+          verpakking: label,
+          verpakkingseenheid: label
+        }
+      };
+    });
 
   const fallbackProducten =
     typeof fallbackRow?.resultaat_snapshot === "object" && fallbackRow.resultaat_snapshot !== null
@@ -398,7 +456,7 @@ function getProductUnitOptions(
             id: String(
               row.product_id ?? row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""
             ),
-            label: String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""),
+            label: cleanUnitLabelForCurrentBeer(String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""), fallbackRow),
             litersPerUnit: Number(row.liters_per_product ?? row.inhoud_per_eenheid_liter ?? 0),
             source: {
               ...row,
@@ -415,7 +473,7 @@ function getProductUnitOptions(
             id: String(
               row.product_id ?? row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""
             ),
-            label: String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""),
+            label: cleanUnitLabelForCurrentBeer(String(row.verpakking ?? row.verpakkingseenheid ?? row.omschrijving ?? ""), fallbackRow),
             litersPerUnit: Number(row.liters_per_product ?? row.totale_inhoud_liter ?? 0),
             source: {
               ...row,

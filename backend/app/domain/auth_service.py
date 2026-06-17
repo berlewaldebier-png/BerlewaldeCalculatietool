@@ -698,6 +698,16 @@ def bootstrap_admin(username: str, password: str, display_name: str, email: str 
 
 
 def auth_status() -> dict[str, Any]:
+    if not auth_enabled():
+        return {
+            "environment": environment_name(),
+            "enabled": False,
+            "mode": auth_mode(),
+            "postgres_configured": bool(postgres_storage.database_url()),
+            "storage_provider": postgres_storage.storage_provider(),
+            "user_count": 1 if _is_local_environment() else 0,
+            "has_admin": _is_local_environment(),
+        }
     users = list_users()
     return {
         "environment": environment_name(),

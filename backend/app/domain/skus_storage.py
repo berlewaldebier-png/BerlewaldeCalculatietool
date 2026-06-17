@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
@@ -144,6 +145,241 @@ def cleanup_duplicate_skus(*, dry_run: bool = True) -> dict[str, Any]:
             conn.commit()
 
     report["deleted"] = len(to_delete)
+    return report
+
+
+def cleanup_legacy_beer_format_aliases(*, dry_run: bool = True, year: int = 0) -> dict[str, Any]:
+    """Merge legacy beer_format SKU aliases into their canonical SKU.
+
+    Older dev data can contain two SKU ids for the same `(beer_id, format_article_id)`.
+    The bad ids usually look like `sku-<uuid>-fmt-*` and produce labels such as
+    `<uuid> - Berlewalde Blond - Fles 33cl`. This repair rewrites references to the
+    canonical SKU id and removes the legacy alias.
+    """
+    ensure_schema()
+
+    legacy_id_re = re.compile(r"^sku-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-", re.I)
+    legacy_name_re = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s+-\s+", re.I)
+
+    def _clean_name(value: str) -> str:
+        text = legacy_name_re.sub("", str(value or "").strip())
+        parts = [part.strip() for part in text.split(" - ") if part.strip()]
+        if len(parts) >= 3 and parts[0].lower() == parts[1].lower():
+            text = " - ".join([parts[0], *parts[2:]])
+        return text
+
+    def _norm_key(value: str) -> str:
+        return re.sub(r"\s+", " ", _clean_name(value).strip().lower())
+
+    def _score(row: dict[str, Any]) -> tuple[int, str]:
+        rid = str(row.get("id", "") or "")
+        name = str(row.get("name", "") or "")
+        legacy_penalty = 100 if legacy_id_re.match(rid) or legacy_name_re.match(name) else 0
+        active_score = -10 if bool(row.get("active", True)) else 0
+        return (legacy_penalty + len(rid) + active_score, rid)
+
+    skus = load_dataset(default_value=[])
+    if not isinstance(skus, list):
+        skus = []
+
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    name_groups: dict[str, list[dict[str, Any]]] = {}
+    for row in skus:
+        if not isinstance(row, dict):
+            continue
+        kind = str(row.get("kind", "") or "").strip().lower()
+        if kind != "beer_format":
+            continue
+        beer_id = str(row.get("beer_id", "") or "").strip()
+        format_id = str(row.get("format_article_id", "") or "").strip()
+        if beer_id and format_id:
+            groups.setdefault((beer_id, format_id), []).append(row)
+        name_key = _norm_key(str(row.get("name", "") or ""))
+        if name_key:
+            name_groups.setdefault(name_key, []).append(row)
+
+    merges: list[dict[str, Any]] = []
+    merged_remove_ids: set[str] = set()
+
+    def _append_merge(scope: str, rows: list[dict[str, Any]], *, beer_id: str = "", format_id: str = "") -> None:
+        sorted_rows = sorted(rows, key=_score)
+        keep = sorted_rows[0]
+        keep_id = str(keep.get("id", "") or "").strip()
+        remove = [
+            str(row.get("id", "") or "").strip()
+            for row in sorted_rows[1:]
+            if str(row.get("id", "") or "").strip()
+            and str(row.get("id", "") or "").strip() not in merged_remove_ids
+            and str(row.get("id", "") or "").strip() != keep_id
+        ]
+        if not keep_id or not remove:
+            return
+        for rid in remove:
+            merged_remove_ids.add(rid)
+        merges.append(
+            {
+                "scope": scope,
+                "beer_id": beer_id,
+                "format_article_id": format_id,
+                "keep": keep_id,
+                "remove": remove,
+                "keep_name": _clean_name(str(keep.get("name", "") or "")),
+            }
+        )
+
+    for (beer_id, format_id), rows in groups.items():
+        if len(rows) <= 1:
+            continue
+        _append_merge("natural-key", rows, beer_id=beer_id, format_id=format_id)
+
+    for name_key, rows in name_groups.items():
+        if len(rows) <= 1:
+            continue
+        legacy_rows = [
+            row
+            for row in rows
+            if legacy_id_re.match(str(row.get("id", "") or ""))
+            or legacy_name_re.match(str(row.get("name", "") or ""))
+        ]
+        canonical_rows = [row for row in rows if row not in legacy_rows]
+        if not legacy_rows or not canonical_rows:
+            continue
+        _append_merge(f"name:{name_key}", [*canonical_rows, *legacy_rows])
+
+    report: dict[str, Any] = {
+        "dry_run": bool(dry_run),
+        "year": int(year or 0),
+        "merge_scopes": len(merges),
+        "remove_count": sum(len(item["remove"]) for item in merges),
+        "examples": merges[:25],
+        "mutations": {},
+    }
+    if dry_run or not merges:
+        return report
+
+    now = datetime.now(UTC)
+    mutations: dict[str, int] = {
+        "cost_version_sku_rows_deleted": 0,
+        "cost_version_sku_rows_updated": 0,
+        "activations_deleted": 0,
+        "activations_updated": 0,
+        "activation_events_updated": 0,
+        "douano_mapping_deleted": 0,
+        "douano_mapping_updated": 0,
+        "bom_lines_updated": 0,
+        "sku_composition_lines_updated": 0,
+        "skus_deleted": 0,
+        "skus_renamed": 0,
+    }
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            for merge in merges:
+                keep_id = str(merge["keep"])
+                remove_ids = [str(v) for v in merge["remove"] if str(v)]
+                keep_name = str(merge.get("keep_name", "") or "").strip()
+                if not keep_id or not remove_ids:
+                    continue
+
+                if keep_name:
+                    cur.execute(
+                        "UPDATE skus SET name = %s, updated_at = %s WHERE id = %s AND name <> %s",
+                        (keep_name, now, keep_id, keep_name),
+                    )
+                    mutations["skus_renamed"] += int(cur.rowcount or 0)
+
+                # Avoid duplicate cost rows per version after rewriting old SKU ids.
+                cur.execute(
+                    """
+                    DELETE FROM cost_version_sku_rows old
+                    WHERE old.sku_id = ANY(%s)
+                      AND EXISTS (
+                        SELECT 1
+                        FROM cost_version_sku_rows keep
+                        WHERE keep.version_id = old.version_id
+                          AND keep.sku_id = %s
+                      )
+                    """,
+                    (remove_ids, keep_id),
+                )
+                mutations["cost_version_sku_rows_deleted"] += int(cur.rowcount or 0)
+                cur.execute(
+                    "UPDATE cost_version_sku_rows SET sku_id = %s WHERE sku_id = ANY(%s)",
+                    (keep_id, remove_ids),
+                )
+                mutations["cost_version_sku_rows_updated"] += int(cur.rowcount or 0)
+
+                year_clause = "AND jaar = %s" if int(year or 0) > 0 else ""
+                params_base: tuple[Any, ...] = (remove_ids, keep_id)
+                params_with_year: tuple[Any, ...] = (remove_ids, int(year or 0), keep_id) if int(year or 0) > 0 else params_base
+                cur.execute(
+                    f"""
+                    DELETE FROM kostprijs_sku_activations old
+                    WHERE old.sku_id = ANY(%s)
+                      {year_clause}
+                      AND EXISTS (
+                        SELECT 1
+                        FROM kostprijs_sku_activations keep
+                        WHERE keep.sku_id = %s
+                          AND keep.jaar = old.jaar
+                          AND keep.effectief_tot IS NULL
+                          AND old.effectief_tot IS NULL
+                      )
+                    """,
+                    params_with_year,
+                )
+                mutations["activations_deleted"] += int(cur.rowcount or 0)
+                cur.execute(
+                    f"UPDATE kostprijs_sku_activations SET sku_id = %s, updated_at = %s WHERE sku_id = ANY(%s) {year_clause}",
+                    (keep_id, now, remove_ids, int(year or 0)) if int(year or 0) > 0 else (keep_id, now, remove_ids),
+                )
+                mutations["activations_updated"] += int(cur.rowcount or 0)
+                cur.execute(
+                    f"UPDATE kostprijs_sku_activation_events SET sku_id = %s WHERE sku_id = ANY(%s) {year_clause}",
+                    (keep_id, remove_ids, int(year or 0)) if int(year or 0) > 0 else (keep_id, remove_ids),
+                )
+                mutations["activation_events_updated"] += int(cur.rowcount or 0)
+
+                try:
+                    cur.execute(
+                        """
+                        DELETE FROM douano_product_mapping old
+                        WHERE old.sku_id = ANY(%s)
+                          AND EXISTS (
+                            SELECT 1
+                            FROM douano_product_mapping keep
+                            WHERE keep.douano_product_id = old.douano_product_id
+                              AND keep.sku_id = %s
+                          )
+                        """,
+                        (remove_ids, keep_id),
+                    )
+                    mutations["douano_mapping_deleted"] += int(cur.rowcount or 0)
+                    cur.execute(
+                        "UPDATE douano_product_mapping SET sku_id = %s, updated_at = %s WHERE sku_id = ANY(%s)",
+                        (keep_id, now, remove_ids),
+                    )
+                    mutations["douano_mapping_updated"] += int(cur.rowcount or 0)
+                except Exception:
+                    pass
+
+                cur.execute("UPDATE bom_lines SET component_sku_id = %s WHERE component_sku_id = ANY(%s)", (keep_id, remove_ids))
+                mutations["bom_lines_updated"] += int(cur.rowcount or 0)
+                try:
+                    cur.execute(
+                        "UPDATE sku_composition_lines SET component_sku_id = %s WHERE component_sku_id = ANY(%s)",
+                        (keep_id, remove_ids),
+                    )
+                    mutations["sku_composition_lines_updated"] += int(cur.rowcount or 0)
+                except Exception:
+                    pass
+                cur.execute("DELETE FROM skus WHERE id = ANY(%s)", (remove_ids,))
+                mutations["skus_deleted"] += int(cur.rowcount or 0)
+
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    report["mutations"] = mutations
     return report
 
 

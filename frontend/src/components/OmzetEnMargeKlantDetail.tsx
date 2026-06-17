@@ -62,6 +62,18 @@ type OrderLineRow = {
   cost_price_ex: number | null;
   cost_total_ex: number;
   margin_ex: number;
+  cost_source?: string;
+  lot_number?: string;
+  lot_internal_number?: string;
+  lot_alias_id?: string;
+  lot_transaction_number?: string;
+  lot_supplier?: string;
+  lot_cost_missing?: boolean;
+  lot_near_match_version_id?: string;
+  lot_near_match_version_label?: string;
+  lot_near_match_number?: string;
+  kostprijsversie_id?: string;
+  kostprijsversie_label?: string;
 };
 
 type InvoiceLineRow = {
@@ -84,6 +96,18 @@ type InvoiceLineRow = {
   cost_price_ex: number | null;
   cost_total_ex: number;
   margin_ex: number;
+  cost_source?: string;
+  lot_number?: string;
+  lot_internal_number?: string;
+  lot_alias_id?: string;
+  lot_transaction_number?: string;
+  lot_supplier?: string;
+  lot_cost_missing?: boolean;
+  lot_near_match_version_id?: string;
+  lot_near_match_version_label?: string;
+  lot_near_match_number?: string;
+  kostprijsversie_id?: string;
+  kostprijsversie_label?: string;
 };
 
 type CompanyUnmappedProductRow = {
@@ -119,6 +143,84 @@ function formatDateNl(value: string) {
   const dt = new Date(`${text}T00:00:00`);
   if (Number.isNaN(dt.getTime())) return text;
   return dt.toLocaleDateString("nl-NL");
+}
+
+function costStatus(line: OrderLineRow | InvoiceLineRow) {
+  const versionLabel = String(line.kostprijsversie_label || "").trim();
+  const versionId = String(line.kostprijsversie_id || "").trim();
+  const versionText = versionLabel || (versionId ? "kostprijsversie" : "");
+  const hasLot = Boolean(String(line.lot_number || "").trim() || String(line.lot_transaction_number || "").trim());
+  const nearVersionLabel = String(line.lot_near_match_version_label || "").trim();
+  const nearVersionId = String(line.lot_near_match_version_id || "").trim();
+  const nearVersionText = nearVersionLabel || (nearVersionId ? "kostprijsversie" : "");
+  const nearLot = String(line.lot_near_match_number || "").trim();
+
+  if (
+    hasLot &&
+    (line.cost_source === "lot" ||
+      line.cost_source === "cost_version_lot" ||
+      line.cost_source === "lot_alias" ||
+      line.cost_source === "cost_version_lot_alias") &&
+    versionText
+  ) {
+    const internalLot = String(line.lot_internal_number || "").trim();
+    const viaAlias = line.cost_source === "lot_alias" || line.cost_source === "cost_version_lot_alias";
+    return {
+      label: `LOT + ${versionText}`,
+      title:
+        viaAlias && internalLot
+          ? `Douano LOT ${line.lot_number || "-"} gekoppeld aan interne LOT ${internalLot}; kostprijsversie ${versionText} gebruikt.`
+          : line.cost_source === "cost_version_lot"
+          ? `LOT en SKU gevonden in kostprijs-/inkoopversie ${versionText}.`
+          : `LOT en SKU gevonden; LOT-kostprijs gebruikt met actieve kostprijsversie ${versionText}.`,
+      background: "rgba(95,255,156,0.16)",
+    };
+  }
+
+  if (hasLot && versionText) {
+    if (nearLot && nearVersionText) {
+      return {
+        label: versionText,
+        title: `LOT ${line.lot_number || "-"} is niet exact bekend. Mogelijke match: ${nearLot} in ${nearVersionText}. Gerekend met actieve SKU-kostprijs ${versionText}.`,
+        background: "rgba(255,206,77,0.16)",
+      };
+    }
+    return {
+      label: versionText,
+      title: `LOT gevonden, maar geen kostprijs voor deze LOT + SKU. Gerekend met actieve SKU-kostprijs ${versionText}.`,
+      background: "rgba(255,206,77,0.16)",
+    };
+  }
+
+  if (!hasLot && versionText) {
+    return {
+      label: versionText,
+      title: `LOT niet gevonden, maar SKU kent wel actieve kostprijs ${versionText}.`,
+      background: "rgba(255,206,77,0.16)",
+    };
+  }
+
+  if (hasLot && !versionText) {
+    return {
+      label: "LOT zonder kostprijs",
+      title: "LOT gevonden, maar geen actieve kostprijsversie gevonden.",
+      background: "rgba(255,77,77,0.16)",
+    };
+  }
+
+  if (line.lot_cost_missing) {
+    return {
+      label: "geen kostprijs",
+      title: "Geen LOT-kostprijs en geen actieve kostprijsversie gevonden.",
+      background: "rgba(255,77,77,0.16)",
+    };
+  }
+
+  return {
+    label: "geen LOT",
+    title: "Geen LOT gevonden en geen actieve kostprijsversie gevonden.",
+    background: "rgba(95,156,255,0.14)",
+  };
 }
 
 export function OmzetEnMargeKlantDetail({
@@ -438,7 +540,7 @@ export function OmzetEnMargeKlantDetail({
 
                     {isExpanded ? (
                       <tr>
-                        <td colSpan={10} style={{ background: "rgba(255,255,255,0.02)" }}>
+                        <td colSpan={11} style={{ background: "rgba(255,255,255,0.02)" }}>
                           <div style={{ padding: "10px 6px" }}>
                             {details && details.length ? (
                               <div className="data-table" style={{ marginTop: 6 }}>
@@ -447,6 +549,7 @@ export function OmzetEnMargeKlantDetail({
                                     <tr>
                                       <th style={{ width: 140 }}>Product</th>
                                       <th style={{ width: 100 }}>SKU</th>
+                                      <th style={{ width: 160 }}>LOT / transactie</th>
                                       <th style={{ width: 100, textAlign: "right" }}>Aantal</th>
                                       <th style={{ width: 120, textAlign: "right" }}>Prijs</th>
                                       <th style={{ width: 130, textAlign: "right" }}>Korting</th>
@@ -466,6 +569,26 @@ export function OmzetEnMargeKlantDetail({
                                         <td>
                                           <code>{line.douano_sku || "-"}</code>
                                         </td>
+                                        <td>
+                                          {line.lot_number ? (
+                                            <span
+                                              title={[
+                                                line.lot_supplier ? `Supplier: ${line.lot_supplier}` : "",
+                                                line.lot_transaction_number ? `Transactie: ${line.lot_transaction_number}` : "",
+                                              ]
+                                                .filter(Boolean)
+                                                .join(" | ")}
+                                              style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}
+                                            >
+                                              <code>{line.lot_number}</code>
+                                              {line.lot_transaction_number ? (
+                                                <code style={{ opacity: 0.72 }}>{line.lot_transaction_number}</code>
+                                              ) : null}
+                                            </span>
+                                          ) : (
+                                            "-"
+                                          )}
+                                        </td>
                                         <td style={{ textAlign: "right" }}>{line.quantity}</td>
                                         <td style={{ textAlign: "right" }}>{euro(line.unit_price_ex)}</td>
                                         <td style={{ textAlign: "right" }}>{euro(line.discount_ex)}</td>
@@ -484,8 +607,8 @@ export function OmzetEnMargeKlantDetail({
                                                 missing cost
                                               </span>
                                             ) : (
-                                              <span className="pill" style={{ background: "rgba(95,255,156,0.16)" }}>
-                                                ok
+                                              <span className="pill" title={costStatus(line).title} style={{ background: costStatus(line).background }}>
+                                                {costStatus(line).label}
                                               </span>
                                             )
                                           ) : (

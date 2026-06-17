@@ -108,7 +108,10 @@ export function DouanoSyncPanel() {
       const stopReason = safeString(fetchMeta?.stop_reason);
 
       const fetched = asNumber(item.stats.fetched);
+      const filtered = asNumber(item.stats.filtered);
       const upserted = asNumber(item.stats.upserted);
+      const saved = asNumber(item.stats.saved);
+      const missingLot = asNumber(item.stats.missing_lot);
       const orders = asNumber(item.stats.orders);
       const invoices = asNumber(item.stats.invoices);
       const lines = asNumber(item.stats.lines);
@@ -122,6 +125,8 @@ export function DouanoSyncPanel() {
       const countsText =
         invoices != null || orders != null || lines != null
           ? `${invoices != null ? `${invoices ?? 0} invoices` : `${orders ?? 0} orders`} / ${lines ?? 0} regels`
+          : filtered != null || saved != null || missingLot != null
+            ? `${fetched ?? 0} fetched / ${filtered ?? 0} verkoop / ${saved ?? 0} opgeslagen${missingLot != null ? ` / ${missingLot} zonder LOT` : ""}`
           : fetched != null || upserted != null
             ? `${fetched ?? 0} fetched / ${upserted ?? 0} upserted`
             : "-";
@@ -186,6 +191,13 @@ export function DouanoSyncPanel() {
             onClick={() => run("Sync sales-invoices", () => requestJson("/api/integrations/douano/sync/sales-invoices", "POST"))}
           >
             Sync sales-invoices
+          </button>
+          <button
+            type="button"
+            className="editor-button"
+            onClick={() => run("Sync stock-history LOTs", () => requestJson("/api/integrations/douano/sync/stock-history-lots", "POST"))}
+          >
+            Sync stock-history LOTs
           </button>
         </div>
         <div className="editor-actions-group">

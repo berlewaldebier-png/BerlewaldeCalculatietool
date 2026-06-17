@@ -836,6 +836,7 @@ def normalize_inkoop_factuur_record(factuur: dict[str, Any] | None) -> dict[str,
         "id": str(source.get("id", "") or uuid4()),
         "factuurnummer": str(source.get("factuurnummer", "") or ""),
         "factuurdatum": str(source.get("factuurdatum", "") or ""),
+        "lotnummer": str(source.get("lotnummer", "") or ""),
         "verzendkosten": float(source.get("verzendkosten", 0.0) or 0.0),
         "overige_kosten": float(source.get("overige_kosten", 0.0) or 0.0),
         "factuurregels": normalized_rows,
@@ -847,6 +848,8 @@ def _factuur_is_meaningful(factuur: dict[str, Any] | None) -> bool:
     if str(normalized.get("factuurnummer", "") or "").strip():
         return True
     if str(normalized.get("factuurdatum", "") or "").strip():
+        return True
+    if str(normalized.get("lotnummer", "") or "").strip():
         return True
     if float(normalized.get("verzendkosten", 0.0) or 0.0) > 0:
         return True
@@ -912,6 +915,7 @@ def _cleanup_kostprijsversie_references(
                     "facturen": sanitized_facturen,
                     "factuurnummer": str(first_factuur.get("factuurnummer", "") or ""),
                     "factuurdatum": str(first_factuur.get("factuurdatum", "") or ""),
+                    "lotnummer": str(first_factuur.get("lotnummer", "") or ""),
                     "verzendkosten": float(first_factuur.get("verzendkosten", 0.0) or 0.0),
                     "overige_kosten": float(first_factuur.get("overige_kosten", 0.0) or 0.0),
                     "factuurregels": deepcopy(first_factuur.get("factuurregels", [])),
@@ -1290,6 +1294,23 @@ def _resolve_kostprijsproduct_refs(
                 continue
             product_id = str(row.get("product_id", "") or "")
             _append(product_id, "samengesteld")
+
+    # Canonical SKU cost rows may include sellable variants created in the wizard
+    # (article/bundle SKUs from "Verkoopbare varianten"). Those rows are normalized
+    # in cost_version_sku_rows and rehydrated as `cost_lines`, not always in the
+    # legacy snapshot sections above.
+    cost_lines = record.get("cost_lines", [])
+    if isinstance(cost_lines, list):
+        for row in cost_lines:
+            if not isinstance(row, dict):
+                continue
+            product_id = str(row.get("product_id", "") or "").strip()
+            sku_id = str(row.get("sku_id", "") or "").strip()
+            product_type = str(row.get("product_type", "") or "").strip().lower()
+            if product_type == "article" and product_id:
+                _append(product_id, "article")
+            elif sku_id and not product_id:
+                _append(sku_id, "sku")
 
     inkoop = ((record.get("invoer", {}) or {}).get("inkoop", {}) or {})
     if isinstance(inkoop, dict):
@@ -1835,6 +1856,7 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         "factuurregels": primary_factuur.get("factuurregels", []),
         "factuurnummer": str(primary_factuur.get("factuurnummer", "") or ""),
         "factuurdatum": str(primary_factuur.get("factuurdatum", "") or ""),
+        "lotnummer": str(primary_factuur.get("lotnummer", "") or ""),
         "notities": str(inkoop.get("notities", "") or ""),
         "verzendkosten": float(primary_factuur.get("verzendkosten", 0.0) or 0.0),
         "overige_kosten": float(primary_factuur.get("overige_kosten", 0.0) or 0.0),
@@ -2025,7 +2047,9 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         basis_rows = producten.get("basisproducten")
         if not isinstance(basis_rows, list):
             basis_rows = []
-        if not basis_rows:
+        # For definitive purchase versions the invoice lines are the SSOT. Always rebuild these
+        # product rows so stale UI snapshots cannot hide newly purchased formats.
+        if isinstance(producten, dict):
             try:
                 # Resolve format/article names from canonical articles dataset (formats live there).
                 postgres_mod = _get_postgres_storage_module()
@@ -4100,6 +4124,9 @@ def _normalize_packaging_component_master_record(record: dict[str, Any]) -> dict
         "beschikbaar_voor_samengesteld": bool(
             record.get("beschikbaar_voor_samengesteld", False)
         ),
+        "beschikbaar_voor_offertes": bool(
+            record.get("beschikbaar_voor_offertes", False)
+        ),
     }
 
 
@@ -4239,6 +4266,9 @@ def load_packaging_component_masters() -> list[dict[str, Any]]:
                     "beschikbaar_voor_samengesteld": bool(
                         record.get("beschikbaar_voor_samengesteld", True)
                     ),
+                    "beschikbaar_voor_offertes": bool(
+                        record.get("beschikbaar_voor_offertes", False)
+                    ),
                 }
             )
         )
@@ -4282,6 +4312,9 @@ def save_packaging_component_masters(data: list[dict[str, Any]]) -> bool:
                 "active": True,
                 "beschikbaar_voor_samengesteld": bool(
                     row.get("beschikbaar_voor_samengesteld", True)
+                ),
+                "beschikbaar_voor_offertes": bool(
+                    row.get("beschikbaar_voor_offertes", False)
                 ),
             }
         )
@@ -8268,15 +8301,50 @@ def generate_missing_kostprijsproductactiveringen(*, dry_run: bool = False) -> d
     activations = [
         row for row in load_kostprijsproductactiveringen() if isinstance(row, dict)
     ]
+    postgres_storage = _get_postgres_storage_module()
+    sku_rows = (
+        postgres_storage.load_dataset("skus", [])
+        if postgres_storage is not None and postgres_storage.uses_postgres()
+        else []
+    )
+    sku_by_id = {
+        str(row.get("id", "") or "").strip(): row
+        for row in (sku_rows if isinstance(sku_rows, list) else [])
+        if isinstance(row, dict) and str(row.get("id", "") or "").strip()
+    }
+    sku_by_beer_format: dict[tuple[str, str], str] = {}
+    sku_by_article: dict[str, str] = {}
+    for row in sku_by_id.values():
+        sku_id = str(row.get("id", "") or "").strip()
+        beer_key = str(row.get("beer_id", "") or "").strip()
+        format_key = str(row.get("format_article_id", "") or "").strip()
+        article_key = str(row.get("article_id", "") or "").strip()
+        if sku_id and beer_key and format_key:
+            sku_by_beer_format[(beer_key, format_key)] = sku_id
+        if sku_id and article_key:
+            sku_by_article[article_key] = sku_id
 
+    record_by_id = {
+        str(record.get("id", "") or "").strip(): record
+        for record in records
+        if str(record.get("id", "") or "").strip()
+    }
     existing_scopes: set[tuple[str, int, str]] = set()
     for act in activations:
-        bier_id = str(act.get("bier_id", "") or "").strip()
+        version_id = str(act.get("kostprijsversie_id", "") or "").strip()
+        version = record_by_id.get(version_id, {})
+        bier_id = str(act.get("bier_id", "") or "").strip() or str(version.get("bier_id", "") or "").strip()
         try:
             jaar = int(act.get("jaar", 0) or 0)
         except (TypeError, ValueError):
             jaar = 0
-        product_id = str(act.get("product_id", "") or "").strip()
+        sku_id = str(act.get("sku_id", "") or "").strip()
+        sku = sku_by_id.get(sku_id, {})
+        product_id = (
+            str(act.get("product_id", "") or "").strip()
+            or str(sku.get("article_id", "") or "").strip()
+            or str(sku.get("format_article_id", "") or "").strip()
+        )
         if bier_id and jaar > 0 and product_id:
             existing_scopes.add((bier_id, jaar, product_id))
 
@@ -8350,12 +8418,29 @@ def generate_missing_kostprijsproductactiveringen(*, dry_run: bool = False) -> d
                     },
                 )
 
-    to_upsert = [row for _, row in candidates.values()]
+    to_upsert: list[dict[str, Any]] = []
+    skipped_missing_sku: list[dict[str, Any]] = []
+    for _, row in candidates.values():
+        product_id = str(row.get("product_id", "") or "").strip()
+        bier_id = str(row.get("bier_id", "") or "").strip()
+        product_type = str(row.get("product_type", "") or "").strip().lower()
+        sku_id = product_id if product_id in sku_by_id else ""
+        if not sku_id and product_type == "article":
+            sku_id = sku_by_article.get(product_id, "")
+        if not sku_id:
+            sku_id = sku_by_beer_format.get((bier_id, product_id), "")
+        if not sku_id:
+            skipped_missing_sku.append(row)
+            continue
+        row = {**row, "sku_id": sku_id}
+        to_upsert.append(row)
     report: dict[str, Any] = {
         "dry_run": dry_run,
         "missing_scopes": len(to_upsert),
+        "skipped_missing_sku": len(skipped_missing_sku),
         "created": 0,
         "examples": to_upsert[:10],
+        "skipped_examples": skipped_missing_sku[:10],
     }
     if dry_run or not to_upsert:
         return report
@@ -8995,6 +9080,72 @@ def activate_kostprijsversie_products(
             sku_by_beer_format[(beer_key, format_key)] = sku_id
         if sku_id and article_key:
             sku_by_article[article_key] = sku_id
+
+    # Partial activation should behave like full activation: when a definitive purchase
+    # version introduces a new format for this beer, create the beer_format SKU first.
+    try:
+        articles_rows = postgres_storage.load_dataset("articles", []) if postgres_storage is not None and postgres_storage.uses_postgres() else []
+        articles_by_id = {
+            str(row.get("id", "") or "").strip(): row
+            for row in (articles_rows if isinstance(articles_rows, list) else [])
+            if isinstance(row, dict) and str(row.get("id", "") or "").strip()
+        }
+        format_ids = {
+            aid
+            for aid, article in articles_by_id.items()
+            if str(article.get("kind", "") or "").strip().lower() == "format"
+        }
+        beer_name = str((basisgegevens or {}).get("biernaam", "") or "").strip() or bier_id
+
+        def _slugify(value: str) -> str:
+            slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "")).strip("-")
+            while "--" in slug:
+                slug = slug.replace("--", "-")
+            return slug or "item"
+
+        def _beer_slug() -> str:
+            if bier_id.startswith("beer-") and bier_id[len("beer-") :].strip():
+                return bier_id[len("beer-") :].strip()
+            return _slugify(beer_name) or bier_id
+
+        def _format_slug(fmt_id: str) -> str:
+            fmt = str(fmt_id or "").strip()
+            if fmt.startswith("fmt-"):
+                return _slugify(fmt[len("fmt-") :])
+            return _slugify(fmt)
+
+        existing_skus = list(sku_rows if isinstance(sku_rows, list) else [])
+        changed = False
+        beer_slug = _beer_slug()
+        for product_id in sorted(valid_product_ids):
+            if product_id not in format_ids or (bier_id, product_id) in sku_by_beer_format:
+                continue
+            article = articles_by_id.get(product_id, {})
+            format_name = str(article.get("name", article.get("naam", "")) or "").strip() or product_id
+            format_slug = _format_slug(product_id)
+            sku_id = f"sku-{beer_slug}-{format_slug}".lower()
+            candidate = {
+                "id": sku_id,
+                "kind": "beer_format",
+                "beer_id": bier_id,
+                "format_article_id": product_id,
+                "article_id": "",
+                "code": f"{beer_slug.upper()}-{format_slug.upper()}".replace("--", "-"),
+                "name": f"{beer_name} - {format_name}",
+                "active": True,
+            }
+            sku_by_id[sku_id] = candidate
+            sku_by_beer_format[(bier_id, product_id)] = sku_id
+            existing_skus.append(candidate)
+            changed = True
+        if changed and postgres_storage is not None and postgres_storage.uses_postgres():
+            postgres_storage.save_dataset("skus", existing_skus, overwrite=False)
+    except Exception as exc:
+        logger.exception("Partial activation failed while ensuring beer_format SKUs exist.")
+        raise RuntimeError(
+            "Activatie faalde tijdens het aanmaken/opslaan van beer_format SKU's."
+        ) from exc
+
     activation_rows: list[dict[str, Any]] = []
     for product_id in valid_product_ids:
         ref = target_ref_by_product_id[product_id]

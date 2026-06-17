@@ -3,6 +3,7 @@ import {
   getSnapshotProductCost,
   parseSortTimestamp,
 } from "@/components/kostprijsbeheer/kostprijsBeheerUtils";
+import { normalizeSkuLabel } from "@/lib/skuLabels";
 
 export type GenericRecord = Record<string, unknown>;
 
@@ -30,6 +31,8 @@ export type ActiveCostRow = {
   key: string;
   skuId: string;
   artikelNaam: string;
+  bierNaam: string;
+  groupLabel: string;
   categorie: string;
   productNaam: string;
   productType: string;
@@ -45,6 +48,10 @@ export type ActiveCostRow = {
   deltaEuro: number | null;
   deltaPct: number | null;
 };
+
+function cleanRepeatedName(label: unknown) {
+  return normalizeSkuLabel(label);
+}
 
 export function buildExistingBerekeningenRows(args: {
   currentBerekeningen: GenericRecord[];
@@ -127,20 +134,32 @@ export function buildActiveRows(args: {
     .filter((row) => Number((row as any)?.jaar ?? 0) === selectedYear)
     .map((row, index) => {
       const skuId = String((row as any)?.sku_id ?? "");
-      const bierId = String((row as any)?.bier_id ?? "");
-      const productId = String((row as any)?.product_id ?? "");
-      const productType = String((row as any)?.product_type ?? "");
       const versieId = String((row as any)?.kostprijsversie_id ?? "");
       const effectiefVanaf = String((row as any)?.effectief_vanaf ?? "");
-
-      const bierNaam = bierenById.get(bierId) ?? bierId ?? "-";
       const skuRow = skuId ? skuById.get(skuId) ?? null : null;
       const skuKind = String((skuRow as any)?.kind ?? "").toLowerCase();
       const skuArticleId =
         skuKind === "beer_format"
           ? String((skuRow as any)?.format_article_id ?? "")
           : String((skuRow as any)?.article_id ?? "");
+      const versie = versieId ? berekeningenById.get(versieId) : undefined;
+      const bierId =
+        String((row as any)?.bier_id ?? "").trim() ||
+        String((skuRow as any)?.beer_id ?? "").trim() ||
+        String((versie as any)?.bier_id ?? "").trim();
       const skuArticle = skuArticleId ? articleById.get(skuArticleId) ?? null : null;
+      const productGroup = String(
+        (skuRow as any)?.product_group ?? (skuArticle as any)?.product_group ?? ""
+      ).trim().toLowerCase();
+      const isGiftset = skuKind === "article" && productGroup === "giftset";
+      const productId =
+        String((row as any)?.product_id ?? "").trim() ||
+        skuArticleId;
+      const productType =
+        String((row as any)?.product_type ?? "").trim() ||
+        (skuKind === "article" ? "article" : skuKind === "beer_format" ? "sku" : "");
+
+      const bierNaam = isGiftset ? "Geschenkverpakkingen" : bierenById.get(bierId) ?? bierId ?? "-";
       const skuLabel =
         String((skuRow as any)?.name ?? "") ||
         String((skuArticle as any)?.name ?? "") ||
@@ -148,11 +167,9 @@ export function buildActiveRows(args: {
         String((skuArticle as any)?.naam ?? "");
 
       const productNaamFromLegacy = (basisById.get(productId) ?? samengesteldById.get(productId) ?? "") as string;
-      const productNaam = productNaamFromLegacy || skuLabel || productId || (skuId ? skuId : "-");
+      const productNaam = cleanRepeatedName(productNaamFromLegacy || skuLabel || productId || (skuId ? skuId : "-"));
 
       const effectiefProductId = (productId || skuArticleId || "").trim();
-
-      const versie = versieId ? berekeningenById.get(versieId) : undefined;
 
       const versieLabel = buildVersionLabel(versieId ? versie : undefined);
       const versieTimestamp = parseSortTimestamp(
@@ -161,8 +178,14 @@ export function buildActiveRows(args: {
 
       const costLinesRaw = (versie as any)?.cost_lines ?? (versie as any)?.costLines ?? [];
       const snapshotRows = Array.isArray(costLinesRaw) ? (costLinesRaw as GenericRecord[]) : [];
-      const matchingSnapshotRow =
-        effectiefProductId ? snapshotRows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId) : undefined;
+      const matchingSnapshotRow = snapshotRows.find((item) => {
+        const rowProductId = String((item as any)?.product_id ?? "").trim();
+        const rowSkuId = String((item as any)?.sku_id ?? "").trim();
+        return Boolean(
+          (effectiefProductId && rowProductId === effectiefProductId) ||
+            (skuId && rowSkuId === skuId)
+        );
+      });
       const versionType = String((versie as any)?.type ?? "").toLowerCase();
       const currentCost =
         matchingSnapshotRow && effectiefProductId
@@ -172,6 +195,7 @@ export function buildActiveRows(args: {
             : null;
 
       const categorie =
+        (isGiftset ? "Giftset" : "") ||
         String((versie as any)?.basisgegevens?.stijl ?? (versie as any)?.bier_snapshot?.stijl ?? "").trim() ||
         String((versie as any)?.basisgegevens?.categorie ?? "").trim() ||
         (skuKind === "beer_format" ? String((versie as any)?.basisgegevens?.stijl ?? "").trim() : "");
@@ -183,14 +207,21 @@ export function buildActiveRows(args: {
       };
 
       const affectsProduct = (record: GenericRecord) => {
-        if (!effectiefProductId) return false;
+        if (!effectiefProductId && !skuId) return false;
         const statusValue = String((record as any)?.status ?? "").toLowerCase();
 
         // Definitive versions must have a snapshot containing this product_id.
         if (statusValue === "definitief") {
           const costLines = (record as any)?.cost_lines ?? (record as any)?.costLines ?? [];
           const rows = Array.isArray(costLines) ? (costLines as GenericRecord[]) : [];
-          return rows.some((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId);
+          return rows.some((item) => {
+            const rowProductId = String((item as any)?.product_id ?? "").trim();
+            const rowSkuId = String((item as any)?.sku_id ?? "").trim();
+            return Boolean(
+              (effectiefProductId && rowProductId === effectiefProductId) ||
+                (skuId && rowSkuId === skuId)
+            );
+          });
         }
 
         // Concept (factuur) versions don't have a snapshot; infer by invoice unit id inclusion.
@@ -229,9 +260,14 @@ export function buildActiveRows(args: {
         .map((record) => {
           const costLinesRaw = (record as any)?.cost_lines ?? (record as any)?.costLines ?? [];
           const rows = Array.isArray(costLinesRaw) ? (costLinesRaw as GenericRecord[]) : [];
-          const match = effectiefProductId
-            ? rows.find((item) => String((item as any)?.product_id ?? "").trim() === effectiefProductId)
-            : undefined;
+          const match = rows.find((item) => {
+            const rowProductId = String((item as any)?.product_id ?? "").trim();
+            const rowSkuId = String((item as any)?.sku_id ?? "").trim();
+            return Boolean(
+              (effectiefProductId && rowProductId === effectiefProductId) ||
+                (skuId && rowSkuId === skuId)
+            );
+          });
           const cost = match ? getSnapshotProductCost(match) : null;
           const deltaEuro = currentCost !== null && cost !== null ? cost - currentCost : null;
           const deltaPct =
@@ -266,6 +302,8 @@ export function buildActiveRows(args: {
         key: rowKeyBase ? rowKeyBase : `row-${index}`,
         skuId,
         artikelNaam: productNaam || bierNaam,
+        bierNaam,
+        groupLabel: isGiftset ? "Geschenkverpakkingen" : bierNaam,
         categorie,
         productNaam,
         productType,

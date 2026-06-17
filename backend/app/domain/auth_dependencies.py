@@ -6,6 +6,8 @@ from app.domain import auth_service
 
 
 def get_current_session(request: Request) -> dict:
+    if not auth_service.auth_enabled():
+        return {"username": "local-admin", "display_name": "Local admin", "role": "admin"}
     token = request.cookies.get(auth_service.SESSION_COOKIE_NAME, "")
     session = auth_service.verify_session_token(token)
     if not session:

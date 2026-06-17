@@ -56,9 +56,9 @@ export type MeResponse = {
 
 export type GenericRecord = Record<string, unknown>;
 
-export type BootstrapResponse = {
+export type BootstrapResponse<T extends Record<string, unknown> = Record<string, unknown>> = {
   navigation?: NavigationItem[];
-  datasets: Record<string, unknown>;
+  datasets: T;
 };
 
 export type ErpDashboardAlertTone = "default" | "warning" | "error";
