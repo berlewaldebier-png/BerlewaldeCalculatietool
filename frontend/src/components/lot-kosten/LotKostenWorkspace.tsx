@@ -173,7 +173,7 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
 
   async function loadInternalLotSummary() {
     try {
-      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/internal-summary?year=${encodeURIComponent(String(year))}`, {
+      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/internal-summary`, {
         credentials: "include",
         cache: "no-store",
       });
