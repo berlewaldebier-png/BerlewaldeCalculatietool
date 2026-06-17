@@ -837,7 +837,6 @@ def correct_internal_lot_to_douano(raw: dict[str, Any]) -> dict[str, Any]:
 def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
     ensure_schema()
     lim = max(1, min(int(limit or 5000), 20000))
-    version_candidates = _version_lot_candidates_by_sku(year=int(year or 0))
     where = "WHERE COALESCE(NULLIF(a.lot_number, ''), '') <> ''"
     params: list[Any] = []
     if int(year or 0) > 0:
@@ -845,7 +844,8 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
         params.extend([f"{int(year)}-01-01", f"{int(year) + 1}-01-01"])
 
     sku_meta: dict[str, dict[str, Any]] = {}
-    douano_by_sku: dict[str, list[dict[str, Any]]] = {}
+    internal_by_style_lot: dict[tuple[str, str], dict[str, Any]] = {}
+    douano_by_style_lot: dict[tuple[str, str], dict[str, Any]] = {}
     beer_names: dict[str, str] = {}
     try:
         from app.domain import dataset_store
@@ -892,9 +892,88 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
                 if _text(meta.get("sku_code"))
             }
 
+            year_clause = "AND v.jaar = %s" if int(year or 0) > 0 else ""
+            year_params: tuple[Any, ...] = (int(year),) if int(year or 0) > 0 else ()
             cur.execute(
                 f"""
                 SELECT
+                    COALESCE(v.bier_id, s.beer_id, '') AS style_id,
+                    COALESCE(s.id, '') AS sku_id,
+                    COALESCE(s.code, '') AS sku_code,
+                    COALESCE(s.name, a.name, s.id, '') AS sku_name,
+                    l.lot_number,
+                    l.source_type,
+                    l.source_ref,
+                    l.source_date,
+                    v.id,
+                    v.jaar,
+                    v.versie_nummer
+                FROM cost_version_lots l
+                JOIN cost_versions v ON v.id = l.version_id
+                LEFT JOIN cost_version_sku_rows r ON r.version_id = v.id
+                LEFT JOIN skus s ON s.id = r.sku_id
+                LEFT JOIN articles a ON a.id = COALESCE(NULLIF(s.article_id, ''), NULLIF(s.format_article_id, ''))
+                WHERE COALESCE(NULLIF(l.lot_number, ''), '') <> ''
+                  AND v.status = 'definitief'
+                  {year_clause}
+                ORDER BY v.jaar DESC, v.versie_nummer DESC, l.lot_number, s.code
+                LIMIT %s
+                """,
+                (*year_params, lim),
+            )
+            for (
+                style_id,
+                sku_id,
+                sku_code,
+                sku_name,
+                lot,
+                source_type,
+                source_ref,
+                source_date,
+                version_id,
+                version_year,
+                version_number,
+            ) in cur.fetchall() or []:
+                lot_text = _text(lot)
+                if not lot_text:
+                    continue
+                sku_id_text = _text(sku_id)
+                meta = sku_meta.get(sku_id_text, {}) if sku_id_text else {}
+                style_id_text = _text(style_id) or _text(meta.get("style_id")) or sku_id_text or f"lot:{_lot_exact_key(lot_text)}"
+                style_name = beer_names.get(style_id_text, "") or _text(meta.get("style_name")) or style_id_text
+                key = (style_id_text, _lot_exact_key(lot_text))
+                item = internal_by_style_lot.setdefault(
+                    key,
+                    {
+                        "style_id": style_id_text,
+                        "style_name": style_name,
+                        "lot_number": lot_text,
+                        "source": _text(source_type) or "cost_version",
+                        "source_ref": _text(source_ref),
+                        "source_date": source_date.isoformat() if source_date else "",
+                        "labels": [],
+                        "version_ids": [],
+                        "skus": {},
+                    },
+                )
+                label = f"v{int(version_number or 0)}" if int(version_number or 0) > 0 else "kostprijsversie"
+                if label and label not in item["labels"]:
+                    item["labels"].append(label)
+                version_text = _text(version_id)
+                if version_text and version_text not in item["version_ids"]:
+                    item["version_ids"].append(version_text)
+                sku_key = sku_id_text or _text(sku_code) or f"{lot_text}:{len(item['skus'])}"
+                if sku_key and sku_key not in item["skus"]:
+                    item["skus"][sku_key] = {
+                        "sku_id": sku_id_text,
+                        "sku_code": _text(sku_code) or _text(meta.get("sku_code")),
+                        "sku_name": _text(sku_name) or _text(meta.get("sku_name")) or sku_key,
+                    }
+
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(s.beer_id, '') AS style_id,
                     COALESCE(m.sku_id, '') AS sku_id,
                     a.sku_code,
                     a.lot_number,
@@ -904,14 +983,15 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
                 FROM sales_lot_allocations a
                 LEFT JOIN douano_products p ON LOWER(p.sku) = LOWER(a.sku_code)
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = p.product_id
+                LEFT JOIN skus s ON s.id = m.sku_id
                 {where}
-                GROUP BY COALESCE(m.sku_id, ''), a.sku_code, a.lot_number
+                GROUP BY COALESCE(s.beer_id, ''), COALESCE(m.sku_id, ''), a.sku_code, a.lot_number
                 ORDER BY rows DESC
                 LIMIT %s
                 """,
                 tuple(params + [lim]),
             )
-            for sku_id, sku_code, lot, product_name, rows, last_movement_date in cur.fetchall() or []:
+            for style_id, sku_id, sku_code, lot, product_name, rows, last_movement_date in cur.fetchall() or []:
                 sku_id_text = _text(sku_id)
                 sku_code_text = _text(sku_code)
                 if not sku_id_text and sku_code_text:
@@ -924,68 +1004,67 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
                         "style_id": sku_id_text,
                         "style_name": _text(product_name) or sku_id_text,
                     }
-                key = sku_id_text or f"sku-code:{sku_code_text}"
-                douano_by_sku.setdefault(key, []).append(
+                meta = sku_meta.get(sku_id_text, {}) if sku_id_text else {}
+                style_id_text = _text(style_id) or _text(meta.get("style_id")) or (f"sku-code:{sku_code_text}" if sku_code_text else "unmapped")
+                style_name = beer_names.get(style_id_text, "") or _text(meta.get("style_name")) or _text(product_name) or style_id_text
+                lot_text = _text(lot)
+                if not lot_text:
+                    continue
+                key = (style_id_text, _lot_exact_key(lot_text))
+                item = douano_by_style_lot.setdefault(
+                    key,
                     {
-                        "lot_number": _text(lot),
-                        "sku_code": sku_code_text,
+                        "style_id": style_id_text,
+                        "style_name": style_name,
+                        "lot_number": lot_text,
                         "product_name": _text(product_name),
-                        "rows": int(rows or 0),
+                        "rows": 0,
+                        "skus": {},
                         "last_movement_date": last_movement_date.isoformat() if last_movement_date else "",
-                    }
+                    },
                 )
-
-            cur.execute(
-                """
-                SELECT DISTINCT sku_id, sku_code, lot_number, source_type, source_ref, source_date
-                FROM lot_cost_records
-                WHERE COALESCE(NULLIF(lot_number, ''), '') <> ''
-                ORDER BY source_date DESC NULLS LAST, lot_number
-                LIMIT %s
-                """,
-                (lim,),
-            )
-            for sku_id, sku_code, lot, source_type, source_ref, source_date in cur.fetchall() or []:
-                sku_id_text = _text(sku_id)
-                sku_code_text = _text(sku_code)
-                key = sku_id_text or f"sku-code:{sku_code_text}"
-                item = {
-                    "lot_number": _text(lot),
-                    "source": _text(source_type) or "lot_cost",
-                    "label": _text(source_ref) or _text(source_type) or "LOT kostprijs",
-                    "source_date": source_date.isoformat() if source_date else "",
-                    "version_ids": [],
-                    "labels": [],
-                }
-                if sku_id_text:
-                    version_candidates.setdefault(sku_id_text, []).append(item)
-                elif sku_code_text:
-                    version_candidates.setdefault(key, []).append(item)
+                item["rows"] = int(item.get("rows", 0) or 0) + int(rows or 0)
+                current_date = _text(item.get("last_movement_date"))
+                next_date = last_movement_date.isoformat() if last_movement_date else ""
+                if next_date and next_date > current_date:
+                    item["last_movement_date"] = next_date
+                sku_key = sku_id_text or sku_code_text or f"{lot_text}:{len(item['skus'])}"
+                sku_item = item["skus"].setdefault(
+                    sku_key,
+                    {
+                        "sku_id": sku_id_text,
+                        "sku_code": sku_code_text,
+                        "sku_name": _text(meta.get("sku_name")) or _text(product_name) or sku_key,
+                        "rows": 0,
+                    },
+                )
+                sku_item["rows"] = int(sku_item.get("rows", 0) or 0) + int(rows or 0)
 
     groups: dict[str, dict[str, Any]] = {}
-    all_keys = sorted(set(version_candidates.keys()) | set(douano_by_sku.keys()))
-    for key in all_keys:
-        meta = sku_meta.get(key, {})
-        if not meta and key.startswith("sku-code:"):
-            meta = {
-                "sku_id": "",
-                "sku_code": key.replace("sku-code:", "", 1),
-                "sku_name": key.replace("sku-code:", "", 1),
-                "style_id": key,
-                "style_name": key.replace("sku-code:", "", 1),
-            }
-        style_id = _text(meta.get("style_id")) or key
+    all_style_ids = sorted(
+        {
+            _text(row.get("style_id"))
+            for row in [*internal_by_style_lot.values(), *douano_by_style_lot.values()]
+            if _text(row.get("style_id"))
+        }
+    )
+    for style_id in all_style_ids:
+        internal_lots = [row for row in internal_by_style_lot.values() if _text(row.get("style_id")) == style_id]
+        douano_lots = [row for row in douano_by_style_lot.values() if _text(row.get("style_id")) == style_id]
+        style_name = (
+            next((_text(row.get("style_name")) for row in internal_lots if _text(row.get("style_name"))), "")
+            or next((_text(row.get("style_name")) for row in douano_lots if _text(row.get("style_name"))), "")
+            or style_id
+        )
         group = groups.setdefault(
             style_id,
             {
                 "style_id": style_id,
-                "style_name": _text(meta.get("style_name")) or style_id,
+                "style_name": style_name,
                 "rows": [],
                 "summary": {"internal_lots": 0, "douano_lots": 0, "matched": 0, "near_match": 0, "missing": 0, "douano_only": 0},
             },
         )
-        douano_lots = douano_by_sku.get(key, [])
-        internal_lots = version_candidates.get(key, [])
         used_douano: set[str] = set()
         for internal in internal_lots:
             internal_lot = _text(internal.get("lot_number"))
@@ -1007,11 +1086,11 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
             status = "matched" if exact else "near_match" if near else "missing_douano"
             group["rows"].append(
                 {
-                    "sku_id": _text(meta.get("sku_id")) if meta else (key if not key.startswith("sku-code:") else ""),
-                    "sku_code": _text(meta.get("sku_code")) or _text((match or {}).get("sku_code")),
-                    "sku_name": _text(meta.get("sku_name")) or _text((match or {}).get("product_name")) or key,
+                    "sku_id": "",
+                    "sku_code": "",
+                    "sku_name": style_name,
                     "internal_lot_number": internal_lot,
-                    "internal_label": _text(internal.get("label")),
+                    "internal_label": ", ".join(_text(label) for label in internal.get("labels", []) if _text(label)),
                     "internal_labels": internal.get("labels") if isinstance(internal.get("labels"), list) else [],
                     "internal_source": _text(internal.get("source")),
                     "internal_version_ids": internal.get("version_ids") if isinstance(internal.get("version_ids"), list) else [],
@@ -1020,6 +1099,8 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
                     "status": status,
                     "rows": int((match or {}).get("rows", 0) or 0),
                     "last_movement_date": _text((match or {}).get("last_movement_date")),
+                    "sku_details": list((internal.get("skus") if isinstance(internal.get("skus"), dict) else {}).values()),
+                    "douano_sku_details": list(((match or {}).get("skus") if isinstance((match or {}).get("skus"), dict) else {}).values()),
                 }
             )
             group["summary"]["internal_lots"] += 1
@@ -1035,9 +1116,9 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
                 continue
             group["rows"].append(
                 {
-                    "sku_id": _text(meta.get("sku_id")) if meta else (key if not key.startswith("sku-code:") else ""),
-                    "sku_code": _text(meta.get("sku_code")) or _text(douano.get("sku_code")),
-                    "sku_name": _text(meta.get("sku_name")) or _text(douano.get("product_name")) or key,
+                    "sku_id": "",
+                    "sku_code": "",
+                    "sku_name": style_name,
                     "internal_lot_number": "",
                     "internal_label": "",
                     "internal_labels": [],
@@ -1048,6 +1129,8 @@ def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[
                     "status": "douano_only",
                     "rows": int(douano.get("rows", 0) or 0),
                     "last_movement_date": _text(douano.get("last_movement_date")),
+                    "sku_details": [],
+                    "douano_sku_details": list((douano.get("skus") if isinstance(douano.get("skus"), dict) else {}).values()),
                 }
             )
             group["summary"]["douano_only"] += 1

@@ -67,6 +67,13 @@ type LotCandidate = {
   year?: number;
 };
 
+type LotSkuDetail = {
+  sku_id?: string;
+  sku_code?: string;
+  sku_name?: string;
+  rows?: number;
+};
+
 type LotReconciliationRow = {
   sku_code: string;
   sku_id: string;
@@ -81,6 +88,8 @@ type LotReconciliationRow = {
   rows: number;
   last_movement_date: string;
   status: "matched" | "near_match" | "missing_douano" | "douano_only";
+  sku_details?: LotSkuDetail[];
+  douano_sku_details?: LotSkuDetail[];
 };
 
 type LotReconciliationGroup = {
@@ -162,7 +171,7 @@ function lotStatusClass(status: LotReconciliationRow["status"]) {
 }
 
 function lotRowKey(row: LotReconciliationRow) {
-  return `${row.sku_id || row.sku_code}|${row.internal_lot_number || "no-internal"}|${row.douano_lot_number || "no-douano"}`;
+  return `${row.sku_id || row.sku_code || row.sku_name}|${row.internal_lot_number || "no-internal"}|${row.douano_lot_number || "no-douano"}`;
 }
 
 function internalLotLabel(row: LotReconciliationRow) {
@@ -204,6 +213,14 @@ function uniqueInternalLotCount(group: LotReconciliationGroup) {
 
 function uniqueDouanoLotCount(group: LotReconciliationGroup) {
   return uniqueTexts(group.rows.map((row) => row.douano_lot_number)).length;
+}
+
+function skuDetailLabel(detail: LotSkuDetail) {
+  const name = String(detail.sku_name || "").trim();
+  const code = String(detail.sku_code || "").trim();
+  const id = String(detail.sku_id || "").trim();
+  if (name && code) return `${name} ${code}`;
+  return name || code || id || "-";
 }
 
 function groupRowsByInternalLot(group: LotReconciliationGroup): LotReconciliationLotGroup[] {
@@ -892,13 +909,22 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                                             const key = lotRowKey(row);
                                             const selectedDouanoLot = selectedDouanoLots[key] ?? row.douano_lot_number ?? "";
                                             const canUpdate = Boolean(row.internal_lot_number && selectedDouanoLot && row.internal_lot_number !== selectedDouanoLot);
+                                            const internalSkuDetails = Array.isArray(row.sku_details) ? row.sku_details : [];
+                                            const douanoSkuDetails = Array.isArray(row.douano_sku_details) ? row.douano_sku_details : [];
                                             return (
                                               <tr key={`${lotGroup.key}-${key}`} className="lot-reconciliation-sku-row">
                                                 <td>
-                                                  <div className="module-card-text">
-                                                    <span style={{ overflowWrap: "anywhere" }}>{row.sku_name}</span>{" "}
-                                                    {row.sku_code ? <code style={{ overflowWrap: "anywhere" }}>{row.sku_code}</code> : null}
-                                                  </div>
+                                                  {internalSkuDetails.length ? (
+                                                    <div className="stack-compact">
+                                                      {internalSkuDetails.map((detail, index) => (
+                                                        <div className="module-card-text" key={`${key}-internal-${detail.sku_id || detail.sku_code || index}`}>
+                                                          <span style={{ overflowWrap: "anywhere" }}>{skuDetailLabel(detail)}</span>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  ) : (
+                                                    <div className="module-card-text">Geen interne SKU-details</div>
+                                                  )}
                                                 </td>
                                                 <td>
                                                   {row.status === "matched" ? (
@@ -922,6 +948,16 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                                                     {Number(row.rows || 0)} row{Number(row.rows || 0) === 1 ? "" : "s"}
                                                     {row.last_movement_date ? ` - ${row.last_movement_date}` : ""}
                                                   </div>
+                                                  {douanoSkuDetails.length ? (
+                                                    <div className="stack-compact" style={{ marginTop: 6 }}>
+                                                      {douanoSkuDetails.map((detail, index) => (
+                                                        <div className="module-card-text" key={`${key}-douano-${detail.sku_id || detail.sku_code || index}`}>
+                                                          <span style={{ overflowWrap: "anywhere" }}>{skuDetailLabel(detail)}</span>
+                                                          {Number(detail.rows || 0) ? ` (${Number(detail.rows || 0)} rows)` : ""}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  ) : null}
                                                 </td>
                                                 <td>
                                                   <div className="lot-reconciliation-status-cell">
