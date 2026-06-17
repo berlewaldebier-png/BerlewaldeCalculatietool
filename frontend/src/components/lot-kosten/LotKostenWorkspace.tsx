@@ -54,11 +54,21 @@ type StockHistoryImport = {
   imported_at: string;
 };
 
+type InternalLotSku = {
+  sku_id: string;
+  sku_code?: string;
+  label: string;
+  name?: string;
+  versions?: string[];
+};
+
 type InternalLotItem = {
   lot_number: string;
   versions?: string[];
   years?: number[];
   sources?: string[];
+  sku_count?: number;
+  skus?: InternalLotSku[];
 };
 
 type InternalLotGroup = {
@@ -428,12 +438,24 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                       </summary>
                       <div style={{ display: "grid", gap: 8, marginTop: 10, paddingLeft: 18 }}>
                         {(group.lots || []).map((lot) => (
-                          <div key={`${group.style_id || group.style_name}-${lot.lot_number}`}>
-                            <code>{lot.lot_number || "-"}</code>{" "}
-                            <span className="module-card-text">
-                              {(lot.versions || []).join("/")}
-                            </span>
-                          </div>
+                          <details key={`${group.style_id || group.style_name}-${lot.lot_number}`}>
+                            <summary style={{ cursor: "pointer" }}>
+                              <code>{lot.lot_number || "-"}</code>{" "}
+                              <span className="module-card-text">{(lot.versions || []).join("/")}</span>
+                              <span className="pill" style={{ marginLeft: 8 }}>
+                                {Number(lot.sku_count || lot.skus?.length || 0)} SKU&apos;s
+                              </span>
+                            </summary>
+                            <div style={{ display: "grid", gap: 6, marginTop: 8, paddingLeft: 18 }}>
+                              {(lot.skus || []).map((sku) => (
+                                <div key={`${lot.lot_number}-${sku.sku_id || sku.sku_code || sku.label}`}>
+                                  {sku.label || sku.name || sku.sku_code || sku.sku_id || "-"}
+                                  {sku.sku_code ? <span className="module-card-text"> {sku.sku_code}</span> : null}
+                                </div>
+                              ))}
+                              {!lot.skus?.length ? <div className="module-card-text">Geen SKU&apos;s gevonden.</div> : null}
+                            </div>
+                          </details>
                         ))}
                         {!group.lots?.length ? <div className="module-card-text">Geen interne LOTs gevonden.</div> : null}
                       </div>

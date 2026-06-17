@@ -1886,6 +1886,40 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
                 tuple(params),
             )
             rows = cur.fetchall() or []
+            version_ids = [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
+            sku_rows_by_version: dict[str, list[dict[str, Any]]] = {}
+            if version_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        r.version_id,
+                        r.sku_id,
+                        r.verpakking_label,
+                        COALESCE(NULLIF(s.name, ''), NULLIF(a.name, ''), r.sku_id) AS sku_name,
+                        COALESCE(NULLIF(s.code, ''), r.sku_id) AS sku_code
+                    FROM cost_version_sku_rows r
+                    LEFT JOIN skus s ON s.id = r.sku_id
+                    LEFT JOIN articles a ON a.id = COALESCE(NULLIF(s.article_id, ''), NULLIF(s.format_article_id, ''))
+                    WHERE r.version_id = ANY(%s)
+                    ORDER BY r.version_id, r.sort_index, r.verpakking_label, sku_name
+                    """,
+                    (version_ids,),
+                )
+                for row in cur.fetchall() or []:
+                    row_version_id, sku_id, verpakking_label, sku_name, sku_code = row
+                    version_id_text = str(row_version_id or "").strip()
+                    sku_id_text = str(sku_id or "").strip()
+                    label = str(verpakking_label or sku_name or sku_code or sku_id_text or "").strip()
+                    if not label:
+                        continue
+                    sku_rows_by_version.setdefault(version_id_text, []).append(
+                        {
+                            "sku_id": sku_id_text,
+                            "sku_code": str(sku_code or "").strip(),
+                            "label": label,
+                            "name": str(sku_name or "").strip(),
+                        }
+                    )
 
     groups: dict[str, dict[str, Any]] = {}
     for version_id, version_year, status, beer_id, version_number, payload in rows:
@@ -1901,6 +1935,7 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
         lot_rows = _version_lot_records(version)
         if not lot_rows:
             continue
+        version_skus = sku_rows_by_version.get(str(version["id"]), [])
 
         basis = version.get("basisgegevens") if isinstance(version.get("basisgegevens"), dict) else {}
         style_id = str(version.get("bier_id", "") or basis.get("bier_id", "") or "").strip()
@@ -1936,6 +1971,7 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
                     "version_ids": [],
                     "years": [],
                     "sources": [],
+                    "skus": {},
                     "source_date": str(lot_row.get("source_date", "") or ""),
                 },
             )
@@ -1950,10 +1986,31 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
             source_label = str(lot_row.get("source_ref", "") or lot_row.get("source_type", "") or "").strip()
             if source_label and source_label not in lot_item["sources"]:
                 lot_item["sources"].append(source_label)
+            for sku in version_skus:
+                sku_key = str(sku.get("sku_id", "") or sku.get("sku_code", "") or sku.get("label", "") or "").strip()
+                if not sku_key:
+                    continue
+                sku_item = lot_item["skus"].setdefault(
+                    sku_key,
+                    {
+                        "sku_id": str(sku.get("sku_id", "") or ""),
+                        "sku_code": str(sku.get("sku_code", "") or ""),
+                        "label": str(sku.get("label", "") or sku_key),
+                        "name": str(sku.get("name", "") or ""),
+                        "versions": [],
+                    },
+                )
+                if version_label not in sku_item["versions"]:
+                    sku_item["versions"].append(version_label)
 
     out: list[dict[str, Any]] = []
     for group in groups.values():
         lots = list(group["lots"].values())
+        for lot in lots:
+            sku_items = list(lot.get("skus", {}).values()) if isinstance(lot.get("skus"), dict) else []
+            sku_items.sort(key=lambda item: str(item.get("label", "") or "").lower())
+            lot["skus"] = sku_items
+            lot["sku_count"] = len(sku_items)
         lots.sort(key=lambda item: str(item.get("lot_number", "") or "").upper())
         out.append(
             {
