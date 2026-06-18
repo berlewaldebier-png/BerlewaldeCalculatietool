@@ -27,6 +27,8 @@ from app.domain import dataset_store
 from app.domain import douano_margin_service
 from app.domain import douano_unmapped_rule_storage
 from app.domain import lot_costs_storage
+from app.domain import cost_versions_storage
+from app.domain import correction_run_storage
 from app.domain import douano_unmapped_service
 from app.domain import break_even_planning_service
 from app.domain import break_even_planning_storage
@@ -1099,19 +1101,29 @@ def get_douano_unmapped_group_lines(
 @router.put("/douano/unmapped-rules")
 def put_douano_unmapped_rule(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
     action = str(payload.get("action", "") or "").strip()
+    match_type = str(payload.get("match_type", "") or "")
+    douano_product_id = int(payload.get("douano_product_id", 0) or 0)
+    line_description = str(payload.get("line_description", "") or "")
     if action == "delete":
         deleted = douano_unmapped_rule_storage.delete_rule(
-            match_type=str(payload.get("match_type", "") or ""),
-            douano_product_id=int(payload.get("douano_product_id", 0) or 0),
-            line_description=str(payload.get("line_description", "") or ""),
+            match_type=match_type,
+            douano_product_id=douano_product_id,
+            line_description=line_description,
         )
-        return {"result": {"deleted": bool(deleted)}}
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_unmapped_rule(
+            match_type=match_type,
+            douano_product_id=douano_product_id,
+            line_description=line_description,
+            basis="both",
+            limit=50000,
+        )
+        return {"result": {"deleted": bool(deleted)}, "snapshot_refresh": snapshot_refresh}
 
     try:
         record = douano_unmapped_rule_storage.upsert_rule(
-            match_type=str(payload.get("match_type", "") or ""),
-            douano_product_id=int(payload.get("douano_product_id", 0) or 0),
-            line_description=str(payload.get("line_description", "") or ""),
+            match_type=match_type,
+            douano_product_id=douano_product_id,
+            line_description=line_description,
             action=str(payload.get("action", "") or ""),
             sku_id=str(payload.get("sku_id", "") or ""),
             category=str(payload.get("category", "") or ""),
@@ -1120,10 +1132,17 @@ def put_douano_unmapped_rule(payload: dict[str, Any], _: dict = Depends(require_
             include_break_even=bool(payload.get("include_break_even", True)),
             note=str(payload.get("note", "") or ""),
         )
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_unmapped_rule(
+            match_type=match_type,
+            douano_product_id=douano_product_id,
+            line_description=line_description,
+            basis="both",
+            limit=50000,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {"result": record}
+    return {"result": record, "snapshot_refresh": snapshot_refresh}
 
 
 @router.get("/douano/unmapped-rules")
@@ -1290,7 +1309,224 @@ def post_douano_create_service_sku(payload: dict[str, Any], _: dict = Depends(re
                 packaging_type="",
             )
 
-        return {"created": True, "sku_id": sku_id, "article_id": article_id, "mapping": mapping}
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+            douano_product_ids=[douano_product_id],
+            basis="both",
+            limit=50000,
+        )
+        return {
+            "created": True,
+            "sku_id": sku_id,
+            "article_id": article_id,
+            "mapping": mapping,
+            "snapshot_refresh": snapshot_refresh,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/douano/create-historical-beer-sku")
+def post_douano_create_historical_beer_sku(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    """Create a missing beer-format SKU for historical LOT coverage.
+
+    This is deliberately scoped: it creates an inactive/historical SKU under an
+    existing beer style and existing format article. It does not create a cost
+    price by itself; the user still records the v0/historical LOT cost explicitly.
+    """
+    try:
+        beer_id = str(payload.get("beer_id", payload.get("style_id", "")) or "").strip()
+        product_name = str(payload.get("product_name", "") or "").strip()
+        template_sku_id = str(payload.get("template_sku_id", payload.get("format_sku_id", "")) or "").strip()
+        selected_format_article_id = str(payload.get("format_article_id", "") or "").strip()
+        sku_name_override = str(payload.get("sku_name", "") or "").strip()
+        douano_product_ids = payload.get("douano_product_ids", [])
+        if not isinstance(douano_product_ids, list):
+            douano_product_ids = []
+        douano_sku_codes = payload.get("sku_codes", [])
+        if not isinstance(douano_sku_codes, list):
+            douano_sku_codes = []
+        if not beer_id:
+            raise ValueError("Stijl ontbreekt.")
+        if not product_name:
+            raise ValueError("Productnaam ontbreekt.")
+
+        def _slugify(value: str) -> str:
+            slug = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "")).strip("-")
+            while "--" in slug:
+                slug = slug.replace("--", "-")
+            return slug
+
+        def _norm(value: Any) -> str:
+            return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+
+        with postgres_storage.transaction():
+            bieren = dataset_store.load_dataset("bieren")
+            articles = dataset_store.load_dataset("articles")
+            skus = dataset_store.load_dataset("skus")
+            if not isinstance(bieren, list):
+                bieren = []
+            if not isinstance(articles, list):
+                articles = []
+            if not isinstance(skus, list):
+                skus = []
+
+            beer = next((row for row in bieren if isinstance(row, dict) and str(row.get("id", "") or "").strip() == beer_id), None)
+            if not beer:
+                raise ValueError("Stijl niet gevonden.")
+            beer_name = str(beer.get("biernaam", "") or beer.get("naam", "") or beer.get("name", "") or beer_id).strip()
+            skus_by_id = {str(row.get("id", "") or "").strip(): row for row in skus if isinstance(row, dict) and str(row.get("id", "") or "").strip()}
+            articles_by_id = {str(row.get("id", "") or "").strip(): row for row in articles if isinstance(row, dict) and str(row.get("id", "") or "").strip()}
+
+            template_sku = skus_by_id.get(template_sku_id) if template_sku_id else None
+            format_article_id = selected_format_article_id
+            article_id = ""
+            if format_article_id:
+                format_article = articles_by_id.get(format_article_id)
+                if not isinstance(format_article, dict) or str(format_article.get("kind", "") or "").strip().lower() != "format":
+                    raise ValueError("Gekozen afvuleenheid is niet geldig.")
+            if isinstance(template_sku, dict):
+                format_article_id = str(template_sku.get("format_article_id", "") or "").strip()
+                article_id = str(template_sku.get("article_id", "") or "").strip()
+                template_beer_id = str(template_sku.get("beer_id", "") or "").strip()
+                if article_id and template_beer_id and template_beer_id != beer_id:
+                    raise ValueError("Deze verkoopbare variant hoort bij een andere stijl. Kies een afvuleenheid of een SKU van dezelfde stijl.")
+                if article_id and template_beer_id == beer_id:
+                    sku_id = str(template_sku.get("id", "") or "").strip()
+                    created = False
+                    sku_record = dict(template_sku)
+                    mappings: list[dict[str, Any]] = []
+                    skipped_mappings: list[dict[str, Any]] = []
+                    existing_mappings = {
+                        int(row.get("douano_product_id", 0) or 0): str(row.get("sku_id", "") or "").strip()
+                        for row in douano_product_mapping_storage.list_mappings(limit=10000)
+                    }
+                    for raw_pid in douano_product_ids:
+                        pid = int(raw_pid or 0)
+                        if pid <= 0:
+                            continue
+                        existing_sku_id = existing_mappings.get(pid, "")
+                        if existing_sku_id and existing_sku_id != sku_id:
+                            skipped_mappings.append({"douano_product_id": pid, "sku_id": existing_sku_id, "reason": "already_mapped"})
+                            continue
+                        mappings.append(
+                            douano_product_mapping_storage.upsert_mapping(
+                                douano_product_id=pid,
+                                sku_id=sku_id,
+                                product_group="drank",
+                                alcohol_category="",
+                                packaging_type="",
+                            )
+                        )
+                    snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+                        douano_product_ids=[int(pid or 0) for pid in douano_product_ids if int(pid or 0) > 0],
+                        basis="both",
+                        limit=50000,
+                    )
+                    return {
+                        "created": created,
+                        "sku_id": sku_id,
+                        "sku": sku_record,
+                        "format_article_id": "",
+                        "article_id": article_id,
+                        "mappings": mappings,
+                        "skipped_mappings": skipped_mappings,
+                        "snapshot_refresh": snapshot_refresh,
+                    }
+
+            if not format_article_id:
+                product_key = _norm(product_name)
+                format_candidates: list[tuple[int, str]] = []
+                for row in skus:
+                    if not isinstance(row, dict):
+                        continue
+                    fmt_id = str(row.get("format_article_id", "") or "").strip()
+                    if not fmt_id:
+                        continue
+                    article = articles_by_id.get(fmt_id, {})
+                    text = f"{row.get('name', '')} {row.get('code', '')} {article.get('name', '')} {article.get('code', '')}"
+                    text_key = _norm(text)
+                    score = 0
+                    if "fust" in product_key and "fust" in text_key:
+                        score += 100
+                    if "20l" in product_key and "20l" in text_key:
+                        score += 20
+                    if "33cl" in product_key and "33cl" in text_key:
+                        score += 20
+                    if "75cl" in product_key and "75cl" in text_key:
+                        score += 20
+                    if "24x33cl" in product_key and ("24x33cl" in text_key or "24st33cl" in text_key):
+                        score += 20
+                    if score > 0:
+                        format_candidates.append((score, fmt_id))
+                format_candidates.sort(reverse=True)
+                if format_candidates:
+                    format_article_id = format_candidates[0][1]
+            if not format_article_id:
+                raise ValueError("Afvulvorm kon niet worden bepaald. Kies eerst een vergelijkbare SKU/afvulvorm.")
+
+            sku_id = f"sku-{beer_id}-fmt-{_slugify(format_article_id)}".lower()
+            if sku_id in skus_by_id:
+                created = False
+                sku_record = dict(skus_by_id[sku_id])
+            else:
+                sku_code = str(next((code for code in douano_sku_codes if str(code or "").strip()), "") or "").strip()
+                if not sku_code:
+                    sku_code = f"HIST-{_slugify(beer_name)[:8]}-{_slugify(format_article_id)[:8]}".upper()[:32]
+                sku_record = {
+                    "id": sku_id,
+                    "kind": "beer_format",
+                    "beer_id": beer_id,
+                    "format_article_id": format_article_id,
+                    "article_id": "",
+                    "code": sku_code,
+                    "name": sku_name_override or product_name,
+                    "active": True,
+                    "historical": True,
+                    "cost_status": "historie_v0",
+                    "product_group": "drank",
+                }
+                skus.append(sku_record)
+                dataset_store.save_dataset("skus", skus)
+                created = True
+
+            mappings: list[dict[str, Any]] = []
+            skipped_mappings: list[dict[str, Any]] = []
+            existing_mappings = {
+                int(row.get("douano_product_id", 0) or 0): str(row.get("sku_id", "") or "").strip()
+                for row in douano_product_mapping_storage.list_mappings(limit=10000)
+            }
+            for raw_pid in douano_product_ids:
+                pid = int(raw_pid or 0)
+                if pid <= 0:
+                    continue
+                existing_sku_id = existing_mappings.get(pid, "")
+                if existing_sku_id and existing_sku_id != sku_id:
+                    skipped_mappings.append({"douano_product_id": pid, "sku_id": existing_sku_id, "reason": "already_mapped"})
+                    continue
+                mappings.append(
+                    douano_product_mapping_storage.upsert_mapping(
+                        douano_product_id=pid,
+                        sku_id=sku_id,
+                        product_group="drank",
+                        alcohol_category="",
+                        packaging_type="",
+                    )
+                )
+
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+            douano_product_ids=[int(pid or 0) for pid in douano_product_ids if int(pid or 0) > 0],
+            basis="both",
+            limit=50000,
+        )
+        return {
+            "created": created,
+            "sku_id": sku_id,
+            "sku": sku_record,
+            "format_article_id": format_article_id,
+            "mappings": mappings,
+            "skipped_mappings": skipped_mappings,
+            "snapshot_refresh": snapshot_refresh,
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1326,9 +1562,14 @@ def put_douano_product_mapping(
             alcohol_category=alcohol_category,
             packaging_type=packaging_type,
         )
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+            douano_product_ids=[int(douano_product_id or 0)],
+            basis="both",
+            limit=50000,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"record": record}
+    return {"record": record, "snapshot_refresh": snapshot_refresh}
 
 
 @router.delete("/douano/product-mappings/{douano_product_id}")
@@ -1337,7 +1578,12 @@ def delete_douano_product_mapping(
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     deleted = douano_product_mapping_storage.delete_mapping(douano_product_id=int(douano_product_id or 0))
-    return {"deleted": bool(deleted)}
+    snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+        douano_product_ids=[int(douano_product_id or 0)],
+        basis="both",
+        limit=50000,
+    )
+    return {"deleted": bool(deleted), "snapshot_refresh": snapshot_refresh}
 
 
 @router.get("/douano/product-ignored")
@@ -1451,21 +1697,109 @@ def get_lot_costs(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
     return {"items": lot_costs_storage.list_lot_cost_records(limit=int(limit))}
 
 
-@router.get("/lot-costs/reconciliation")
-def get_lot_reconciliation(
+@router.get("/lot-costs/internal-summary")
+def get_internal_lot_summary(
     year: int = Query(0, ge=0),
-    limit: int = Query(500, ge=1, le=5000),
+    limit: int = Query(5000, ge=1, le=50000),
+) -> dict[str, Any]:
+    return {"items": lot_costs_storage.list_internal_lot_summary(year=int(year or 0), limit=int(limit))}
+
+
+@router.get("/lot-costs/external-lots")
+def get_external_lots(limit: int = Query(5000, ge=1, le=50000)) -> dict[str, Any]:
+    return {"items": lot_costs_storage.list_external_lots(limit=int(limit))}
+
+
+@router.get("/correction-runs")
+def get_correction_runs(
+    source_type: str = Query("", description="Optioneel filter, bijvoorbeeld fixed_costs."),
+    limit: int = Query(50, ge=1, le=200),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
-    groups = lot_costs_storage.list_lot_master_reconciliation(year=int(year or 0), limit=int(limit))
-    items = [row for group in groups for row in group.get("rows", [])]
-    return {"groups": groups, "items": items}
+    return {"items": correction_run_storage.list_correction_runs(source_type=source_type, limit=int(limit))}
+
+
+@router.post("/correction-runs/{run_id}/revert")
+def post_revert_correction_run(run_id: str, _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        return correction_run_storage.revert_fixed_cost_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/lot-costs/internal-lots/update")
+def post_update_internal_lot(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        version_ids = payload.get("version_ids", [])
+        if not isinstance(version_ids, list):
+            version_ids = []
+        from_lot = str(payload.get("from_lot", "") or "")
+        to_lot = str(payload.get("to_lot", "") or "")
+        update_result = cost_versions_storage.update_internal_lot_number(
+            version_ids=[str(item or "") for item in version_ids],
+            from_lot=from_lot,
+            to_lot=to_lot,
+        )
+        if int(update_result.get("updated_versions", 0) or 0) > 0:
+            snapshot_result = douano_margin_service.backfill_line_snapshots_for_lots(
+                lot_numbers=[from_lot, to_lot],
+                basis="both",
+                limit=50000,
+            )
+        else:
+            snapshot_result = {
+                "computed": 0,
+                "missing_cost": 0,
+                "documents": 0,
+                "basis": "both",
+                "lots": [lot for lot in [from_lot, to_lot] if str(lot or "").strip()],
+            }
+        return {
+            "result": update_result,
+            "snapshot_refresh": snapshot_result,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Internal LOT update failed")
+        raise HTTPException(status_code=500, detail="Interne LOT kon niet worden bijgewerkt.") from exc
+
+
+@router.post("/lot-costs/internal-lots/refresh-snapshots")
+def post_refresh_internal_lot_snapshots(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        lot_numbers = payload.get("lot_numbers", [])
+        if not isinstance(lot_numbers, list):
+            lot_numbers = []
+        snapshot_result = douano_margin_service.backfill_line_snapshots_for_lots(
+            lot_numbers=[str(item or "") for item in lot_numbers],
+            basis="both",
+            limit=50000,
+        )
+        return {"snapshot_refresh": snapshot_result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Internal LOT snapshot refresh failed")
+        raise HTTPException(status_code=500, detail="Omzet en Marge snapshots konden niet worden ververst.") from exc
 
 
 @router.put("/lot-costs/aliases")
 def put_lot_alias(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
     try:
-        return {"record": lot_costs_storage.upsert_lot_alias(payload)}
+        records = lot_costs_storage.upsert_lot_aliases(payload)
+        douano_lot = str(payload.get("douano_lot_number", payload.get("douano_lot", payload.get("lot_number", ""))) or "")
+        internal_lot = str(payload.get("internal_lot_number", payload.get("internal_lot", "")) or "")
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_lots(
+            lot_numbers=[douano_lot, internal_lot],
+            basis="both",
+            limit=50000,
+        )
+        return {
+            "record": records[0] if records else {},
+            "records": records,
+            "snapshot_refresh": snapshot_refresh,
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1475,18 +1809,17 @@ def delete_lot_alias(alias_id: str, _: dict = Depends(require_admin)) -> dict[st
     return {"deleted": lot_costs_storage.delete_lot_alias(alias_id)}
 
 
-@router.post("/lot-costs/correct-internal-lot")
-def post_correct_internal_lot(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
-    try:
-        return {"result": lot_costs_storage.correct_internal_lot_to_douano(payload)}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.post("/lot-costs")
 def post_lot_cost(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
     try:
-        return {"record": lot_costs_storage.upsert_lot_cost_record(payload)}
+        record = lot_costs_storage.upsert_lot_cost_record(payload)
+        lot_number = str(record.get("lot_number", "") or "")
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_lots(
+            lot_numbers=[lot_number],
+            basis="both",
+            limit=50000,
+        )
+        return {"record": record, "snapshot_refresh": snapshot_refresh}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1624,9 +1957,14 @@ def put_douano_product_ignored(
             douano_product_id=int(douano_product_id or 0),
             reason=str(payload.get("reason", "") or ""),
         )
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+            douano_product_ids=[int(douano_product_id or 0)],
+            basis="both",
+            limit=50000,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"record": record}
+    return {"record": record, "snapshot_refresh": snapshot_refresh}
 
 
 @router.delete("/douano/product-ignored/{douano_product_id}")
@@ -1635,7 +1973,12 @@ def delete_douano_product_ignored(
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     deleted = douano_product_ignore_storage.delete_ignore(douano_product_id=int(douano_product_id or 0))
-    return {"deleted": bool(deleted)}
+    snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+        douano_product_ids=[int(douano_product_id or 0)],
+        basis="both",
+        limit=50000,
+    )
+    return {"deleted": bool(deleted), "snapshot_refresh": snapshot_refresh}
 
 
 @router.get("/douano/cost-combos")

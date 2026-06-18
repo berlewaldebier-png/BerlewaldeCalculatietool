@@ -522,8 +522,6 @@ def upsert_lot_alias(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Douano LOT ontbreekt.")
     if not internal_lot:
         raise ValueError("Interne LOT ontbreekt.")
-    if not sku_id and not sku_code:
-        raise ValueError("SKU ontbreekt.")
     record_id = _text(raw.get("id")) or _id_for("lot_alias", sku_id, sku_code, douano_lot)
     payload = dict(raw)
     now = _now()
@@ -575,6 +573,38 @@ def upsert_lot_alias(raw: dict[str, Any]) -> dict[str, Any]:
         "reason": reason,
         "updated_at": now.isoformat(),
     }
+
+
+def upsert_lot_aliases(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Create one or more explicit raw-Douano -> canonical/internal LOT mappings.
+
+    `sku_ids` / `sku_codes` keep aliases scoped to the products under a cost
+    source. If no scope is provided, a global LOT alias is allowed deliberately.
+    """
+    sku_ids = [_text(value) for value in raw.get("sku_ids", []) if _text(value)] if isinstance(raw.get("sku_ids"), list) else []
+    sku_codes = [_text(value) for value in raw.get("sku_codes", []) if _text(value)] if isinstance(raw.get("sku_codes"), list) else []
+    single_sku_id = _text(raw.get("sku_id"))
+    single_sku_code = _text(raw.get("sku_code", raw.get("sku")))
+    if single_sku_id and single_sku_id not in sku_ids:
+        sku_ids.append(single_sku_id)
+    if single_sku_code and single_sku_code not in sku_codes:
+        sku_codes.append(single_sku_code)
+
+    scopes: list[dict[str, str]] = []
+    scopes.extend({"sku_id": sku_id, "sku_code": ""} for sku_id in sku_ids)
+    scopes.extend({"sku_id": "", "sku_code": sku_code} for sku_code in sku_codes)
+    if not scopes:
+        scopes.append({"sku_id": "", "sku_code": ""})
+
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for scope in scopes:
+        key = (scope["sku_id"].lower(), scope["sku_code"].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(upsert_lot_alias({**raw, **scope}))
+    return out
 
 
 def delete_lot_alias(alias_id: str) -> bool:
@@ -655,409 +685,10 @@ def _version_lot_candidates_by_sku(*, year: int = 0) -> dict[str, list[dict[str,
         return {}
 
 
-def _replace_lot_values(value: Any, *, from_lot: str, to_lot: str) -> tuple[Any, int]:
-    from_key = _lot_exact_key(from_lot)
-    changed = 0
-    if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        for key, child in value.items():
-            if _lot_key_name(key) in _LOT_KEYS and _lot_exact_key(child) == from_key:
-                out[key] = to_lot
-                changed += 1
-                continue
-            new_child, child_changed = _replace_lot_values(child, from_lot=from_lot, to_lot=to_lot)
-            out[key] = new_child
-            changed += child_changed
-        return out, changed
-    if isinstance(value, list):
-        out_list: list[Any] = []
-        for child in value:
-            new_child, child_changed = _replace_lot_values(child, from_lot=from_lot, to_lot=to_lot)
-            out_list.append(new_child)
-            changed += child_changed
-        return out_list, changed
-    return value, 0
-
-
-def correct_internal_lot_to_douano(raw: dict[str, Any]) -> dict[str, Any]:
-    ensure_schema()
-    sku_id = _text(raw.get("sku_id"))
-    sku_code = _text(raw.get("sku_code", raw.get("sku")))
-    douano_lot = _text(raw.get("douano_lot_number", raw.get("douano_lot")))
-    internal_lot = _text(raw.get("internal_lot_number", raw.get("internal_lot")))
-    raw_version_ids = raw.get("internal_version_ids", raw.get("version_ids", []))
-    version_ids = [
-        _text(value)
-        for value in (raw_version_ids if isinstance(raw_version_ids, list) else [raw_version_ids])
-        if _text(value)
-    ]
-    if not douano_lot:
-        raise ValueError("Douano LOT ontbreekt.")
-    if not internal_lot:
-        raise ValueError("Interne LOT ontbreekt.")
-    if _lot_exact_key(douano_lot) == _lot_exact_key(internal_lot):
-        return {"updated_cost_versions": 0, "updated_lot_cost_records": 0, "deleted_aliases": 0, "message": "LOTs zijn al gelijk."}
-
+def list_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
     from app.domain import cost_versions_storage
 
-    cost_versions_storage.ensure_schema()
-    updated_versions = 0
-    updated_lot_rows = 0
-    updated_lot_records = 0
-    deleted_aliases = 0
-    now = _now()
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            if version_ids:
-                placeholders = ", ".join(["%s"] * len(version_ids))
-                cur.execute(
-                    f"""
-                    SELECT DISTINCT v.id, v.payload
-                    FROM cost_versions v
-                    WHERE v.id IN ({placeholders})
-                    """,
-                    tuple(version_ids),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT DISTINCT v.id, v.payload
-                    FROM cost_versions v
-                    JOIN cost_version_lots l ON l.version_id = v.id
-                    LEFT JOIN cost_version_sku_rows r ON r.version_id = v.id
-                    WHERE LOWER(l.lot_number) = LOWER(%s)
-                      AND (
-                        (%s <> '' AND r.sku_id = %s)
-                        OR (%s <> '' AND EXISTS (
-                            SELECT 1
-                            FROM lot_cost_records c
-                            WHERE LOWER(c.sku_code) = LOWER(%s)
-                              AND LOWER(c.lot_number) = LOWER(%s)
-                        ))
-                        OR (%s = '' AND %s = '')
-                      )
-                    """,
-                    (internal_lot, sku_id, sku_id, sku_code, sku_code, internal_lot, sku_id, sku_code),
-                )
-            selected_version_ids: list[str] = []
-            for version_id, payload in cur.fetchall() or []:
-                version_text = _text(version_id)
-                if version_text:
-                    selected_version_ids.append(version_text)
-                version_payload = payload if isinstance(payload, dict) else {}
-                new_payload, changed = _replace_lot_values(version_payload, from_lot=internal_lot, to_lot=douano_lot)
-                if changed <= 0:
-                    continue
-                cur.execute(
-                    """
-                    UPDATE cost_versions
-                    SET payload = %s::jsonb,
-                        updated_at = %s,
-                        updated_at_ts = %s
-                    WHERE id = %s
-                    """,
-                    (json.dumps(new_payload), now, now, _text(version_id)),
-                )
-                updated_versions += 1
-
-            if selected_version_ids:
-                placeholders = ", ".join(["%s"] * len(selected_version_ids))
-                # If the corrected Douano LOT already exists on the same version, remove that duplicate first.
-                cur.execute(
-                    f"""
-                    DELETE FROM cost_version_lots target
-                    WHERE target.version_id IN ({placeholders})
-                      AND LOWER(target.lot_number) = LOWER(%s)
-                      AND EXISTS (
-                        SELECT 1
-                        FROM cost_version_lots source
-                        WHERE source.version_id = target.version_id
-                          AND LOWER(source.lot_number) = LOWER(%s)
-                          AND source.id <> target.id
-                      )
-                    """,
-                    (*selected_version_ids, douano_lot, internal_lot),
-                )
-                cur.execute(
-                    f"""
-                    UPDATE cost_version_lots
-                    SET lot_number = %s,
-                        updated_at_ts = %s
-                    WHERE version_id IN ({placeholders})
-                      AND LOWER(lot_number) = LOWER(%s)
-                    """,
-                    (douano_lot, now, *selected_version_ids, internal_lot),
-                )
-                updated_lot_rows = int(cur.rowcount or 0)
-
-            cur.execute(
-                """
-                UPDATE lot_cost_records
-                SET lot_number = %s,
-                    payload = jsonb_set(payload, '{lot_number}', to_jsonb(%s::text), true),
-                    updated_at = %s
-                WHERE LOWER(lot_number) = LOWER(%s)
-                  AND (
-                    COALESCE(sku_id, '') = ''
-                    OR (%s <> '' AND sku_id = %s)
-                    OR (%s <> '' AND LOWER(sku_code) = LOWER(%s))
-                  )
-                """,
-                (douano_lot, douano_lot, now, internal_lot, sku_id, sku_id, sku_code, sku_code),
-            )
-            updated_lot_records = int(cur.rowcount or 0)
-
-            cur.execute(
-                """
-                DELETE FROM lot_alias_mappings
-                WHERE LOWER(douano_lot_number) = LOWER(%s)
-                  AND LOWER(internal_lot_number) = LOWER(%s)
-                  AND (
-                    COALESCE(sku_id, '') = ''
-                    OR (%s <> '' AND sku_id = %s)
-                    OR (%s <> '' AND LOWER(sku_code) = LOWER(%s))
-                  )
-                """,
-                (douano_lot, internal_lot, sku_id, sku_id, sku_code, sku_code),
-            )
-            deleted_aliases = int(cur.rowcount or 0)
-        if not postgres_storage.in_transaction():
-            conn.commit()
-
-    return {
-        "updated_cost_versions": updated_versions,
-        "updated_cost_version_lots": updated_lot_rows,
-        "updated_lot_cost_records": updated_lot_records,
-        "deleted_aliases": deleted_aliases,
-        "douano_lot_number": douano_lot,
-        "previous_internal_lot_number": internal_lot,
-    }
-
-
-def list_lot_master_reconciliation(*, year: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
-    ensure_schema()
-    lim = max(1, min(int(limit or 5000), 20000))
-    version_candidates = _version_lot_candidates_by_sku(year=int(year or 0))
-    where = "WHERE COALESCE(NULLIF(a.lot_number, ''), '') <> ''"
-    params: list[Any] = []
-    if int(year or 0) > 0:
-        where += " AND a.movement_date >= %s::date AND a.movement_date < %s::date"
-        params.extend([f"{int(year)}-01-01", f"{int(year) + 1}-01-01"])
-
-    sku_meta: dict[str, dict[str, Any]] = {}
-    douano_by_sku: dict[str, list[dict[str, Any]]] = {}
-    beer_names: dict[str, str] = {}
-    try:
-        from app.domain import dataset_store
-
-        beers = dataset_store.load_dataset("bieren")
-        if isinstance(beers, list):
-            for beer in beers:
-                if isinstance(beer, dict):
-                    bid = _text(beer.get("id"))
-                    name = _text(beer.get("naam", beer.get("name", beer.get("biernaam", ""))))
-                    if bid and name:
-                        beer_names[bid] = name
-    except Exception:
-        beer_names = {}
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT s.id, COALESCE(s.code, '') AS code, COALESCE(s.name, '') AS name,
-                       COALESCE(s.beer_id, '') AS beer_id,
-                       COALESCE(a.name, '') AS article_name
-                FROM skus s
-                LEFT JOIN articles a ON a.id = COALESCE(NULLIF(s.article_id, ''), NULLIF(s.format_article_id, ''))
-                LIMIT %s
-                """,
-                (lim,),
-            )
-            for sid, code, name, beer_id, article_name in cur.fetchall() or []:
-                sku_id = _text(sid)
-                if not sku_id:
-                    continue
-                beer_id_text = _text(beer_id)
-                sku_meta[sku_id] = {
-                    "sku_id": sku_id,
-                    "sku_code": _text(code),
-                    "sku_name": _text(name) or _text(article_name) or sku_id,
-                    "style_id": beer_id_text or sku_id,
-                    "style_name": beer_names.get(beer_id_text, "") or _text(name) or _text(article_name) or sku_id,
-                }
-
-            sku_id_by_code = {
-                _text(meta.get("sku_code")).lower(): sku_id
-                for sku_id, meta in sku_meta.items()
-                if _text(meta.get("sku_code"))
-            }
-
-            cur.execute(
-                f"""
-                SELECT
-                    COALESCE(m.sku_id, '') AS sku_id,
-                    a.sku_code,
-                    a.lot_number,
-                    MAX(a.product_name) AS product_name,
-                    COUNT(*)::int AS rows,
-                    MAX(a.movement_date) AS last_movement_date
-                FROM sales_lot_allocations a
-                LEFT JOIN douano_products p ON LOWER(p.sku) = LOWER(a.sku_code)
-                LEFT JOIN douano_product_mapping m ON m.douano_product_id = p.product_id
-                {where}
-                GROUP BY COALESCE(m.sku_id, ''), a.sku_code, a.lot_number
-                ORDER BY rows DESC
-                LIMIT %s
-                """,
-                tuple(params + [lim]),
-            )
-            for sku_id, sku_code, lot, product_name, rows, last_movement_date in cur.fetchall() or []:
-                sku_id_text = _text(sku_id)
-                sku_code_text = _text(sku_code)
-                if not sku_id_text and sku_code_text:
-                    sku_id_text = sku_id_by_code.get(sku_code_text.lower(), "")
-                if sku_id_text and sku_id_text not in sku_meta:
-                    sku_meta[sku_id_text] = {
-                        "sku_id": sku_id_text,
-                        "sku_code": sku_code_text,
-                        "sku_name": _text(product_name) or sku_id_text,
-                        "style_id": sku_id_text,
-                        "style_name": _text(product_name) or sku_id_text,
-                    }
-                key = sku_id_text or f"sku-code:{sku_code_text}"
-                douano_by_sku.setdefault(key, []).append(
-                    {
-                        "lot_number": _text(lot),
-                        "sku_code": sku_code_text,
-                        "product_name": _text(product_name),
-                        "rows": int(rows or 0),
-                        "last_movement_date": last_movement_date.isoformat() if last_movement_date else "",
-                    }
-                )
-
-            cur.execute(
-                """
-                SELECT DISTINCT sku_id, sku_code, lot_number, source_type, source_ref, source_date
-                FROM lot_cost_records
-                WHERE COALESCE(NULLIF(lot_number, ''), '') <> ''
-                ORDER BY source_date DESC NULLS LAST, lot_number
-                LIMIT %s
-                """,
-                (lim,),
-            )
-            for sku_id, sku_code, lot, source_type, source_ref, source_date in cur.fetchall() or []:
-                sku_id_text = _text(sku_id)
-                sku_code_text = _text(sku_code)
-                key = sku_id_text or f"sku-code:{sku_code_text}"
-                item = {
-                    "lot_number": _text(lot),
-                    "source": _text(source_type) or "lot_cost",
-                    "label": _text(source_ref) or _text(source_type) or "LOT kostprijs",
-                    "source_date": source_date.isoformat() if source_date else "",
-                    "version_ids": [],
-                    "labels": [],
-                }
-                if sku_id_text:
-                    version_candidates.setdefault(sku_id_text, []).append(item)
-                elif sku_code_text:
-                    version_candidates.setdefault(key, []).append(item)
-
-    groups: dict[str, dict[str, Any]] = {}
-    all_keys = sorted(set(version_candidates.keys()) | set(douano_by_sku.keys()))
-    for key in all_keys:
-        meta = sku_meta.get(key, {})
-        if not meta and key.startswith("sku-code:"):
-            meta = {
-                "sku_id": "",
-                "sku_code": key.replace("sku-code:", "", 1),
-                "sku_name": key.replace("sku-code:", "", 1),
-                "style_id": key,
-                "style_name": key.replace("sku-code:", "", 1),
-            }
-        style_id = _text(meta.get("style_id")) or key
-        group = groups.setdefault(
-            style_id,
-            {
-                "style_id": style_id,
-                "style_name": _text(meta.get("style_name")) or style_id,
-                "rows": [],
-                "summary": {"internal_lots": 0, "douano_lots": 0, "matched": 0, "near_match": 0, "missing": 0, "douano_only": 0},
-            },
-        )
-        douano_lots = douano_by_sku.get(key, [])
-        internal_lots = version_candidates.get(key, [])
-        used_douano: set[str] = set()
-        for internal in internal_lots:
-            internal_lot = _text(internal.get("lot_number"))
-            if not internal_lot:
-                continue
-            exact = next((row for row in douano_lots if _lot_exact_key(row.get("lot_number")) == _lot_exact_key(internal_lot)), None)
-            near = next(
-                (
-                    row
-                    for row in douano_lots
-                    if _lot_exact_key(row.get("lot_number")) != _lot_exact_key(internal_lot)
-                    and _lot_near_key(row.get("lot_number")) == _lot_near_key(internal_lot)
-                ),
-                None,
-            )
-            match = exact or near
-            if match:
-                used_douano.add(_lot_exact_key(match.get("lot_number")))
-            status = "matched" if exact else "near_match" if near else "missing_douano"
-            group["rows"].append(
-                {
-                    "sku_id": _text(meta.get("sku_id")) if meta else (key if not key.startswith("sku-code:") else ""),
-                    "sku_code": _text(meta.get("sku_code")) or _text((match or {}).get("sku_code")),
-                    "sku_name": _text(meta.get("sku_name")) or _text((match or {}).get("product_name")) or key,
-                    "internal_lot_number": internal_lot,
-                    "internal_label": _text(internal.get("label")),
-                    "internal_labels": internal.get("labels") if isinstance(internal.get("labels"), list) else [],
-                    "internal_source": _text(internal.get("source")),
-                    "internal_version_ids": internal.get("version_ids") if isinstance(internal.get("version_ids"), list) else [],
-                    "douano_lot_number": _text((match or {}).get("lot_number")),
-                    "douano_options": douano_lots,
-                    "status": status,
-                    "rows": int((match or {}).get("rows", 0) or 0),
-                    "last_movement_date": _text((match or {}).get("last_movement_date")),
-                }
-            )
-            group["summary"]["internal_lots"] += 1
-            group["summary"]["matched" if exact else "near_match" if near else "missing"] += 1
-        for douano in douano_lots:
-            if _lot_exact_key(douano.get("lot_number")) in used_douano:
-                continue
-            has_near_internal = any(
-                _lot_near_key(row.get("lot_number")) == _lot_near_key(douano.get("lot_number"))
-                for row in internal_lots
-            )
-            if has_near_internal:
-                continue
-            group["rows"].append(
-                {
-                    "sku_id": _text(meta.get("sku_id")) if meta else (key if not key.startswith("sku-code:") else ""),
-                    "sku_code": _text(meta.get("sku_code")) or _text(douano.get("sku_code")),
-                    "sku_name": _text(meta.get("sku_name")) or _text(douano.get("product_name")) or key,
-                    "internal_lot_number": "",
-                    "internal_label": "",
-                    "internal_labels": [],
-                    "internal_source": "",
-                    "internal_version_ids": [],
-                    "douano_lot_number": _text(douano.get("lot_number")),
-                    "douano_options": douano_lots,
-                    "status": "douano_only",
-                    "rows": int(douano.get("rows", 0) or 0),
-                    "last_movement_date": _text(douano.get("last_movement_date")),
-                }
-            )
-            group["summary"]["douano_only"] += 1
-        group["summary"]["douano_lots"] += len(douano_lots)
-
-    out = list(groups.values())
-    for group in out:
-        group["rows"].sort(key=lambda row: (str(row.get("sku_name", "")), str(row.get("internal_lot_number", "")), str(row.get("douano_lot_number", ""))))
-    out.sort(key=lambda row: (row["summary"].get("near_match", 0) + row["summary"].get("missing", 0) + row["summary"].get("douano_only", 0) == 0, str(row.get("style_name", ""))))
-    return out
+    return cost_versions_storage.load_internal_lot_summary(year=int(year or 0), limit=int(limit or 5000))
 
 
 def list_lot_reconciliation(*, year: int = 0, limit: int = 500) -> list[dict[str, Any]]:
@@ -1237,6 +868,83 @@ def list_lot_reconciliation(*, year: int = 0, limit: int = 500) -> list[dict[str
             }
         )
     return out
+
+
+def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
+    """Return distinct Douano/API LOTs from stored stock-history allocations."""
+    ensure_schema()
+    try:
+        from app.domain import douano_product_mapping_storage
+
+        douano_product_mapping_storage.ensure_schema()
+    except Exception:
+        pass
+    lim = max(1, min(int(limit or 5000), 50000))
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    a.lot_number,
+                    COUNT(*)::int AS rows,
+                    MAX(a.movement_date) AS last_movement_date,
+                    MAX(a.product_name) AS product_name,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(a.sku_code, ''), '')), '') AS sku_codes,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(p.product_id, 0)), 0) AS douano_product_ids,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(s.beer_id, ''), '')), '') AS style_ids,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(alias.internal_lot_number, ''), '')), '') AS canonical_lots
+                FROM sales_lot_allocations a
+                LEFT JOIN douano_products p ON LOWER(p.sku) = LOWER(a.sku_code)
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = p.product_id
+                LEFT JOIN skus s ON s.id = m.sku_id
+                LEFT JOIN lot_alias_mappings alias
+                  ON LOWER(alias.douano_lot_number) = LOWER(a.lot_number)
+                 AND (
+                    (COALESCE(alias.sku_id, '') <> '' AND alias.sku_id = s.id)
+                    OR (COALESCE(alias.sku_code, '') <> '' AND LOWER(alias.sku_code) = LOWER(a.sku_code))
+                    OR (COALESCE(alias.sku_id, '') = '' AND COALESCE(alias.sku_code, '') = '')
+                 )
+                WHERE COALESCE(NULLIF(a.lot_number, ''), '') <> ''
+                GROUP BY a.lot_number
+                ORDER BY a.lot_number
+                LIMIT %s
+                """,
+                (lim,),
+            )
+            rows = cur.fetchall() or []
+    style_name_by_id: dict[str, str] = {}
+    try:
+        from app.domain import dataset_store
+
+        bieren = dataset_store.load_dataset("bieren")
+        if isinstance(bieren, list):
+            for row in bieren:
+                if not isinstance(row, dict):
+                    continue
+                style_id = _text(row.get("id"))
+                style_name = _text(row.get("biernaam") or row.get("naam") or row.get("name"))
+                if style_id:
+                    style_name_by_id[style_id] = style_name or style_id
+    except Exception:
+        style_name_by_id = {}
+    return [
+        {
+            "lot_number": _text(lot_number),
+            "rows": int(count_rows or 0),
+            "last_movement_date": last_movement_date.isoformat() if last_movement_date else "",
+            "product_name": _text(product_name),
+            "sku_codes": [_text(sku_code) for sku_code in (sku_codes or []) if _text(sku_code)],
+            "douano_product_ids": [int(product_id or 0) for product_id in (douano_product_ids or []) if int(product_id or 0) > 0],
+            "style_ids": [_text(style_id) for style_id in (style_ids or []) if _text(style_id)],
+            "canonical_lots": [_text(lot) for lot in (canonical_lots or []) if _text(lot)],
+            "style_names": [
+                style_name_by_id.get(_text(style_id), _text(style_id))
+                for style_id in (style_ids or [])
+                if _text(style_id)
+            ],
+        }
+        for lot_number, count_rows, last_movement_date, product_name, sku_codes, douano_product_ids, style_ids, canonical_lots in rows
+    ]
 
 
 def find_sales_lot(*, transaction_number: str, sku_code: str) -> dict[str, Any] | None:

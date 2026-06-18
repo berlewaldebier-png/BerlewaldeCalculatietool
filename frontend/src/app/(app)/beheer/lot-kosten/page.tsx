@@ -3,9 +3,10 @@ import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 
 export default async function LotKostenPage() {
-  const bootstrap = await getBootstrap(["auth-status", "skus"], true, "/beheer/lot-kosten");
+  const bootstrap = await getBootstrap(["auth-status", "skus", "articles"], true, "/beheer/lot-kosten");
   const navigation = bootstrap.navigation ?? [];
   const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
+  const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
 
   return (
     <PageShell
@@ -14,7 +15,7 @@ export default async function LotKostenPage() {
       activePath="/beheer"
       navigation={navigation}
     >
-      <LotKostenWorkspace skus={skus} />
+      <LotKostenWorkspace skus={skus} articles={articles} />
     </PageShell>
   );
 }

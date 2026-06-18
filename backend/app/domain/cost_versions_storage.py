@@ -377,6 +377,22 @@ def _lot_exact_key(value: Any) -> str:
     return "".join(ch for ch in str(value or "").strip().upper() if ch.isalnum())
 
 
+def _iso_date_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text[:10]
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            pass
+    try:
+        return datetime.fromisoformat(str(value or "").replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        return ""
+
+
 def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
     """Project LOT numbers from a cost version payload into canonical lot rows.
 
@@ -390,7 +406,7 @@ def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
     source_type = str(version.get("type", "") or "").strip() or "cost_version"
     source_ref = str(version.get("factuurnummer", "") or version.get("invoice_number", "") or version_id).strip()
     supplier = str(version.get("leverancier", "") or version.get("supplier", "") or "").strip()
-    source_date = str(version.get("factuurdatum", "") or version.get("datum", "") or version.get("finalized_at", "") or "").strip()[:10]
+    source_date = _iso_date_text(version.get("factuurdatum", "") or version.get("datum", "") or version.get("finalized_at", ""))
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
 
@@ -404,12 +420,12 @@ def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
                 or source_ref
             ).strip()
             local_supplier = str(value.get("leverancier", "") or value.get("supplier", "") or supplier).strip()
-            local_source_date = str(
+            local_source_date = _iso_date_text(
                 value.get("factuurdatum", "")
                 or value.get("datum", "")
                 or value.get("source_date", "")
                 or source_date
-            ).strip()[:10]
+            )
             for key, child in value.items():
                 key_text = _lot_key_name(key)
                 if key_text in _LOT_KEYS:
@@ -1332,6 +1348,8 @@ def rebuild_overhead_versions_for_year(
     owner: str,
     dry_run: bool = True,
     source_version_ids: Iterable[str] | None = None,
+    in_place_revision: bool = False,
+    correction_run_id: str = "",
 ) -> dict[str, Any]:
     """Create new definitive cost versions for the given year with ABC-light overhead recomputed.
 
@@ -1558,8 +1576,8 @@ def rebuild_overhead_versions_for_year(
                 business += rate
         return manufacturing, business, breakdown_rules
 
-    created: list[dict[str, Any]] = []
-    created_ids: list[str] = []
+    changed_versions: list[dict[str, Any]] = []
+    changed_ids: list[str] = []
     issues: list[str] = []
 
     for source in year_records:
@@ -1610,7 +1628,7 @@ def rebuild_overhead_versions_for_year(
                         {
                             "cost_pool": str(rr.get("cost_pool", "") or ""),
                             "allocation_driver": str(rr.get("allocation_driver", "") or ""),
-                            "amount": round(allocated, 2),
+                            "amount": allocated,
                         }
                     )
             primary = float(row.get("inkoop", row.get("primaire_kosten", row.get("variabele_kosten", 0.0))) or 0.0)
@@ -1620,38 +1638,65 @@ def rebuild_overhead_versions_for_year(
             total_cost = primary + packaging + overhead_total + excise
             next_row = dict(row)
             next_row["product_id"] = product_id
-            next_row["inkoop"] = round(primary, 2)
-            next_row["primaire_kosten"] = round(primary, 2)
+            next_row["inkoop"] = primary
+            next_row["primaire_kosten"] = primary
             next_row["liters_per_product"] = liters
-            next_row["manufacturing_overhead"] = round(manufacturing_amount, 2)
-            next_row["business_overhead"] = round(business_amount, 2)
-            next_row["vaste_kosten"] = round(overhead_total, 2)
-            next_row["indirecte_kosten"] = round(overhead_total, 2)
-            next_row["kostprijs"] = round(total_cost, 2)
+            next_row["manufacturing_overhead"] = manufacturing_amount
+            next_row["business_overhead"] = business_amount
+            next_row["vaste_kosten"] = overhead_total
+            next_row["indirecte_kosten"] = overhead_total
+            next_row["kostprijs"] = total_cost
             next_row["overhead_breakdown"] = overhead_breakdown
             return next_row
 
         next_basis = [rebuild_product_row(r) for r in basis_rows if isinstance(r, dict)]
         next_sameng = [rebuild_product_row(r) for r in sameng_rows if isinstance(r, dict)]
 
-        # New version metadata.
-        bier_id = str(source.get("bier_id", "") or "").strip()
-        key = (bier_id, year_value)
-        next_num = next_num_by_key.get(key, 0) + 1
-        next_num_by_key[key] = next_num
+        if in_place_revision:
+            changed_version = dict(source)
+            changed_id = str(changed_version.get("id", "") or "").strip()
+            changed_ids.append(changed_id)
+            changed_version["updated_at"] = now
+            try:
+                revision_number = int(changed_version.get("correction_revision_number", 0) or 0) + 1
+            except (TypeError, ValueError):
+                revision_number = 1
+            changed_version["correction_revision_number"] = revision_number
+            changed_version["correction_run_id"] = str(correction_run_id or "")
+            changed_version["corrected_at"] = now
+            changed_version["corrected_by"] = owner_value
+            history = changed_version.get("correction_history")
+            if not isinstance(history, list):
+                history = []
+            history.append(
+                {
+                    "correction_run_id": str(correction_run_id or ""),
+                    "revision_number": revision_number,
+                    "corrected_at": now,
+                    "corrected_by": owner_value,
+                    "reason": "abc_overhead_correction",
+                }
+            )
+            changed_version["correction_history"] = history[-25:]
+        else:
+            # New version metadata.
+            bier_id = str(source.get("bier_id", "") or "").strip()
+            key = (bier_id, year_value)
+            next_num = next_num_by_key.get(key, 0) + 1
+            next_num_by_key[key] = next_num
 
-        new_id = str(uuid4())
-        created_ids.append(new_id)
-        created_version = dict(source)
-        created_version["id"] = new_id
-        created_version["versie_nummer"] = next_num
-        created_version["status"] = "definitief"
-        created_version["created_at"] = now
-        created_version["updated_at"] = now
-        created_version["finalized_at"] = now
-        created_version["hercalculatie_reden"] = "abc_overhead_rebuild"
-        created_version["hercalculatie_notitie"] = f"Overhead herberekend (ABC-light) door {owner_value} op {now}"
-        created_version["hercalculatie_timestamp"] = now
+            changed_id = str(uuid4())
+            changed_ids.append(changed_id)
+            changed_version = dict(source)
+            changed_version["id"] = changed_id
+            changed_version["versie_nummer"] = next_num
+            changed_version["status"] = "definitief"
+            changed_version["created_at"] = now
+            changed_version["updated_at"] = now
+            changed_version["finalized_at"] = now
+            changed_version["hercalculatie_reden"] = "abc_overhead_rebuild"
+            changed_version["hercalculatie_notitie"] = f"Overhead herberekend (ABC-light) door {owner_value} op {now}"
+            changed_version["hercalculatie_timestamp"] = now
 
         next_snapshot = dict(snapshot)
         next_snapshot["methodology_version"] = "abc_v1"
@@ -1667,15 +1712,17 @@ def rebuild_overhead_versions_for_year(
             "basisproducten": next_basis,
             "samengestelde_producten": next_sameng,
         }
-        created_version["resultaat_snapshot"] = next_snapshot
-        created.append(created_version)
+        changed_version["resultaat_snapshot"] = next_snapshot
+        changed_versions.append(changed_version)
 
-    if not created:
+    if not changed_versions:
         return {
             "year": year_value,
             "dry_run": bool(dry_run),
             "created_versions": 0,
             "created_version_ids": [],
+            "revised_versions": 0,
+            "revised_version_ids": [],
             "detail": "Geen geschikte definitieve versies met product rows gevonden.",
             "issues": issues,
         }
@@ -1684,29 +1731,40 @@ def rebuild_overhead_versions_for_year(
         return {
             "year": year_value,
             "dry_run": True,
-            "created_versions": len(created),
-            "created_version_ids": created_ids,
+            "created_versions": 0 if in_place_revision else len(changed_versions),
+            "created_version_ids": [] if in_place_revision else changed_ids,
+            "revised_versions": len(changed_versions) if in_place_revision else 0,
+            "revised_version_ids": changed_ids if in_place_revision else [],
             "detail": "Dry run; geen data opgeslagen.",
             "issues": issues,
         }
 
-    # Persist: include old + new versions for this year to avoid delete-by-scope.
+    # Persist: include all versions for this year to avoid delete-by-scope surprises.
     kept = [row for row in records if int(row.get("jaar", 0) or 0) != year_value]
-    if source_id_set:
-        kept.extend(
-            row
+    if in_place_revision:
+        changed_by_id = {str(row.get("id", "") or "").strip(): row for row in changed_versions}
+        next_year_records = [
+            changed_by_id.get(str(row.get("id", "") or "").strip(), row)
             for row in all_year_records
-            if str(row.get("id", "") or "").strip() not in source_id_set
-        )
-    next_year_records = [row for row in year_records] + created
+        ]
+    else:
+        if source_id_set:
+            kept.extend(
+                row
+                for row in all_year_records
+                if str(row.get("id", "") or "").strip() not in source_id_set
+            )
+        next_year_records = [row for row in year_records] + changed_versions
     save_dataset([*kept, *next_year_records], overwrite=True)
 
     return {
         "year": year_value,
         "dry_run": False,
-        "created_versions": len(created),
-        "created_version_ids": created_ids,
-        "detail": "Nieuwe versies aangemaakt; sku rows moeten (opnieuw) worden opgebouwd.",
+        "created_versions": 0 if in_place_revision else len(changed_versions),
+        "created_version_ids": [] if in_place_revision else changed_ids,
+        "revised_versions": len(changed_versions) if in_place_revision else 0,
+        "revised_version_ids": changed_ids if in_place_revision else [],
+        "detail": "Bestaande versies als correctierevisie bijgewerkt." if in_place_revision else "Nieuwe versies aangemaakt; sku rows moeten (opnieuw) worden opgebouwd.",
         "issues": issues,
     }
 
@@ -1854,6 +1912,442 @@ def rebuild_lot_rows_from_payloads(*, year: int = 0, only_if_empty: bool = False
             conn.commit()
 
     return {"versions": len(versions), "lots": sum(len(_version_lot_records(row)) for row in versions), "rebuilt": 1}
+
+
+def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
+    """Return internal LOTs grouped by beer style directly from cost versions.
+
+    Cost version payloads are the source for internal LOT declarations. The
+    normalized `cost_version_lots` table is useful as an index, but this read
+    path deliberately avoids depending on that index being backfilled.
+    """
+    ensure_schema()
+    lim = max(1, min(int(limit or 5000), 50000))
+    year_value = int(year or 0)
+    where = "WHERE LOWER(status) = 'definitief'"
+    params: list[Any] = []
+    if year_value > 0:
+        where += " AND jaar = %s"
+        params.append(year_value)
+    params.append(lim)
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, jaar, status, bier_id, versie_nummer, payload
+                FROM cost_versions
+                {where}
+                ORDER BY jaar DESC, bier_id, versie_nummer, id
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            rows = cur.fetchall() or []
+            version_ids = [str(row[0] or "").strip() for row in rows if str(row[0] or "").strip()]
+            sku_rows_by_version: dict[str, list[dict[str, Any]]] = {}
+            if version_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        r.version_id,
+                        r.sku_id,
+                        r.verpakking_label,
+                        COALESCE(NULLIF(s.name, ''), NULLIF(a.name, ''), r.sku_id) AS sku_name,
+                        COALESCE(NULLIF(s.code, ''), r.sku_id) AS sku_code
+                    FROM cost_version_sku_rows r
+                    LEFT JOIN skus s ON s.id = r.sku_id
+                    LEFT JOIN articles a ON a.id = COALESCE(NULLIF(s.article_id, ''), NULLIF(s.format_article_id, ''))
+                    WHERE r.version_id = ANY(%s)
+                    ORDER BY r.version_id, r.sort_index, r.verpakking_label, sku_name
+                    """,
+                    (version_ids,),
+                )
+                for row in cur.fetchall() or []:
+                    row_version_id, sku_id, verpakking_label, sku_name, sku_code = row
+                    version_id_text = str(row_version_id or "").strip()
+                    sku_id_text = str(sku_id or "").strip()
+                    label = str(verpakking_label or sku_name or sku_code or sku_id_text or "").strip()
+                    if not label:
+                        continue
+                    sku_rows_by_version.setdefault(version_id_text, []).append(
+                        {
+                            "sku_id": sku_id_text,
+                            "sku_code": str(sku_code or "").strip(),
+                            "label": label,
+                            "name": str(sku_name or "").strip(),
+                        }
+                    )
+            historical_where = """
+                WHERE COALESCE(NULLIF(h.lot_number, ''), '') <> ''
+                  AND h.source_type IN ('opening_stock', 'opening_lot')
+            """
+            historical_params: list[Any] = []
+            if year_value > 0:
+                historical_where += " AND h.source_date >= %s::date AND h.source_date < %s::date"
+                historical_params.extend([f"{year_value}-01-01", f"{year_value + 1}-01-01"])
+            cur.execute(
+                f"""
+                SELECT
+                    h.id,
+                    h.lot_number,
+                    h.source_ref,
+                    h.source_type,
+                    h.source_date,
+                    h.sku_id,
+                    h.sku_code,
+                    COALESCE(NULLIF(h.product_name, ''), NULLIF(s.name, ''), NULLIF(a.name, ''), h.sku_code, h.sku_id) AS sku_name,
+                    COALESCE(NULLIF(s.name, ''), NULLIF(a.name, ''), NULLIF(h.product_name, ''), h.sku_code, h.sku_id) AS sku_label,
+                    COALESCE(NULLIF(s.code, ''), NULLIF(h.sku_code, ''), h.sku_id) AS resolved_sku_code,
+                    COALESCE(NULLIF(s.beer_id, ''), '') AS style_id
+                FROM lot_cost_records h
+                LEFT JOIN skus s ON s.id = h.sku_id OR (COALESCE(NULLIF(h.sku_id, ''), '') = '' AND LOWER(s.code) = LOWER(h.sku_code))
+                LEFT JOIN articles a ON a.id = COALESCE(NULLIF(s.article_id, ''), NULLIF(s.format_article_id, ''))
+                {historical_where}
+                ORDER BY h.source_date DESC NULLS LAST, h.lot_number, sku_label
+                LIMIT %s
+                """,
+                tuple(historical_params + [lim]),
+            )
+            historical_rows = cur.fetchall() or []
+
+    style_name_by_id: dict[str, str] = {}
+    try:
+        bieren = postgres_storage.load_dataset("bieren", [])
+        if isinstance(bieren, list):
+            for bier in bieren:
+                if not isinstance(bier, dict):
+                    continue
+                style_id = str(bier.get("id", "") or "").strip()
+                style_name = str(bier.get("biernaam", "") or bier.get("naam", "") or bier.get("name", "") or "").strip()
+                if style_id:
+                    style_name_by_id[style_id] = style_name or style_id
+    except Exception:
+        style_name_by_id = {}
+
+    groups: dict[str, dict[str, Any]] = {}
+    for version_id, version_year, status, beer_id, version_number, payload in rows:
+        version = payload if isinstance(payload, dict) else {}
+        if not isinstance(version, dict):
+            continue
+        version = dict(version)
+        version["id"] = str(version_id or version.get("id", "") or "")
+        version["jaar"] = int(version_year or version.get("jaar", 0) or 0)
+        version["status"] = str(status or version.get("status", "") or "")
+        version["bier_id"] = str(beer_id or version.get("bier_id", "") or "")
+        version["versie_nummer"] = int(version_number or version.get("versie_nummer", 0) or 0)
+        lot_rows = _version_lot_records(version)
+        if not lot_rows:
+            continue
+        version_skus = sku_rows_by_version.get(str(version["id"]), [])
+
+        basis = version.get("basisgegevens") if isinstance(version.get("basisgegevens"), dict) else {}
+        style_id = str(version.get("bier_id", "") or basis.get("bier_id", "") or "").strip()
+        style_name = str(
+            basis.get("biernaam", "")
+            or basis.get("naam", "")
+            or version.get("biernaam", "")
+            or version.get("naam", "")
+            or style_id
+            or "Onbekende stijl"
+        ).strip()
+        group_key = style_id or style_name.lower()
+        group = groups.setdefault(
+            group_key,
+            {
+                "style_id": style_id,
+                "style_name": style_name,
+                "lots": {},
+            },
+        )
+        version_num = int(version.get("versie_nummer", 0) or 0)
+        version_label = f"v{version_num}" if version_num > 0 else "kostprijsversie"
+        for lot_row in lot_rows:
+            lot_number = str(lot_row.get("lot_number", "") or "").strip()
+            lot_key = _lot_exact_key(lot_number)
+            if not lot_number or not lot_key:
+                continue
+            lot_item = group["lots"].setdefault(
+                lot_key,
+                {
+                    "lot_number": lot_number,
+                    "versions": [],
+                    "version_ids": [],
+                    "years": [],
+                    "sources": [],
+                    "skus": {},
+                    "source_date": str(lot_row.get("source_date", "") or ""),
+                },
+            )
+            if version_label not in lot_item["versions"]:
+                lot_item["versions"].append(version_label)
+            version_id_text = str(version.get("id", "") or "").strip()
+            if version_id_text and version_id_text not in lot_item["version_ids"]:
+                lot_item["version_ids"].append(version_id_text)
+            year_num = int(version.get("jaar", 0) or 0)
+            if year_num > 0 and year_num not in lot_item["years"]:
+                lot_item["years"].append(year_num)
+            source_label = str(lot_row.get("source_ref", "") or lot_row.get("source_type", "") or "").strip()
+            if source_label and source_label not in lot_item["sources"]:
+                lot_item["sources"].append(source_label)
+            for sku in version_skus:
+                sku_key = str(sku.get("sku_id", "") or sku.get("sku_code", "") or sku.get("label", "") or "").strip()
+                if not sku_key:
+                    continue
+                sku_item = lot_item["skus"].setdefault(
+                    sku_key,
+                    {
+                        "sku_id": str(sku.get("sku_id", "") or ""),
+                        "sku_code": str(sku.get("sku_code", "") or ""),
+                        "label": str(sku.get("label", "") or sku_key),
+                        "name": str(sku.get("name", "") or ""),
+                        "versions": [],
+                    },
+                )
+                if version_label not in sku_item["versions"]:
+                    sku_item["versions"].append(version_label)
+
+    for (
+        record_id,
+        lot_number,
+        source_ref,
+        source_type,
+        source_date,
+        sku_id,
+        sku_code,
+        sku_name,
+        sku_label,
+        resolved_sku_code,
+        style_id,
+    ) in historical_rows:
+        lot_text = str(lot_number or "").strip()
+        lot_key = _lot_exact_key(lot_text)
+        if not lot_text or not lot_key:
+            continue
+        style_id_text = str(style_id or "").strip()
+        style_name = style_name_by_id.get(style_id_text, style_id_text or "Onbekende stijl")
+        group_key = style_id_text or style_name.lower()
+        group = groups.setdefault(
+            group_key,
+            {
+                "style_id": style_id_text,
+                "style_name": style_name,
+                "lots": {},
+            },
+        )
+        lot_item = group["lots"].setdefault(
+            lot_key,
+            {
+                "lot_number": lot_text,
+                "versions": [],
+                "version_ids": [],
+                "years": [],
+                "sources": [],
+                "skus": {},
+                "source_date": source_date.isoformat() if hasattr(source_date, "isoformat") and source_date else "",
+            },
+        )
+        if "v0" not in lot_item["versions"]:
+            lot_item["versions"].append("v0")
+        record_id_text = str(record_id or "").strip()
+        if record_id_text and record_id_text not in lot_item["version_ids"]:
+            lot_item["version_ids"].append(record_id_text)
+        if hasattr(source_date, "year"):
+            year_num = int(source_date.year)
+            if year_num > 0 and year_num not in lot_item["years"]:
+                lot_item["years"].append(year_num)
+        source_label = str(source_ref or source_type or "Historie v0").strip()
+        if source_label and source_label not in lot_item["sources"]:
+            lot_item["sources"].append(source_label)
+        sku_key = str(sku_id or sku_code or sku_label or "").strip()
+        if not sku_key:
+            continue
+        sku_item = lot_item["skus"].setdefault(
+            sku_key,
+            {
+                "sku_id": str(sku_id or ""),
+                "sku_code": str(resolved_sku_code or sku_code or ""),
+                "label": str(sku_label or sku_name or sku_code or sku_id or ""),
+                "name": str(sku_name or ""),
+                "versions": [],
+            },
+        )
+        if "v0" not in sku_item["versions"]:
+            sku_item["versions"].append("v0")
+
+    out: list[dict[str, Any]] = []
+    for group in groups.values():
+        lots = list(group["lots"].values())
+        for lot in lots:
+            sku_items = list(lot.get("skus", {}).values()) if isinstance(lot.get("skus"), dict) else []
+            sku_items.sort(key=lambda item: str(item.get("label", "") or "").lower())
+            lot["skus"] = sku_items
+            lot["sku_count"] = len(sku_items)
+        lots.sort(key=lambda item: str(item.get("lot_number", "") or "").upper())
+        out.append(
+            {
+                "style_id": group["style_id"],
+                "style_name": group["style_name"],
+                "lot_count": len(lots),
+                "lots": lots,
+            }
+        )
+    out.sort(key=lambda item: str(item.get("style_name", "") or "").lower())
+    return out
+
+
+def _replace_lot_in_payload(value: Any, *, from_lot: str, to_lot: str) -> tuple[Any, int]:
+    from_key = _lot_exact_key(from_lot)
+    if isinstance(value, dict):
+        changed = 0
+        next_value: dict[str, Any] = {}
+        for key, child in value.items():
+            key_text = _lot_key_name(key)
+            if key_text in _LOT_KEYS and _lot_exact_key(child) == from_key:
+                next_value[key] = to_lot
+                changed += 1
+                continue
+            next_child, child_changed = _replace_lot_in_payload(child, from_lot=from_lot, to_lot=to_lot)
+            next_value[key] = next_child
+            changed += child_changed
+        return next_value, changed
+    if isinstance(value, list):
+        changed = 0
+        next_items: list[Any] = []
+        for child in value:
+            next_child, child_changed = _replace_lot_in_payload(child, from_lot=from_lot, to_lot=to_lot)
+            next_items.append(next_child)
+            changed += child_changed
+        return next_items, changed
+    return value, 0
+
+
+def update_internal_lot_number(*, version_ids: list[str], from_lot: str, to_lot: str) -> dict[str, Any]:
+    """Replace an internal LOT in selected cost version payloads.
+
+    This updates the source cost version payload, then rebuilds normalized LOT
+    rows for those versions. Because LOT is declared at the cost version /
+    purchase invoice source, every SKU row below the selected source versions is
+    affected. It does not create fuzzy matches or aliases.
+    """
+    ensure_schema()
+    ids = sorted({str(version_id or "").strip() for version_id in version_ids if str(version_id or "").strip()})
+    from_text = str(from_lot or "").strip()
+    to_text = str(to_lot or "").strip()
+    if not ids:
+        raise ValueError("Kostprijsversies ontbreken.")
+    if not from_text:
+        raise ValueError("Interne LOT ontbreekt.")
+    if not to_text:
+        raise ValueError("Externe LOT ontbreekt.")
+    if _lot_exact_key(from_text) == _lot_exact_key(to_text) and from_text == to_text:
+        return {"updated_versions": 0, "updated_fields": 0, "from_lot": from_text, "to_lot": to_text}
+
+    now = datetime.now(UTC)
+    updated_versions: list[dict[str, Any]] = []
+    updated_fields = 0
+    affected_skus_by_id: dict[str, dict[str, Any]] = {}
+    affected_sources: list[dict[str, Any]] = []
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload
+                FROM cost_versions
+                WHERE id = ANY(%s)
+                FOR UPDATE
+                """,
+                (ids,),
+            )
+            rows = cur.fetchall() or []
+            found_ids = {str(row[0] or "").strip() for row in rows}
+            missing_ids = [version_id for version_id in ids if version_id not in found_ids]
+            if missing_ids:
+                raise ValueError(f"Kostprijsversie niet gevonden: {', '.join(missing_ids)}")
+            if found_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        r.version_id,
+                        r.sku_id,
+                        r.verpakking_label,
+                        COALESCE(NULLIF(s.code, ''), r.sku_id) AS sku_code,
+                        COALESCE(NULLIF(s.name, ''), NULLIF(a.name, ''), r.verpakking_label, r.sku_id) AS sku_name
+                    FROM cost_version_sku_rows r
+                    LEFT JOIN skus s ON s.id = r.sku_id
+                    LEFT JOIN articles a ON a.id = COALESCE(NULLIF(s.article_id, ''), NULLIF(s.format_article_id, ''))
+                    WHERE r.version_id = ANY(%s)
+                    ORDER BY r.version_id, r.sort_index, r.verpakking_label, sku_name
+                    """,
+                    (list(found_ids),),
+                )
+                for row_version_id, sku_id, verpakking_label, sku_code, sku_name in cur.fetchall() or []:
+                    sku_id_text = str(sku_id or "").strip()
+                    if not sku_id_text:
+                        continue
+                    affected_skus_by_id.setdefault(
+                        sku_id_text,
+                        {
+                            "sku_id": sku_id_text,
+                            "sku_code": str(sku_code or "").strip(),
+                            "label": str(verpakking_label or sku_name or sku_code or sku_id_text).strip(),
+                            "version_ids": [],
+                        },
+                    )
+                    version_id_text = str(row_version_id or "").strip()
+                    if version_id_text and version_id_text not in affected_skus_by_id[sku_id_text]["version_ids"]:
+                        affected_skus_by_id[sku_id_text]["version_ids"].append(version_id_text)
+            for version_id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload in rows:
+                payload_obj = payload if isinstance(payload, dict) else {}
+                if not isinstance(payload_obj, dict):
+                    payload_obj = {}
+                next_payload, changed = _replace_lot_in_payload(payload_obj, from_lot=from_text, to_lot=to_text)
+                if changed <= 0:
+                    continue
+                next_payload = dict(next_payload)
+                next_payload["id"] = str(version_id or "")
+                next_payload["jaar"] = int(jaar or 0)
+                next_payload["status"] = str(status or "")
+                next_payload["bier_id"] = str(bier_id or "")
+                next_payload["versie_nummer"] = int(versie_nummer or 0)
+                next_payload["created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else str(next_payload.get("created_at", "") or "")
+                next_payload["updated_at"] = now.isoformat()
+                next_payload["finalized_at"] = finalized_at.isoformat() if hasattr(finalized_at, "isoformat") and finalized_at else str(next_payload.get("finalized_at", "") or "")
+                cur.execute(
+                    """
+                    UPDATE cost_versions
+                    SET payload = %s::jsonb,
+                        updated_at = %s,
+                        updated_at_ts = %s
+                    WHERE id = %s
+                    """,
+                    (json.dumps(next_payload, ensure_ascii=False), now, now, str(version_id or "")),
+                )
+                updated_versions.append(next_payload)
+                updated_fields += changed
+                affected_sources.append(
+                    {
+                        "version_id": str(version_id or ""),
+                        "year": int(jaar or 0),
+                        "version_number": int(versie_nummer or 0),
+                        "updated_fields": int(changed),
+                    }
+                )
+            if updated_versions:
+                _upsert_lot_rows(cur, updated_versions, overwrite=True, now=now)
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    return {
+        "updated_versions": len(updated_versions),
+        "updated_fields": updated_fields,
+        "from_lot": from_text,
+        "to_lot": to_text,
+        "version_ids": [str(row.get("id", "") or "") for row in updated_versions],
+        "affected_sources": affected_sources,
+        "affected_sku_count": len(affected_skus_by_id),
+        "affected_skus": list(affected_skus_by_id.values()),
+    }
 
 
 def load_lot_candidates_by_sku(*, year: int = 0, limit: int = 20000) -> dict[str, list[dict[str, Any]]]:

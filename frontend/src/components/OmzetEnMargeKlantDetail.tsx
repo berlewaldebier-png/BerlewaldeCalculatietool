@@ -180,13 +180,13 @@ function costStatus(line: OrderLineRow | InvoiceLineRow) {
   if (hasLot && versionText) {
     if (nearLot && nearVersionText) {
       return {
-        label: versionText,
+        label: "bijna-match",
         title: `LOT ${line.lot_number || "-"} is niet exact bekend. Mogelijke match: ${nearLot} in ${nearVersionText}. Gerekend met actieve SKU-kostprijs ${versionText}.`,
         background: "rgba(255,206,77,0.16)",
       };
     }
     return {
-      label: versionText,
+      label: "LOT niet gekoppeld",
       title: `LOT gevonden, maar geen kostprijs voor deze LOT + SKU. Gerekend met actieve SKU-kostprijs ${versionText}.`,
       background: "rgba(255,206,77,0.16)",
     };

@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response, status
 
-from app.domain import dataset_store
+from app.domain import correction_run_storage, dataset_store
 from app.domain.auth_dependencies import require_admin, require_user
 
 logger = logging.getLogger(__name__)
@@ -180,12 +180,12 @@ def create_dataset_crud_router(
         except Exception as exc:
             _raise_dataset_http_error(exc)
 
-    @router.put("/{dataset_name}", response_model=dict[str, bool])
+    @router.put("/{dataset_name}", response_model=dict[str, Any])
     def put_dataset(
         dataset_name: str,
         data: Any = Body(...),
         _: dict = Depends(require_admin),
-    ) -> dict[str, bool]:
+    ) -> dict[str, Any]:
         """Update a dataset."""
         if dataset_name not in dataset_names:
             logger.warning(f"Attempted to update unknown dataset: {dataset_name}")
@@ -197,12 +197,25 @@ def create_dataset_crud_router(
             )
         
         try:
+            before: Any = None
+            if dataset_name == "vaste-kosten":
+                before = dataset_store.load_dataset(dataset_name)
             saved = dataset_store.save_dataset(dataset_name, data)
+            correction_run = None
+            if saved and dataset_name == "vaste-kosten":
+                correction_run = correction_run_storage.create_fixed_cost_run(
+                    before=before,
+                    after=data,
+                    result={"saved": bool(saved)},
+                )
             if saved:
                 logger.info(f"Dataset updated: {dataset_name}")
             else:
                 logger.warning(f"Dataset save returned False: {dataset_name}")
-            return {"saved": saved}
+            response: dict[str, Any] = {"saved": saved}
+            if correction_run is not None:
+                response["correction_run"] = correction_run
+            return response
         except ValueError as exc:
             logger.warning(f"Validation error saving {dataset_name}: {exc}")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
