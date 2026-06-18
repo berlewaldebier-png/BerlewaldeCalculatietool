@@ -236,18 +236,40 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
     }
   }
 
-  function externalOptionsFor(rowKey: string) {
+  function matchedExternalLot(lotNumber: string) {
+    return externalLots.find((lot) => lotExactKey(lot.lot_number) === lotExactKey(lotNumber));
+  }
+
+  function selectedOrMatchedExternalLot(rowKey: string, lotNumber: string) {
+    const selected = String(selectedExternalLots[rowKey] || "").trim();
+    if (selected) return selected;
+    return matchedExternalLot(lotNumber)?.lot_number || "";
+  }
+
+  function externalOptionsFor(rowKey: string, currentLotNumber: string) {
     const usedByOtherRows = new Set(
       Object.entries(selectedExternalLots)
         .filter(([key]) => key !== rowKey)
         .map(([, value]) => lotExactKey(value))
         .filter(Boolean)
     );
-    return externalLots.filter((lot) => !usedByOtherRows.has(lotExactKey(lot.lot_number)));
+    for (const group of internalLotGroups) {
+      const groupKey = group.style_id || group.style_name;
+      for (const lot of group.lots || []) {
+        const key = `${groupKey}-${lot.lot_number}`;
+        if (key === rowKey) continue;
+        const exactMatch = matchedExternalLot(lot.lot_number);
+        if (exactMatch) {
+          usedByOtherRows.add(lotExactKey(exactMatch.lot_number));
+        }
+      }
+    }
+    const currentKey = lotExactKey(currentLotNumber);
+    return externalLots.filter((lot) => lotExactKey(lot.lot_number) === currentKey || !usedByOtherRows.has(lotExactKey(lot.lot_number)));
   }
 
   async function updateInternalLot(group: InternalLotGroup, lot: InternalLotItem, lotKey: string) {
-    const selectedLot = String(selectedExternalLots[lotKey] || "").trim();
+    const selectedLot = selectedOrMatchedExternalLot(lotKey, lot.lot_number);
     if (!selectedLot) return;
     const externalLot = externalLots.find((item) => lotExactKey(item.lot_number) === lotExactKey(selectedLot));
     const externalStyleIds = externalLot?.style_ids || [];
@@ -553,8 +575,9 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                     </tr>
                     {(group.lots || []).map((lot) => {
                       const lotKey = `${groupKey}-${lot.lot_number}`;
-                      const selectedLot = selectedExternalLots[lotKey] || "";
-                      const options = externalOptionsFor(lotKey);
+                      const selectedLot = selectedOrMatchedExternalLot(lotKey, lot.lot_number);
+                      const showUpdate = selectedLot.trim() && lotExactKey(selectedLot) !== lotExactKey(lot.lot_number);
+                      const options = externalOptionsFor(lotKey, lot.lot_number);
                       return (
                         <tr key={lotKey}>
                           <td style={{ verticalAlign: "top", paddingLeft: 28 }}>
@@ -603,7 +626,7 @@ export function LotKostenWorkspace({ skus, year = new Date().getFullYear() }: { 
                                   }))
                                 }
                               />
-                              {selectedLot.trim() ? (
+                              {showUpdate ? (
                                 <button
                                   type="button"
                                   className="editor-button editor-button-secondary"
