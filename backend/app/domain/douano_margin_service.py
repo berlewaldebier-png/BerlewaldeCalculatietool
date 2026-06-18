@@ -1783,6 +1783,10 @@ def _snapshot_cost_status(line: dict[str, Any]) -> str:
     if source in {"lot_alias", "cost_version_lot_alias"}:
         return "resolved_lot_alias"
     if source == "baseline":
+        if str(line.get("lot_number", "") or "").strip():
+            if str(line.get("lot_near_match_number", "") or "").strip():
+                return "lot_near_match_fallback"
+            return "lot_unmatched_fallback"
         return "fallback_active_sku_cost"
     return "resolved"
 
@@ -2028,6 +2032,7 @@ def _resolve_snapshot_batch(
 def backfill_line_snapshots(
     *,
     since: str = "",
+    until: str = "",
     company_id: int = 0,
     limit: int = 5000,
     basis: str = "both",
@@ -2042,6 +2047,7 @@ def backfill_line_snapshots(
     if source_basis not in {"order", "invoice", "both"}:
         raise ValueError("basis must be 'order', 'invoice', or 'both'.")
     since_text = (since or "").strip()
+    until_text = (until or "").strip()
     lim = max(1, min(int(limit or 5000), 50000))
     batch_size = 1000
     run_context = _build_snapshot_run_context()
@@ -2059,6 +2065,9 @@ def backfill_line_snapshots(
         if since_text:
             base_clauses.append("l.order_date >= %s::date")
             base_params.append(since_text)
+        if until_text:
+            base_clauses.append("l.order_date < %s::date")
+            base_params.append(until_text)
         processed = 0
         last_line_id = 0
         while processed < lim:
@@ -2133,6 +2142,9 @@ def backfill_line_snapshots(
         if since_text:
             base_clauses.append("l.invoice_date >= %s::date")
             base_params.append(since_text)
+        if until_text:
+            base_clauses.append("l.invoice_date < %s::date")
+            base_params.append(until_text)
         processed = 0
         last_line_id = 0
         while processed < lim:
@@ -2198,4 +2210,457 @@ def backfill_line_snapshots(
                 break
             processed += len(rows)
 
-    return {"computed": computed, "missing_cost": missing, "documents": len(documents), "basis": source_basis}
+    return {
+        "computed": computed,
+        "missing_cost": missing,
+        "documents": len(documents),
+        "basis": source_basis,
+        "since": since_text,
+        "until": until_text,
+    }
+
+
+def backfill_line_snapshots_for_year(
+    *,
+    year: int,
+    limit: int = 50000,
+    basis: str = "both",
+) -> dict[str, Any]:
+    year_value = int(year or 0)
+    if year_value <= 0:
+        return {"computed": 0, "missing_cost": 0, "documents": 0, "basis": str(basis or "both"), "year": year_value}
+    result = backfill_line_snapshots(
+        since=f"{year_value}-01-01",
+        until=f"{year_value + 1}-01-01",
+        basis=basis,
+        limit=limit,
+    )
+    result["year"] = year_value
+    return result
+
+
+def backfill_line_snapshots_for_lots(
+    *,
+    lot_numbers: Iterable[str],
+    limit: int = 50000,
+    basis: str = "both",
+) -> dict[str, Any]:
+    """Recompute stored margin snapshots for sales rows that use Douano LOTs.
+
+    This is intentionally narrower than a full backfill. It is used after an
+    internal LOT correction: Douano LOTs on sales rows are the source of truth,
+    and changing the internal LOT only changes how those existing sales rows
+    resolve their cost version.
+    """
+    douano_margin_snapshot_storage.ensure_schema()
+    lot_costs_storage.ensure_schema()
+    source_basis = str(basis or "both").strip().lower()
+    if source_basis not in {"order", "invoice", "both"}:
+        raise ValueError("basis must be 'order', 'invoice', or 'both'.")
+    lots = sorted({str(lot or "").strip() for lot in lot_numbers if str(lot or "").strip()})
+    if not lots:
+        return {"computed": 0, "missing_cost": 0, "documents": 0, "basis": source_basis, "lots": []}
+    lot_keys = [lot.lower() for lot in lots]
+    lim = max(1, min(int(limit or 50000), 50000))
+    run_context = _build_snapshot_run_context()
+
+    computed = 0
+    missing = 0
+    documents: set[tuple[str, int]] = set()
+
+    if source_basis in {"order", "both"}:
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.line_id,
+                        l.sales_order_id,
+                        l.company_id,
+                        l.order_date,
+                        o.transaction_number,
+                        l.douano_product_id,
+                        COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
+                        p.sku,
+                        l.quantity,
+                        l.unit_price_ex,
+                        l.discount_ex,
+                        l.charges_total_ex,
+                        l.net_revenue_ex,
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
+                        ig.douano_product_id IS NOT NULL AS ignored
+                    FROM douano_sales_order_lines l
+                    JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
+                    LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM sales_lot_allocations a
+                        WHERE a.transaction_number = o.transaction_number
+                          AND LOWER(a.sku_code) = LOWER(COALESCE(p.sku, ''))
+                          AND LOWER(a.lot_number) = ANY(%s::text[])
+                    )
+                    ORDER BY l.line_id DESC
+                    LIMIT %s
+                    """,
+                    (lot_keys, lim),
+                )
+                rows = cur.fetchall() or []
+        lines = _resolve_snapshot_batch(source_type="order", rows=list(rows), run_context=run_context)
+        records = [
+            record for line in lines
+            if (record := _line_snapshot_record(source_type="order", line=line)) is not None
+        ]
+        computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+        for line in lines:
+            documents.add(("order", int(line.get("sales_order_id", 0) or 0)))
+            if line.get("missing_cost"):
+                missing += 1
+
+    if source_basis in {"invoice", "both"}:
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.line_id,
+                        l.sales_invoice_id,
+                        l.company_id,
+                        l.invoice_date,
+                        COALESCE((SELECT array_agg(tx.value) FROM jsonb_array_elements_text(i.invoiced_transaction_numbers) AS tx(value)), ARRAY[]::text[]) AS transaction_numbers,
+                        l.douano_product_id,
+                        COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
+                        p.sku,
+                        l.quantity,
+                        l.unit_price_ex,
+                        l.discount_ex,
+                        l.charges_total_ex,
+                        l.net_revenue_ex,
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
+                        ig.douano_product_id IS NOT NULL AS ignored
+                    FROM douano_sales_invoice_lines l
+                    JOIN douano_sales_invoices i ON i.sales_invoice_id = l.sales_invoice_id
+                    LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM sales_lot_allocations a
+                        JOIN jsonb_array_elements_text(i.invoiced_transaction_numbers) tx(value)
+                          ON tx.value = a.transaction_number
+                        WHERE LOWER(a.sku_code) = LOWER(COALESCE(p.sku, ''))
+                          AND LOWER(a.lot_number) = ANY(%s::text[])
+                    )
+                    ORDER BY l.line_id DESC
+                    LIMIT %s
+                    """,
+                    (lot_keys, lim),
+                )
+                rows = cur.fetchall() or []
+        lines = _resolve_snapshot_batch(source_type="invoice", rows=list(rows), run_context=run_context)
+        records = [
+            record for line in lines
+            if (record := _line_snapshot_record(source_type="invoice", line=line)) is not None
+        ]
+        computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+        for line in lines:
+            documents.add(("invoice", int(line.get("sales_invoice_id", 0) or 0)))
+            if line.get("missing_cost"):
+                missing += 1
+
+    return {
+        "computed": computed,
+        "missing_cost": missing,
+        "documents": len(documents),
+        "basis": source_basis,
+        "lots": lots,
+    }
+
+
+def backfill_line_snapshots_for_douano_products(
+    *,
+    douano_product_ids: Iterable[int],
+    limit: int = 50000,
+    basis: str = "both",
+) -> dict[str, Any]:
+    """Recompute snapshots for sales rows whose product mapping/ignore state changed."""
+    douano_margin_snapshot_storage.ensure_schema()
+    source_basis = str(basis or "both").strip().lower()
+    if source_basis not in {"order", "invoice", "both"}:
+        raise ValueError("basis must be 'order', 'invoice', or 'both'.")
+    product_ids = sorted({int(pid or 0) for pid in douano_product_ids if int(pid or 0) > 0})
+    if not product_ids:
+        return {"computed": 0, "missing_cost": 0, "documents": 0, "basis": source_basis, "douano_product_ids": []}
+    lim = max(1, min(int(limit or 50000), 50000))
+    run_context = _build_snapshot_run_context()
+
+    computed = 0
+    missing = 0
+    documents: set[tuple[str, int]] = set()
+
+    if source_basis in {"order", "both"}:
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.line_id,
+                        l.sales_order_id,
+                        l.company_id,
+                        l.order_date,
+                        o.transaction_number,
+                        l.douano_product_id,
+                        COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
+                        p.sku,
+                        l.quantity,
+                        l.unit_price_ex,
+                        l.discount_ex,
+                        l.charges_total_ex,
+                        l.net_revenue_ex,
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
+                        ig.douano_product_id IS NOT NULL AS ignored
+                    FROM douano_sales_order_lines l
+                    JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
+                    LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                    WHERE l.douano_product_id = ANY(%s::bigint[])
+                    ORDER BY l.line_id DESC
+                    LIMIT %s
+                    """,
+                    (product_ids, lim),
+                )
+                rows = cur.fetchall() or []
+        lines = _resolve_snapshot_batch(source_type="order", rows=list(rows), run_context=run_context)
+        records = [
+            record for line in lines
+            if (record := _line_snapshot_record(source_type="order", line=line)) is not None
+        ]
+        computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+        for line in lines:
+            documents.add(("order", int(line.get("sales_order_id", 0) or 0)))
+            if line.get("missing_cost"):
+                missing += 1
+
+    if source_basis in {"invoice", "both"}:
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.line_id,
+                        l.sales_invoice_id,
+                        l.company_id,
+                        l.invoice_date,
+                        COALESCE((SELECT array_agg(tx.value) FROM jsonb_array_elements_text(i.invoiced_transaction_numbers) AS tx(value)), ARRAY[]::text[]) AS transaction_numbers,
+                        l.douano_product_id,
+                        COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
+                        p.sku,
+                        l.quantity,
+                        l.unit_price_ex,
+                        l.discount_ex,
+                        l.charges_total_ex,
+                        l.net_revenue_ex,
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
+                        ig.douano_product_id IS NOT NULL AS ignored
+                    FROM douano_sales_invoice_lines l
+                    JOIN douano_sales_invoices i ON i.sales_invoice_id = l.sales_invoice_id
+                    LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                    WHERE l.douano_product_id = ANY(%s::bigint[])
+                    ORDER BY l.line_id DESC
+                    LIMIT %s
+                    """,
+                    (product_ids, lim),
+                )
+                rows = cur.fetchall() or []
+        lines = _resolve_snapshot_batch(source_type="invoice", rows=list(rows), run_context=run_context)
+        records = [
+            record for line in lines
+            if (record := _line_snapshot_record(source_type="invoice", line=line)) is not None
+        ]
+        computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+        for line in lines:
+            documents.add(("invoice", int(line.get("sales_invoice_id", 0) or 0)))
+            if line.get("missing_cost"):
+                missing += 1
+
+    return {
+        "computed": computed,
+        "missing_cost": missing,
+        "documents": len(documents),
+        "basis": source_basis,
+        "douano_product_ids": product_ids,
+    }
+
+
+def backfill_line_snapshots_for_unmapped_rule(
+    *,
+    match_type: str,
+    douano_product_id: int = 0,
+    line_description: str = "",
+    limit: int = 50000,
+    basis: str = "both",
+) -> dict[str, Any]:
+    """Recompute snapshots affected by an unmapped-rule change.
+
+    Normal Douano products are handled by product id. Product-0 miscellaneous
+    lines are matched by their stored line description.
+    """
+    mt = str(match_type or "").strip()
+    pid = int(douano_product_id or 0)
+    if mt == "douano_product_id" and pid > 0:
+        return backfill_line_snapshots_for_douano_products(
+            douano_product_ids=[pid],
+            limit=limit,
+            basis=basis,
+        )
+    if mt != "product0_description":
+        return {"computed": 0, "missing_cost": 0, "documents": 0, "basis": str(basis or "both"), "match_type": mt}
+
+    description = str(line_description or "").strip() or "Overig"
+    source_basis = str(basis or "both").strip().lower()
+    if source_basis not in {"order", "invoice", "both"}:
+        raise ValueError("basis must be 'order', 'invoice', or 'both'.")
+    lim = max(1, min(int(limit or 50000), 50000))
+    run_context = _build_snapshot_run_context()
+    computed = 0
+    missing = 0
+    documents: set[tuple[str, int]] = set()
+
+    if source_basis in {"order", "both"}:
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.line_id,
+                        l.sales_order_id,
+                        l.company_id,
+                        l.order_date,
+                        o.transaction_number,
+                        l.douano_product_id,
+                        COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
+                        p.sku,
+                        l.quantity,
+                        l.unit_price_ex,
+                        l.discount_ex,
+                        l.charges_total_ex,
+                        l.net_revenue_ex,
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
+                        ig.douano_product_id IS NOT NULL AS ignored
+                    FROM douano_sales_order_lines l
+                    JOIN douano_sales_orders o ON o.sales_order_id = l.sales_order_id
+                    LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                    WHERE l.douano_product_id = 0
+                      AND COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s
+                    ORDER BY l.line_id DESC
+                    LIMIT %s
+                    """,
+                    (description, lim),
+                )
+                rows = cur.fetchall() or []
+        lines = _resolve_snapshot_batch(source_type="order", rows=list(rows), run_context=run_context)
+        records = [
+            record for line in lines
+            if (record := _line_snapshot_record(source_type="order", line=line)) is not None
+        ]
+        computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+        for line in lines:
+            documents.add(("order", int(line.get("sales_order_id", 0) or 0)))
+            if line.get("missing_cost"):
+                missing += 1
+
+    if source_basis in {"invoice", "both"}:
+        with postgres_storage.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.line_id,
+                        l.sales_invoice_id,
+                        l.company_id,
+                        l.invoice_date,
+                        COALESCE((SELECT array_agg(tx.value) FROM jsonb_array_elements_text(i.invoiced_transaction_numbers) AS tx(value)), ARRAY[]::text[]) AS transaction_numbers,
+                        l.douano_product_id,
+                        COALESCE(NULLIF(p.name, ''), NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), '') AS product_name,
+                        p.sku,
+                        l.quantity,
+                        l.unit_price_ex,
+                        l.discount_ex,
+                        l.charges_total_ex,
+                        l.net_revenue_ex,
+                        COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) AS sku_id,
+                        ig.douano_product_id IS NOT NULL AS ignored
+                    FROM douano_sales_invoice_lines l
+                    JOIN douano_sales_invoices i ON i.sales_invoice_id = l.sales_invoice_id
+                    LEFT JOIN douano_products p ON p.product_id = l.douano_product_id
+                    LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
+                    LEFT JOIN douano_unmapped_rules r
+                      ON l.douano_product_id = 0
+                     AND r.match_type = 'product0_description'
+                     AND r.douano_product_id = 0
+                     AND r.action = 'map_to_sku'
+                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                    WHERE l.douano_product_id = 0
+                      AND COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s
+                    ORDER BY l.line_id DESC
+                    LIMIT %s
+                    """,
+                    (description, lim),
+                )
+                rows = cur.fetchall() or []
+        lines = _resolve_snapshot_batch(source_type="invoice", rows=list(rows), run_context=run_context)
+        records = [
+            record for line in lines
+            if (record := _line_snapshot_record(source_type="invoice", line=line)) is not None
+        ]
+        computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+        for line in lines:
+            documents.add(("invoice", int(line.get("sales_invoice_id", 0) or 0)))
+            if line.get("missing_cost"):
+                missing += 1
+
+    return {
+        "computed": computed,
+        "missing_cost": missing,
+        "documents": len(documents),
+        "basis": source_basis,
+        "match_type": mt,
+        "line_description": description,
+    }

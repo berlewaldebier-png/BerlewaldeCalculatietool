@@ -9,6 +9,14 @@ import { createDatasetItem } from "@/lib/datasetItems";
 type EditorValue = string | number | boolean | null;
 type EditorRow = Record<string, EditorValue>;
 
+type CorrectionRun = {
+  id: string;
+  status: string;
+  scope_years?: number[];
+  summary?: string;
+  created_at?: string;
+};
+
 function formatEur(value: number) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(value);
 }
@@ -308,13 +316,34 @@ export function VasteKostenClient({
   const [rowsByYear, setRowsByYear] = useState<Record<string, InternalRow[]>>(normalizedByYear);
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isReverting, setIsReverting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isPoolSaving, setIsPoolSaving] = useState(false);
+  const [correctionRuns, setCorrectionRuns] = useState<CorrectionRun[]>([]);
 
   useEffect(() => {
     if (!syncOnPropsChange) return;
     setRowsByYear(normalizedByYear);
   }, [normalizedByYear, syncOnPropsChange]);
+
+  async function loadCorrectionRuns() {
+    if (mode === "draft") return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/integrations/correction-runs?source_type=fixed_costs&limit=5`, {
+        credentials: "include",
+        cache: "no-store"
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      setCorrectionRuns(Array.isArray(payload?.items) ? payload.items : []);
+    } catch {
+      // Non-critical: fixed-cost editing must keep working if history cannot be loaded.
+    }
+  }
+
+  useEffect(() => {
+    void loadCorrectionRuns();
+  }, [mode]);
 
   const totalsByYear = useMemo(() => {
     const years =
@@ -496,7 +525,22 @@ export function VasteKostenClient({
           const text = await response.text();
           throw new Error(text || "Opslaan mislukt");
         }
-        setStatus("Opgeslagen.");
+        const result = await response.json().catch(() => null);
+        const correctionRun = result?.correction_run;
+        const years = Array.isArray(correctionRun?.scope_years) ? correctionRun.scope_years.join(", ") : "";
+        const reports = Array.isArray(correctionRun?.result?.revision_reports) ? correctionRun.result.revision_reports : [];
+        const refreshes = Array.isArray(correctionRun?.result?.snapshot_refreshes) ? correctionRun.result.snapshot_refreshes : [];
+        const revised = reports.reduce((sum: number, row: any) => sum + Number(row?.revised_versions ?? 0), 0);
+        const refreshed = refreshes.reduce((sum: number, row: any) => sum + Number(row?.computed ?? 0), 0);
+        const correctionStatus = String(correctionRun?.status ?? "");
+        setStatus(
+          correctionRun
+            ? correctionStatus === "failed"
+              ? `Opgeslagen, maar correctierevisie faalde voor ${years || "gewijzigde jaren"}. Controleer de correctierun.`
+              : `Opgeslagen. Correctierevisie voor ${years || "gewijzigde jaren"}: ${revised} kostprijsversies bijgewerkt, ${refreshed} Omzet & Marge regels ververst.`
+            : "Opgeslagen."
+        );
+        await loadCorrectionRuns();
         router.refresh();
       }
     } catch (error) {
@@ -504,6 +548,67 @@ export function VasteKostenClient({
       setStatus(message);
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function refreshFixedCostsFromServer() {
+    const response = await fetch(`${API_BASE_URL}/data/vaste-kosten`, { cache: "no-store", credentials: "include" });
+    if (!response.ok) return;
+    const payload = await response.json();
+    const data = payload?.data;
+    if (!data || typeof data !== "object") return;
+    const next: Record<string, InternalRow[]> = {};
+    for (const [yearKey, rawItems] of Object.entries(data as Record<string, unknown>)) {
+      if (!Array.isArray(rawItems)) continue;
+      next[String(yearKey)] = (rawItems as Array<Record<string, unknown>>).map((item, index) => {
+        const rawId = String(item.id ?? "").trim();
+        return {
+          _uiId: rawId ? `${rawId}-${index}` : createUiId(),
+          id: rawId,
+          omschrijving: String(item.omschrijving ?? ""),
+          kostensoort: String(item.kostensoort ?? ""),
+          cost_pool: String((item as any).cost_pool ?? ""),
+          domain: String((item as any).domain ?? (item as any).domein ?? "production") || "production",
+          allocation_driver: String((item as any).allocation_driver ?? ""),
+          allocation_scope: String((item as any).allocation_scope ?? "all") || "all",
+          stand: String((item as any).stand ?? (item as any).basis ?? "normal") || "normal",
+          include_in_inventory_cost: Boolean((item as any).include_in_inventory_cost ?? true),
+          include_in_quote_handling: Boolean((item as any).include_in_quote_handling ?? false),
+          bedrag_per_jaar: Number(item.bedrag_per_jaar ?? 0),
+          herverdeel_pct: clampPct(item.herverdeel_pct ?? 0)
+        };
+      });
+    }
+    setRowsByYear(next);
+  }
+
+  async function handleRevertLatestCorrection() {
+    const latest = correctionRuns.find((run) => run.status === "applied");
+    if (!latest?.id) {
+      setStatus("Geen toegepaste vaste-kosten correctierun om terug te draaien.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Laatste vaste-kosten correctie terugdraaien?\n\n${latest.summary || latest.id}\n\nDit herstelt de vaste-kosten brondata.`
+    );
+    if (!confirmed) return;
+    setIsReverting(true);
+    setStatus("Correctierun terugdraaien...");
+    try {
+      const response = await fetch(`${API_BASE_URL}/integrations/correction-runs/${latest.id}/revert`, {
+        method: "POST",
+        credentials: "include"
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(String(payload?.detail || "Terugdraaien mislukt."));
+      await refreshFixedCostsFromServer();
+      await loadCorrectionRuns();
+      setStatus("Laatste vaste-kosten correctie teruggedraaid.");
+      router.refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Terugdraaien mislukt.");
+    } finally {
+      setIsReverting(false);
     }
   }
 
@@ -859,6 +964,17 @@ export function VasteKostenClient({
             </div>
             <div className="editor-actions-group">
               {status ? <span className="editor-status">{status}</span> : null}
+              {mode !== "draft" && correctionRuns.some((run) => run.status === "applied") ? (
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={handleRevertLatestCorrection}
+                  disabled={isSaving || isReverting}
+                  title="Herstel de vaste-kosten brondata van de laatste toegepaste correctierun."
+                >
+                  {isReverting ? "Terugdraaien..." : "Laatste correctie terugdraaien"}
+                </button>
+              ) : null}
               <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>
                 {isSaving ? (mode === "draft" ? "Concept opslaan..." : "Opslaan...") : mode === "draft" ? "Concept opslaan" : "Opslaan"}
               </button>

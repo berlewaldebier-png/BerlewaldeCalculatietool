@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.api.utils import create_dataset_crud_router
-from app.domain import dataset_store, postgres_storage, product_model_storage
+from app.domain import dataset_store, douano_margin_service, postgres_storage, product_model_storage
 from app.domain.auth_dependencies import require_admin
 from app.schemas.sku_composition import (
     UpsertBundleRequest,
@@ -159,7 +159,9 @@ def post_activate_kostprijsversie(
                 ),
             )
         logger.info(f"Activated cost version: {version_id}")
-        return {"activated": True, "record": activated}
+        year = int(activated.get("jaar", 0) or 0) if isinstance(activated, dict) else 0
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_year(year=year, basis="both", limit=50000)
+        return {"activated": True, "record": activated, "snapshot_refresh": snapshot_refresh}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -199,7 +201,9 @@ def post_activate_kostprijsversie_products(
             )
         
         logger.info(f"Activated {len(product_ids)} products for cost version: {version_id}")
-        return {"activated": True, "record": activated}
+        year = int(activated.get("jaar", 0) or 0) if isinstance(activated, dict) else 0
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_year(year=year, basis="both", limit=50000)
+        return {"activated": True, "record": activated, "snapshot_refresh": snapshot_refresh}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:

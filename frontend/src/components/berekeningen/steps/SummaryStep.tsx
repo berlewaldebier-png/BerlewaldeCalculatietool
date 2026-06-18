@@ -45,6 +45,36 @@ function cleanUnitLabel(label: unknown, beerName: unknown) {
     .trim() || raw;
 }
 
+function asRecord(value: unknown): GenericRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as GenericRecord) : {};
+}
+
+function getCanonicalSnapshot(current: GenericRecord, buildResultaatSnapshot: (row: GenericRecord) => any) {
+  const liveSnapshot = buildResultaatSnapshot(current);
+  const status = String((current as any).status ?? "").trim().toLowerCase();
+  const costLinesRaw = (current as any).cost_lines ?? (current as any).costLines ?? [];
+  const costLines = Array.isArray(costLinesRaw) ? (costLinesRaw as SummaryProductRow[]) : [];
+
+  if (status !== "definitief" || costLines.length === 0) {
+    return liveSnapshot;
+  }
+
+  const storedSnapshot = asRecord((current as any).resultaat_snapshot);
+  const storedProducts = asRecord((storedSnapshot as any).producten);
+  const storedCompositeRows = Array.isArray((storedProducts as any).samengestelde_producten)
+    ? ((storedProducts as any).samengestelde_producten as SummaryProductRow[])
+    : [];
+
+  return {
+    ...liveSnapshot,
+    ...storedSnapshot,
+    producten: {
+      basisproducten: costLines,
+      samengestelde_producten: storedCompositeRows,
+    },
+  };
+}
+
 export function SummaryStep({
   current,
   buildResultaatSnapshot,
@@ -60,7 +90,7 @@ export function SummaryStep({
   enabledFormatIds: string[] | null;
   onToggleFormat: (formatId: string, enabled: boolean) => void;
 }) {
-  const snapshot = buildResultaatSnapshot(current);
+  const snapshot = getCanonicalSnapshot(current, buildResultaatSnapshot);
   const basisproductenRows = snapshot.producten.basisproducten;
   const samengesteldeRows = snapshot.producten.samengestelde_producten;
   const basis = (current.basisgegevens as GenericRecord) ?? {};

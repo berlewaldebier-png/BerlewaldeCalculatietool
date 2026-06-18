@@ -522,8 +522,6 @@ def upsert_lot_alias(raw: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Douano LOT ontbreekt.")
     if not internal_lot:
         raise ValueError("Interne LOT ontbreekt.")
-    if not sku_id and not sku_code:
-        raise ValueError("SKU ontbreekt.")
     record_id = _text(raw.get("id")) or _id_for("lot_alias", sku_id, sku_code, douano_lot)
     payload = dict(raw)
     now = _now()
@@ -575,6 +573,38 @@ def upsert_lot_alias(raw: dict[str, Any]) -> dict[str, Any]:
         "reason": reason,
         "updated_at": now.isoformat(),
     }
+
+
+def upsert_lot_aliases(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Create one or more explicit raw-Douano -> canonical/internal LOT mappings.
+
+    `sku_ids` / `sku_codes` keep aliases scoped to the products under a cost
+    source. If no scope is provided, a global LOT alias is allowed deliberately.
+    """
+    sku_ids = [_text(value) for value in raw.get("sku_ids", []) if _text(value)] if isinstance(raw.get("sku_ids"), list) else []
+    sku_codes = [_text(value) for value in raw.get("sku_codes", []) if _text(value)] if isinstance(raw.get("sku_codes"), list) else []
+    single_sku_id = _text(raw.get("sku_id"))
+    single_sku_code = _text(raw.get("sku_code", raw.get("sku")))
+    if single_sku_id and single_sku_id not in sku_ids:
+        sku_ids.append(single_sku_id)
+    if single_sku_code and single_sku_code not in sku_codes:
+        sku_codes.append(single_sku_code)
+
+    scopes: list[dict[str, str]] = []
+    scopes.extend({"sku_id": sku_id, "sku_code": ""} for sku_id in sku_ids)
+    scopes.extend({"sku_id": "", "sku_code": sku_code} for sku_code in sku_codes)
+    if not scopes:
+        scopes.append({"sku_id": "", "sku_code": ""})
+
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for scope in scopes:
+        key = (scope["sku_id"].lower(), scope["sku_code"].lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(upsert_lot_alias({**raw, **scope}))
+    return out
 
 
 def delete_lot_alias(alias_id: str) -> bool:
@@ -859,11 +889,21 @@ def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
                     COUNT(*)::int AS rows,
                     MAX(a.movement_date) AS last_movement_date,
                     MAX(a.product_name) AS product_name,
-                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(s.beer_id, ''), '')), '') AS style_ids
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(a.sku_code, ''), '')), '') AS sku_codes,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(p.product_id, 0)), 0) AS douano_product_ids,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(s.beer_id, ''), '')), '') AS style_ids,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(alias.internal_lot_number, ''), '')), '') AS canonical_lots
                 FROM sales_lot_allocations a
                 LEFT JOIN douano_products p ON LOWER(p.sku) = LOWER(a.sku_code)
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = p.product_id
                 LEFT JOIN skus s ON s.id = m.sku_id
+                LEFT JOIN lot_alias_mappings alias
+                  ON LOWER(alias.douano_lot_number) = LOWER(a.lot_number)
+                 AND (
+                    (COALESCE(alias.sku_id, '') <> '' AND alias.sku_id = s.id)
+                    OR (COALESCE(alias.sku_code, '') <> '' AND LOWER(alias.sku_code) = LOWER(a.sku_code))
+                    OR (COALESCE(alias.sku_id, '') = '' AND COALESCE(alias.sku_code, '') = '')
+                 )
                 WHERE COALESCE(NULLIF(a.lot_number, ''), '') <> ''
                 GROUP BY a.lot_number
                 ORDER BY a.lot_number
@@ -893,14 +933,17 @@ def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
             "rows": int(count_rows or 0),
             "last_movement_date": last_movement_date.isoformat() if last_movement_date else "",
             "product_name": _text(product_name),
+            "sku_codes": [_text(sku_code) for sku_code in (sku_codes or []) if _text(sku_code)],
+            "douano_product_ids": [int(product_id or 0) for product_id in (douano_product_ids or []) if int(product_id or 0) > 0],
             "style_ids": [_text(style_id) for style_id in (style_ids or []) if _text(style_id)],
+            "canonical_lots": [_text(lot) for lot in (canonical_lots or []) if _text(lot)],
             "style_names": [
                 style_name_by_id.get(_text(style_id), _text(style_id))
                 for style_id in (style_ids or [])
                 if _text(style_id)
             ],
         }
-        for lot_number, count_rows, last_movement_date, product_name, style_ids in rows
+        for lot_number, count_rows, last_movement_date, product_name, sku_codes, douano_product_ids, style_ids, canonical_lots in rows
     ]
 
 

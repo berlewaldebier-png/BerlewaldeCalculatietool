@@ -33,9 +33,10 @@ export default async function ApiIntegratiesPage({ searchParams }: { searchParam
   const resolved = searchParams ? await searchParams : {};
   const yearRaw = typeof resolved.year === "string" ? resolved.year : "";
   const statusYear = Number(yearRaw) || new Date().getFullYear();
-  const bootstrap = await getBootstrap(["auth-status", "skus"], true, "/beheer/api");
+  const bootstrap = await getBootstrap(["auth-status", "skus", "articles"], true, "/beheer/api");
   const navigation = bootstrap.navigation ?? [];
   const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
+  const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
 
   let douano: DouanoStatus | null = null;
   let douanoError = "";
@@ -69,6 +70,7 @@ export default async function ApiIntegratiesPage({ searchParams }: { searchParam
       <DataQualityIntegrationWorkspace
         initialStatus={setupStatusPayload.result}
         skus={skus}
+        articles={articles}
         advanced={
           <>
             <SectionCard title="Douano verbinding" description="OAuth2 verbinding en basisinformatie. Tokens worden server-side opgeslagen in PostgreSQL.">
@@ -132,7 +134,7 @@ export default async function ApiIntegratiesPage({ searchParams }: { searchParam
               </div>
             </SectionCard>
 
-            <LotKostenWorkspace skus={skus} />
+            <LotKostenWorkspace skus={skus} articles={articles} />
             <CostpriceModelWorkspace />
 
             <SectionCard title="Gebruikte aanroepen" description="Interne endpoints voor de Douano OAuth flow en technische diagnose.">

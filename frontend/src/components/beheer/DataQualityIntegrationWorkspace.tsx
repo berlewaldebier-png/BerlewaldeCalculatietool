@@ -385,10 +385,12 @@ function ReliabilityBanner({ status }: { status: SetupStatus }) {
 export function DataQualityIntegrationWorkspace({
   initialStatus,
   skus,
+  articles = [],
   advanced,
 }: {
   initialStatus: SetupStatus;
   skus: GenericRecord[];
+  articles?: GenericRecord[];
   advanced: ReactNode;
 }) {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -444,7 +446,7 @@ export function DataQualityIntegrationWorkspace({
       return (
         <div className="wizard-stack">
           <CheckGrid checks={lotChecks} openId={openMissingId} setOpenId={setOpenMissingId} />
-          <LotKostenWorkspace skus={skus} year={initialStatus.year} />
+          <LotKostenWorkspace skus={skus} articles={articles} year={initialStatus.year} />
         </div>
       );
     }
