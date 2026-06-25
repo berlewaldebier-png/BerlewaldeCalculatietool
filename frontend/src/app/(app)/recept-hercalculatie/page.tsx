@@ -16,8 +16,8 @@ export default async function ReceptHercalculatiePage() {
 
   return (
     <PageShell
-      title="Recept hercalculeren"
-      subtitle="Start nieuwe concept-hercalculaties op basis van definitieve eigen-productieberekeningen."
+      title="Brouwmoment toevoegen"
+      subtitle="Maak een LOT-gebonden batchversie op basis van een actieve kostprijs."
       activePath="/recept-hercalculatie"
       navigation={navigation}
     >

@@ -9,6 +9,7 @@ import zipfile
 from datetime import UTC, datetime, timedelta
 import urllib.parse
 from typing import Any
+from uuid import uuid4, uuid5, NAMESPACE_URL
 from xml.sax.saxutils import escape as _xml_escape
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -32,6 +33,8 @@ from app.domain import correction_run_storage
 from app.domain import douano_unmapped_service
 from app.domain import break_even_planning_service
 from app.domain import break_even_planning_storage
+from app.domain import skus_storage
+from app.utils import storage as storage_utils
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
@@ -1126,6 +1129,7 @@ def put_douano_unmapped_rule(payload: dict[str, Any], _: dict = Depends(require_
             line_description=line_description,
             action=str(payload.get("action", "") or ""),
             sku_id=str(payload.get("sku_id", "") or ""),
+            internal_lot_number=str(payload.get("internal_lot_number", "") or ""),
             category=str(payload.get("category", "") or ""),
             include_revenue=bool(payload.get("include_revenue", True)),
             include_liters=bool(payload.get("include_liters", False)),
@@ -1143,6 +1147,372 @@ def put_douano_unmapped_rule(payload: dict[str, Any], _: dict = Depends(require_
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"result": record, "snapshot_refresh": snapshot_refresh}
+
+
+def _num_value(value: Any, default: float = 0.0) -> float:
+    try:
+        if isinstance(value, str):
+            value = value.replace(",", ".")
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _iso_date(value: Any, fallback_year: int) -> str:
+    text = str(value or "").strip()
+    if "T" in text:
+        text = text.split("T", 1)[0].strip()
+    if len(text) == 10 and text.count("-") == 2:
+        return text
+    year_value = int(fallback_year or datetime.now(UTC).year)
+    return f"{year_value}-01-01"
+
+
+def _style_label_for_beer(beer: dict[str, Any]) -> str:
+    return str(beer.get("stijl", "") or beer.get("categorie", "") or beer.get("style", "") or "").strip()
+
+
+def _create_historical_sku_cost_version(payload: dict[str, Any]) -> dict[str, Any]:
+    sku_id = str(payload.get("sku_id", "") or "").strip()
+    if not sku_id:
+        raise ValueError("sku_id ontbreekt.")
+    purchase_price = _num_value(payload.get("purchase_price_input", payload.get("purchase_price", 0)))
+    if purchase_price < 0:
+        raise ValueError("Inkoopprijs is ongeldig.")
+    year = int(payload.get("year", payload.get("jaar", 0)) or 0)
+    if year <= 0:
+        raise ValueError("Jaar ontbreekt.")
+    effective_from = _iso_date(payload.get("effective_from", payload.get("source_date", "")), year)
+    supplier = str(payload.get("supplier", "") or "Historisch").strip() or "Historisch"
+    note = str(payload.get("note", "") or "").strip()
+
+    skus = postgres_storage.load_dataset("skus", [])
+    sku = next((row for row in skus if isinstance(row, dict) and str(row.get("id", "") or "").strip() == sku_id), None)
+    if not isinstance(sku, dict):
+        raise ValueError("SKU niet gevonden.")
+    beer_id = str(sku.get("beer_id", "") or "").strip()
+    format_id = str(sku.get("format_article_id", "") or "").strip()
+    if not beer_id or not format_id:
+        raise ValueError("Alleen bier-SKU's met afvuleenheid kunnen via deze actie een historische kostprijs krijgen.")
+
+    bieren = postgres_storage.load_dataset("bieren", [])
+    beer = next((row for row in bieren if isinstance(row, dict) and str(row.get("id", "") or "").strip() == beer_id), None)
+    if not isinstance(beer, dict):
+        raise ValueError("Bier/stijl niet gevonden voor deze SKU.")
+    articles = postgres_storage.load_dataset("articles", [])
+    article = next((row for row in articles if isinstance(row, dict) and str(row.get("id", "") or "").strip() == format_id), None)
+    if not isinstance(article, dict):
+        raise ValueError("Afvuleenheid niet gevonden voor deze SKU.")
+
+    beer_name = str(beer.get("biernaam", "") or beer.get("naam", "") or beer.get("name", "") or sku.get("name", "") or "").strip()
+    style_label = _style_label_for_beer(beer)
+    article_name = str(article.get("name", "") or article.get("naam", "") or sku.get("name", "") or format_id).strip()
+    liters = _num_value(article.get("content_liter", article.get("liters", article.get("liter", 0))))
+    alcohol = _num_value(beer.get("alcoholpercentage", beer.get("alcohol", 0)))
+    tarief_accijns = str(beer.get("tarief_accijns", "") or "Hoog").strip() or "Hoog"
+    belastingsoort = str(beer.get("belastingsoort", "") or "Accijns").strip() or "Accijns"
+
+    overhead_per_liter = storage_utils.bereken_directe_vaste_kosten_per_liter(year) or 0.0
+    overhead = max(float(overhead_per_liter), 0.0) * max(liters, 0.0)
+    excise = 0.0
+    if liters > 0 and alcohol > 0:
+        excise = float(
+            storage_utils.bereken_accijns_voor_liters(
+                year=year,
+                liters=liters,
+                alcoholpercentage=alcohol,
+                tarief_accijns=tarief_accijns,
+                belastingsoort=belastingsoort,
+            )
+            or 0.0
+        )
+    total_cost = purchase_price + overhead + excise
+
+    existing_versions = [row for row in cost_versions_storage.load_dataset([]) if isinstance(row, dict)]
+    version_number = (
+        max(
+            [
+                int(row.get("versie_nummer", 0) or 0)
+                for row in existing_versions
+                if int(row.get("jaar", 0) or 0) == year and str(row.get("bier_id", "") or "").strip() == beer_id
+            ]
+            or [0]
+        )
+        + 1
+    )
+    now_iso = datetime.now(UTC).isoformat()
+    version_id = str(uuid4())
+    row_id = str(uuid5(NAMESPACE_URL, f"historical-sku-cost:{version_id}:{sku_id}"))
+    cost_line = {
+        "id": row_id,
+        "soort": "Historisch",
+        "sku_id": sku_id,
+        "bier_id": beer_id,
+        "biernaam": beer_name,
+        "product_id": format_id,
+        "product_type": "sku",
+        "verpakking": article_name,
+        "verpakking_label": article_name,
+        "verpakkingseenheid": article_name,
+        "primaire_kosten": purchase_price,
+        "variabele_kosten": purchase_price,
+        "inkoop": purchase_price,
+        "verpakkingskosten": 0.0,
+        "vaste_kosten": overhead,
+        "vaste_directe_kosten": overhead,
+        "indirecte_kosten": overhead,
+        "accijns": excise,
+        "kostprijs": total_cost,
+        "liters_per_product": liters,
+    }
+    version = {
+        "id": version_id,
+        "jaar": year,
+        "type": "inkoop",
+        "status": "definitief",
+        "bier_id": beer_id,
+        "brontype": "historisch",
+        "bron_id": str(payload.get("source_ref", "") or "data_quality"),
+        "record_type": "kostprijsberekening",
+        "cost_source": "historical_sku_cost",
+        "calculation_variant": "historisch",
+        "leverancier": supplier,
+        "supplier_name": supplier,
+        "supplier": {"id": supplier.lower().replace(" ", "-"), "name": supplier},
+        "supplier_id": supplier.lower().replace(" ", "-"),
+        "versie_nummer": version_number,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "aangemaakt_op": now_iso,
+        "aangepast_op": now_iso,
+        "finalized_at": now_iso,
+        "effectief_vanaf": effective_from,
+        "kostprijs": total_cost,
+        "basisgegevens": {
+            "jaar": year,
+            "biernaam": beer_name,
+            "stijl": style_label,
+            "sku_type": "bier",
+            "sku_id": sku_id,
+            "article_id": "",
+            "uom": "",
+            "btw_tarief": str(beer.get("btw_tarief", "") or "21%"),
+            "belastingsoort": belastingsoort,
+            "tarief_accijns": tarief_accijns,
+            "alcoholpercentage": alcohol,
+            "manual_rate_ex": 0.0,
+        },
+        "bier_snapshot": {
+            "biernaam": beer_name,
+            "stijl": style_label,
+            "btw_tarief": str(beer.get("btw_tarief", "") or "21%"),
+            "belastingsoort": belastingsoort,
+            "tarief_accijns": tarief_accijns,
+            "alcoholpercentage": alcohol,
+        },
+        "invoer": {
+            "inkoop": {
+                "notities": note,
+                "lotnummer": "",
+                "factuurdatum": effective_from,
+                "factuurnummer": "Historisch",
+                "regels": [],
+                "facturen": [],
+                "factuurregels": [
+                    {
+                        "id": str(uuid4()),
+                        "aantal": 1,
+                        "liters": liters,
+                        "eenheid": format_id,
+                        "subfactuurbedrag": purchase_price,
+                        "afvulkosten_fust": 0,
+                    }
+                ],
+                "verzendkosten": 0,
+                "overige_kosten": 0,
+            },
+            "ingredienten": {"regels": [], "notities": ""},
+        },
+        "resultaat_snapshot": {
+            "producten": {
+                "basisproducten": [cost_line],
+                "samengestelde_producten": [],
+            },
+            "directe_vaste_kosten_per_liter": float(overhead_per_liter or 0),
+            "variabele_kosten_per_liter": purchase_price / liters if liters > 0 else 0,
+            "integrale_kostprijs_per_liter": total_cost / liters if liters > 0 else 0,
+        },
+        "cost_lines": [cost_line],
+        "enabled_format_ids": [format_id],
+        "soort_berekening": {"type": "Historisch"},
+        "last_completed_step": 8,
+        "hercalculatie_reden": "historical_sku_cost",
+        "hercalculatie_notitie": note,
+        "supplier_config": {},
+    }
+
+    cost_versions_storage.save_dataset(existing_versions + [version], overwrite=True)
+    activated = dataset_store.activate_cost_version(
+        version_id,
+        effective_from=effective_from,
+        context={"action": "data_quality_historical_sku_cost"},
+    )
+    if activated is None:
+        raise ValueError("Historische kostprijs is aangemaakt, maar kon niet worden geactiveerd.")
+    return {
+        "version": version,
+        "activated": activated,
+        "components": {
+            "purchase_price": purchase_price,
+            "overhead": overhead,
+            "excise": excise,
+            "cost_price": total_cost,
+        },
+    }
+
+
+@router.post("/douano/unmapped-rules/historical-cost")
+def post_douano_unmapped_rule_historical_cost(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        created = _create_historical_sku_cost_version(payload)
+        match_type = str(payload.get("match_type", "") or "").strip()
+        douano_product_id = int(payload.get("douano_product_id", 0) or 0)
+        line_description = str(payload.get("line_description", "") or "").strip()
+        sku_id = str(payload.get("sku_id", "") or "").strip()
+        rule = douano_unmapped_rule_storage.upsert_rule(
+            match_type=match_type,
+            douano_product_id=douano_product_id,
+            line_description=line_description,
+            action="map_to_sku",
+            sku_id=sku_id,
+            internal_lot_number="",
+            note="Historische SKU-kostprijs toegevoegd vanuit datakwaliteit.",
+        )
+        snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_unmapped_rule(
+            match_type=match_type,
+            douano_product_id=douano_product_id,
+            line_description=line_description,
+            basis="both",
+            limit=50000,
+        )
+        return {"result": created, "rule": rule, "snapshot_refresh": snapshot_refresh}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/douano/unmapped-rules/batch")
+def put_douano_unmapped_rules_batch(payload: dict[str, Any], _: dict = Depends(require_admin)) -> dict[str, Any]:
+    action = str(payload.get("action", "") or "").strip()
+    items = payload.get("items", [])
+    if action not in {"map_to_sku", "no_cost_required"}:
+        raise HTTPException(status_code=400, detail="Ongeldige batchactie.")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="Geen regels geselecteerd.")
+
+    if action == "map_to_sku":
+        sku_id_for_classification = str(payload.get("sku_id", "") or "").strip()
+        product_group = str(payload.get("product_group", "") or "").strip()
+        alcohol_category = str(payload.get("alcohol_category", "") or "").strip()
+        packaging_type = str(payload.get("packaging_type", "") or "").strip()
+        if sku_id_for_classification and (product_group or alcohol_category or packaging_type):
+            skus_storage.update_classification(
+                sku_id_for_classification,
+                product_group=product_group,
+                alcohol_category=alcohol_category,
+                packaging_type=packaging_type,
+            )
+
+    records: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    refresh_total = {"computed": 0, "missing_cost": 0, "documents": 0}
+    refreshed_keys: set[tuple[str, int, str]] = set()
+
+    def _refresh(match_type: str, douano_product_id: int, line_description: str) -> None:
+        key = (str(match_type or ""), int(douano_product_id or 0), str(line_description or ""))
+        if key in refreshed_keys:
+            return
+        refreshed_keys.add(key)
+        result = douano_margin_service.backfill_line_snapshots_for_unmapped_rule(
+            match_type=key[0],
+            douano_product_id=key[1],
+            line_description=key[2],
+            basis="both",
+            limit=50000,
+        )
+        refresh_total["computed"] += int(result.get("computed", 0) or 0)
+        refresh_total["missing_cost"] += int(result.get("missing_cost", 0) or 0)
+        refresh_total["documents"] += int(result.get("documents", 0) or 0)
+
+    for index, raw_item in enumerate(items):
+        if not isinstance(raw_item, dict):
+            errors.append({"index": index, "detail": "Regel is ongeldig."})
+            continue
+        match_type = str(raw_item.get("match_type", "") or "").strip()
+        douano_product_id = int(raw_item.get("douano_product_id", 0) or 0)
+        line_description = str(raw_item.get("line_description", "") or "").strip()
+        try:
+            if action == "map_to_sku":
+                sku_id = str(payload.get("sku_id", "") or "").strip()
+                if not sku_id:
+                    raise ValueError("sku_id ontbreekt")
+                if match_type == "douano_product_id" and douano_product_id > 0:
+                    record = douano_product_mapping_storage.upsert_mapping(
+                        douano_product_id=douano_product_id,
+                        sku_id=sku_id,
+                        product_group=str(payload.get("product_group", "") or "").strip(),
+                        alcohol_category=str(payload.get("alcohol_category", "") or "").strip(),
+                        packaging_type=str(payload.get("packaging_type", "") or "").strip(),
+                    )
+                    snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
+                        douano_product_ids=[douano_product_id],
+                        basis="both",
+                        limit=50000,
+                    )
+                    refresh_total["computed"] += int(snapshot_refresh.get("computed", 0) or 0)
+                    refresh_total["missing_cost"] += int(snapshot_refresh.get("missing_cost", 0) or 0)
+                    refresh_total["documents"] += int(snapshot_refresh.get("documents", 0) or 0)
+                    records.append({"type": "product_mapping", "result": record})
+                    continue
+                record = douano_unmapped_rule_storage.upsert_rule(
+                    match_type=match_type,
+                    douano_product_id=douano_product_id,
+                    line_description=line_description,
+                    action="map_to_sku",
+                    sku_id=sku_id,
+                    internal_lot_number=str(payload.get("internal_lot_number", "") or "").strip(),
+                )
+                records.append({"type": "unmapped_rule", "result": record})
+                _refresh(match_type, douano_product_id, line_description)
+                continue
+
+            record = douano_unmapped_rule_storage.upsert_rule(
+                match_type=match_type,
+                douano_product_id=douano_product_id,
+                line_description=line_description,
+                action="no_cost_required",
+                category=str(payload.get("category", "Geen kostprijs nodig") or "Geen kostprijs nodig"),
+                include_revenue=bool(payload.get("include_revenue", True)),
+                include_liters=bool(payload.get("include_liters", False)),
+                include_break_even=bool(payload.get("include_break_even", False)),
+                note=str(payload.get("note", "") or ""),
+            )
+            records.append({"type": "unmapped_rule", "result": record})
+            _refresh(match_type, douano_product_id, line_description)
+        except ValueError as exc:
+            errors.append({"index": index, "detail": str(exc)})
+        except Exception as exc:
+            logger.exception("Batch unmapped rule update failed")
+            errors.append({"index": index, "detail": "Regel kon niet worden opgeslagen."})
+
+    return {
+        "result": {
+            "requested": len(items),
+            "saved": len(records),
+            "errors": errors,
+        },
+        "items": records,
+        "snapshot_refresh": refresh_total,
+    }
 
 
 @router.get("/douano/unmapped-rules")
@@ -1359,6 +1729,10 @@ def post_douano_create_historical_beer_sku(payload: dict[str, Any], _: dict = De
         def _norm(value: Any) -> str:
             return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
+        def _format_sku_slug(format_article_id: str) -> str:
+            slug = _slugify(format_article_id)
+            return slug[4:] if slug.startswith("fmt-") else slug
+
         with postgres_storage.transaction():
             bieren = dataset_store.load_dataset("bieren")
             articles = dataset_store.load_dataset("articles")
@@ -1390,7 +1764,7 @@ def post_douano_create_historical_beer_sku(payload: dict[str, Any], _: dict = De
                 template_beer_id = str(template_sku.get("beer_id", "") or "").strip()
                 if article_id and template_beer_id and template_beer_id != beer_id:
                     raise ValueError("Deze verkoopbare variant hoort bij een andere stijl. Kies een afvuleenheid of een SKU van dezelfde stijl.")
-                if article_id and template_beer_id == beer_id:
+                if template_beer_id == beer_id and (article_id or format_article_id):
                     sku_id = str(template_sku.get("id", "") or "").strip()
                     created = False
                     sku_record = dict(template_sku)
@@ -1464,9 +1838,12 @@ def post_douano_create_historical_beer_sku(payload: dict[str, Any], _: dict = De
             if not format_article_id:
                 raise ValueError("Afvulvorm kon niet worden bepaald. Kies eerst een vergelijkbare SKU/afvulvorm.")
 
-            sku_id = f"sku-{beer_id}-fmt-{_slugify(format_article_id)}".lower()
-            if sku_id in skus_by_id:
+            sku_id = f"sku-{beer_id}-fmt-{_format_sku_slug(format_article_id)}".lower()
+            legacy_sku_id = f"sku-{beer_id}-fmt-{_slugify(format_article_id)}".lower()
+            existing_sku_id = sku_id if sku_id in skus_by_id else legacy_sku_id if legacy_sku_id in skus_by_id else ""
+            if existing_sku_id:
                 created = False
+                sku_id = existing_sku_id
                 sku_record = dict(skus_by_id[sku_id])
             else:
                 sku_code = str(next((code for code in douano_sku_codes if str(code or "").strip()), "") or "").strip()
@@ -1562,6 +1939,13 @@ def put_douano_product_mapping(
             alcohol_category=alcohol_category,
             packaging_type=packaging_type,
         )
+        if sku_id and (product_group or alcohol_category or packaging_type):
+            skus_storage.update_classification(
+                sku_id,
+                product_group=product_group,
+                alcohol_category=alcohol_category,
+                packaging_type=packaging_type,
+            )
         snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
             douano_product_ids=[int(douano_product_id or 0)],
             basis="both",
@@ -1706,8 +2090,11 @@ def get_internal_lot_summary(
 
 
 @router.get("/lot-costs/external-lots")
-def get_external_lots(limit: int = Query(5000, ge=1, le=50000)) -> dict[str, Any]:
-    return {"items": lot_costs_storage.list_external_lots(limit=int(limit))}
+def get_external_lots(
+    year: int = Query(0, ge=0),
+    limit: int = Query(5000, ge=1, le=50000),
+) -> dict[str, Any]:
+    return {"items": lot_costs_storage.list_external_lots(year=int(year or 0), limit=int(limit))}
 
 
 @router.get("/correction-runs")
@@ -1717,6 +2104,18 @@ def get_correction_runs(
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     return {"items": correction_run_storage.list_correction_runs(source_type=source_type, limit=int(limit))}
+
+
+@router.post("/cost-versions/backfill-source-metadata")
+def post_backfill_cost_version_source_metadata(
+    year: int = Query(0, ge=0),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"result": cost_versions_storage.backfill_source_metadata(year=int(year or 0))}
+    except Exception as exc:
+        logger.exception("Cost version source metadata backfill failed")
+        raise HTTPException(status_code=500, detail="Bronmetadata kon niet worden bijgewerkt.") from exc
 
 
 @router.post("/correction-runs/{run_id}/revert")
@@ -1993,12 +2392,15 @@ def get_douano_cost_combos(
     - The list includes:
       - active activations (kostprijsproductactiveringen)
       - definitive cost version snapshots (kostprijsversies.resultaat_snapshot)
+      - active sellable article SKUs with an explicit packaging-component price
     """
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
     versions = dataset_store.load_dataset("kostprijsversies")
     skus = dataset_store.load_dataset("skus")
     articles = dataset_store.load_dataset("articles")
+    packaging_component_prices = dataset_store.load_dataset("packaging-component-prices")
     article_name_by_id: dict[str, str] = {}
+    sellable_component_ids: set[str] = set()
     if isinstance(articles, list):
         for row in articles:
             if not isinstance(row, dict):
@@ -2007,6 +2409,27 @@ def get_douano_cost_combos(
             if not rid:
                 continue
             article_name_by_id[rid] = str(row.get("name", row.get("naam", "")) or "").strip() or rid
+            if (
+                bool(row.get("beschikbaar_voor_offertes", False))
+                and str(row.get("sellable_sku_id", "") or "").strip()
+            ):
+                sellable_component_ids.add(rid)
+    priced_component_ids: set[str] = set()
+    if isinstance(packaging_component_prices, list):
+        for row in packaging_component_prices:
+            if not isinstance(row, dict):
+                continue
+            component_id = str(
+                row.get("verpakkingsonderdeel_id", "") or row.get("component_id", "") or ""
+            ).strip()
+            if not component_id:
+                continue
+            try:
+                price = float(row.get("prijs_per_stuk") or row.get("price_per_unit") or 0)
+            except (TypeError, ValueError):
+                price = 0.0
+            if price > 0:
+                priced_component_ids.add(component_id)
     sku_by_id: dict[str, dict[str, str]] = {}
     if isinstance(skus, list):
         for row in skus:
@@ -2021,6 +2444,9 @@ def get_douano_cost_combos(
                 "beer_id": str(row.get("beer_id", "") or "").strip(),
                 "format_article_id": str(row.get("format_article_id", "") or "").strip(),
                 "article_id": str(row.get("article_id", "") or "").strip(),
+                "active": "true" if row.get("active", row.get("actief", True)) is not False else "false",
+                "sellable_subtype": str(row.get("sellable_subtype", "") or "").strip().lower(),
+                "pricing_method": str(row.get("pricing_method", "") or "").strip().lower(),
             }
 
     items: list[dict[str, Any]] = []
@@ -2109,6 +2535,20 @@ def get_douano_cost_combos(
                 if not isinstance(row, dict):
                     continue
                 _append_combo(sku_id=str(row.get("sku_id", "") or ""))
+
+    for sku_id, meta in sku_by_id.items():
+        if str(meta.get("active", "") or "") == "false":
+            continue
+        if str(meta.get("kind", "") or "") != "article":
+            continue
+        article_id = str(meta.get("article_id", "") or "").strip()
+        if not article_id:
+            continue
+        if article_id not in sellable_component_ids:
+            continue
+        if article_id not in priced_component_ids:
+            continue
+        _append_combo(sku_id=sku_id)
 
     items.sort(key=lambda item: str(item.get("label", "") or "").lower())
     return {"items": items}

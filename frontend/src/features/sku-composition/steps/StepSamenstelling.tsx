@@ -1,8 +1,9 @@
 "use client";
 
+import { SkuSearchSelect } from "@/components/SkuSearchSelect";
 import { toNumber, type CompositionLine, type PackagingLine } from "@/features/sku-composition/skuCompositionUtils";
 
-type Option = { value: string; label: string; contentLiter?: number };
+type Option = { value: string; label: string; description?: string; keywords?: string; contentLiter?: number };
 
 type FlowMode = "afvuleenheid" | "verkoopbaar";
 type SellableKind = "product" | "dienst";
@@ -41,22 +42,17 @@ export function StepSamenstelling(props: Props) {
           </div>
           {props.composition.map((line) => (
             <div key={line.id} style={{ display: "grid", gridTemplateColumns: "1fr 120px 40px", gap: 10, marginBottom: 10 }}>
-              <select
+              <SkuSearchSelect
                 className="dataset-input"
                 value={line.componentSkuId}
-                onChange={(e) =>
-                  props.setComposition((current) => current.map((row) => (row.id === line.id ? { ...row, componentSkuId: e.target.value } : row)))
+                placeholder="Zoek item..."
+                options={props.selectableSkuOptions.filter(
+                  (opt) => opt.value === line.componentSkuId || !props.composition.some((row) => row.id !== line.id && row.componentSkuId === opt.value)
+                )}
+                onChange={(nextValue) =>
+                  props.setComposition((current) => current.map((row) => (row.id === line.id ? { ...row, componentSkuId: nextValue } : row)))
                 }
-              >
-                <option value="">Kies item…</option>
-                {props.selectableSkuOptions
-                  .filter((opt) => opt.value === line.componentSkuId || !props.composition.some((row) => row.id !== line.id && row.componentSkuId === opt.value))
-                  .map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-              </select>
+              />
               <input
                 className="dataset-input"
                 type="number"
@@ -67,15 +63,13 @@ export function StepSamenstelling(props: Props) {
                 }
               />
               <button type="button" className="icon-button-table" onClick={() => props.setComposition((current) => current.filter((row) => row.id !== line.id))}>
-                ×
+                x
               </button>
             </div>
           ))}
           <button
             type="button"
             className="editor-button editor-button-secondary"
-            disabled={sellableKind === "dienst"}
-            title={sellableKind === "dienst" ? "Diensten hebben geen samenstelling." : ""}
             onClick={() =>
               props.setComposition((current) => [...current, { id: `c-${Date.now()}-${Math.random().toString(16).slice(2)}`, componentSkuId: "", qty: 1 }])
             }
@@ -105,7 +99,7 @@ export function StepSamenstelling(props: Props) {
                 value={line.componentId}
                 onChange={(e) => props.setAfvulParts((current) => current.map((row) => (row.id === line.id ? { ...row, componentId: e.target.value } : row)))}
               >
-                <option value="">{line.kind === "format" ? "Kies afvuleenheid…" : "Kies onderdeel…"}</option>
+                <option value="">{line.kind === "format" ? "Kies afvuleenheid..." : "Kies onderdeel..."}</option>
                 {(line.kind === "format" ? props.formatOptions : props.packagingOptions).map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
@@ -122,7 +116,7 @@ export function StepSamenstelling(props: Props) {
               />
 
               <button type="button" className="icon-button-table" onClick={() => props.setAfvulParts((current) => current.filter((row) => row.id !== line.id))}>
-                ×
+                x
               </button>
             </div>
           ))}
@@ -141,4 +135,3 @@ export function StepSamenstelling(props: Props) {
     </div>
   );
 }
-

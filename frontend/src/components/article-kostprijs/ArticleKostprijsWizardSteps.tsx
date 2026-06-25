@@ -1,5 +1,6 @@
 "use client";
 
+import { SkuSearchSelect } from "@/components/SkuSearchSelect";
 import { formatMoneyEUR } from "@/lib/formatters";
 import { toNumber } from "@/components/article-kostprijs/articleKostprijsWizardUtils";
 import type { BomCostLine, Summary } from "@/components/article-kostprijs/articleKostprijsWizardDerivations";
@@ -24,17 +25,13 @@ export function ArticleKostprijsBasisStep(props: {
       </label>
       <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
         <span>Artikel</span>
-        <select
+        <SkuSearchSelect
           className="dataset-input"
           value={props.selectedBundleSkuId}
-          onChange={(e) => props.onSelectedBundleSkuIdChange(String(e.target.value))}
-        >
-          {props.bundleOptions.map((opt) => (
-            <option key={opt.skuId} value={opt.skuId}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          placeholder="Zoek artikel..."
+          options={props.bundleOptions.map((opt) => ({ value: opt.skuId, label: opt.label, description: opt.skuId }))}
+          onChange={props.onSelectedBundleSkuIdChange}
+        />
       </label>
     </div>
   );

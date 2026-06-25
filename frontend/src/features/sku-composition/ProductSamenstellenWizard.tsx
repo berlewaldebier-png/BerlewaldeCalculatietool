@@ -167,6 +167,7 @@ export function ProductSamenstellenWizard(props: Props) {
       verkoopprijzen: props.verkoopprijzen,
       skus: props.skus,
       articles: props.articles,
+      packagingComponentPrices: props.packagingComponentPrices,
       kostprijsversies: props.kostprijsversies,
       kostprijsproductactiveringen: props.kostprijsproductactiveringen,
     });
@@ -176,6 +177,7 @@ export function ProductSamenstellenWizard(props: Props) {
     props.verkoopprijzen,
     props.skus,
     props.articles,
+    props.packagingComponentPrices,
     props.kostprijsversies,
     props.kostprijsproductactiveringen,
   ]);
@@ -184,7 +186,13 @@ export function ProductSamenstellenWizard(props: Props) {
     // For composition we allow cost_plus items with active cost, and finalized services with manual rate.
     return central.rows
       .filter((row) => (row.pricingMethod === "cost_plus" ? row.hasActiveCost : row.manualRateEx > 0))
-      .map((row) => ({ value: row.skuId, label: row.label, uom: row.uom }));
+      .map((row) => ({
+        value: row.skuId,
+        label: row.label,
+        description: [row.productGroup, row.subtype, row.uom].filter(Boolean).join(" - "),
+        keywords: `${row.productGroup} ${row.subtype} ${row.uom}`,
+        uom: row.uom,
+      }));
   }, [central.rows]);
 
   const beerOptions = useMemo(() => {
@@ -240,6 +248,18 @@ export function ProductSamenstellenWizard(props: Props) {
     if (!packagingRequired) return verpakkingstypeOptions;
     return verpakkingstypeOptions.filter((row) => row.allowed.length === 0 || row.allowed.includes(productGroup));
   }, [packagingRequired, productGroup, verpakkingstypeOptions]);
+
+  const inferredProductGroup = useMemo(() => {
+    if (mode !== "verkoopbaar" || sellableKind !== "product" || composition.length === 0) return "";
+    const selectedRows = composition
+      .map((line) => central.bySkuId.get(text(line.componentSkuId)))
+      .filter(Boolean);
+    if (selectedRows.length !== composition.length) return "";
+    if (selectedRows.every((row) => text((row as any)?.productGroup).toLowerCase() === "merchandise")) {
+      return "merchandise";
+    }
+    return "";
+  }, [central.bySkuId, composition, mode, sellableKind]);
 
   const formatOptions = useMemo(() => {
     return (Array.isArray(props.articles) ? props.articles : [])
@@ -390,7 +410,7 @@ export function ProductSamenstellenWizard(props: Props) {
   const blockingWarnings = useMemo(() => {
     const warnings: string[] = [];
     if (!name.trim()) warnings.push("Naam is verplicht.");
-    if (mode === "verkoopbaar" && sellableKind === "product" && composition.length === 0) {
+    if (mode === "verkoopbaar" && composition.length === 0 && sellableKind !== "dienst") {
       warnings.push("Samenstelling is leeg.");
     }
     if (mode === "verkoopbaar" && sellableKind === "product" && bundleContext === "beer_variant" && !beerId) {
@@ -399,7 +419,7 @@ export function ProductSamenstellenWizard(props: Props) {
     if (mode === "afvuleenheid" && afvulParts.length === 0) {
       warnings.push("Samenstelling is leeg.");
     }
-    if (mode === "verkoopbaar" && sellableKind === "dienst") {
+    if (mode === "verkoopbaar" && sellableKind === "dienst" && composition.length === 0) {
       if (toNumber(manualRateEx, 0) <= 0) warnings.push("Tarief per uur is verplicht.");
     }
     return warnings;
@@ -464,9 +484,9 @@ export function ProductSamenstellenWizard(props: Props) {
         bundleContext,
         beerId,
         manualRateEx,
-        productGroup,
+        productGroup: sellableKind === "dienst" ? "dienst" : inferredProductGroup || productGroup,
         alcoholCategory,
-        packagingType: packagingRequired || packagingTypeOptIn ? packagingType : "",
+        packagingType: (inferredProductGroup || productGroup) === "merchandise" ? "" : packagingRequired || packagingTypeOptIn ? packagingType : "",
         composition,
         packaging,
         editArticleId: createdArticleId || props.editArticleId || "",
@@ -635,6 +655,7 @@ export function ProductSamenstellenWizard(props: Props) {
                       setContentLiter={setContentLiter}
                       manualRateEx={manualRateEx}
                       setManualRateEx={setManualRateEx}
+                      hasComposition={composition.length > 0}
                       packaging={packaging}
                       setPackaging={setPackaging}
                       packagingOptions={packagingOptions}
@@ -650,6 +671,7 @@ export function ProductSamenstellenWizard(props: Props) {
                     name={name}
                     uom={uom}
                     totals={totals}
+                    hasComposition={composition.length > 0}
                     blockingWarnings={blockingWarnings}
                     beheerWarning={beheerClassificationWarning}
                     onGoToBeheer={() => {
@@ -672,6 +694,7 @@ export function ProductSamenstellenWizard(props: Props) {
                     bomSaved={bomSaved}
                     beheerClassificationWarning={beheerClassificationWarning}
                     kostprijsIsActive={kostprijsIsActive}
+                    hasComposition={composition.length > 0}
                     onBackToControle={() => setStepIndex(3)}
                   />
                 ) : null}

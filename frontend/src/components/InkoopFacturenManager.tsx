@@ -13,6 +13,13 @@ import { TrashIcon } from "@/components/inkoopfacturen/InkoopFacturenParts";
 import { InkoopFactuurEditor } from "@/components/inkoopfacturen/InkoopFactuurEditor";
 import { SellableVariantsStep, type CostProductCandidate } from "@/components/berekeningen/steps/SellableVariantsStep";
 import { KoppelenStep } from "@/components/berekeningen/steps/KoppelenStep";
+import {
+  SupplierConfigStep,
+  applySupplierMetadataToRecord,
+  normalizeSupplierConfigState,
+  supplierPackagingAppliesForProduct,
+  type SupplierConfigState,
+} from "@/components/berekeningen/steps/SupplierConfigStep";
 import { WizardSteps } from "@/components/WizardSteps";
 import {
   loadArticles,
@@ -191,6 +198,9 @@ export function InkoopFacturenManager({
   const [showNewTargetPicker, setShowNewTargetPicker] = useState(false);
   const [draftSourceKey, setDraftSourceKey] = useState<string>("");
   const [wizardStep, setWizardStep] = useState(1);
+  const [draftSupplierConfig, setDraftSupplierConfig] = useState<SupplierConfigState>(() =>
+    normalizeSupplierConfigState({ cost_source: "purchase_invoice" })
+  );
   const [localSkus, setLocalSkus] = useState<GenericRecord[]>(Array.isArray(skus) ? skus : []);
   const [localArticles, setLocalArticles] = useState<GenericRecord[]>(Array.isArray(articles) ? articles : []);
   const [localBomLines, setLocalBomLines] = useState<GenericRecord[]>(Array.isArray(bomLines) ? bomLines : []);
@@ -273,11 +283,12 @@ export function InkoopFacturenManager({
   const wizardSteps = [
     { id: 1, label: "Factuurdetails", text: "Kies bron en LOT" },
     { id: 2, label: "Factuurregels", text: "Selecteer afvuleenheden" },
-    { id: 3, label: "Kostenverdeling", text: "Controleer toeslag per regel" },
-    { id: 4, label: "Preview versies", text: "Nieuw versus actief" },
-    { id: 5, label: "Verkoopbare SKU's", text: "Maak nieuwe SKU's" },
-    { id: 6, label: "Koppelen", text: "Koppel Douano" },
-    { id: 7, label: "Samenvatting", text: "Afronden" },
+    { id: 3, label: "Leverancier", text: "Configureer bronregels" },
+    { id: 4, label: "Kostenverdeling", text: "Controleer toeslag per regel" },
+    { id: 5, label: "Preview versies", text: "Nieuw versus actief" },
+    { id: 6, label: "Verkoopbare SKU's", text: "Maak nieuwe SKU's" },
+    { id: 7, label: "Koppelen", text: "Koppel Douano" },
+    { id: 8, label: "Samenvatting", text: "Afronden" },
   ];
 
   function requestDelete(title: string, body: string, onConfirm: () => void) {
@@ -302,6 +313,7 @@ export function InkoopFacturenManager({
     setDraftMode("new");
     setDraftVersionId("");
     setDraftSourceKey(selectedGroup?.key ?? "");
+    setDraftSupplierConfig(normalizeSupplierConfigState({ ...(selectedActiveRecord ?? {}), cost_source: "purchase_invoice" }));
     setDraftFactuur(normalizeFactuur({ factuurregels: [normalizeFactuurRegel()] }));
     setWizardStep(1);
     setStatus("");
@@ -314,6 +326,7 @@ export function InkoopFacturenManager({
     setDraftMode("new");
     setDraftVersionId("");
     setDraftSourceKey(String(sourceKey ?? selectedBeerKey ?? ""));
+    setDraftSupplierConfig(normalizeSupplierConfigState({ ...sourceRecord, cost_source: "purchase_invoice" }));
     setDraftFactuur(
       normalizeFactuur({
         factuurregels: [normalizeFactuurRegel()]
@@ -335,6 +348,7 @@ export function InkoopFacturenManager({
     const primary = facturen[0] ?? normalizeFactuur({ factuurregels: [normalizeFactuurRegel()] });
     setDraftMode("edit");
     setDraftVersionId(String(record.id ?? ""));
+    setDraftSupplierConfig(normalizeSupplierConfigState({ ...record, cost_source: "purchase_invoice" }));
     setDraftFactuur(normalizeFactuur(primary));
     setWizardStep(1);
     setStatus("");
@@ -462,6 +476,7 @@ export function InkoopFacturenManager({
       }
       try {
         const draftRecord = createFactuurVersieFromSource(selectedActiveRecord, normalizeFactuur(draftFactuur));
+        applySupplierMetadataToRecord(draftRecord, draftSupplierConfig, "purchase_invoice");
         const snapshot = await computeInkoopSnapshotForRecord(normalizeBerekening(draftRecord));
         if (!cancelled) setDraftResultaatSnapshot(snapshot as GenericRecord);
       } catch {
@@ -472,7 +487,7 @@ export function InkoopFacturenManager({
     return () => {
       cancelled = true;
     };
-  }, [draftFactuur, selectedActiveRecord, basisproducten, samengesteldeProducten]);
+  }, [draftFactuur, selectedActiveRecord, draftSupplierConfig, basisproducten, samengesteldeProducten]);
 
   function unitLabelById(unitId: string) {
     return unitOptions.find((option) => option.id === unitId)?.label || unitId;
@@ -761,6 +776,10 @@ export function InkoopFacturenManager({
     const variabeleKostenPerLiter = totals.liters > 0 ? totals.bedrag / totals.liters : 0;
 
     const tarieven = tarievenHeffingen.find((row) => Number(row.jaar ?? 0) === year) ?? {};
+    const supplierConfig = (record as any)?.supplier_config && typeof (record as any).supplier_config === "object"
+      ? ((record as any).supplier_config as GenericRecord)
+      : {};
+    const includeExciseCosts = !Boolean((supplierConfig as any).excise_included_in_purchase_price);
     const belastingsoort = String(basis.belastingsoort ?? "").trim().toLowerCase();
     const alcoholpercentage = Number(basis.alcoholpercentage ?? 0) / 100;
     const tariefAccijns = String(basis.tarief_accijns ?? "").trim().toLowerCase();
@@ -786,9 +805,12 @@ export function InkoopFacturenManager({
       : [];
     [...sourceBasisRows, ...sourceComposedRows].forEach(addActiveCost);
 
-    const selectedProducts = expandSelectedInvoiceProducts(buildSelectedInvoiceProducts(factuur));
+    const selectedProducts = buildSelectedInvoiceProducts(factuur);
 
     const computeExcise = (liters: number) => {
+      if (!includeExciseCosts) {
+        return 0;
+      }
       if (belastingsoort === "verbruiksbelasting") {
         return Number((tarieven as any).verbruikersbelasting ?? 0) * (liters / 100);
       }
@@ -800,7 +822,9 @@ export function InkoopFacturenManager({
       const liters = productLiters(item.product);
       const verpakkingseenheid = productUnitLabel(item.product);
       const primary = item.pricePerUnit;
-      const packaging = activeCost ? asNumber((activeCost as any)?.verpakkingskosten, 0) : productPackagingCost(item.product);
+      const packaging = supplierPackagingAppliesForProduct(record, item.productId)
+        ? productPackagingCost(item.product)
+        : 0;
       const overhead = activeCost ? summaryOverheadValue(activeCost) : vasteKostenPerLiter * liters;
       const excise = activeCost ? asNumber((activeCost as any)?.accijns, 0) : computeExcise(liters);
       return {
@@ -870,11 +894,13 @@ export function InkoopFacturenManager({
               updated.updated_at = new Date().toISOString();
               updated.aangepast_op = updated.updated_at;
               setInkoopFacturen(updated, [normalizedDraft]);
+              applySupplierMetadataToRecord(updated, draftSupplierConfig, "purchase_invoice");
               return normalizeBerekening(updated);
             })()
           : (() => {
               const created = createFactuurVersieFromSource(selectedActiveRecord, normalizedDraft);
               created.versie_nummer = maxVersion + 1;
+              applySupplierMetadataToRecord(created, draftSupplierConfig, "purchase_invoice");
               return normalizeBerekening(created);
             })();
       const cleanedRows = rows
@@ -954,6 +980,7 @@ export function InkoopFacturenManager({
       if (!base) {
         nextVersion.versie_nummer = maxVersion + 1;
       }
+      applySupplierMetadataToRecord(nextVersion, draftSupplierConfig, "purchase_invoice");
       nextVersion.status = "definitief";
       nextVersion.finalized_at = nowIso;
       nextVersion.updated_at = nowIso;
@@ -1210,6 +1237,46 @@ export function InkoopFacturenManager({
           </table>
         </div>
       </div>
+    );
+  }
+
+  async function rollbackTestVersion(versionId: string) {
+    if (!versionId) return;
+
+    setStatus("");
+    setIsSaving(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/meta/delete-kostprijs-concept?kostprijs_id=${encodeURIComponent(versionId)}&dry_run=false`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(text || "Testversie verwijderen mislukt.");
+      }
+      const refreshed = await fetch(KOSTPRIJSVERSIES_API, { cache: "no-store" });
+      const refreshedRows = refreshed.ok ? ((await refreshed.json()) as GenericRecord[]) : rows.filter((row) => String(row.id ?? "") !== versionId);
+      setRows(refreshedRows.map((row) => normalizeBerekening(row)));
+      setDraftFactuur(null);
+      setDraftVersionId("");
+      setDraftMode("new");
+      setDraftSourceKey("");
+      setStatus("Testversie verwijderd.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setStatus(message ? `Verwijderen mislukt: ${message}` : "Verwijderen mislukt.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function renderSupplierConfigStep() {
+    return (
+      <SupplierConfigStep
+        value={draftSupplierConfig}
+        productRows={buildDraftCostProductCandidates()}
+        onChange={setDraftSupplierConfig}
+      />
     );
   }
 
@@ -1550,9 +1617,10 @@ export function InkoopFacturenManager({
   function renderWizardStepContent() {
     if (wizardStep === 1) return renderFactuurDetailsStep();
     if (wizardStep === 2) return renderFactuurEditorStep();
-    if (wizardStep === 3) return renderKostenverdelingStep();
-    if (wizardStep === 4) return renderPreviewStep();
-    if (wizardStep === 5) {
+    if (wizardStep === 3) return renderSupplierConfigStep();
+    if (wizardStep === 4) return renderKostenverdelingStep();
+    if (wizardStep === 5) return renderPreviewStep();
+    if (wizardStep === 6) {
       return (
         <SellableVariantsStep
           current={buildWizardCurrentRecord()}
@@ -1566,7 +1634,7 @@ export function InkoopFacturenManager({
         />
       );
     }
-    if (wizardStep === 6) {
+    if (wizardStep === 7) {
       return (
         <KoppelenStep
           current={buildWizardCurrentRecord()}
@@ -1767,6 +1835,7 @@ export function InkoopFacturenManager({
                       getInkoopFacturen(record).map((factuur) => ({
                         recordId: String(record.id ?? ""),
                         recordStatus: String(record.status ?? ""),
+                        isTestVersion: Boolean((record as any).is_test_version),
                         versie: `v${Number(record.versie_nummer ?? 0) || 1}`,
                         status: `${String(record.status ?? "")}${Boolean(record.is_actief) ? " · actief" : ""}`,
                         factuurnummer: String(factuur.factuurnummer ?? "").trim() || "-",
@@ -1864,6 +1933,23 @@ export function InkoopFacturenManager({
                                                 }}
                                               >
                                                 ×
+                                              </button>
+                                            ) : null}
+                                            {Boolean((row as any).isTestVersion) ? (
+                                              <button
+                                                type="button"
+                                                className="editor-button editor-button-secondary"
+                                                title="Testversie volledig terugdraaien"
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  requestDelete(
+                                                    "Testversie verwijderen",
+                                                    "Weet je zeker dat je deze tijdelijke test-factuurversie wilt terugdraaien? Als deze actief was, activeer daarna de gewenste echte versie opnieuw.",
+                                                    () => rollbackTestVersion(String((row as any).recordId ?? ""))
+                                                  );
+                                                }}
+                                              >
+                                                Test verwijderen
                                               </button>
                                             ) : null}
                                           </td>

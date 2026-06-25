@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { SectionCard } from "@/components/SectionCard";
+import { SkuSearchSelect, type SkuSearchOption } from "@/components/SkuSearchSelect";
 import { PageSizeSelect, PaginationBar, SortButton, type PageSizeValue } from "@/components/table/TableControls";
 import { normalizeSkuLabel } from "@/lib/skuLabels";
 import { clampPage, compareNullableNumber, compareText, computeTotalPages, slicePage } from "@/lib/tableControls";
@@ -402,6 +403,39 @@ export function DouanoProductMappingCard({
     });
     return map;
   }, [combos]);
+
+  const skusById = useMemo(() => {
+    const map = new Map<string, SkuRow>();
+    skus.forEach((row) => {
+      if (row.id) map.set(row.id, row);
+    });
+    return map;
+  }, [skus]);
+
+  const skuSearchOptions = useMemo<SkuSearchOption[]>(() => {
+    const byValue = new Map<string, SkuSearchOption>();
+    combos.forEach((c) => {
+      const value = String((c as any)?.sku_id ?? "").trim();
+      const label = normalizePackLabel(String((c as any)?.naam ?? "").trim() || String((c as any)?.label ?? "").trim() || value);
+      if (!value || !label) return;
+      byValue.set(value, {
+        value,
+        label,
+        description: value,
+        keywords: `${value} ${String((c as any)?.beer_id ?? "")} ${String((c as any)?.format_article_id ?? "")}`,
+      });
+    });
+    skus.forEach((sku) => {
+      if (!sku.id || byValue.has(sku.id)) return;
+      byValue.set(sku.id, {
+        value: sku.id,
+        label: normalizePackLabel(sku.name || sku.id),
+        description: sku.id,
+        keywords: `${sku.id} ${sku.kind}`,
+      });
+    });
+    return Array.from(byValue.values()).sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [combos, skus]);
 
   const ignoredById = useMemo(() => {
     const map = new Map<number, { douano_product_id: number; reason: string }>();
@@ -1141,7 +1175,7 @@ export function DouanoProductMappingCard({
               const value = String(draft[id] ?? mappedKey ?? "");
               const isMapped = Boolean(mapping);
               const mappedLabel = mappedKey
-                ? ((combosByKey.get(mappedKey) as any)?.naam ?? combosByKey.get(mappedKey)?.label ?? mappedKey)
+                ? ((combosByKey.get(mappedKey) as any)?.naam ?? combosByKey.get(mappedKey)?.label ?? skusById.get(mappedKey)?.name ?? mappedKey)
                 : "";
               const isIgnored = ignoredById.has(id);
               const heuristicServiceGroup =
@@ -1176,26 +1210,18 @@ export function DouanoProductMappingCard({
                     <code>{p.gtin}</code>
                   </td>
                   <td>
-                    <select
+                    <SkuSearchSelect
                       className="editor-input"
-                      style={{ width: "100%" }}
+                      style={{ width: "100%", minWidth: 260 }}
                       value={value}
-                      onChange={(e) => setDraft((prev) => ({ ...prev, [id]: e.target.value }))}
-                    >
-                      <option value="">Selecteer SKU-kostprijs</option>
-                      {mappedKey && !combosByKey.has(mappedKey) ? (
-                        <option value={mappedKey}>{mappedLabel || mappedKey}</option>
-                      ) : null}
-                      {combos.map((c) => {
-                        const key = String((c as any)?.sku_id ?? "").trim();
-                        if (!key) return null;
-                        return (
-                          <option key={key} value={key}>
-                            {String((c as any)?.naam ?? "").trim() || c.label}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      placeholder="Zoek SKU..."
+                      options={
+                        mappedKey && !combosByKey.has(mappedKey)
+                          ? [{ value: mappedKey, label: mappedLabel || mappedKey, description: mappedKey }, ...skuSearchOptions]
+                          : skuSearchOptions
+                      }
+                      onChange={(nextValue) => setDraft((prev) => ({ ...prev, [id]: nextValue }))}
+                    />
                   </td>
                   <td>
                     <select

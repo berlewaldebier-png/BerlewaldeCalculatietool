@@ -9,11 +9,13 @@ export function StepControle(props: {
   name: string;
   uom: string;
   totals: { liters: number; cost: number; packagingCost: number; totalCost: number };
+  hasComposition: boolean;
   blockingWarnings: string[];
   beheerWarning?: string;
   onGoToBeheer?: () => void;
 }) {
-  const { mode, sellableKind, name, uom, totals, blockingWarnings, beheerWarning, onGoToBeheer } = props;
+  const { mode, sellableKind, name, uom, totals, hasComposition, blockingWarnings, beheerWarning, onGoToBeheer } = props;
+  const compactService = mode === "verkoopbaar" && sellableKind === "dienst" && !hasComposition;
   return (
     <div className="wizard-form-grid">
       <div className="nested-field" style={{ gridColumn: "1 / -1" }}>
@@ -21,7 +23,7 @@ export function StepControle(props: {
         <div className="dataset-editor-scroll" style={{ borderRadius: 12 }}>
           <table className="dataset-editor-table">
             <thead>
-              {mode === "verkoopbaar" && sellableKind === "dienst" ? (
+              {compactService ? (
                 <tr>
                   <th>Naam</th>
                   <th>UoM</th>
@@ -40,7 +42,7 @@ export function StepControle(props: {
               )}
             </thead>
             <tbody>
-              {mode === "verkoopbaar" && sellableKind === "dienst" ? (
+              {compactService ? (
                 <tr>
                   <td>{name}</td>
                   <td>{uom}</td>

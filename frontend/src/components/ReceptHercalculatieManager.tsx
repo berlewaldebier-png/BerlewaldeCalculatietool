@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
 import { reconcileDatasetItems } from "@/lib/datasetItems";
@@ -12,6 +13,11 @@ type ReceptHercalculatieManagerProps = {
   basisproducten: GenericRecord[];
   samengesteldeProducten: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
+};
+
+type BrewMomentModalState = {
+  groupKey: string;
+  sourceId: string;
 };
 
 const KOSTPRIJSVERSIES_API = `${API_BASE_URL}/data/kostprijsversies`;
@@ -102,11 +108,14 @@ export function ReceptHercalculatieManager({
   samengesteldeProducten,
   kostprijsproductactiveringen
 }: ReceptHercalculatieManagerProps) {
+  const router = useRouter();
   const initial = useMemo(() => initialRows.map((row) => normalizeBerekening(row)), [initialRows]);
   const [rows, setRows] = useState(initial);
   const [selectedBeerKey, setSelectedBeerKey] = useState("");
   const [selectedDraftSourceId, setSelectedDraftSourceId] = useState("");
-  const [reason, setReason] = useState("Hercalculatie");
+  const [brewMomentModal, setBrewMomentModal] = useState<BrewMomentModalState | null>(null);
+  const [lotNumber, setLotNumber] = useState("");
+  const [brewDate, setBrewDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -125,14 +134,12 @@ export function ReceptHercalculatieManager({
     [samengesteldeProducten]
   );
 
-  const sourceRows = rows.filter(
-    (row) =>
-      String(row.status).toLowerCase() === "definitief" &&
-      String(((row.soort_berekening as GenericRecord)?.type ?? "")).toLowerCase() ===
-        "eigen productie"
-  );
-
   const groups = useMemo(() => {
+    const activeVersionIds = new Set(
+      (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [])
+        .map((row) => String((row as any)?.kostprijsversie_id ?? "").trim())
+        .filter(Boolean)
+    );
     const grouped = new Map<
       string,
       {
@@ -148,18 +155,22 @@ export function ReceptHercalculatieManager({
     >();
 
     rows.forEach((row) => {
-      const soort = String(((row.soort_berekening as GenericRecord)?.type ?? "")).toLowerCase();
-      if (soort !== "eigen productie") {
+      if (String(row.status).toLowerCase() !== "definitief") {
         return;
       }
       const basis = (row.basisgegevens as GenericRecord) ?? {};
+      const subjectType = String((basis as any).sku_type ?? "bier").trim().toLowerCase() || "bier";
+      if (subjectType !== "bier") {
+        return;
+      }
       const bierId = String(row.bier_id ?? "");
       const jaar = Number(basis.jaar ?? row.jaar ?? 0);
-      const key = `${bierId}::${jaar}`;
+      const biernaam = String(basis.biernaam ?? "Onbekend bier");
+      const key = `${bierId || biernaam.toLowerCase()}::${jaar}`;
       const current = grouped.get(key) ?? {
         key,
         bierId,
-        biernaam: String(basis.biernaam ?? "Onbekend bier"),
+        biernaam,
         stijl: String(basis.stijl ?? ""),
         jaar,
         activeDate: "",
@@ -167,13 +178,10 @@ export function ReceptHercalculatieManager({
         hercalculaties: []
       };
 
-      if (String(row.status).toLowerCase() === "definitief" && String(row.calculation_variant ?? "origineel") !== "hercalculatie") {
-        current.sourceRows.push(row);
-      }
-      if (
-        String(row.calculation_variant ?? "") === "hercalculatie" ||
-        String(row.bron_berekening_id ?? "").trim() !== ""
-      ) {
+      current.sourceRows.push(row);
+      const variant = String(row.calculation_variant ?? "").trim().toLowerCase();
+      const sourceType = String((row as any).brontype ?? "").trim().toLowerCase();
+      if (variant === "hercalculatie" || variant === "brouwmoment" || sourceType === "brouwmoment") {
         current.hercalculaties.push(row);
       }
       grouped.set(key, current);
@@ -193,9 +201,8 @@ export function ReceptHercalculatieManager({
       .map((group) => ({
         ...group,
         sourceRows: [...group.sourceRows].sort((left, right) =>
-          String(right.finalized_at ?? right.updated_at ?? "").localeCompare(
-            String(left.finalized_at ?? left.updated_at ?? "")
-          )
+          Number(activeVersionIds.has(String(right.id ?? ""))) - Number(activeVersionIds.has(String(left.id ?? ""))) ||
+          String(right.finalized_at ?? right.updated_at ?? "").localeCompare(String(left.finalized_at ?? left.updated_at ?? ""))
         ),
         hercalculaties: [...group.hercalculaties].sort((left, right) =>
           String(right.updated_at ?? right.created_at ?? "").localeCompare(
@@ -208,11 +215,36 @@ export function ReceptHercalculatieManager({
   }, [kostprijsproductactiveringen, rows]);
 
   const selectedGroup = groups.find((group) => group.key === selectedBeerKey) ?? null;
+  const modalGroup = groups.find((group) => group.key === brewMomentModal?.groupKey) ?? null;
 
   const draftSource =
-    selectedGroup?.sourceRows.find((row) => String(row.id) === selectedDraftSourceId) ??
-    selectedGroup?.sourceRows[0] ??
+    modalGroup?.sourceRows.find((row) => String(row.id) === (brewMomentModal?.sourceId ?? selectedDraftSourceId)) ??
+    modalGroup?.sourceRows[0] ??
     null;
+
+  function resetBrewMomentForm() {
+    setSelectedDraftSourceId("");
+    setLotNumber("");
+    setBrewDate(new Date().toISOString().slice(0, 10));
+    setNote("");
+  }
+
+  function openBrewMomentModal(group: { key: string; sourceRows: GenericRecord[] }) {
+    const sourceId = String(group.sourceRows[0]?.id ?? "");
+    setSelectedBeerKey(group.key);
+    setSelectedDraftSourceId(sourceId);
+    setBrewMomentModal({ groupKey: group.key, sourceId });
+    setLotNumber("");
+    setBrewDate(new Date().toISOString().slice(0, 10));
+    setNote("");
+    setStatus("");
+  }
+
+  function closeBrewMomentModal() {
+    setBrewMomentModal(null);
+    resetBrewMomentForm();
+    setStatus("");
+  }
 
   function requestAction(title: string, body: string, onConfirm: () => Promise<void> | void) {
     setPendingAction({ title, body, onConfirm });
@@ -265,41 +297,95 @@ export function ReceptHercalculatieManager({
       await reconcileDatasetItems("kostprijsversies", nextRows);
       setRows(nextRows.map((row) => normalizeBerekening(row)));
       setStatus(successMessage);
+      return true;
     } catch {
       setStatus("Opslaan mislukt.");
+      return false;
     } finally {
       setIsSaving(false);
     }
   }
 
-  async function createHercalculatie() {
+  function ensureBrewMomentLotOnDraft(draft: GenericRecord, lot: string) {
+    const invoer = ((draft as any).invoer && typeof (draft as any).invoer === "object"
+      ? ((draft as any).invoer as GenericRecord)
+      : {}) as GenericRecord;
+    const inkoop = ((invoer as any).inkoop && typeof (invoer as any).inkoop === "object"
+      ? ((invoer as any).inkoop as GenericRecord)
+      : {}) as GenericRecord;
+    inkoop.lotnummer = lot;
+    const facturen = Array.isArray((inkoop as any).facturen) ? ((inkoop as any).facturen as GenericRecord[]) : [];
+    if (facturen.length === 0) {
+      facturen.push({ id: createId(), factuurregels: [] });
+    }
+    (facturen[0] as GenericRecord).lotnummer = lot;
+    inkoop.facturen = facturen;
+    invoer.inkoop = inkoop;
+    (draft as any).invoer = invoer;
+  }
+
+  async function createBrouwmoment() {
     if (!draftSource) {
+      return;
+    }
+    const lot = lotNumber.trim();
+    const date = brewDate.trim();
+    if (!lot || !date) {
+      setStatus("LOT nummer en brouwdatum zijn verplicht.");
       return;
     }
 
     const draft = cloneValue(draftSource);
     const now = new Date().toISOString();
+    const sourceType = String(((draftSource.soort_berekening as GenericRecord)?.type ?? "")).trim();
     draft.id = createId();
     draft.status = "concept";
     draft.is_actief = false;
-    draft.effectief_vanaf = "";
-    draft.calculation_variant = "hercalculatie";
+    draft.effectief_vanaf = date;
+    draft.calculation_variant = "brouwmoment";
     draft.bron_berekening_id = String(draftSource.id);
-    draft.brontype = "hercalculatie";
+    draft.bron_berekening_label = `v${Number(draftSource.versie_nummer ?? 0) || 1}`;
+    draft.brontype = "brouwmoment";
     draft.bron_id = String(draftSource.id);
-    draft.hercalculatie_reden = reason.trim() || "Hercalculatie";
+    draft.type = "brouwmoment";
+    draft.cost_source = "brew_moment";
+    draft.is_test_version = true;
+    draft.supplier_id = "eigen_productie";
+    draft.supplier_name = "Eigen productie";
+    draft.supplier = { id: "eigen_productie", name: "Eigen productie" };
+    draft.leverancier = "Eigen productie";
+    draft.production_location = "Eigen productie";
+    draft.soort_berekening = { type: "Eigen productie" };
+    if (sourceType.toLowerCase() === "inkoop") {
+      draft.invoer = {
+        ...(((draft as any).invoer as GenericRecord | undefined) ?? {}),
+        ingredienten: { regels: [], notities: "" }
+      };
+    }
+    draft.brouwmoment = {
+      lotnummer: lot,
+      brouwdatum: date,
+      notitie: note.trim(),
+      bron_berekening_id: String(draftSource.id),
+      bron_soort: sourceType || "Eigen productie"
+    };
+    ensureBrewMomentLotOnDraft(draft, lot);
+    draft.hercalculatie_reden = "Brouwmoment";
     draft.hercalculatie_notitie = note.trim();
     draft.hercalculatie_timestamp = now;
     draft.finalized_at = "";
     draft.created_at = now;
     draft.updated_at = now;
     draft.last_completed_step = 1;
+    draft.resultaat_snapshot = {};
 
     const nextRows = [draft, ...rows];
-    await saveRows(nextRows, "Concept-hercalculatie aangemaakt.");
-    setReason("Hercalculatie");
-    setNote("");
-    setSelectedDraftSourceId("");
+    const saved = await saveRows(nextRows, "Concept-brouwmoment aangemaakt.");
+    if (!saved) {
+      return;
+    }
+    closeBrewMomentModal();
+    router.push(`/nieuwe-kostprijsberekening?mode=wizard-edit&selected_id=${encodeURIComponent(String(draft.id ?? ""))}`);
   }
 
   async function activateProduct(versionId: string, productId: string, productLabel: string) {
@@ -328,16 +414,16 @@ export function ReceptHercalculatieManager({
   return (
     <section className="module-card">
       <div className="module-card-header">
-        <div className="module-card-title">Recept hercalculeren</div>
+        <div className="module-card-title">Brouwmoment toevoegen</div>
         <div className="module-card-text">
-          Start nieuwe concept-hercalculaties op basis van definitieve eigen-productieberekeningen.
+          Maak een LOT-gebonden batchversie op basis van de actieve kostprijs van een eigen of ingekocht bier.
         </div>
       </div>
 
       <div className="wizard-shell wizard-shell-single">
         <div className="wizard-step-card">
           <div className="wizard-panel-header">
-            <div className="wizard-panel-title">Eigen-productiebieren</div>
+            <div className="wizard-panel-title">Bieren met actieve kostprijs</div>
             <div className="wizard-panel-text">{groups.length} bieren zichtbaar</div>
           </div>
 
@@ -360,7 +446,6 @@ export function ReceptHercalculatieManager({
                           style={{ cursor: "pointer" }}
                           onClick={() => {
                             setSelectedBeerKey(isSelected ? "" : group.key);
-                            setSelectedDraftSourceId("");
                             setStatus("");
                           }}
                         >
@@ -375,9 +460,7 @@ export function ReceptHercalculatieManager({
                               className="editor-button editor-button-secondary"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                setSelectedBeerKey(group.key);
-                                setSelectedDraftSourceId(String(group.sourceRows[0]?.id ?? ""));
-                                setStatus("");
+                                openBrewMomentModal(group);
                               }}
                             >
                               +
@@ -452,7 +535,7 @@ export function ReceptHercalculatieManager({
                                     ) : (
                                       <tr>
                                         <td className="dataset-empty" colSpan={5}>
-                                          Nog geen hercalculaties gevonden voor dit bier.
+                                          Nog geen brouwmomenten gevonden voor dit bier.
                                         </td>
                                       </tr>
                                     )}
@@ -468,7 +551,7 @@ export function ReceptHercalculatieManager({
                 ) : (
                   <tr>
                     <td className="dataset-empty" colSpan={3}>
-                      Nog geen definitieve eigen-productieberekeningen gevonden.
+                      Nog geen definitieve bierkostprijzen gevonden.
                     </td>
                   </tr>
                 )}
@@ -477,14 +560,14 @@ export function ReceptHercalculatieManager({
           </div>
         </div>
 
-        {selectedBeerKey && draftSource ? (
+        {selectedBeerKey && draftSource && false ? (
           <div className="wizard-step-card">
             <div className="wizard-step-header">
               <div>
-                <div className="wizard-step-title">Nieuwe hercalculatieversie</div>
+                <div className="wizard-step-title">Nieuw brouwmoment</div>
                 <div className="wizard-step-text">
-                  Bron: {String(((draftSource.basisgegevens as GenericRecord)?.biernaam ?? ""))} ·{" "}
-                  {String(((draftSource.basisgegevens as GenericRecord)?.jaar ?? ""))}
+                  Bron: {String(((draftSource!.basisgegevens as GenericRecord)?.biernaam ?? ""))} ·{" "}
+                  {String(((draftSource!.basisgegevens as GenericRecord)?.jaar ?? ""))}
                 </div>
               </div>
             </div>
@@ -505,14 +588,21 @@ export function ReceptHercalculatieManager({
                 </select>
               </label>
               <label className="nested-field">
-                <span>
-                  Reden
-                  <span style={{ color: "#c62828" }}> *</span>
-                </span>
+                <span>LOT nummer *</span>
                 <input
                   className="dataset-input"
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
+                  value={lotNumber}
+                  onChange={(event) => setLotNumber(event.target.value)}
+                  placeholder="Bijvoorbeeld P03270"
+                />
+              </label>
+              <label className="nested-field">
+                <span>Brouwdatum *</span>
+                <input
+                  className="dataset-input"
+                  type="date"
+                  value={brewDate}
+                  onChange={(event) => setBrewDate(event.target.value)}
                 />
               </label>
               <label className="nested-field">
@@ -534,7 +624,8 @@ export function ReceptHercalculatieManager({
                   className="editor-button editor-button-secondary"
                   onClick={() => {
                     setSelectedDraftSourceId("");
-                    setReason("Hercalculatie");
+                    setLotNumber("");
+                    setBrewDate(new Date().toISOString().slice(0, 10));
                     setNote("");
                     setStatus("");
                   }}
@@ -544,10 +635,94 @@ export function ReceptHercalculatieManager({
                 <button
                   type="button"
                   className="editor-button"
-                  onClick={createHercalculatie}
-                  disabled={isSaving || !selectedDraftSourceId || !reason.trim()}
+                  onClick={createBrouwmoment}
+                  disabled={isSaving || !selectedDraftSourceId || !lotNumber.trim() || !brewDate.trim()}
                 >
-                  {isSaving ? "Opslaan..." : "Opslaan"}
+                  {isSaving ? "Opslaan..." : "Brouwmoment maken"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {brewMomentModal && modalGroup && draftSource ? (
+          <div className="confirm-modal-overlay" role="presentation">
+            <div
+              className="confirm-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="new-brew-moment-title"
+              style={{ maxWidth: 720 }}
+            >
+              <div className="confirm-modal-title" id="new-brew-moment-title">
+                Nieuw brouwmoment
+              </div>
+              <div className="confirm-modal-text">
+                {modalGroup.biernaam} - {modalGroup.jaar}
+              </div>
+              <div className="wizard-form-grid" style={{ marginTop: 16 }}>
+                <label className="nested-field">
+                  <span>Bronversie *</span>
+                  <select
+                    className="dataset-input"
+                    value={selectedDraftSourceId}
+                    onChange={(event) => {
+                      const sourceId = event.target.value;
+                      setSelectedDraftSourceId(sourceId);
+                      setBrewMomentModal({ groupKey: modalGroup.key, sourceId });
+                    }}
+                  >
+                    {modalGroup.sourceRows.map((row) => (
+                      <option key={String(row.id ?? "")} value={String(row.id ?? "")}>
+                        {`v${Number(row.versie_nummer ?? 0) || 1} - ${formatDate(row.finalized_at ?? row.updated_at)}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="nested-field">
+                  <span>LOT nummer *</span>
+                  <input
+                    className="dataset-input"
+                    value={lotNumber}
+                    onChange={(event) => setLotNumber(event.target.value)}
+                    placeholder="Bijvoorbeeld P03270"
+                  />
+                </label>
+                <label className="nested-field">
+                  <span>Brouwdatum *</span>
+                  <input
+                    className="dataset-input"
+                    type="date"
+                    value={brewDate}
+                    onChange={(event) => setBrewDate(event.target.value)}
+                  />
+                </label>
+                <label className="nested-field">
+                  <span>Notitie</span>
+                  <input
+                    className="dataset-input"
+                    value={note}
+                    onChange={(event) => setNote(event.target.value)}
+                  />
+                </label>
+              </div>
+              {status ? <div className="editor-status" style={{ marginTop: 12 }}>{status}</div> : null}
+              <div className="confirm-modal-actions">
+                <button
+                  type="button"
+                  className="editor-button editor-button-secondary"
+                  onClick={closeBrewMomentModal}
+                  disabled={isSaving}
+                >
+                  Annuleren
+                </button>
+                <button
+                  type="button"
+                  className="editor-button"
+                  onClick={createBrouwmoment}
+                  disabled={isSaving || !selectedDraftSourceId || !lotNumber.trim() || !brewDate.trim()}
+                >
+                  {isSaving ? "Opslaan..." : "Brouwmoment maken"}
                 </button>
               </div>
             </div>

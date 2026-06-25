@@ -276,6 +276,12 @@ def _canonical_sku_name(beer_name: str, unit_name: str) -> str:
     return beer or unit
 
 
+def _code_from_name(prefix: str, name: str) -> str:
+    slug = re.sub(r"[^A-Z0-9]+", "-", str(name or "").upper()).strip("-")
+    slug = re.sub(r"-+", "-", slug)
+    return f"{prefix}-{slug[:16]}".strip("-")[:20] or prefix
+
+
 def _raise_validation_error(message: str, *, field_errors: list[dict[str, Any]] | None = None) -> None:
     raise HTTPException(
         status_code=400,
@@ -284,6 +290,121 @@ def _raise_validation_error(message: str, *, field_errors: list[dict[str, Any]] 
             "field_errors": field_errors or [],
         },
     )
+
+
+@router.post("/packaging-components/{component_id}/sellable-sku")
+def post_packaging_component_sellable_sku(
+    component_id: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Mark a packaging component as sellable and ensure a canonical SKU exists.
+
+    This is deliberately explicit: checking "In offertes" creates/updates a normal
+    SKU instead of relying on a separate shortcut list. Merchandise stays an
+    article SKU; beer-style related items may carry `beer_id` for grouping.
+    """
+    try:
+        component_key = str(component_id or "").strip()
+        if not component_key:
+            raise HTTPException(status_code=400, detail="Verpakkingsonderdeel ontbreekt.")
+
+        category_type = str(payload.get("category_type", "merchandise") or "merchandise").strip().lower()
+        category_id = str(payload.get("category_id", "") or "").strip()
+        if category_type not in {"merchandise", "beer"}:
+            raise HTTPException(status_code=400, detail="Ongeldige categorie.")
+
+        with postgres_storage.transaction():
+            articles_raw = dataset_store.load_dataset("articles")
+            skus_raw = dataset_store.load_dataset("skus")
+            beers_raw = dataset_store.load_dataset("bieren")
+            articles = [row for row in (articles_raw if isinstance(articles_raw, list) else []) if isinstance(row, dict)]
+            skus = [row for row in (skus_raw if isinstance(skus_raw, list) else []) if isinstance(row, dict)]
+            beers = [row for row in (beers_raw if isinstance(beers_raw, list) else []) if isinstance(row, dict)]
+
+            component = next(
+                (
+                    row
+                    for row in articles
+                    if str(row.get("id", "") or "").strip() == component_key
+                    and str(row.get("kind", "") or "").strip().lower() == "packaging_component"
+                ),
+                None,
+            )
+            if not component:
+                raise HTTPException(status_code=404, detail="Verpakkingsonderdeel niet gevonden.")
+
+            beer_name = ""
+            if category_type == "beer":
+                beer = next((row for row in beers if str(row.get("id", "") or "").strip() == category_id), None)
+                if not beer:
+                    raise HTTPException(status_code=400, detail="Stijl niet gevonden.")
+                beer_name = str(beer.get("biernaam") or beer.get("naam") or "").strip()
+
+            name = str(component.get("name") or component.get("omschrijving") or component_key).strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="Omschrijving ontbreekt.")
+
+            existing_sku = next(
+                (
+                    row
+                    for row in skus
+                    if str(row.get("kind", "") or "").strip().lower() == "article"
+                    and str(row.get("article_id", "") or "").strip() == component_key
+                ),
+                None,
+            )
+            sku_id = str((existing_sku or {}).get("id", "") or "").strip() or f"sku-{component_key}".lower()
+            product_group = "merchandise" if category_type == "merchandise" else "bier"
+            sellable_subtype = "merchandise" if category_type == "merchandise" else "bier"
+
+            updated_component = {
+                **component,
+                "active": True,
+                "actief": True,
+                "beschikbaar_voor_offertes": True,
+                "sellable_sku_id": sku_id,
+                "sellable_category_type": category_type,
+                "sellable_category_id": category_id,
+                "sellable_subtype": sellable_subtype,
+                "product_group": product_group,
+            }
+            sku_payload = {
+                **(existing_sku or {}),
+                "id": sku_id,
+                "kind": "article",
+                "beer_id": category_id if category_type == "beer" else "",
+                "format_article_id": "",
+                "article_id": component_key,
+                "code": str((existing_sku or {}).get("code", "") or "").strip() or _code_from_name("MERCH", name),
+                "name": name,
+                "active": True,
+                "actief": True,
+                "sellable_subtype": sellable_subtype,
+                "pricing_method": "cost_plus",
+                "manual_rate_ex": 0.0,
+                "product_group": product_group,
+                "alcohol_category": "",
+                "packaging_type": "",
+            }
+
+            kept_articles = [row for row in articles if str(row.get("id", "") or "").strip() != component_key]
+            kept_skus = [row for row in skus if str(row.get("id", "") or "").strip() != sku_id]
+            dataset_store.save_dataset("articles", [*kept_articles, updated_component])
+            dataset_store.save_dataset("skus", [*kept_skus, sku_payload])
+
+        return {
+            "component_id": component_key,
+            "sku_id": sku_id,
+            "category_type": category_type,
+            "category_id": category_id,
+            "category_label": beer_name if category_type == "beer" else "Merchandise",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error creating packaging component sellable SKU")
+        raise HTTPException(status_code=500, detail="Verkoopbare SKU kon niet worden opgeslagen.") from exc
 
 
 @router.post("/sku-composition/upsert-format", response_model=UpsertFormatResponse)
@@ -546,6 +667,8 @@ def post_upsert_bundle(
 
         sellable_kind = str(payload.sellable_kind or "product").strip().lower()
         is_service = sellable_kind == "dienst"
+        has_sku_components = any(str(line.component_sku_id or "").strip() and float(line.qty or 0.0) > 0 for line in (payload.composition or []))
+        service_uses_component_cost = is_service and has_sku_components
 
         bundle_context = str(getattr(payload, "bundle_context", "giftset") or "giftset").strip().lower()
         if bundle_context not in {"giftset", "beer_variant"}:
@@ -563,9 +686,9 @@ def post_upsert_bundle(
             "active": True,
             "actief": True,
             "sellable_subtype": "dienst" if is_service else ("beer_bundle" if bundle_context == "beer_variant" else "product"),
-            "pricing_method": "manual_rate" if is_service else "cost_plus",
-            "manual_rate_ex": float(payload.manual_rate_ex or 0.0) if is_service else 0.0,
-            "product_group": str(payload.product_group or "").strip(),
+            "pricing_method": "cost_plus" if service_uses_component_cost else ("manual_rate" if is_service else "cost_plus"),
+            "manual_rate_ex": float(payload.manual_rate_ex or 0.0) if is_service and not service_uses_component_cost else 0.0,
+            "product_group": "dienst" if is_service else str(payload.product_group or "").strip(),
             "alcohol_category": str(payload.alcohol_category or "").strip(),
             "packaging_type": str(payload.packaging_type or "").strip(),
         }

@@ -210,8 +210,8 @@ def get_navigation() -> list[NavigationItem]:
         ),
         NavigationItem(
             key="recept-hercalculatie",
-            label="Recept hercalculeren",
-            description="Start een hercalculatie voor eigen productie.",
+            label="Brouwmoment",
+            description="Maak een LOT-gebonden batchversie op basis van een actieve kostprijs.",
             href="/recept-hercalculatie",
             section="Calculatie",
         ),
@@ -1527,6 +1527,11 @@ def post_delete_kostprijs_concept(
     def _text(value: Any) -> str:
         return str(value or "").strip()
 
+    def _truthy(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"1", "true", "yes", "ja", "on"}
+
     def _scan_ids(value: Any, keys: set[str], out: set[str]) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
@@ -1578,14 +1583,17 @@ def post_delete_kostprijs_concept(
             raise HTTPException(status_code=404, detail=f"Kostprijsconcept '{target_id}' niet gevonden.")
 
         status = _text(target.get("status")).lower()
-        if status in {"definitief", "definitive", "active", "actief"}:
+        # TODO: Remove temporary test-version rollback before production use.
+        is_test_version = _truthy(target.get("is_test_version"))
+        is_finalized_test_version = is_test_version and status in {"definitief", "definitive", "active", "actief"}
+        if status in {"definitief", "definitive", "active", "actief"} and not is_finalized_test_version:
             raise HTTPException(status_code=409, detail="Alleen concept-kostprijzen kunnen via deze route verwijderd worden.")
 
         basis = target.get("basisgegevens")
         if not isinstance(basis, dict):
             basis = {}
         beer_id = _text(target.get("bier_id") or basis.get("bier_id"))
-        product_ids = _snapshot_product_ids(target)
+        product_ids = set() if is_finalized_test_version else _snapshot_product_ids(target)
 
         skus = postgres_storage.load_dataset("skus", [])
         if not isinstance(skus, list):
@@ -1633,35 +1641,37 @@ def post_delete_kostprijs_concept(
         reasons: list[str] = []
 
         # Active costprice usage means this is no longer a reversible draft.
-        try:
-            kostprijs_activation_storage.ensure_schema()
-            with postgres_storage.connect() as conn:
-                with conn.cursor() as cur:
-                    if sku_ids:
-                        cur.execute(
-                            """
-                            SELECT sku_id, kostprijsversie_id
-                            FROM kostprijs_sku_activations
-                            WHERE kostprijsversie_id = %s OR sku_id = ANY(%s)
-                            LIMIT 10
-                            """,
-                            (target_id, list(sku_ids)),
-                        )
-                    else:
-                        cur.execute(
-                            """
-                            SELECT sku_id, kostprijsversie_id
-                            FROM kostprijs_sku_activations
-                            WHERE kostprijsversie_id = %s
-                            LIMIT 10
-                            """,
-                            (target_id,),
-                        )
-                    activation_rows = cur.fetchall() or []
-                    if activation_rows:
-                        reasons.append("Kostprijs/SKU is al geactiveerd; concept-delete is geblokkeerd.")
-        except Exception:
-            reasons.append("Kon kostprijsactivaties niet verifieren.")
+        # Temporary test versions may be removed after activation; only their own activations are deleted.
+        if not is_finalized_test_version:
+            try:
+                kostprijs_activation_storage.ensure_schema()
+                with postgres_storage.connect() as conn:
+                    with conn.cursor() as cur:
+                        if sku_ids:
+                            cur.execute(
+                                """
+                                SELECT sku_id, kostprijsversie_id
+                                FROM kostprijs_sku_activations
+                                WHERE kostprijsversie_id = %s OR sku_id = ANY(%s)
+                                LIMIT 10
+                                """,
+                                (target_id, list(sku_ids)),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                SELECT sku_id, kostprijsversie_id
+                                FROM kostprijs_sku_activations
+                                WHERE kostprijsversie_id = %s
+                                LIMIT 10
+                                """,
+                                (target_id,),
+                            )
+                        activation_rows = cur.fetchall() or []
+                        if activation_rows:
+                            reasons.append("Kostprijs/SKU is al geactiveerd; concept-delete is geblokkeerd.")
+            except Exception:
+                reasons.append("Kon kostprijsactivaties niet verifieren.")
 
         # Normalized cost rows may only belong to this target version.
         if sku_ids:
@@ -1687,16 +1697,17 @@ def post_delete_kostprijs_concept(
                 reasons.append("Kon genormaliseerde kostprijsregels niet verifieren.")
 
         # Other kostprijs payloads may not reference the same SKU/article ids.
-        for row in kostprijsversies:
-            if not isinstance(row, dict) or _text(row.get("id")) == target_id:
-                continue
-            found_skus: set[str] = set()
-            found_articles: set[str] = set()
-            _scan_ids(row, {"sku_id", "component_sku_id"}, found_skus)
-            _scan_ids(row, {"product_id", "article_id", "format_article_id"}, found_articles)
-            if sku_ids.intersection(found_skus) or article_ids.intersection(found_articles):
-                reasons.append(f"Kostprijsversie '{_text(row.get('id'))}' verwijst nog naar dezelfde SKU/article.")
-                break
+        if not is_finalized_test_version:
+            for row in kostprijsversies:
+                if not isinstance(row, dict) or _text(row.get("id")) == target_id:
+                    continue
+                found_skus: set[str] = set()
+                found_articles: set[str] = set()
+                _scan_ids(row, {"sku_id", "component_sku_id"}, found_skus)
+                _scan_ids(row, {"product_id", "article_id", "format_article_id"}, found_articles)
+                if sku_ids.intersection(found_skus) or article_ids.intersection(found_articles):
+                    reasons.append(f"Kostprijsversie '{_text(row.get('id'))}' verwijst nog naar dezelfde SKU/article.")
+                    break
 
         # A SKU may not be a component in something outside the deletion set.
         for line in bom_lines:
@@ -1766,6 +1777,8 @@ def post_delete_kostprijs_concept(
             "kostprijs_id": target_id,
             "dry_run": bool(dry_run),
             "can_delete": len(reasons) == 0,
+            "test_version": is_test_version,
+            "finalized_test_version": is_finalized_test_version,
             "blocked_reasons": reasons,
             "related": {
                 "beer_id": beer_id,
@@ -1794,6 +1807,13 @@ def post_delete_kostprijs_concept(
             # Remove table-backed references first to satisfy FK restrictions.
             with postgres_storage.connect() as conn:
                 with conn.cursor() as cur:
+                    if is_finalized_test_version:
+                        cur.execute("DELETE FROM kostprijs_sku_activations WHERE kostprijsversie_id = %s", (target_id,))
+                        report["deleted"]["kostprijs_sku_activations"] = int(cur.rowcount or 0)
+                        cur.execute("DELETE FROM kostprijs_sku_activation_events WHERE kostprijsversie_id = %s", (target_id,))
+                        report["deleted"]["kostprijs_sku_activation_events"] = int(cur.rowcount or 0)
+                    cur.execute("DELETE FROM cost_version_lots WHERE version_id = %s", (target_id,))
+                    report["deleted"]["cost_version_lots"] = int(cur.rowcount or 0)
                     cur.execute("DELETE FROM cost_version_sku_rows WHERE version_id = %s", (target_id,))
                     report["deleted"]["cost_version_sku_rows_by_version"] = int(cur.rowcount or 0)
                     if sku_ids:

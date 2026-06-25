@@ -174,12 +174,12 @@ export function DouanoUnmappedRulesCard({
   const availableSkus = useMemo(() => {
     return combos
       .map((c) => {
-        const id = String((c as any)?.sku_id ?? "").trim();
-        const name = String((c as any)?.naam ?? "").trim() || String((c as any)?.label ?? "").trim() || id;
-        return { id, name };
+        const value = String((c as any)?.sku_id ?? "").trim();
+        const name = String((c as any)?.naam ?? "").trim() || String((c as any)?.label ?? "").trim() || value;
+        return { id: value, name, value, label: name, description: value, keywords: `${value} ${String((c as any)?.beer_id ?? "")}` };
       })
-      .filter((s) => s.id)
-      .sort((a, b) => a.name.localeCompare(b.name, "nl-NL"));
+      .filter((s) => s.value && s.label)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
   }, [combos]);
 
   async function refresh() {

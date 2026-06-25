@@ -49,6 +49,63 @@ function asRecord(value: unknown): GenericRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as GenericRecord) : {};
 }
 
+function rowProductKey(row: SummaryProductRow) {
+  const productId = String((row as any).product_id ?? "").trim();
+  if (productId) return `product:${productId}`;
+  const unit = String((row as any).verpakkingseenheid ?? (row as any).verpakking ?? "").trim();
+  return unit ? `unit:${unit}` : "";
+}
+
+function mergeStoredAmountsIntoLiveRows(liveRows: SummaryProductRow[], storedRows: SummaryProductRow[]) {
+  const storedByProduct = new Map<string, SummaryProductRow>();
+  storedRows.forEach((row) => {
+    const key = rowProductKey(row);
+    if (key && !storedByProduct.has(key)) {
+      storedByProduct.set(key, row);
+    }
+  });
+
+  const amountFields = [
+    "primaire_kosten",
+    "verpakkingskosten",
+    "vaste_kosten",
+    "manufacturing_overhead",
+    "business_overhead",
+    "overhead_breakdown",
+    "accijns",
+    "kostprijs",
+  ];
+
+  return liveRows.map((row) => {
+    const stored = storedByProduct.get(rowProductKey(row));
+    if (!stored) return row;
+    const merged = { ...row } as GenericRecord;
+    amountFields.forEach((field) => {
+      if ((stored as any)[field] !== undefined) {
+        merged[field] = (stored as any)[field];
+      }
+    });
+    return merged as SummaryProductRow;
+  });
+}
+
+function mergeStoredAmountsAndAppendMissingRows(liveRows: SummaryProductRow[], storedRows: SummaryProductRow[]) {
+  const mergedRows = mergeStoredAmountsIntoLiveRows(liveRows, storedRows);
+  const liveKeys = new Set(mergedRows.map(rowProductKey).filter(Boolean));
+  const missingStoredRows = storedRows.filter((row) => {
+    const key = rowProductKey(row);
+    return key && !liveKeys.has(key);
+  });
+  return [...mergedRows, ...missingStoredRows];
+}
+
+function filterRowsByProductKeys(rows: SummaryProductRow[], excludedKeys: Set<string>) {
+  return rows.filter((row) => {
+    const key = rowProductKey(row);
+    return !key || !excludedKeys.has(key);
+  });
+}
+
 function getCanonicalSnapshot(current: GenericRecord, buildResultaatSnapshot: (row: GenericRecord) => any) {
   const liveSnapshot = buildResultaatSnapshot(current);
   const status = String((current as any).status ?? "").trim().toLowerCase();
@@ -61,16 +118,40 @@ function getCanonicalSnapshot(current: GenericRecord, buildResultaatSnapshot: (r
 
   const storedSnapshot = asRecord((current as any).resultaat_snapshot);
   const storedProducts = asRecord((storedSnapshot as any).producten);
+  const storedBasisRows = Array.isArray((storedProducts as any).basisproducten)
+    ? ((storedProducts as any).basisproducten as SummaryProductRow[])
+    : [];
   const storedCompositeRows = Array.isArray((storedProducts as any).samengestelde_producten)
     ? ((storedProducts as any).samengestelde_producten as SummaryProductRow[])
     : [];
+  const storedBasisSourceRows = storedBasisRows.length > 0 ? storedBasisRows : costLines;
+  const liveProducts = asRecord((liveSnapshot as any).producten);
+  const liveBasisRows = Array.isArray((liveProducts as any).basisproducten)
+    ? ((liveProducts as any).basisproducten as SummaryProductRow[])
+    : [];
+  const liveCompositeRows = Array.isArray((liveProducts as any).samengestelde_producten)
+    ? ((liveProducts as any).samengestelde_producten as SummaryProductRow[])
+    : [];
+  const liveBasisKeys = new Set(liveBasisRows.map(rowProductKey).filter(Boolean));
+  const liveCompositeKeys = new Set(liveCompositeRows.map(rowProductKey).filter(Boolean));
+  const storedBasisForBasis = filterRowsByProductKeys(storedBasisSourceRows, liveCompositeKeys);
+  const storedCompositeForComposite = filterRowsByProductKeys(
+    [...storedCompositeRows, ...storedBasisSourceRows.filter((row) => liveCompositeKeys.has(rowProductKey(row)))],
+    liveBasisKeys
+  );
 
   return {
     ...liveSnapshot,
     ...storedSnapshot,
     producten: {
-      basisproducten: costLines,
-      samengestelde_producten: storedCompositeRows,
+      basisproducten:
+        liveBasisRows.length > 0
+          ? mergeStoredAmountsAndAppendMissingRows(liveBasisRows, storedBasisForBasis)
+          : storedBasisForBasis,
+      samengestelde_producten:
+        liveCompositeRows.length > 0
+          ? mergeStoredAmountsAndAppendMissingRows(liveCompositeRows, storedCompositeForComposite)
+          : storedCompositeForComposite,
     },
   };
 }

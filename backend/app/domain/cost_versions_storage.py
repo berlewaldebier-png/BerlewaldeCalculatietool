@@ -16,6 +16,88 @@ from app.domain import production_storage
 _SCHEMA_READY = False
 _SCHEMA_LOCK = Lock()
 
+DEFAULT_SUPPLIER_ID = "beerselect"
+DEFAULT_SUPPLIER_NAME = "Beerselect"
+OWN_PRODUCTION_SUPPLIER_ID = "eigen-productie"
+OWN_PRODUCTION_SUPPLIER_NAME = "Eigen productie"
+DEFAULT_SUPPLIER_CONFIG: dict[str, Any] = {
+    "packaging_costs_apply_by_sku": {},
+    "excise_included_in_purchase_price": False,
+    "transport_included": False,
+    "deposit_included": False,
+    "extra_handling_fee": False,
+    "supplier_specific_overhead_rule": False,
+}
+
+
+def _default_supplier_config(existing: Any = None) -> dict[str, Any]:
+    config = dict(DEFAULT_SUPPLIER_CONFIG)
+    if isinstance(existing, dict):
+        for key, value in existing.items():
+            if key == "packaging_costs_apply_by_sku":
+                config[key] = value if isinstance(value, dict) else {}
+            elif key in config:
+                config[key] = bool(value)
+            else:
+                config[key] = value
+    if not isinstance(config.get("packaging_costs_apply_by_sku"), dict):
+        config["packaging_costs_apply_by_sku"] = {}
+    return config
+
+
+def _cost_source_from_version(version: dict[str, Any]) -> str:
+    explicit = str(version.get("cost_source", "") or "").strip()
+    if explicit:
+        return explicit
+    version_type = str(version.get("type", "") or "").strip().lower()
+    source_type = str(version.get("brontype", "") or version.get("bron_type", "") or "").strip().lower()
+    if version_type == "inkoop" or source_type == "factuur":
+        return "purchase_invoice"
+    if version_type in {"brouwmoment", "brew_moment"} or source_type in {"brouwmoment", "brew_moment"}:
+        return "brew_moment"
+    if version_type in {"hercalculatie", "recept", "recipe"} or "hercalculatie" in source_type:
+        return "recipe_recalculation"
+    return "initial_calculation"
+
+
+def normalize_source_metadata(version: dict[str, Any]) -> dict[str, Any]:
+    """Ensure a cost version has explicit source/supplier metadata.
+
+    The metadata is descriptive in phase 1. It does not alter cost calculations.
+    """
+    row = dict(version)
+    supplier_obj = row.get("supplier") if isinstance(row.get("supplier"), dict) else {}
+    calculation_type = ""
+    soort = row.get("soort_berekening")
+    if isinstance(soort, dict):
+        calculation_type = str(soort.get("type", "") or "").strip()
+    default_supplier_id = OWN_PRODUCTION_SUPPLIER_ID if calculation_type == "Eigen productie" else DEFAULT_SUPPLIER_ID
+    default_supplier_name = OWN_PRODUCTION_SUPPLIER_NAME if calculation_type == "Eigen productie" else DEFAULT_SUPPLIER_NAME
+    supplier_id = str(
+        row.get("supplier_id", "")
+        or (supplier_obj or {}).get("id", "")
+        or default_supplier_id
+    ).strip()
+    supplier_name = str(
+        row.get("supplier_name", "")
+        or row.get("leverancier", "")
+        or (supplier_obj or {}).get("name", "")
+        or default_supplier_name
+    ).strip()
+    if not supplier_id:
+        supplier_id = default_supplier_id
+    if not supplier_name:
+        supplier_name = default_supplier_name
+    row["cost_source"] = _cost_source_from_version(row)
+    row["supplier_id"] = supplier_id
+    row["supplier_name"] = supplier_name
+    row["supplier"] = {"id": supplier_id, "name": supplier_name}
+    row["leverancier"] = supplier_name
+    row["production_location"] = str(row.get("production_location", "") or supplier_name).strip()
+    row["supplier_config"] = _default_supplier_config(row.get("supplier_config"))
+    row["supplier_config_version"] = int(row.get("supplier_config_version", 1) or 1)
+    return row
+
 
 def reset_defaults() -> None:
     """Development helper: clear cost versions and their normalized SKU rows.
@@ -405,7 +487,8 @@ def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     source_type = str(version.get("type", "") or "").strip() or "cost_version"
     source_ref = str(version.get("factuurnummer", "") or version.get("invoice_number", "") or version_id).strip()
-    supplier = str(version.get("leverancier", "") or version.get("supplier", "") or "").strip()
+    version = normalize_source_metadata(version)
+    supplier = str(version.get("supplier_name", "") or version.get("leverancier", "") or "").strip()
     source_date = _iso_date_text(version.get("factuurdatum", "") or version.get("datum", "") or version.get("finalized_at", ""))
     seen: set[str] = set()
     rows: list[dict[str, Any]] = []
@@ -419,7 +502,7 @@ def _version_lot_records(version: dict[str, Any]) -> list[dict[str, Any]]:
                 or value.get("source_ref", "")
                 or source_ref
             ).strip()
-            local_supplier = str(value.get("leverancier", "") or value.get("supplier", "") or supplier).strip()
+            local_supplier = str(value.get("leverancier", "") or value.get("supplier_name", "") or supplier).strip()
             local_source_date = _iso_date_text(
                 value.get("factuurdatum", "")
                 or value.get("datum", "")
@@ -662,7 +745,7 @@ def load_dataset(default_value: Any) -> Any:
         if not isinstance(payload, dict):
             continue
         # Columns are canonical; payload is a view cache. Always override payload with column values.
-        merged = dict(payload)
+        merged = normalize_source_metadata(dict(payload))
         merged["id"] = str(version_id)
         merged["jaar"] = int(jaar or 0)
         merged["status"] = str(status or "")
@@ -715,7 +798,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     if not isinstance(data, list):
         raise ValueError("Ongeldig payload voor 'kostprijsversies': verwacht list.")
 
-    records: list[dict[str, Any]] = [row for row in data if isinstance(row, dict)]
+    records: list[dict[str, Any]] = [normalize_source_metadata(row) for row in data if isinstance(row, dict)]
     now = datetime.now(UTC)
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
@@ -749,7 +832,7 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     updated_at = str(row.get("updated_at", "") or "")
                     finalized_at = str(row.get("finalized_at", "") or "")
                     # Payload is a view cache; force canonical column values into it.
-                    payload_obj = _strip_snapshot_sections(row)
+                    payload_obj = normalize_source_metadata(_strip_snapshot_sections(row))
                     payload_obj["id"] = record_id
                     payload_obj["jaar"] = jaar
                     payload_obj["status"] = status
@@ -1914,6 +1997,82 @@ def rebuild_lot_rows_from_payloads(*, year: int = 0, only_if_empty: bool = False
     return {"versions": len(versions), "lots": sum(len(_version_lot_records(row)) for row in versions), "rebuilt": 1}
 
 
+def backfill_source_metadata(*, year: int = 0) -> dict[str, Any]:
+    """Persist phase-1 source/supplier metadata on existing cost versions.
+
+    Existing explicit values are preserved. Missing supplier metadata is filled
+    with Beerselect because current historical cost versions are Beerselect-based.
+    """
+    ensure_schema()
+    year_value = int(year or 0)
+    where = "WHERE jaar = %s" if year_value > 0 else ""
+    params: tuple[Any, ...] = (year_value,) if year_value > 0 else ()
+    scanned = 0
+    updated = 0
+    versions_for_lot_rebuild: list[dict[str, Any]] = []
+    now = datetime.now(UTC)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, jaar, status, bier_id, versie_nummer, created_at, updated_at, finalized_at, payload
+                FROM cost_versions
+                {where}
+                ORDER BY jaar, bier_id, versie_nummer, id
+                """,
+                params,
+            )
+            rows = cur.fetchall() or []
+            for (
+                version_id,
+                version_year,
+                status,
+                beer_id,
+                version_number,
+                created_at,
+                updated_at,
+                finalized_at,
+                payload,
+            ) in rows:
+                scanned += 1
+                original = payload if isinstance(payload, dict) else {}
+                if not isinstance(original, dict):
+                    original = {}
+                normalized = normalize_source_metadata(dict(original))
+                normalized["id"] = str(version_id or normalized.get("id", "") or "")
+                normalized["jaar"] = int(version_year or normalized.get("jaar", 0) or 0)
+                normalized["status"] = str(status or normalized.get("status", "") or "")
+                normalized["bier_id"] = str(beer_id or normalized.get("bier_id", "") or "")
+                normalized["versie_nummer"] = int(version_number or normalized.get("versie_nummer", 0) or 0)
+                normalized["created_at"] = created_at.isoformat() if hasattr(created_at, "isoformat") and created_at else str(normalized.get("created_at", "") or "")
+                normalized["updated_at"] = updated_at.isoformat() if hasattr(updated_at, "isoformat") and updated_at else str(normalized.get("updated_at", "") or "")
+                normalized["finalized_at"] = finalized_at.isoformat() if hasattr(finalized_at, "isoformat") and finalized_at else str(normalized.get("finalized_at", "") or "")
+                if json.dumps(normalized, sort_keys=True, ensure_ascii=False) != json.dumps(original, sort_keys=True, ensure_ascii=False):
+                    cur.execute(
+                        """
+                        UPDATE cost_versions
+                        SET payload = %s::jsonb,
+                            updated_at_ts = %s
+                        WHERE id = %s
+                        """,
+                        (json.dumps(normalized, ensure_ascii=False), now, str(version_id)),
+                    )
+                    updated += 1
+                versions_for_lot_rebuild.append(normalized)
+            if versions_for_lot_rebuild:
+                _upsert_lot_rows(cur, versions_for_lot_rebuild, overwrite=True, now=now)
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    return {
+        "scanned": scanned,
+        "updated": updated,
+        "lot_rows": sum(len(_version_lot_records(row)) for row in versions_for_lot_rebuild),
+        "supplier_id": DEFAULT_SUPPLIER_ID,
+        "supplier_name": DEFAULT_SUPPLIER_NAME,
+        "year": year_value,
+    }
+
+
 def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
     """Return internal LOTs grouped by beer style directly from cost versions.
 
@@ -2030,7 +2189,7 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
         version = payload if isinstance(payload, dict) else {}
         if not isinstance(version, dict):
             continue
-        version = dict(version)
+        version = normalize_source_metadata(dict(version))
         version["id"] = str(version_id or version.get("id", "") or "")
         version["jaar"] = int(version_year or version.get("jaar", 0) or 0)
         version["status"] = str(status or version.get("status", "") or "")
@@ -2074,6 +2233,7 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
                     "versions": [],
                     "version_ids": [],
                     "years": [],
+                    "suppliers": [],
                     "sources": [],
                     "skus": {},
                     "source_date": str(lot_row.get("source_date", "") or ""),
@@ -2090,6 +2250,9 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
             source_label = str(lot_row.get("source_ref", "") or lot_row.get("source_type", "") or "").strip()
             if source_label and source_label not in lot_item["sources"]:
                 lot_item["sources"].append(source_label)
+            supplier_label = str(version.get("supplier_name", "") or lot_row.get("supplier", "") or "").strip()
+            if supplier_label and supplier_label not in lot_item["suppliers"]:
+                lot_item["suppliers"].append(supplier_label)
             for sku in version_skus:
                 sku_key = str(sku.get("sku_id", "") or sku.get("sku_code", "") or sku.get("label", "") or "").strip()
                 if not sku_key:
@@ -2143,6 +2306,7 @@ def load_internal_lot_summary(*, year: int = 0, limit: int = 5000) -> list[dict[
                 "version_ids": [],
                 "years": [],
                 "sources": [],
+                "suppliers": [],
                 "skus": {},
                 "source_date": source_date.isoformat() if hasattr(source_date, "isoformat") and source_date else "",
             },

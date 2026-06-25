@@ -5,6 +5,7 @@ from typing import Any
 from app.domain import (
     cost_versions_storage,
     dataset_store,
+    douano_margin_snapshot_storage,
     kostprijs_activation_storage,
     lot_costs_storage,
     postgres_storage,
@@ -87,6 +88,30 @@ def _sync_ok(resource: str) -> bool:
             (resource,),
         )
     )
+
+
+def _known_production_years() -> list[int]:
+    productie = dataset_store.load_dataset("productie")
+    years: set[int] = set()
+    if isinstance(productie, dict):
+        for key in productie.keys():
+            try:
+                year = int(key)
+            except (TypeError, ValueError):
+                continue
+            if year > 0:
+                years.add(year)
+    elif isinstance(productie, list):
+        for row in productie:
+            if not isinstance(row, dict):
+                continue
+            try:
+                year = int(row.get("jaar") or row.get("year") or 0)
+            except (TypeError, ValueError):
+                continue
+            if year > 0:
+                years.add(year)
+    return sorted(years)
 
 
 def _dataset_year_rows(name: str, year: int) -> list[dict[str, Any]]:
@@ -358,6 +383,129 @@ def build_setup_status(year: int) -> dict[str, Any]:
             for row in lot_missing_reconciliation[:100]
         ]
 
+    douano_margin_snapshot_storage.ensure_schema()
+    snapshot_bad_statuses = (
+        "unmapped_sku",
+        "missing_cost",
+        "missing_lot_cost",
+        "lot_near_match_fallback",
+        "lot_unmatched_fallback",
+    )
+    snapshot_total = _safe_scalar(
+        """
+        SELECT COUNT(*)
+        FROM douano_sales_line_cost_snapshots
+        WHERE line_date >= %s::date
+          AND line_date < %s::date
+          AND NOT ignored
+        """,
+        (start_date, end_date),
+    )
+    snapshot_missing_rows = _safe_rows(
+        """
+        SELECT
+            source_type,
+            source_line_id,
+            line_date,
+            COALESCE(payload->>'transaction_number', '') AS transaction_number,
+            COALESCE(payload->>'douano_product_name', '') AS product_name,
+            douano_product_id,
+            douano_sku AS sku_code,
+            sku_id,
+            lot_number,
+            lot_internal_number AS interne_lot,
+            cost_status,
+            cost_source,
+            CASE
+                WHEN NOT mapped OR cost_status = 'unmapped_sku' THEN 'Productkoppeling ontbreekt'
+                WHEN cost_status IN ('lot_near_match_fallback', 'lot_unmatched_fallback') THEN 'LOT alias nodig'
+                WHEN missing_cost OR cost_price_ex IS NULL OR cost_status IN ('missing_cost', 'missing_lot_cost') THEN 'Kostprijsbron ontbreekt'
+                ELSE 'Controle nodig'
+            END AS oorzaak
+        FROM douano_sales_line_cost_snapshots
+        WHERE line_date >= %s::date
+          AND line_date < %s::date
+          AND NOT ignored
+          AND (
+              NOT mapped
+              OR missing_cost
+              OR cost_price_ex IS NULL
+              OR cost_status = ANY(%s::text[])
+          )
+        ORDER BY line_date DESC NULLS LAST, source_type, source_line_id
+        LIMIT %s
+        """,
+        (start_date, end_date, list(snapshot_bad_statuses), 100),
+    )
+    snapshot_missing_total = _safe_scalar(
+        """
+        SELECT COUNT(*)
+        FROM douano_sales_line_cost_snapshots
+        WHERE line_date >= %s::date
+          AND line_date < %s::date
+          AND NOT ignored
+          AND (
+              NOT mapped
+              OR missing_cost
+              OR cost_price_ex IS NULL
+              OR cost_status = ANY(%s::text[])
+          )
+        """,
+        (start_date, end_date, list(snapshot_bad_statuses)),
+    )
+    snapshot_with_cost_source = max(0, snapshot_total - snapshot_missing_total)
+    snapshot_sku_total = _safe_scalar(
+        """
+        SELECT COUNT(*)
+        FROM douano_sales_line_cost_snapshots
+        WHERE line_date >= %s::date
+          AND line_date < %s::date
+          AND NOT ignored
+          AND COALESCE(NULLIF(sku_id, ''), '') <> ''
+        """,
+        (start_date, end_date),
+    )
+    snapshot_sku_missing_total = _safe_scalar(
+        """
+        SELECT COUNT(*)
+        FROM douano_sales_line_cost_snapshots
+        WHERE line_date >= %s::date
+          AND line_date < %s::date
+          AND NOT ignored
+          AND COALESCE(NULLIF(sku_id, ''), '') <> ''
+          AND (
+              missing_cost
+              OR cost_price_ex IS NULL
+              OR cost_status = ANY(%s::text[])
+          )
+        """,
+        (start_date, end_date, list(snapshot_bad_statuses)),
+    )
+    snapshot_sku_with_cost_source = max(0, snapshot_sku_total - snapshot_sku_missing_total)
+    snapshot_non_sku_total = _safe_scalar(
+        """
+        SELECT COUNT(*)
+        FROM douano_sales_line_cost_snapshots
+        WHERE line_date >= %s::date
+          AND line_date < %s::date
+          AND NOT ignored
+          AND COALESCE(NULLIF(sku_id, ''), '') = ''
+        """,
+        (start_date, end_date),
+    )
+    snapshot_non_sku_categorized = _safe_scalar(
+        """
+        SELECT COUNT(*)
+        FROM douano_sales_line_cost_snapshots
+        WHERE line_date >= %s::date
+          AND line_date < %s::date
+          AND NOT ignored
+          AND COALESCE(NULLIF(sku_id, ''), '') = ''
+          AND cost_status = 'no_cost_required'
+        """,
+        (start_date, end_date),
+    )
+
     sold_products_total = _safe_scalar(
         """
         SELECT COUNT(*)
@@ -592,19 +740,27 @@ def build_setup_status(year: int) -> dict[str, Any]:
             href="/beheer/api",
         ),
         _check(
-            check_id="lot_costs",
-            label="LOT-plichtige SKU + LOT combinaties hebben directe kostprijs",
-            done=lot_pairs_total > 0 and lot_missing_cost_total == 0,
-            current=lot_pairs_with_cost,
-            total=lot_pairs_total,
-            missing=lot_missing_cost,
+            check_id="sales_rows_cost_source",
+            label="Verkoopregels zijn verwerkt",
+            done=snapshot_total > 0 and snapshot_missing_total == 0,
+            current=snapshot_with_cost_source,
+            total=snapshot_total,
+            missing=snapshot_missing_rows,
             group="readiness",
-            description="Dit telt unieke bier-SKU + LOT combinaties met directe LOT-kost. Giftsets vallen terug op hun actieve samengestelde kostprijs.",
-            href="/beheer/api",
+            description="Iedere verkoopregel moet verklaarbaar zijn: SKU's met kostprijsbron, of niet-SKU regels expliciet gecategoriseerd.",
+            href="/omzet-en-marge",
         ),
     ]
 
-    can_complete = all(bool(check.get("done")) for check in checks)
+    quality_gate_ids = {
+        "douano_products",
+        "sales_invoices",
+        "stock_history_sync",
+        "product_mappings",
+        "stock_history_lots",
+        "sales_rows_cost_source",
+    }
+    can_complete = all(bool(check.get("done")) for check in checks if str(check.get("id", "")) in quality_gate_ids)
     return {
         "year": int(year),
         "can_complete": can_complete,
@@ -626,11 +782,21 @@ def build_setup_status(year: int) -> dict[str, Any]:
             "lot_cost_records": lot_cost_total,
             "lot_pairs": lot_pairs_total,
             "lot_pairs_missing_cost": lot_missing_cost_total,
+            "sales_rows_with_cost_source": snapshot_with_cost_source,
+            "sales_rows_cost_source_total": snapshot_total,
+            "sales_rows_missing_cost_source": snapshot_missing_total,
+            "sales_rows_sku_with_cost_source": snapshot_sku_with_cost_source,
+            "sales_rows_sku_total": snapshot_sku_total,
+            "sales_rows_non_sku_categorized": snapshot_non_sku_categorized,
+            "sales_rows_non_sku_total": snapshot_non_sku_total,
+            "sales_rows_processed": snapshot_with_cost_source,
+            "sales_rows_total": snapshot_total,
             "sold_skus": sold_skus_total,
             "sold_skus_missing_cost": len(sold_skus_missing_cost),
             "fixed_cost_lines": len(fixed_cost_rows),
             "fixed_cost_total": fixed_cost_total,
             "tariff_years": len(tariffs_rows),
+            "production_years": _known_production_years(),
         },
         "checks": checks,
     }

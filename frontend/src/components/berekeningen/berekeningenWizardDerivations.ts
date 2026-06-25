@@ -8,6 +8,7 @@ import {
   type ResultaatSnapshot,
 } from "@/lib/kostprijsSnapshotEngine";
 import type { GenericRecord } from "@/components/berekeningen/berekeningenWizardUtils";
+import { supplierPackagingAppliesForProduct } from "@/components/berekeningen/steps/SupplierConfigStep";
 
 export type BerekeningSubjectType = "bier" | "artikel" | "dienst";
 
@@ -34,7 +35,6 @@ export function buildResultaatSnapshotFromWizard(params: {
     basisproducten: GenericRecord[],
     samengesteldeProducten: GenericRecord[]
   ) => any[];
-  expandSelectedInkoopProductsToBasisproducten: (selected: any[], basisproducten: GenericRecord[]) => any[];
 }): ResultaatSnapshot {
   const {
     row,
@@ -48,7 +48,6 @@ export function buildResultaatSnapshotFromWizard(params: {
     getProductDisplayName,
     calculateVariabeleKostenPerLiter,
     getSelectedInkoopProducts,
-    expandSelectedInkoopProductsToBasisproducten,
   } = params;
 
   const basisgegevens = (row.basisgegevens as GenericRecord) ?? {};
@@ -93,21 +92,35 @@ export function buildResultaatSnapshotFromWizard(params: {
   const methodologyVersion = hasAnyAbc ? "abc_v1" : "legacy";
   const fixedPerLiterEffective = hasAnyAbc ? overheadPerLiter.totalPerLiter : fixedPerLiter;
   const geselecteerdeInkoopProducten =
-    soort === "Inkoop"
-      ? expandSelectedInkoopProductsToBasisproducten(
-          getSelectedInkoopProducts(row, jaar, basisproducten, samengesteldeProducten),
-          basisproducten
-        )
-      : [];
+    soort === "Inkoop" ? getSelectedInkoopProducts(row, jaar, basisproducten, samengesteldeProducten) : [];
+  const basisIds = new Set(
+    (Array.isArray(basisproducten) ? basisproducten : [])
+      .map((item) => String((item as any)?.id ?? "").trim())
+      .filter(Boolean)
+  );
+  const productTypeForSelectedInkoopItem = (item: any): "basis" | "samengesteld" => {
+    const product = item && typeof item === "object" && "product" in item ? item.product : item;
+    const productId = String(product?.id ?? "").trim();
+    const explicit = String(item?.productType ?? item?.product_type ?? product?.productType ?? product?.product_type ?? "")
+      .trim()
+      .toLowerCase();
+    if (explicit === "basis" || explicit === "samengesteld") {
+      return explicit;
+    }
+    if (productId && basisIds.has(productId)) {
+      return "basis";
+    }
+    return "samengesteld";
+  };
   const basisproductenVanJaar =
     soort === "Inkoop"
-      ? geselecteerdeInkoopProducten.filter((item) => Number((item as any).product?.inhoud_per_eenheid_liter ?? 0) > 0)
+      ? geselecteerdeInkoopProducten.filter((item) => productTypeForSelectedInkoopItem(item) === "basis")
       : hasBeerContext
         ? basisproducten.filter((item) => Number((item as any).jaar ?? 0) === jaar)
         : [];
   const samengesteldeVanJaar =
     soort === "Inkoop"
-      ? geselecteerdeInkoopProducten.filter((item) => Number((item as any).product?.totale_inhoud_liter ?? 0) > 0)
+      ? geselecteerdeInkoopProducten.filter((item) => productTypeForSelectedInkoopItem(item) === "samengesteld")
       : hasBeerContext
         ? samengesteldeProducten.filter((item) => Number((item as any).jaar ?? 0) === jaar)
         : [];
@@ -117,11 +130,11 @@ export function buildResultaatSnapshotFromWizard(params: {
       ? (tarievenHeffingen.find((r: any) => Number(r?.jaar ?? 0) === jaar) as any)
       : null) ?? null;
 
-  const includePackagingCosts = soort !== "Inkoop";
-
-
   const packagingByProductId = new Map<string, number>();
   const litersByProductId = new Map<string, number>();
+  const packagingEnabledByProductId = new Map<string, boolean>();
+  const supplierConfig = row.supplier_config && typeof row.supplier_config === "object" ? (row.supplier_config as GenericRecord) : {};
+  const includeExciseCosts = soort !== "Inkoop" || !Boolean((supplierConfig as any).excise_included_in_purchase_price);
 
   const { packagingCost, litersPerUnit } = createPackagingResolvers({
     baseDefs: Array.isArray(basisproducten) ? (basisproducten as any[]) : [],
@@ -134,7 +147,9 @@ export function buildResultaatSnapshotFromWizard(params: {
     if (!id) return;
     const liters = litersPerUnit(id, productType, jaar);
     litersByProductId.set(id, Number.isFinite(liters) ? liters : 0);
-    const packaging = includePackagingCosts ? packagingCost(id, productType, jaar) : 0;
+    const packagingEnabled = soort !== "Inkoop" || supplierPackagingAppliesForProduct(row, id);
+    packagingEnabledByProductId.set(id, packagingEnabled);
+    const packaging = packagingEnabled ? packagingCost(id, productType, jaar) : 0;
     packagingByProductId.set(id, Number.isFinite(packaging) ? packaging : 0);
   }
 
@@ -156,6 +171,9 @@ export function buildResultaatSnapshotFromWizard(params: {
     return { product, primaryCost };
   });
 
+  const includePackagingCosts =
+    soort !== "Inkoop" || Array.from(packagingEnabledByProductId.values()).some(Boolean);
+
   return computeResultaatSnapshot({
     biernaam,
     soortLabel: soort,
@@ -169,12 +187,13 @@ export function buildResultaatSnapshotFromWizard(params: {
     basisRows: basisInputs,
     samengRows: samengInputs,
     includePackagingCosts,
+    includeExciseCosts,
     overheadPerLiter,
     methodologyVersion,
     vasteKostenRows: vasteKostenRows as any,
     productieYear: productieGegevens as any,
     packagingCost: (productId) =>
-      includePackagingCosts ? Number(packagingByProductId.get(String(productId)) ?? 0) : 0,
+      packagingEnabledByProductId.get(String(productId)) ? Number(packagingByProductId.get(String(productId)) ?? 0) : 0,
     litersPerUnit: (productId) => Number(litersByProductId.get(String(productId)) ?? 0),
     productLabel: (product: any) => getProductDisplayName(product)
   });
@@ -192,6 +211,23 @@ export function validateCurrentBeforePersistFromWizard(params: {
   const basis = (current.basisgegevens as GenericRecord) ?? {};
   const inkoop = ((current.invoer as GenericRecord)?.inkoop as GenericRecord) ?? {};
   const soort = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
+  const productionStatus = String(
+    (current as any)?.production_status ?? ((current.soort_berekening as GenericRecord | undefined) as any)?.production_status ?? ""
+  ).trim();
+  const brontype = String((current as any)?.brontype ?? "").trim().toLowerCase();
+  const isBrouwmoment = brontype === "brouwmoment" || brontype === "brew_moment";
+  const isBrewedOwnProduction = soort === "Eigen productie" && productionStatus === "brewed_batch";
+  if (isBrouwmoment || isBrewedOwnProduction) {
+    const brouwmoment = ((current as any).brouwmoment as GenericRecord | undefined) ?? {};
+    const lot = String((brouwmoment as any).lotnummer ?? (inkoop as any).lotnummer ?? "").trim();
+    const brouwdatum = String((brouwmoment as any).brouwdatum ?? (current as any).effectief_vanaf ?? "").trim();
+    if (!lot) {
+      return "LOT-nummer is verplicht voor een gebrouwen batch.";
+    }
+    if (!brouwdatum) {
+      return "Brouwdatum is verplicht voor een gebrouwen batch.";
+    }
+  }
   if (soort === "Inkoop" && String((inkoop as any).lotnummer ?? "").trim() === "") {
     return "LOT-nummer is verplicht in de stap Inkoopfactuur.";
   }

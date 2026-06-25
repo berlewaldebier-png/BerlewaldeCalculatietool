@@ -22,6 +22,21 @@ function methodLabel(value: PricingMethod) {
   return value === "manual_rate" ? "Tarief" : "Kostprijs";
 }
 
+function nonBeerGroupForSku(sku: GenericRecord | undefined, productGroup = "") {
+  const group = String(productGroup || (sku as any)?.product_group || "").trim().toLowerCase();
+  const subtype = String((sku as any)?.sellable_subtype || "").trim().toLowerCase();
+  if (group === "merchandise" || subtype === "merchandise") return "group:merchandise";
+  if (group === "dienst" || subtype === "dienst") return "group:dienst";
+  return "";
+}
+
+function groupNameForId(id: string) {
+  if (id === "group:merchandise") return "Merchandise";
+  if (id === "group:dienst") return "Dienstverlening";
+  if (id === "__zonder_stijl__") return "Zonder stijl";
+  return "";
+}
+
 function TrashIcon() {
   return (
     <svg viewBox="0 0 24 24" className="svg-icon" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -254,7 +269,11 @@ export function VerkoopbareArtikelenWorkspace({
   }, [bieren]);
 
   const styleById = useMemo(() => {
-    return new Map(styleOptions.map((style) => [style.id, style]));
+    return new Map([
+      ...styleOptions.map((style) => [style.id, style] as const),
+      ["group:merchandise", { id: "group:merchandise", name: "Merchandise" }] as const,
+      ["group:dienst", { id: "group:dienst", name: "Dienstverlening" }] as const,
+    ]);
   }, [styleOptions]);
 
   const skuRawById = useMemo(() => {
@@ -277,18 +296,46 @@ export function VerkoopbareArtikelenWorkspace({
   }, [bieren]);
 
   const componentStyleIdsByParentArticle = useMemo(() => {
-    const out = new Map<string, Set<string>>();
+    const linesByParentArticle = new Map<string, GenericRecord[]>();
     (Array.isArray(bomLines) ? bomLines : []).forEach((line) => {
       const parentArticleId = String((line as any)?.parent_article_id ?? "").trim();
       if (!parentArticleId) return;
-      const componentSkuId = String((line as any)?.component_sku_id ?? "").trim();
-      const componentSku = componentSkuId ? skuRawById.get(componentSkuId) : null;
-      const beerId = String((componentSku as any)?.beer_id ?? "").trim();
-      const styleKey = beerId ? styleKeyByBeerId.get(beerId) : "";
-      if (!styleKey) return;
-      if (!out.has(parentArticleId)) out.set(parentArticleId, new Set());
-      out.get(parentArticleId)?.add(styleKey);
+      if (!linesByParentArticle.has(parentArticleId)) linesByParentArticle.set(parentArticleId, []);
+      linesByParentArticle.get(parentArticleId)?.push(line);
     });
+
+    function collectForArticle(articleId: string, visited: Set<string>): Set<string> {
+      const result = new Set<string>();
+      const currentArticleId = String(articleId || "").trim();
+      if (!currentArticleId || visited.has(currentArticleId)) return result;
+      visited.add(currentArticleId);
+      for (const line of linesByParentArticle.get(currentArticleId) || []) {
+        const componentSkuId = String((line as any)?.component_sku_id ?? "").trim();
+        const componentArticleId = String((line as any)?.component_article_id ?? "").trim();
+        if (componentArticleId) {
+          collectForArticle(componentArticleId, new Set(visited)).forEach((styleId) => result.add(styleId));
+        }
+        if (!componentSkuId) continue;
+        const componentSku = skuRawById.get(componentSkuId) as any;
+        const beerId = String(componentSku?.beer_id ?? "").trim();
+        const styleKey = beerId ? styleKeyByBeerId.get(beerId) : "";
+        if (styleKey) {
+          result.add(styleKey);
+          continue;
+        }
+        const nestedArticleId = String(componentSku?.article_id ?? "").trim();
+        if (nestedArticleId) {
+          collectForArticle(nestedArticleId, new Set(visited)).forEach((styleId) => result.add(styleId));
+        }
+      }
+      return result;
+    }
+
+    const out = new Map<string, Set<string>>();
+    for (const parentArticleId of linesByParentArticle.keys()) {
+      const styles = collectForArticle(parentArticleId, new Set());
+      if (styles.size > 0) out.set(parentArticleId, styles);
+    }
     return out;
   }, [bomLines, skuRawById, styleKeyByBeerId]);
 
@@ -312,6 +359,9 @@ export function VerkoopbareArtikelenWorkspace({
     const beerId = String(sku?.beer_id ?? "").trim();
     const styleKey = beerId ? styleKeyByBeerId.get(beerId) : "";
     if (styleKey) return [styleKey];
+    const tableRow = rows.find((row) => row.skuId === skuId);
+    const nonBeerGroup = nonBeerGroupForSku(sku, tableRow?.productGroup || "");
+    if (nonBeerGroup) return [nonBeerGroup];
     const articleId = String(sku?.article_id ?? "").trim();
     const componentStyles = articleId ? componentStyleIdsByParentArticle.get(articleId) : null;
     if (componentStyles && componentStyles.size > 0) return Array.from(componentStyles);
@@ -324,7 +374,7 @@ export function VerkoopbareArtikelenWorkspace({
       const ids = inferStyleIdsForSku(row.skuId);
       const isMixed = ids.filter((id) => id !== "__zonder_stijl__").length > 1;
       ids.forEach((styleId) => {
-        const styleName = styleId === "__zonder_stijl__" ? "Zonder stijl" : styleById.get(styleId)?.name || styleId;
+        const styleName = groupNameForId(styleId) || styleById.get(styleId)?.name || styleId;
         const group = groups.get(styleId) ?? { styleId, styleName, rows: [], inferred: 0, mixed: 0 };
         group.rows.push(row);
         if (!explicitStyleIdsBySku.has(row.skuId)) group.inferred += 1;
@@ -332,14 +382,18 @@ export function VerkoopbareArtikelenWorkspace({
         groups.set(styleId, group);
       });
     });
-    const preferredOrder = new Map(styleOptions.map((style, index) => [style.id, index]));
+    const preferredOrder = new Map([
+      ...styleOptions.map((style, index) => [style.id, index] as const),
+      ["group:merchandise", styleOptions.length + 10] as const,
+      ["group:dienst", styleOptions.length + 11] as const,
+    ]);
     return Array.from(groups.values()).sort((a, b) => {
       const ai = preferredOrder.has(a.styleId) ? preferredOrder.get(a.styleId)! : 9999;
       const bi = preferredOrder.has(b.styleId) ? preferredOrder.get(b.styleId)! : 9999;
       if (ai !== bi) return ai - bi;
       return a.styleName.localeCompare(b.styleName, "nl-NL");
     });
-  }, [sorted, styleById, styleOptions, explicitStyleIdsBySku, skuRawById, componentStyleIdsByParentArticle, styleKeyByBeerId]);
+  }, [sorted, styleById, styleOptions, explicitStyleIdsBySku, skuRawById, rows, componentStyleIdsByParentArticle, styleKeyByBeerId]);
 
   useEffect(() => {
     setOpenStyleIds((current) => {

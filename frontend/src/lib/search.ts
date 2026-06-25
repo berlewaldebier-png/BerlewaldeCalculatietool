@@ -241,8 +241,8 @@ const SEARCH_INDEX: SearchIndexEntry[] = [
   {
     id: "recipe-index",
     type: "recipe",
-    title: "Recept hercalculatie",
-    subtitle: "Recepten en brouwformules",
+    title: "Brouwmoment",
+    subtitle: "LOT-gebonden batchversies maken",
     meta: "Productie",
     href: "/recept-hercalculatie",
     keywords: ["recept", "recepten", "brouwformule", "ingrediënten"]

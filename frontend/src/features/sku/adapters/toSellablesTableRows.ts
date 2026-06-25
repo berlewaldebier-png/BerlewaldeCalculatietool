@@ -8,6 +8,7 @@ export type SellableTableRow = {
   skuId: string;
   label: string;
   subtype: SellableSubtype;
+  productGroup: string;
   pricingMethod: PricingMethod;
   uom: Uom;
   contentLiter: number;
@@ -21,6 +22,7 @@ export function toSellableTableRows(rows: CentralSkuRow[]): SellableTableRow[] {
     skuId: row.skuId,
     label: row.label,
     subtype: row.subtype === "dienst" ? "dienst" : row.subtype === "bier" ? "bier" : "product",
+    productGroup: row.productGroup,
     pricingMethod: row.pricingMethod,
     uom: normalizeUom(row.uom),
     contentLiter: row.contentLiter,

@@ -4,12 +4,14 @@ export type NormalizedSku = {
   id: string;
   kind: string;
   name: string;
+  isActive: boolean;
   beerId: string;
   formatArticleId: string;
   articleId: string;
   payload: GenericRecord;
   pricingMethodRaw: string;
   sellableSubtypeRaw: string;
+  productGroupRaw: string;
   uom: Uom;
 };
 
@@ -17,11 +19,14 @@ export type NormalizedArticle = {
   id: string;
   kind: string;
   name: string;
+  isActive: boolean;
+  availableForQuotes: boolean;
   uom: Uom;
   contentLiter: number;
   payload: GenericRecord;
   pricingMethodRaw: string;
   sellableSubtypeRaw: string;
+  productGroupRaw: string;
 };
 
 export type NormalizedActivation = {
@@ -67,12 +72,14 @@ export function normalizeSku(row: GenericRecord): NormalizedSku | null {
     id,
     kind,
     name: text((row as any)?.name) || text((row as any)?.naam),
+    isActive: (row as any)?.active !== false && (row as any)?.actief !== false,
     beerId: text((row as any)?.beer_id),
     formatArticleId: text((row as any)?.format_article_id),
     articleId: text((row as any)?.article_id),
     payload,
     pricingMethodRaw: text((payload as any)?.pricing_method) || text((row as any)?.pricing_method),
     sellableSubtypeRaw: text((payload as any)?.sellable_subtype) || text((row as any)?.sellable_subtype),
+    productGroupRaw: text((payload as any)?.product_group) || text((row as any)?.product_group),
     uom: normalizeUom((row as any)?.uom || (payload as any)?.uom),
   };
 }
@@ -86,11 +93,14 @@ export function normalizeArticle(row: GenericRecord): NormalizedArticle | null {
     id,
     kind,
     name: text((row as any)?.name) || text((row as any)?.naam),
+    isActive: (row as any)?.active !== false && (row as any)?.actief !== false,
+    availableForQuotes: Boolean((row as any)?.beschikbaar_voor_offertes),
     uom: normalizeUom((row as any)?.uom || (payload as any)?.uom),
     contentLiter: toNumber((row as any)?.content_liter, 0),
     payload,
     pricingMethodRaw: text((payload as any)?.pricing_method) || text((row as any)?.pricing_method),
     sellableSubtypeRaw: text((payload as any)?.sellable_subtype) || text((row as any)?.sellable_subtype),
+    productGroupRaw: text((payload as any)?.product_group) || text((row as any)?.product_group),
   };
 }
 

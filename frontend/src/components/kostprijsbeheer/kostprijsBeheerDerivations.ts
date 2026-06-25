@@ -1,4 +1,6 @@
 import {
+  buildCostSourceLabel,
+  buildSupplierLabel,
   buildVersionLabel,
   getSnapshotProductCost,
   parseSortTimestamp,
@@ -13,6 +15,8 @@ export type ExistingBerekeningRow = {
   jaar: number | null;
   status: string;
   type: string;
+  sourceLabel: string;
+  supplierLabel: string;
   kostprijsPerLiter: number | null;
   ts: string;
   matches: boolean;
@@ -39,6 +43,8 @@ export type ActiveCostRow = {
   effectiefVanaf: string;
   versieId: string;
   versieLabel: string;
+  sourceLabel: string;
+  supplierLabel: string;
   versieTimestamp: number;
   currentCost: number | null;
   recommendedVersionId: string;
@@ -51,6 +57,14 @@ export type ActiveCostRow = {
 
 function cleanRepeatedName(label: unknown) {
   return normalizeSkuLabel(label);
+}
+
+function nonBeerGroupLabel(productGroup: string, sellableSubtype: string) {
+  const group = String(productGroup || "").trim().toLowerCase();
+  const subtype = String(sellableSubtype || "").trim().toLowerCase();
+  if (group === "merchandise" || subtype === "merchandise") return "Merchandise";
+  if (group === "dienst" || subtype === "dienst") return "Dienstverlening";
+  return "";
 }
 
 export function buildExistingBerekeningenRows(args: {
@@ -82,16 +96,20 @@ export function buildExistingBerekeningenRows(args: {
       const jaar = Number((row as any)?.jaar ?? basis?.jaar ?? 0) || 0;
       const status = String((row as any)?.status ?? "");
       const type = String((row as any)?.type ?? "");
+      const sourceLabel = buildCostSourceLabel(row);
+      const supplierLabel = buildSupplierLabel(row);
       const kostprijsPerLiter = Number((row as any)?.kostprijs ?? Number.NaN);
       const ts = String((row as any)?.finalized_at ?? (row as any)?.updated_at ?? (row as any)?.created_at ?? "");
       const label = buildVersionLabel(row);
-      const hay = `${bierNaam} ${jaar} ${status} ${type} ${label}`.toLowerCase();
+      const hay = `${bierNaam} ${jaar} ${status} ${type} ${label} ${sourceLabel} ${supplierLabel}`.toLowerCase();
       return {
         id,
         bierNaam: bierNaam || "-",
         jaar: jaar || null,
         status,
         type,
+        sourceLabel,
+        supplierLabel,
         kostprijsPerLiter: Number.isFinite(kostprijsPerLiter) ? kostprijsPerLiter : null,
         ts,
         matches: !q || hay.includes(q),
@@ -110,9 +128,11 @@ export function buildActiveRows(args: {
   basisById: Map<string, string>;
   skuById: Map<string, GenericRecord>;
   articleById: Map<string, GenericRecord>;
+  bomLines: GenericRecord[];
   samengesteldById: Map<string, string>;
   berekeningenById: Map<string, GenericRecord>;
   currentBerekeningen: GenericRecord[];
+  packagingComponentPrices?: GenericRecord[];
 }): ActiveCostRow[] {
   const {
     kostprijsproductactiveringen,
@@ -123,14 +143,66 @@ export function buildActiveRows(args: {
     basisById,
     skuById,
     articleById,
+    bomLines,
     samengesteldById,
     berekeningenById,
     currentBerekeningen,
+    packagingComponentPrices,
   } = args;
   const q = search.trim().toLowerCase();
   const warningThresholdPct = 10;
+  const bomLinesByParentArticle = new Map<string, GenericRecord[]>();
+  (Array.isArray(bomLines) ? bomLines : []).forEach((line) => {
+    const parentArticleId = String((line as any)?.parent_article_id ?? "").trim();
+    if (!parentArticleId) return;
+    if (!bomLinesByParentArticle.has(parentArticleId)) bomLinesByParentArticle.set(parentArticleId, []);
+    bomLinesByParentArticle.get(parentArticleId)?.push(line);
+  });
 
-  const rows: ActiveCostRow[] = (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [])
+  function collectGroupLabelsForArticle(articleId: string, visited: Set<string>): Set<string> {
+    const result = new Set<string>();
+    const currentArticleId = String(articleId || "").trim();
+    if (!currentArticleId || visited.has(currentArticleId)) return result;
+    visited.add(currentArticleId);
+    for (const line of bomLinesByParentArticle.get(currentArticleId) || []) {
+      const componentArticleId = String((line as any)?.component_article_id ?? "").trim();
+      if (componentArticleId) {
+        collectGroupLabelsForArticle(componentArticleId, new Set(visited)).forEach((label) => result.add(label));
+      }
+      const componentSkuId = String((line as any)?.component_sku_id ?? "").trim();
+      if (!componentSkuId) continue;
+      const componentSku = skuById.get(componentSkuId) ?? null;
+      const componentBeerId = String((componentSku as any)?.beer_id ?? "").trim();
+      const componentLabel = componentBeerId ? bierenById.get(componentBeerId) ?? "" : "";
+      if (componentLabel) {
+        result.add(componentLabel);
+        continue;
+      }
+      const nestedArticleId = String((componentSku as any)?.article_id ?? "").trim();
+      if (nestedArticleId) {
+        collectGroupLabelsForArticle(nestedArticleId, new Set(visited)).forEach((label) => result.add(label));
+      }
+    }
+    return result;
+  }
+
+  const componentGroupLabelsByArticleId = new Map<string, Set<string>>();
+  for (const parentArticleId of bomLinesByParentArticle.keys()) {
+    const labels = collectGroupLabelsForArticle(parentArticleId, new Set());
+    if (labels.size > 0) componentGroupLabelsByArticleId.set(parentArticleId, labels);
+  }
+
+  const packagingPriceByArticleId = new Map<string, number>();
+  (Array.isArray(packagingComponentPrices) ? packagingComponentPrices : []).forEach((row) => {
+    const year = Number((row as any)?.jaar ?? 0) || 0;
+    if (year !== selectedYear) return;
+    const articleId = String((row as any)?.verpakkingsonderdeel_id ?? (row as any)?.component_id ?? "").trim();
+    if (!articleId) return;
+    const price = Number((row as any)?.prijs_per_stuk ?? (row as any)?.price_per_unit ?? 0) || 0;
+    if (price > 0) packagingPriceByArticleId.set(articleId, price);
+  });
+
+  const rawRows: Array<ActiveCostRow & { groupLabels?: string[] }> = (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [])
     .filter((row) => Number((row as any)?.jaar ?? 0) === selectedYear)
     .map((row, index) => {
       const skuId = String((row as any)?.sku_id ?? "");
@@ -151,7 +223,11 @@ export function buildActiveRows(args: {
       const productGroup = String(
         (skuRow as any)?.product_group ?? (skuArticle as any)?.product_group ?? ""
       ).trim().toLowerCase();
+      const sellableSubtype = String(
+        (skuRow as any)?.sellable_subtype ?? (skuArticle as any)?.sellable_subtype ?? ""
+      ).trim().toLowerCase();
       const isGiftset = skuKind === "article" && productGroup === "giftset";
+      const categoryGroupLabel = nonBeerGroupLabel(productGroup, sellableSubtype);
       const productId =
         String((row as any)?.product_id ?? "").trim() ||
         skuArticleId;
@@ -172,6 +248,8 @@ export function buildActiveRows(args: {
       const effectiefProductId = (productId || skuArticleId || "").trim();
 
       const versieLabel = buildVersionLabel(versieId ? versie : undefined);
+      const sourceLabel = buildCostSourceLabel(versieId ? versie : undefined);
+      const supplierLabel = buildSupplierLabel(versieId ? versie : undefined);
       const versieTimestamp = parseSortTimestamp(
         (versie as any)?.finalized_at ?? (versie as any)?.updated_at ?? effectiefVanaf
       );
@@ -298,18 +376,31 @@ export function buildActiveRows(args: {
       const isWarning = hasUpdate && deltaPct !== null && deltaPct >= warningThresholdPct;
 
       const rowKeyBase = skuId || `${bierId}|${productId}`;
+      const componentGroupLabels =
+        skuKind === "article" && !bierId && skuArticleId
+          ? Array.from(componentGroupLabelsByArticleId.get(skuArticleId) ?? [])
+          : [];
+      const groupLabels =
+        categoryGroupLabel
+          ? [categoryGroupLabel]
+          : componentGroupLabels.length
+            ? componentGroupLabels
+            : [isGiftset ? "Geschenkverpakkingen" : bierNaam];
       return {
         key: rowKeyBase ? rowKeyBase : `row-${index}`,
         skuId,
         artikelNaam: productNaam || bierNaam,
         bierNaam,
-        groupLabel: isGiftset ? "Geschenkverpakkingen" : bierNaam,
+        groupLabel: groupLabels[0] || bierNaam,
+        groupLabels,
         categorie,
         productNaam,
         productType,
         effectiefVanaf,
         versieId,
         versieLabel,
+        sourceLabel,
+        supplierLabel,
         versieTimestamp,
         currentCost,
         recommendedVersionId,
@@ -321,10 +412,163 @@ export function buildActiveRows(args: {
       };
     });
 
+  for (const [skuId, skuRow] of skuById.entries()) {
+    const skuKind = String((skuRow as any)?.kind ?? "").trim().toLowerCase();
+    if (skuKind !== "article") continue;
+    if ((skuRow as any)?.active === false || (skuRow as any)?.actief === false) continue;
+    const skuArticleId = String((skuRow as any)?.article_id ?? "").trim();
+    if (!skuArticleId) continue;
+    const skuArticle = articleById.get(skuArticleId) ?? null;
+    if (!skuArticle) continue;
+    if ((skuArticle as any)?.active === false || (skuArticle as any)?.actief === false) continue;
+    if (!(skuArticle as any)?.beschikbaar_voor_offertes) continue;
+    const currentCost = packagingPriceByArticleId.get(skuArticleId);
+    if (currentCost === undefined) continue;
+    if (rawRows.some((row) => row.skuId === skuId)) continue;
+    const productGroup = String(
+      (skuRow as any)?.product_group ?? (skuArticle as any)?.product_group ?? ""
+    ).trim().toLowerCase();
+    const sellableSubtype = String(
+      (skuRow as any)?.sellable_subtype ?? (skuArticle as any)?.sellable_subtype ?? ""
+    ).trim().toLowerCase();
+    const groupLabel = nonBeerGroupLabel(productGroup, sellableSubtype) || "Merchandise";
+    const label = cleanRepeatedName(
+      String((skuRow as any)?.name ?? "") ||
+        String((skuArticle as any)?.name ?? "") ||
+        String((skuArticle as any)?.naam ?? "") ||
+        skuId
+    );
+    rawRows.push({
+      key: skuId,
+      skuId,
+      artikelNaam: label,
+      bierNaam: groupLabel,
+      groupLabel,
+      groupLabels: [groupLabel],
+      categorie: groupLabel,
+      productNaam: label,
+      productType: "article",
+      effectiefVanaf: `${selectedYear}-01-01`,
+      versieId: "",
+      versieLabel: "Jaarprijs",
+      sourceLabel: "Verpakkingsonderdeel",
+      supplierLabel: "",
+      versieTimestamp: 0,
+      currentCost,
+      recommendedVersionId: "",
+      definitiveOptions: [],
+      hasUpdate: false,
+      isWarning: false,
+      deltaEuro: null,
+      deltaPct: null,
+    });
+  }
+
+  function composedCostForArticle(articleId: string, visited: Set<string>): number | null {
+    const currentArticleId = String(articleId || "").trim();
+    if (!currentArticleId || visited.has(currentArticleId)) return null;
+    visited.add(currentArticleId);
+    let total = 0;
+    let hasAnyCost = false;
+    for (const line of bomLinesByParentArticle.get(currentArticleId) || []) {
+      const qty = Math.max(0, Number((line as any)?.quantity ?? 0) || 0);
+      if (qty <= 0) continue;
+      const componentSkuId = String((line as any)?.component_sku_id ?? "").trim();
+      if (componentSkuId) {
+        const componentRow = rawRows.find((row) => row.skuId === componentSkuId && typeof row.currentCost === "number");
+        if (componentRow && typeof componentRow.currentCost === "number") {
+          total += qty * componentRow.currentCost;
+          hasAnyCost = true;
+        }
+        continue;
+      }
+      const componentArticleId = String((line as any)?.component_article_id ?? "").trim();
+      if (!componentArticleId) continue;
+      const directPrice = packagingPriceByArticleId.get(componentArticleId);
+      if (typeof directPrice === "number") {
+        total += qty * directPrice;
+        hasAnyCost = true;
+        continue;
+      }
+      const nested = composedCostForArticle(componentArticleId, new Set(visited));
+      if (nested !== null) {
+        total += qty * nested;
+        hasAnyCost = true;
+      }
+    }
+    return hasAnyCost ? total : null;
+  }
+
+  for (const [skuId, skuRow] of skuById.entries()) {
+    const skuKind = String((skuRow as any)?.kind ?? "").trim().toLowerCase();
+    if (skuKind !== "article") continue;
+    if (rawRows.some((row) => row.skuId === skuId)) continue;
+    if ((skuRow as any)?.active === false || (skuRow as any)?.actief === false) continue;
+    const skuArticleId = String((skuRow as any)?.article_id ?? "").trim();
+    if (!skuArticleId || !bomLinesByParentArticle.has(skuArticleId)) continue;
+    const skuArticle = articleById.get(skuArticleId) ?? null;
+    if (!skuArticle) continue;
+    if ((skuArticle as any)?.active === false || (skuArticle as any)?.actief === false) continue;
+    const currentCost = composedCostForArticle(skuArticleId, new Set());
+    if (currentCost === null) continue;
+    const productGroup = String(
+      (skuRow as any)?.product_group ?? (skuArticle as any)?.product_group ?? ""
+    ).trim().toLowerCase();
+    const sellableSubtype = String(
+      (skuRow as any)?.sellable_subtype ?? (skuArticle as any)?.sellable_subtype ?? ""
+    ).trim().toLowerCase();
+    const categoryGroupLabel = nonBeerGroupLabel(productGroup, sellableSubtype);
+    const componentGroupLabels = Array.from(componentGroupLabelsByArticleId.get(skuArticleId) ?? []);
+    const groupLabels = Array.from(new Set([categoryGroupLabel, ...componentGroupLabels].filter(Boolean)));
+    if (groupLabels.length === 0) continue;
+    const label = cleanRepeatedName(
+      String((skuRow as any)?.name ?? "") ||
+        String((skuArticle as any)?.name ?? "") ||
+        String((skuArticle as any)?.naam ?? "") ||
+        skuId
+    );
+    rawRows.push({
+      key: skuId,
+      skuId,
+      artikelNaam: label,
+      bierNaam: groupLabels[0],
+      groupLabel: groupLabels[0],
+      groupLabels,
+      categorie: categoryGroupLabel || "Samenstelling",
+      productNaam: label,
+      productType: "article",
+      effectiefVanaf: `${selectedYear}-01-01`,
+      versieId: "",
+      versieLabel: "Samenstelling",
+      sourceLabel: "Componenten",
+      supplierLabel: "",
+      versieTimestamp: 0,
+      currentCost,
+      recommendedVersionId: "",
+      definitiveOptions: [],
+      hasUpdate: false,
+      isWarning: false,
+      deltaEuro: null,
+      deltaPct: null,
+    });
+  }
+
+  const rows: ActiveCostRow[] = rawRows.flatMap((row) => {
+    const labels = (row.groupLabels && row.groupLabels.length ? row.groupLabels : [row.groupLabel]).filter(Boolean);
+    return labels.map((label) => {
+      const { groupLabels: _groupLabels, ...rest } = row;
+      return {
+        ...rest,
+        key: `${rest.key}|${label}`,
+        groupLabel: label,
+      };
+    });
+  });
+
   const filtered = !q
     ? rows
     : rows.filter((row) => {
-        const hay = `${row.artikelNaam} ${row.categorie} ${row.versieLabel}`.toLowerCase();
+        const hay = `${row.artikelNaam} ${row.categorie} ${row.versieLabel} ${row.sourceLabel} ${row.supplierLabel}`.toLowerCase();
         return hay.includes(q);
       });
 

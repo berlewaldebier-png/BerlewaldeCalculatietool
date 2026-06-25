@@ -13,6 +13,7 @@ export function StepLijst(props: {
   bomSaved: boolean;
   beheerClassificationWarning: string;
   kostprijsIsActive: boolean;
+  hasComposition: boolean;
   onBackToControle: () => void;
 }) {
   const {
@@ -25,6 +26,7 @@ export function StepLijst(props: {
     bomSaved,
     beheerClassificationWarning,
     kostprijsIsActive,
+    hasComposition,
     onBackToControle,
   } = props;
 
@@ -109,7 +111,9 @@ export function StepLijst(props: {
         </div>
       ) : sellableKind === "dienst" ? (
         <div className="dataset-empty" style={{ gridColumn: "1 / -1" }}>
-          Dienstverlening gebruikt een uur-tarief en is direct selecteerbaar in offertes zodra het tarief is ingevuld.
+          {hasComposition
+            ? "Dienstverlening met componenten gebruikt de kostprijs van de onderliggende items en blijft zichtbaar als dienst."
+            : "Dienstverlening gebruikt een uur-tarief en is direct selecteerbaar in offertes zodra het tarief is ingevuld."}
         </div>
       ) : (
         <div className="dataset-empty" style={{ gridColumn: "1 / -1" }}>

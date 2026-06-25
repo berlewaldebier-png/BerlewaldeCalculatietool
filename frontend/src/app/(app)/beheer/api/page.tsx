@@ -32,11 +32,20 @@ function formatDate(value?: string) {
 export default async function ApiIntegratiesPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
   const resolved = searchParams ? await searchParams : {};
   const yearRaw = typeof resolved.year === "string" ? resolved.year : "";
-  const statusYear = Number(yearRaw) || new Date().getFullYear();
-  const bootstrap = await getBootstrap(["auth-status", "skus", "articles"], true, "/beheer/api");
+  const bootstrap = await getBootstrap(["auth-status", "skus", "articles", "productie"], true, "/beheer/api");
   const navigation = bootstrap.navigation ?? [];
   const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
   const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
+  const currentYear = new Date().getFullYear();
+  const productionYears = Object.keys(productie ?? {})
+    .map((key) => Number(key))
+    .filter((year) => Number.isFinite(year) && year > 0)
+    .sort((a, b) => a - b);
+  const defaultYear = productionYears.includes(currentYear)
+    ? currentYear
+    : productionYears.filter((year) => year < currentYear).at(-1) ?? productionYears.at(-1) ?? currentYear;
+  const statusYear = Number(yearRaw) || defaultYear;
 
   let douano: DouanoStatus | null = null;
   let douanoError = "";

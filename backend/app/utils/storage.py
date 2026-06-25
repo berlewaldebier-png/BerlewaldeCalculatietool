@@ -1761,12 +1761,63 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
     soort_berekening = record.get("soort_berekening", {})
     if not isinstance(soort_berekening, dict):
         soort_berekening = {}
+    raw_soort_berekening = dict(soort_berekening)
     calculation_type = str(
         soort_berekening.get("type", record.get("calculation_type", "")) or ""
     ).strip()
     if calculation_type not in {"Eigen productie", "Inkoop"}:
         calculation_type = "Eigen productie"
     soort_berekening = {"type": calculation_type}
+    production_status = str(
+        record.get("production_status", raw_soort_berekening.get("production_status", ""))
+        or ""
+    ).strip()
+    if production_status not in {"planned_recipe", "brewed_batch"}:
+        production_status = ""
+    productiestatus = str(
+        raw_soort_berekening.get("productiestatus", "")
+        or ""
+    ).strip()
+    if production_status:
+        soort_berekening["production_status"] = production_status
+    if productiestatus:
+        soort_berekening["productiestatus"] = productiestatus
+
+    supplier_obj = record.get("supplier", {})
+    if not isinstance(supplier_obj, dict):
+        supplier_obj = {}
+    default_supplier_id = "eigen-productie" if calculation_type == "Eigen productie" else "beerselect"
+    default_supplier_name = "Eigen productie" if calculation_type == "Eigen productie" else "Beerselect"
+    supplier_id = str(
+        record.get("supplier_id", "")
+        or supplier_obj.get("id", "")
+        or default_supplier_id
+    ).strip()
+    supplier_name = str(
+        record.get("supplier_name", "")
+        or record.get("leverancier", "")
+        or supplier_obj.get("name", "")
+        or default_supplier_name
+    ).strip()
+    if not supplier_id:
+        supplier_id = default_supplier_id
+    if not supplier_name:
+        supplier_name = default_supplier_name
+    supplier_config = record.get("supplier_config", {})
+    if not isinstance(supplier_config, dict):
+        supplier_config = {}
+    packaging_config = supplier_config.get("packaging_costs_apply_by_sku", {})
+    if not isinstance(packaging_config, dict):
+        packaging_config = {}
+    supplier_config = {
+        "packaging_costs_apply_by_sku": {str(key): bool(value) for key, value in packaging_config.items()},
+        "excise_included_in_purchase_price": bool(supplier_config.get("excise_included_in_purchase_price", False)),
+        "transport_included": bool(supplier_config.get("transport_included", False)),
+        "deposit_included": bool(supplier_config.get("deposit_included", False)),
+        "extra_handling_fee": bool(supplier_config.get("extra_handling_fee", False)),
+        "supplier_specific_overhead_rule": bool(supplier_config.get("supplier_specific_overhead_rule", False)),
+    }
+    cost_source = str(record.get("cost_source", "") or "").strip()
 
     bier_snapshot = record.get("bier_snapshot", {})
     if not isinstance(bier_snapshot, dict):
@@ -1975,6 +2026,18 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         is_actief = False
         effectief_vanaf = ""
 
+    raw_brouwmoment = record.get("brouwmoment", {})
+    if not isinstance(raw_brouwmoment, dict):
+        raw_brouwmoment = {}
+    brouwmoment = {
+        "lotnummer": str(raw_brouwmoment.get("lotnummer", "") or ""),
+        "brouwdatum": str(raw_brouwmoment.get("brouwdatum", "") or ""),
+        "notitie": str(raw_brouwmoment.get("notitie", "") or ""),
+        "bron_berekening_id": str(raw_brouwmoment.get("bron_berekening_id", "") or ""),
+        "bron_brouwmoment_id": str(raw_brouwmoment.get("bron_brouwmoment_id", "") or ""),
+        "overgenomen_op": str(raw_brouwmoment.get("overgenomen_op", "") or ""),
+    }
+
     normalized = {
         "id": str(record.get("id", "") or uuid4()),
         "bier_id": str(record.get("bier_id", "") or ""),
@@ -1982,6 +2045,14 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
         "versie_nummer": versie_nummer,
         "type": soort,
         "kostprijs": kostprijs,
+        "cost_source": cost_source,
+        "supplier_id": supplier_id,
+        "supplier_name": supplier_name,
+        "supplier": {"id": supplier_id, "name": supplier_name},
+        "leverancier": supplier_name,
+        "production_location": str(record.get("production_location", "") or supplier_name).strip(),
+        "supplier_config": supplier_config,
+        "supplier_config_version": int(record.get("supplier_config_version", 1) or 1),
         # Canonical per-SKU cost lines (derived from cost_version_sku_rows in Postgres).
         # Keep this on the read model so UIs (e.g. bundle/article wizard) can resolve component costs
         # without parsing resultaat_snapshot or applying any fallback logic.
@@ -2009,13 +2080,18 @@ def normalize_berekening_record(record: dict[str, Any]) -> dict[str, Any]:
             "inkoop": inkoop,
         },
         "bier_snapshot": bier_snapshot,
-        "resultaat_snapshot": resultaat_snapshot if status == "definitief" else {},
+        "resultaat_snapshot": resultaat_snapshot if status == "definitief" or production_status == "planned_recipe" else {},
         "jaarovergang": jaarovergang,
         "last_completed_step": max(1, int(record.get("last_completed_step", 1) or 1)),
         "created_at": created_at,
         "updated_at": updated_at,
         "finalized_at": finalized_at if status == "definitief" else "",
     }
+    if production_status:
+        normalized["production_status"] = production_status
+        normalized["is_brewed"] = production_status == "brewed_batch"
+    if any(str(value or "").strip() for value in brouwmoment.values()):
+        normalized["brouwmoment"] = brouwmoment
 
     # Optional selection scope: enabled format/product refs.
     #
@@ -4127,6 +4203,9 @@ def _normalize_packaging_component_master_record(record: dict[str, Any]) -> dict
         "beschikbaar_voor_offertes": bool(
             record.get("beschikbaar_voor_offertes", False)
         ),
+        "sellable_sku_id": str(record.get("sellable_sku_id", "") or ""),
+        "sellable_category_type": str(record.get("sellable_category_type", "") or ""),
+        "sellable_category_id": str(record.get("sellable_category_id", "") or ""),
     }
 
 
@@ -4269,6 +4348,9 @@ def load_packaging_component_masters() -> list[dict[str, Any]]:
                     "beschikbaar_voor_offertes": bool(
                         record.get("beschikbaar_voor_offertes", False)
                     ),
+                    "sellable_sku_id": str(record.get("sellable_sku_id", "") or ""),
+                    "sellable_category_type": str(record.get("sellable_category_type", "") or ""),
+                    "sellable_category_id": str(record.get("sellable_category_id", "") or ""),
                 }
             )
         )
@@ -4316,6 +4398,9 @@ def save_packaging_component_masters(data: list[dict[str, Any]]) -> bool:
                 "beschikbaar_voor_offertes": bool(
                     row.get("beschikbaar_voor_offertes", False)
                 ),
+                "sellable_sku_id": str(row.get("sellable_sku_id", "") or ""),
+                "sellable_category_type": str(row.get("sellable_category_type", "") or ""),
+                "sellable_category_id": str(row.get("sellable_category_id", "") or ""),
             }
         )
     return bool(_save_postgres_dataset("articles", [*kept_articles, *next_packaging_articles]))

@@ -21,6 +21,7 @@ export type CentralSkuRow = {
   skuId: string;
   label: string;
   subtype: SellableSubtype;
+  productGroup: string;
   pricingMethod: PricingMethod;
   uom: Uom;
   contentLiter: number;
@@ -46,6 +47,7 @@ function inferSubtypeFromSku(sku: NormalizedSku, article: NormalizedArticle | nu
 function inferPricingMethod(subtype: SellableSubtype, sku: NormalizedSku, article: NormalizedArticle | null): PricingMethod {
   const explicit = text(article?.pricingMethodRaw) || text(sku.pricingMethodRaw);
   const normalized = explicit.toLowerCase();
+  if (normalized === "cost_plus" || normalized === "costplus") return "cost_plus";
   if (normalized === "manual_rate" || normalized === "rate" || normalized === "manual") return "manual_rate";
   if (subtype === "dienst") return "manual_rate";
   return "cost_plus";
@@ -102,6 +104,7 @@ export function buildCentralSkuIndex(params: {
   verkoopprijzen: GenericRecord[];
   skus: GenericRecord[];
   articles: GenericRecord[];
+  packagingComponentPrices?: GenericRecord[];
   kostprijsversies: GenericRecord[];
   kostprijsproductactiveringen: GenericRecord[];
   includeDraftCostPlus?: boolean;
@@ -115,6 +118,14 @@ export function buildCentralSkuIndex(params: {
   (Array.isArray(params.articles) ? params.articles : []).forEach((row) => {
     const normalized = normalizeArticle(row);
     if (normalized) articleById.set(normalized.id, normalized);
+  });
+  const packagingCostByArticleId = new Map<string, number>();
+  (Array.isArray(params.packagingComponentPrices) ? params.packagingComponentPrices : []).forEach((row) => {
+    const componentId = text((row as any)?.verpakkingsonderdeel_id || (row as any)?.component_id);
+    const year = toNumber((row as any)?.jaar, 0);
+    if (!componentId || year !== params.year) return;
+    const price = toNumber((row as any)?.prijs_per_stuk || (row as any)?.price_per_unit, 0);
+    if (price > 0) packagingCostByArticleId.set(componentId, price);
   });
   const versionById = new Map<string, NormalizedKostprijsVersie>();
   (Array.isArray(params.kostprijsversies) ? params.kostprijsversies : []).forEach((row) => {
@@ -182,6 +193,7 @@ export function buildCentralSkuIndex(params: {
     const { skuId, sku, article, productId, activation, version } = args;
     const skuKind = text(sku.kind).toLowerCase();
     const subtype = inferSubtypeFromSku(sku, article);
+    const productGroup = text(sku.productGroupRaw) || text(article?.productGroupRaw);
     const pricingMethod = inferPricingMethod(subtype, sku, article);
     const uom = normalizeUom(text(article?.uom) || text(sku.uom));
     const contentLiter = toNumber(article?.contentLiter, 0);
@@ -190,7 +202,8 @@ export function buildCentralSkuIndex(params: {
     const snapshotRow = getSnapshotProductRow(version, { skuId, productId });
     const kostprijsFromSnapshot = toNumber((snapshotRow as any)?.kostprijs, 0);
     const kostprijsFromVersion = toNumber(version?.kostprijs, 0);
-    const kostprijsEx = kostprijsFromSnapshot || (skuKind === "article" ? kostprijsFromVersion : 0);
+    const packagingComponentCost = skuKind === "article" ? toNumber(packagingCostByArticleId.get(text(sku.articleId)), 0) : 0;
+    const kostprijsEx = kostprijsFromSnapshot || (skuKind === "article" ? kostprijsFromVersion : 0) || packagingComponentCost;
 
     const btwPct = parseBtwPct(version?.basisBtwTarief);
     const label = cleanRepeatedName(
@@ -222,13 +235,14 @@ export function buildCentralSkuIndex(params: {
       }
     }
 
-    const isActive = Boolean(activation);
+    const isActive = Boolean(activation) || packagingComponentCost > 0;
     const hasCost = pricingMethod === "cost_plus" ? isActive && kostprijsEx > 0 : false;
 
     rows.push({
       skuId,
       label,
       subtype,
+      productGroup,
       pricingMethod,
       uom,
       contentLiter,
@@ -271,6 +285,25 @@ export function buildCentralSkuIndex(params: {
     if (pricingMethod !== "manual_rate") continue;
     const manualRateEx = readManualRateEx(sku, article);
     if (manualRateEx <= 0) continue;
+    pushRow({ skuId, sku, article, productId: articleId, activation: null, version: undefined });
+  }
+
+  // Sellable packaging components / merchandise have an explicit component price,
+  // but no cost-version activation. They are still valid SKU choices for
+  // composition and product mapping.
+  for (const [skuId, sku] of skuById.entries()) {
+    if (rows.some((row) => row.skuId === skuId)) continue;
+    if (!sku.isActive) continue;
+    const kind = text(sku.kind).toLowerCase();
+    if (kind !== "article") continue;
+    const articleId = text(sku.articleId);
+    if (!articleId) continue;
+    const article = articleById.get(articleId) ?? null;
+    if (!article?.isActive || !article.availableForQuotes) continue;
+    if (!packagingCostByArticleId.has(articleId)) continue;
+    const subtype = inferSubtypeFromSku(sku, article);
+    const pricingMethod = inferPricingMethod(subtype, sku, article);
+    if (pricingMethod !== "cost_plus") continue;
     pushRow({ skuId, sku, article, productId: articleId, activation: null, version: undefined });
   }
 

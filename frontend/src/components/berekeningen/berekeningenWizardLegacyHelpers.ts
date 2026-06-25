@@ -16,6 +16,7 @@ type StepDefinition = {
 
 type BerekeningProcessType = "Eigen productie" | "Inkoop";
 type BerekeningSubjectType = "bier" | "artikel" | "dienst";
+type ProductionStatus = "planned_recipe" | "brewed_batch";
 
 export type BerekeningenWizardPersistResult = {
   id: string;
@@ -113,8 +114,41 @@ function normalizeBerekening(raw: GenericRecord): GenericRecord {
     typeof row.soort_berekening === "object" && row.soort_berekening !== null
       ? (row.soort_berekening as GenericRecord)
       : {};
+  const rawProductionStatus = String(row.production_status ?? soort.production_status ?? "").trim();
+  const typeForProduction = String(soort.type ?? "Eigen productie").trim();
+  const hasStoredProductionStatus = rawProductionStatus === "brewed_batch" || rawProductionStatus === "planned_recipe";
+  const productionStatus: ProductionStatus = hasStoredProductionStatus
+    ? rawProductionStatus === "brewed_batch"
+      ? "brewed_batch"
+      : "planned_recipe"
+    : typeForProduction === "Eigen productie" && String(row.status ?? "").trim().toLowerCase() === "definitief"
+      ? "brewed_batch"
+      : "planned_recipe";
   row.soort_berekening = {
-    type: String(soort.type ?? "Eigen productie")
+    type: typeForProduction,
+  };
+  if (typeForProduction === "Eigen productie") {
+    row.production_status = productionStatus;
+    row.is_brewed = productionStatus === "brewed_batch";
+    row.soort_berekening = {
+      ...((row.soort_berekening as GenericRecord) ?? {}),
+      production_status: productionStatus,
+      productiestatus: productionStatus === "brewed_batch" ? "Al gebrouwen" : "Nog niet gebrouwen",
+    };
+  } else {
+    delete (row as any).production_status;
+    delete (row as any).is_brewed;
+  }
+
+  const brouwmoment =
+    typeof row.brouwmoment === "object" && row.brouwmoment !== null ? (row.brouwmoment as GenericRecord) : {};
+  row.brouwmoment = {
+    lotnummer: String(brouwmoment.lotnummer ?? ""),
+    brouwdatum: String(brouwmoment.brouwdatum ?? ""),
+    notitie: String(brouwmoment.notitie ?? ""),
+    bron_berekening_id: String(brouwmoment.bron_berekening_id ?? ""),
+    bron_brouwmoment_id: String(brouwmoment.bron_brouwmoment_id ?? ""),
+    overgenomen_op: String(brouwmoment.overgenomen_op ?? ""),
   };
 
   const invoer =
@@ -194,8 +228,13 @@ function createEmptyBerekening(): GenericRecord {
     status: "concept",
     basisgegevens: {},
     soort_berekening: {
-      type: "Eigen productie"
+      type: "Eigen productie",
+      production_status: "planned_recipe",
+      productiestatus: "Nog niet gebrouwen",
     },
+    production_status: "planned_recipe",
+    is_brewed: false,
+    brouwmoment: {},
     invoer: {},
     bier_snapshot: {},
     resultaat_snapshot: {},
@@ -247,9 +286,58 @@ function getBerekeningProcessType(row: GenericRecord): BerekeningProcessType {
   return rawType === "Inkoop" ? "Inkoop" : "Eigen productie";
 }
 
+function getProductionStatus(row: GenericRecord): ProductionStatus {
+  const soort = (row.soort_berekening as GenericRecord | undefined) ?? {};
+  const raw = String((row as any)?.production_status ?? (soort as any)?.production_status ?? "").trim();
+  return raw === "brewed_batch" ? "brewed_batch" : "planned_recipe";
+}
+
 function buildWizardSteps(row: GenericRecord): StepDefinition[] {
   const processType = getBerekeningProcessType(row);
+  const productionStatus = getProductionStatus(row);
+  const isPlannedOwnProduction = processType === "Eigen productie" && productionStatus === "planned_recipe";
   const meaningfulFacturen = processType === "Inkoop" && hasMeaningfulFacturen(row);
+  const sourceType = String((row as any)?.brontype ?? "").trim().toLowerCase();
+
+  if (sourceType === "brouwmoment" || sourceType === "brew_moment") {
+    return [
+      {
+        id: "brouwmoment",
+        label: "Brouwmoment",
+        description: "Bevestig batch, LOT en brouwdatum"
+      },
+      {
+        id: "input",
+        label: "Ingredienten",
+        description: "Werk recept en batchkosten uit"
+      },
+      {
+        id: "supplier",
+        label: "Bron",
+        description: "Configureer productieroute en bronregels"
+      },
+      {
+        id: "kostprijs",
+        label: "Kostprijs o.b.v. recept",
+        description: "Controleer de berekende kostprijs op basis van het recept"
+      },
+      {
+        id: "varianten",
+        label: "Verkoopbare varianten",
+        description: "Maak afgeleide SKU's zoals doos 12 x 33cl"
+      },
+      {
+        id: "koppelen",
+        label: "Koppelen",
+        description: "Koppel verkoopbare SKU's aan Douano producten"
+      },
+      {
+        id: "summary",
+        label: "Samenvatting",
+        description: "Controleer kostprijs, varianten en Douano-koppelingen"
+      }
+    ];
+  }
 
   const steps: StepDefinition[] =
     processType === "Inkoop"
@@ -268,6 +356,11 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
             id: "input",
             label: "Inkoopfactuur",
             description: "Selecteer producten, aantallen en bronkosten"
+          },
+          {
+            id: "supplier",
+            label: "Leverancier",
+            description: "Configureer leverancier en bronregels"
           }
         ]
       : [
@@ -285,6 +378,11 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
             id: "input",
             label: "Recept",
             description: "Werk recept, ingredienten en opbrengst uit"
+          },
+          {
+            id: "supplier",
+            label: "Bron",
+            description: "Configureer productieroute en bronregels"
           }
         ];
 
@@ -305,22 +403,26 @@ function buildWizardSteps(row: GenericRecord): StepDefinition[] {
         : "Controleer de berekende kostprijs op basis van het recept"
   });
 
-  steps.push({
-    id: "varianten",
-    label: "Verkoopbare varianten",
-    description: "Maak afgeleide SKU's zoals doos 12 x 33cl"
-  });
+  if (!isPlannedOwnProduction) {
+    steps.push({
+      id: "varianten",
+      label: "Verkoopbare varianten",
+      description: "Maak afgeleide SKU's zoals doos 12 x 33cl"
+    });
 
-  steps.push({
-    id: "koppelen",
-    label: "Koppelen",
-    description: "Koppel verkoopbare SKU's aan Douano producten"
-  });
+    steps.push({
+      id: "koppelen",
+      label: "Koppelen",
+      description: "Koppel verkoopbare SKU's aan Douano producten"
+    });
+  }
 
   steps.push({
     id: "summary",
     label: "Samenvatting",
-    description: "Controleer kostprijs, varianten en Douano-koppelingen"
+    description: isPlannedOwnProduction
+      ? "Controleer de geplande receptprijs voordat je deze opslaat"
+      : "Controleer kostprijs, varianten en Douano-koppelingen"
   });
 
   return steps;

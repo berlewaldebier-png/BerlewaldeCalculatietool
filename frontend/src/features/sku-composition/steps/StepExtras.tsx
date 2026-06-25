@@ -19,6 +19,7 @@ type Props = {
 
   manualRateEx: number;
   setManualRateEx: (next: number) => void;
+  hasComposition: boolean;
 
   packaging: PackagingLine[];
   setPackaging: (updater: (current: PackagingLine[]) => PackagingLine[]) => void;
@@ -54,7 +55,7 @@ export function StepExtras(props: Props) {
         </>
       )}
 
-      {props.mode === "verkoopbaar" && props.sellableKind === "dienst" ? (
+      {props.mode === "verkoopbaar" && props.sellableKind === "dienst" && !props.hasComposition ? (
         <label className="nested-field" style={{ gridColumn: "1 / -1" }}>
           <span>Tarief (ex) per uur</span>
           <input className="dataset-input" type="number" step="any" value={String(props.manualRateEx)} onChange={(e) => props.setManualRateEx(toNumber(e.target.value, 0))} />

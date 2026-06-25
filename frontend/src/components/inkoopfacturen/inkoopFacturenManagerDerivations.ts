@@ -88,6 +88,7 @@ export function createFactuurVersieFromSource(source: GenericRecord, factuur: Ge
   draft.versie_nummer = Number(draft.versie_nummer ?? 0) || 0;
   draft.brontype = "factuur";
   draft.calculation_variant = "factuur";
+  draft.is_test_version = true;
   draft.bron_id = String(factuur.id ?? "");
   draft.bron_berekening_id = String(source.id ?? "");
   draft.created_at = nowIso;

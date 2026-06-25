@@ -65,6 +65,20 @@ type ExternalLotItem = {
   style_ids?: string[];
   style_names?: string[];
   canonical_lots?: string[];
+  sku_rows?: ExternalLotSkuRow[];
+};
+
+type ExternalLotSkuRow = {
+  lot_number: string;
+  sku_code?: string;
+  rows?: number;
+  last_movement_date?: string;
+  product_name?: string;
+  douano_product_ids?: number[];
+  sku_id?: string;
+  sku_name?: string;
+  style_ids?: string[];
+  style_names?: string[];
 };
 
 type InternalLotSku = {
@@ -81,6 +95,7 @@ type InternalLotItem = {
   version_ids?: string[];
   years?: number[];
   sources?: string[];
+  suppliers?: string[];
   sku_count?: number;
   skus?: InternalLotSku[];
 };
@@ -93,7 +108,7 @@ type InternalLotGroup = {
 };
 
 type LotMatchStatus = "exact" | "mapped" | "near" | "selected" | "missing";
-type ExternalLotCategory = "variant" | "gift" | "historic" | "unknown_product" | "unclassified";
+type ExternalLotCategory = "variant" | "gift" | "historic" | "unknown_product" | "alias_needed" | "future_year" | "unclassified";
 type HistoricalSkuOption = {
   id: string;
   value: string;
@@ -132,6 +147,18 @@ const EXTERNAL_LOT_CATEGORY_META: Record<
     description: "Douano LOT hoort bij een product dat nog niet aan een interne stijl/SKU gekoppeld is.",
     action: "Product/SKU beoordelen",
   },
+  alias_needed: {
+    label: "LOT alias nodig",
+    tone: "status-warning",
+    description: "De SKU is bekend, maar de Douano LOT wijkt af van de interne LOT. Koppel expliciet aan de interne LOT die Omzet en Marge moet gebruiken.",
+    action: "Koppel alias",
+  },
+  future_year: {
+    label: "Toekomstig jaar voorbereiden",
+    tone: "status-warning",
+    description: "Deze LOTs komen uit een jaar waarvoor de inkoopfactuur/kostprijs waarschijnlijk nog voorbereid moet worden.",
+    action: "Later bij jaarvoorbereiding",
+  },
   unclassified: {
     label: "Ongeclassificeerd",
     tone: "status-danger",
@@ -139,6 +166,15 @@ const EXTERNAL_LOT_CATEGORY_META: Record<
     action: "Handmatig beoordelen",
   },
 };
+const EXTERNAL_LOT_CATEGORY_ORDER: ExternalLotCategory[] = [
+  "variant",
+  "alias_needed",
+  "future_year",
+  "gift",
+  "historic",
+  "unknown_product",
+  "unclassified",
+];
 
 function createRowId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -166,6 +202,8 @@ function createOpeningLotRow() {
     other_direct_cost_per_unit: "",
   };
 }
+
+type OpeningLotRow = ReturnType<typeof createOpeningLotRow>;
 
 function euro(value: unknown) {
   const num = Number(value ?? 0);
@@ -201,6 +239,13 @@ function lotNearKey(value: unknown) {
   return lotExactKey(value).replace(/O/g, "0");
 }
 
+function skuCoverageKeys(skuId: unknown, skuCode: unknown) {
+  return [
+    String(skuId ?? "").trim() ? `id:${String(skuId).trim().toLowerCase()}` : "",
+    String(skuCode ?? "").trim() ? `code:${String(skuCode).trim().toLowerCase()}` : "",
+  ].filter(Boolean);
+}
+
 function domId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
@@ -222,12 +267,15 @@ export function LotKostenWorkspace({
   const [stockImports, setStockImports] = useState<StockHistoryImport[]>([]);
   const [internalLotGroups, setInternalLotGroups] = useState<InternalLotGroup[]>([]);
   const [externalLots, setExternalLots] = useState<ExternalLotItem[]>([]);
+  const [showAllExternalLots, setShowAllExternalLots] = useState(false);
   const [selectedExternalLots, setSelectedExternalLots] = useState<Record<string, string>>({});
+  const [selectedAliasInternalLots, setSelectedAliasInternalLots] = useState<Record<string, string>>({});
   const [selectedHistoricalStyleByLot, setSelectedHistoricalStyleByLot] = useState<Record<string, string>>({});
   const [selectedHistoricalFormatByLot, setSelectedHistoricalFormatByLot] = useState<Record<string, string>>({});
   const [historicalSkuNameByLot, setHistoricalSkuNameByLot] = useState<Record<string, string>>({});
   const [historicalSkuModalLot, setHistoricalSkuModalLot] = useState<ExternalLotItem | null>(null);
   const [createdSkus, setCreatedSkus] = useState<GenericRecord[]>([]);
+  const [openInternalLotDetails, setOpenInternalLotDetails] = useState(false);
   const [status, setStatus] = useState("");
   const [tone, setTone] = useState<"" | "success" | "error">("");
   const [saving, setSaving] = useState(false);
@@ -313,7 +361,7 @@ export function LotKostenWorkspace({
 
   async function loadInternalLotSummary() {
     try {
-      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/internal-summary`, {
+      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/internal-summary?year=0&limit=5000`, {
         credentials: "include",
         cache: "no-store",
       });
@@ -328,7 +376,7 @@ export function LotKostenWorkspace({
 
   async function loadExternalLots() {
     try {
-      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/external-lots`, {
+      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/external-lots?year=0&limit=5000`, {
         credentials: "include",
         cache: "no-store",
       });
@@ -369,6 +417,31 @@ export function LotKostenWorkspace({
     });
   }
 
+  function externalSkuRowsForInternalLot(lotNumber: string) {
+    const key = lotExactKey(lotNumber);
+    if (!key) return [];
+    return externalLots
+      .filter((lot) => {
+        if (lotExactKey(lot.lot_number) === key) return true;
+        return (lot.canonical_lots || []).some((canonicalLot) => lotExactKey(canonicalLot) === key);
+      })
+      .flatMap((lot) => lot.sku_rows || []);
+  }
+
+  function missingExternalSkuRowsForInternalLot(lot: InternalLotItem) {
+    const coveredKeys = new Set<string>();
+    for (const sku of lot.skus || []) {
+      for (const key of skuCoverageKeys(sku.sku_id, sku.sku_code)) {
+        coveredKeys.add(key);
+      }
+    }
+    return externalSkuRowsForInternalLot(lot.lot_number).filter((row) => {
+      const keys = skuCoverageKeys(row.sku_id, row.sku_code);
+      if (!keys.length) return true;
+      return !keys.some((key) => coveredKeys.has(key));
+    });
+  }
+
   function selectedOrMatchedExternalLot(rowKey: string, lotNumber: string) {
     const selected = String(selectedExternalLots[rowKey] || "").trim();
     if (selected) return selected;
@@ -396,6 +469,18 @@ export function LotKostenWorkspace({
     if (status === "exact" || status === "mapped") return "status-ok";
     if (status === "near" || status === "selected") return "status-warning";
     return "status-danger";
+  }
+
+  function externalLotYear(lot: ExternalLotItem) {
+    const parsed = Number(String(lot.last_movement_date || "").slice(0, 4));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }
+
+  function externalLotYearSuffix(lot: ExternalLotItem) {
+    const lotYear = externalLotYear(lot);
+    const selectedYear = Number(year || 0);
+    if (!selectedYear || !lotYear || lotYear === selectedYear) return "";
+    return ` - Douano ${lotYear}`;
   }
 
   function externalOptionsFor(rowKey: string, currentLotNumber: string) {
@@ -539,6 +624,62 @@ export function LotKostenWorkspace({
       });
       setStatus(
         `Externe LOT ${selectedLot} gekoppeld aan hoofd-LOT ${internalLot}. ${aliases} koppeling${aliases === 1 ? "" : "en"} opgeslagen. Omzet en Marge snapshots ververst voor ${refreshed} regels (${documents} documenten).`
+      );
+      setTone("success");
+      await loadExternalLots();
+      await loadInternalLotSummary();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      setTone("error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function mapUnclassifiedExternalLotToInternal(lot: ExternalLotItem, lotKey: string) {
+    const selectedInternalLot = String(selectedAliasInternalLots[lotKey] || "").trim();
+    const externalLot = String(lot.lot_number || "").trim();
+    if (!selectedInternalLot || !externalLot) return;
+    const skuIds = Array.from(new Set((lot.sku_rows || []).map((row) => String(row.sku_id || "").trim()).filter(Boolean)));
+    const skuCodes = skuIds.length
+      ? []
+      : Array.from(new Set([...(lot.sku_codes || []), ...(lot.sku_rows || []).map((row) => row.sku_code || "")].map((code) => String(code || "").trim()).filter(Boolean)));
+    const message =
+      `Je gaat externe LOT ${externalLot} als alias koppelen aan interne LOT ${selectedInternalLot}.\n\n` +
+      `Product: ${lot.product_name || "-"}\n` +
+      `Scope: ${skuIds.length ? `${skuIds.length} SKU's` : skuCodes.length ? `${skuCodes.length} SKU-codes` : "globale LOT-koppeling"}\n\n` +
+      `Raw Douano data blijft ongewijzigd. Omzet en Marge gebruikt daarna ${selectedInternalLot} voor de kostprijsdekking.`;
+    if (!window.confirm(message)) return;
+
+    setSaving(true);
+    setStatus("LOT alias opslaan...");
+    setTone("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/integrations/lot-costs/aliases`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku_ids: skuIds,
+          sku_codes: skuCodes,
+          douano_lot_number: externalLot,
+          internal_lot_number: selectedInternalLot,
+          reason: "manual_lot_alias",
+          source: "lot_dekking_unclassified",
+        }),
+      });
+      const payload = await readJson(response);
+      if (!response.ok) throw new Error(String(payload?.detail || response.statusText));
+      const aliases = Number(payload?.records?.length ?? 0);
+      const refreshed = Number(payload?.snapshot_refresh?.computed ?? 0);
+      const documents = Number(payload?.snapshot_refresh?.documents ?? 0);
+      setSelectedAliasInternalLots((current) => {
+        const next = { ...current };
+        delete next[lotKey];
+        return next;
+      });
+      setStatus(
+        `LOT alias ${externalLot} -> ${selectedInternalLot} opgeslagen. ${aliases} koppeling${aliases === 1 ? "" : "en"}. Omzet en Marge snapshots ververst voor ${refreshed} regels (${documents} documenten).`
       );
       setTone("success");
       await loadExternalLots();
@@ -707,19 +848,48 @@ export function LotKostenWorkspace({
     }
   }
 
-  function updateOpeningRow(rowId: string, patch: Partial<ReturnType<typeof createOpeningLotRow>>) {
-    setOpeningRows((prev) => prev.map((row) => (row.id === rowId ? { ...row, ...patch } : row)));
+  function updateOpeningRow(rowId: string, patch: Partial<OpeningLotRow>) {
+    setOpeningRows((prev) => {
+      const rowIndex = prev.findIndex((row) => row.id === rowId);
+      if (rowIndex !== 0 || (!("supplier" in patch) && !("lot_number" in patch))) {
+        return prev.map((row) => (row.id === rowId ? { ...row, ...patch } : row));
+      }
+      return prev.map((row, index) => {
+        if (index === 0) return { ...row, ...patch };
+        return {
+          ...row,
+          supplier: "supplier" in patch ? String(patch.supplier ?? "") : row.supplier,
+          lot_number: "lot_number" in patch ? String(patch.lot_number ?? "") : row.lot_number,
+        };
+      });
+    });
   }
 
   function addOpeningRow() {
-    setOpeningRows((prev) => [...prev, createOpeningLotRow()]);
+    setOpeningRows((prev) => {
+      const first = prev[0];
+      const next = createOpeningLotRow();
+      if (!first) return [next];
+      return [
+        ...prev,
+        {
+          ...next,
+          source_type: first.source_type,
+          source_ref: first.source_ref,
+          supplier: first.supplier,
+          lot_number: first.lot_number,
+          source_date: first.source_date,
+          purchase_price_includes_excise: first.purchase_price_includes_excise,
+        },
+      ];
+    });
   }
 
   function removeOpeningRow(rowId: string) {
     setOpeningRows((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== rowId) : prev));
   }
 
-  function prepareHistoricalLot(lot: ExternalLotItem, patch: Partial<ReturnType<typeof createOpeningLotRow>> = {}) {
+  function prepareHistoricalLot(lot: ExternalLotItem, patch: Partial<OpeningLotRow> = {}) {
     const lotNumber = String(lot.lot_number || "").trim();
     if (!lotNumber) return;
     const text = `${lotNumber} ${lot.product_name || ""}`.toLowerCase();
@@ -744,6 +914,39 @@ export function LotKostenWorkspace({
     setStatus(`Historische LOT ${lotNumber} klaargezet. Kies de interne SKU en vul de historische kostprijs in.`);
     setTone("success");
     window.setTimeout(() => document.getElementById("historische-lot-invoer")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function prepareExistingInternalLot(lot: InternalLotItem) {
+    const lotNumber = String(lot.lot_number || "").trim();
+    if (!lotNumber) return;
+    const supplier = String(lot.suppliers?.[0] || "Wentersch").trim() || "Wentersch";
+    setOpeningRows([
+      {
+        ...createOpeningLotRow(),
+        source_type: "opening_stock",
+        source_ref: "Historie v0",
+        supplier,
+        lot_number: lotNumber,
+      },
+    ]);
+    setStatus(`Interne LOT ${lotNumber} klaargezet. Voeg een extra SKU met eigen historische kostprijs toe.`);
+    setTone("success");
+    window.setTimeout(() => document.getElementById("historische-lot-invoer")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function externalLotItemFromSkuRow(row: ExternalLotSkuRow, group?: InternalLotGroup): ExternalLotItem {
+    return {
+      lot_number: row.lot_number,
+      rows: row.rows,
+      last_movement_date: row.last_movement_date,
+      product_name: row.product_name,
+      sku_codes: row.sku_code ? [row.sku_code] : [],
+      douano_product_ids: row.douano_product_ids || [],
+      style_ids: row.style_ids?.length ? row.style_ids : group?.style_id ? [group.style_id] : [],
+      style_names: row.style_names?.length ? row.style_names : group?.style_name ? [group.style_name] : [],
+      canonical_lots: [],
+      sku_rows: [row],
+    };
   }
 
   function suggestedHistoricalSkuName(styleId: string, templateSkuId: string, fallbackProductName: string) {
@@ -876,7 +1079,7 @@ export function LotKostenWorkspace({
       let refreshed = 0;
       let documents = 0;
       for (const row of openingRows) {
-        const hasContent = row.lot_number.trim() || row.sku_id.trim() || row.sku_code.trim() || row.purchase_price_input.trim();
+        const hasContent = row.sku_id.trim() || row.sku_code.trim() || row.purchase_price_input.trim();
         if (!hasContent) continue;
         const response = await fetch(`${API_BASE_URL}/integrations/lot-costs`, {
           method: "POST",
@@ -972,10 +1175,12 @@ export function LotKostenWorkspace({
   const unusedExternalLots = useMemo(
     () =>
       externalLots.filter((lot) => {
+        const lotYear = externalLotYear(lot);
+        if (!showAllExternalLots && lotYear && Number(year || 0) && lotYear > Number(year || 0)) return false;
         if (matchedInternalLotKeys.has(lotExactKey(lot.lot_number))) return false;
         return !(lot.canonical_lots || []).some((canonicalLot) => matchedInternalLotKeys.has(lotExactKey(canonicalLot)));
       }),
-    [externalLots, matchedInternalLotKeys]
+    [externalLots, matchedInternalLotKeys, showAllExternalLots, year]
   );
   const internalLotsByNearKey = useMemo(() => {
     const map = new Map<string, Array<{ lot_number: string; style_name: string; versions: string[] }>>();
@@ -993,6 +1198,25 @@ export function LotKostenWorkspace({
       }
     }
     return map;
+  }, [internalLotGroups]);
+  const internalLotOptions = useMemo(() => {
+    const options: Array<{ value: string; label: string }> = [];
+    const seen = new Set<string>();
+    for (const group of internalLotGroups) {
+      for (const lot of group.lots || []) {
+        const value = String(lot.lot_number || "").trim();
+        const key = lotExactKey(value);
+        if (!value || seen.has(key)) continue;
+        seen.add(key);
+        const versions = (lot.versions || []).join("/");
+        const supplier = lot.suppliers?.length ? ` - ${lot.suppliers.join(", ")}` : "";
+        options.push({
+          value,
+          label: `${value}${versions ? ` ${versions}` : ""} - ${group.style_name || "Onbekende stijl"}${supplier}`,
+        });
+      }
+    }
+    return options.sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
   }, [internalLotGroups]);
   const styleOptions = useMemo(() => {
     const options = new Map<string, string>();
@@ -1018,14 +1242,19 @@ export function LotKostenWorkspace({
       gift: [],
       historic: [],
       unknown_product: [],
+      alias_needed: [],
+      future_year: [],
       unclassified: [],
     };
     for (const lot of unusedExternalLots) {
       const text = `${lot.lot_number || ""} ${lot.product_name || ""}`.toLowerCase();
       const hasStyle = Boolean(lot.style_ids?.length || lot.style_names?.length);
       const hasNearInternalLot = Boolean(internalLotsByNearKey.get(lotNearKey(lot.lot_number))?.length);
+      const lotYear = externalLotYear(lot);
       let category: ExternalLotCategory = "unclassified";
-      if (hasNearInternalLot) {
+      if (lotYear && Number(year || 0) && lotYear > Number(year || 0)) {
+        category = "future_year";
+      } else if (hasNearInternalLot) {
         category = "variant";
       } else if (text.includes("geschenk")) {
         category = "gift";
@@ -1033,11 +1262,13 @@ export function LotKostenWorkspace({
         category = "historic";
       } else if (!hasStyle) {
         category = "unknown_product";
+      } else {
+        category = "alias_needed";
       }
       groups[category].push(lot);
     }
     return groups;
-  }, [internalLotsByNearKey, unusedExternalLots]);
+  }, [internalLotsByNearKey, unusedExternalLots, year]);
   const pendingVariantCount = useMemo(() => {
     let count = 0;
     for (const group of internalLotGroups) {
@@ -1074,6 +1305,16 @@ export function LotKostenWorkspace({
             <span className="status-pill status-danger">Geen externe LOT {lotStatusCounts.missing}</span>
             <span className="pill">Ongebruikte externe LOTs {unusedExternalLots.length}</span>
           </div>
+          <div className="editor-actions-group">
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={showAllExternalLots}
+                onChange={(event) => setShowAllExternalLots(event.target.checked)}
+              />
+              Toon alle externe LOTs
+            </label>
+          </div>
         </div>
         {unusedExternalLots.length > 0 ? (
           <details className="module-card compact-card" style={{ marginTop: 12 }}>
@@ -1082,10 +1323,11 @@ export function LotKostenWorkspace({
             </summary>
             <div className="module-card-text" style={{ marginTop: 8 }}>
               Dit zijn Douano LOTs die niet exact of via een expliciete koppeling terugkomen als interne LOT.
+              Matches worden over alle jaren herkend; de geselecteerde jaarweergave bepaalt alleen welke openstaande externe LOTs als actiepunt meetellen.
             </div>
             <div className="editor-actions" style={{ marginTop: 10 }}>
               <div className="editor-actions-group">
-                {(["variant", "gift", "historic", "unknown_product", "unclassified"] as ExternalLotCategory[]).map((category) => {
+                {EXTERNAL_LOT_CATEGORY_ORDER.map((category) => {
                   const meta = EXTERNAL_LOT_CATEGORY_META[category];
                   return (
                     <span key={category} className={`status-pill ${meta.tone}`}>
@@ -1096,7 +1338,7 @@ export function LotKostenWorkspace({
               </div>
             </div>
             <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-              {(["variant", "gift", "historic", "unknown_product", "unclassified"] as ExternalLotCategory[]).map((category) => {
+              {EXTERNAL_LOT_CATEGORY_ORDER.map((category) => {
                 const lots = classifiedUnusedExternalLots[category];
                 if (!lots.length) return null;
                 const meta = EXTERNAL_LOT_CATEGORY_META[category];
@@ -1116,7 +1358,7 @@ export function LotKostenWorkspace({
                             <th style={{ width: "13%" }}>Interne hint</th>
                             <th style={{ width: 64 }}>Regels</th>
                             <th style={{ width: 112 }}>Laatste beweging</th>
-                            <th style={{ width: "24%" }}>Actie</th>
+                            <th style={{ width: "30%" }}>Actie</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1127,7 +1369,10 @@ export function LotKostenWorkspace({
                             const selectedStyle = selectedHistoricalStyleByLot[lotKey] || lot.style_ids?.[0] || "";
                             return (
                               <tr key={`${category}-${lot.lot_number}-${lot.product_name || ""}`}>
-                                <td style={{ wordBreak: "break-word" }}><code>{lot.lot_number || "-"}</code></td>
+                                <td style={{ wordBreak: "break-word" }}>
+                                  <code>{lot.lot_number || "-"}</code>
+                                  {externalLotYearSuffix(lot) ? <div className="module-card-text">{externalLotYearSuffix(lot).replace(/^ - /, "")}</div> : null}
+                                </td>
                                 <td style={{ whiteSpace: "normal", wordBreak: "break-word" }}>{lot.product_name || "-"}</td>
                                 <td style={{ whiteSpace: "normal", wordBreak: "break-word" }}>{lot.style_names?.join(", ") || "-"}</td>
                                 <td style={{ whiteSpace: "normal", wordBreak: "break-word" }}>
@@ -1141,7 +1386,38 @@ export function LotKostenWorkspace({
                                 <td>{Number(lot.rows || 0)}</td>
                                 <td>{lot.last_movement_date || "-"}</td>
                                 <td>
-                                  {canCreateHistoricalSku ? (
+                                  {category === "alias_needed" ? (
+                                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 6, alignItems: "center" }}>
+                                      <select
+                                        className="editor-input"
+                                        value={selectedAliasInternalLots[lotKey] || ""}
+                                        disabled={saving}
+                                        onChange={(event) =>
+                                          setSelectedAliasInternalLots((current) => ({
+                                            ...current,
+                                            [lotKey]: event.target.value,
+                                          }))
+                                        }
+                                        style={{ minWidth: 0 }}
+                                      >
+                                        <option value="">Kies interne LOT</option>
+                                        {internalLotOptions.map((option) => (
+                                          <option key={option.value} value={option.value}>
+                                            {option.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        className="editor-button editor-button-secondary"
+                                        disabled={saving || !selectedAliasInternalLots[lotKey]}
+                                        onClick={() => void mapUnclassifiedExternalLotToInternal(lot, lotKey)}
+                                        style={{ minWidth: 0 }}
+                                      >
+                                        Koppel
+                                      </button>
+                                    </div>
+                                  ) : canCreateHistoricalSku ? (
                                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                       <button
                                         type="button"
@@ -1185,6 +1461,19 @@ export function LotKostenWorkspace({
             </div>
           </details>
         ) : null}
+        <div className="editor-actions" style={{ marginTop: 12 }}>
+          <div className="editor-actions-group">
+            <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenInternalLotDetails(true)}>
+              Alles openen
+            </button>
+            <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenInternalLotDetails(true)}>
+              Alle SKU&apos;s openen
+            </button>
+            <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenInternalLotDetails(false)}>
+              Alles sluiten
+            </button>
+          </div>
+        </div>
         <div className="data-table" style={{ marginTop: 12 }}>
           <table>
             <thead>
@@ -1218,13 +1507,17 @@ export function LotKostenWorkspace({
                       const showUpdate = selectedLot.trim() && lotExactKey(selectedLot) !== lotExactKey(lot.lot_number) && !selectedIsMapped;
                       const options = externalOptionsFor(lotKey, lot.lot_number);
                       const variantLots = unmappedNearExternalLots(lot.lot_number);
+                      const missingSkuRows = missingExternalSkuRowsForInternalLot(lot);
                       return (
-                        <tr key={lotKey}>
+                        <tr key={`${lotKey}-${openInternalLotDetails ? "open" : "closed"}`}>
                           <td style={{ verticalAlign: "top", paddingLeft: 28 }}>
-                            <details>
+                            <details open={openInternalLotDetails || undefined}>
                               <summary style={{ cursor: "pointer" }}>
                                 <code>{lot.lot_number || "-"}</code>{" "}
                                 <span className="module-card-text">{(lot.versions || []).join("/")}</span>
+                                {lot.suppliers?.length ? (
+                                  <span className="module-card-text"> - {lot.suppliers.join(", ")}</span>
+                                ) : null}
                                 <span className="pill" style={{ marginLeft: 8 }}>
                                   {Number(lot.sku_count || lot.skus?.length || 0)} SKU&apos;s
                                 </span>
@@ -1233,6 +1526,16 @@ export function LotKostenWorkspace({
                                 </span>
                               </summary>
                               <div style={{ display: "grid", gap: 6, marginTop: 8, paddingLeft: 18 }}>
+                                <div>
+                                  <button
+                                    type="button"
+                                    className="editor-button editor-button-secondary"
+                                    disabled={saving}
+                                    onClick={() => prepareExistingInternalLot(lot)}
+                                  >
+                                    SKU toevoegen aan LOT
+                                  </button>
+                                </div>
                                 {(lot.skus || []).map((sku) => (
                                   <div key={`${lot.lot_number}-${sku.sku_id || sku.sku_code || sku.label}`}>
                                     {sku.label || sku.name || sku.sku_code || sku.sku_id || "-"}
@@ -1240,6 +1543,36 @@ export function LotKostenWorkspace({
                                   </div>
                                 ))}
                                 {!lot.skus?.length ? <div className="module-card-text">Geen SKU&apos;s gevonden.</div> : null}
+                                {missingSkuRows.length ? (
+                                  <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                                    <strong>Externe SKU&apos;s zonder interne dekking</strong>
+                                    {missingSkuRows.map((row) => (
+                                      <div
+                                        key={`${lot.lot_number}-${row.sku_code || row.product_name}`}
+                                        style={{
+                                          display: "grid",
+                                          gridTemplateColumns: "minmax(0, 1fr) auto",
+                                          gap: 8,
+                                          alignItems: "center",
+                                        }}
+                                      >
+                                        <span>
+                                          {row.product_name || row.sku_name || row.sku_code || "-"}
+                                          {row.sku_code ? <span className="module-card-text"> {row.sku_code}</span> : null}
+                                          {row.rows ? <span className="module-card-text"> ({row.rows} regels)</span> : null}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className="editor-button editor-button-secondary"
+                                          disabled={saving}
+                                          onClick={() => openHistoricalSkuModal(externalLotItemFromSkuRow(row, group))}
+                                        >
+                                          Maak historische SKU
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </div>
                             </details>
                           </td>
@@ -1250,7 +1583,7 @@ export function LotKostenWorkspace({
                                   <option
                                     key={externalLot.lot_number}
                                     value={externalLot.lot_number}
-                                    label={`${externalLot.lot_number}${externalLot.product_name ? ` - ${externalLot.product_name}` : ""}${
+                                    label={`${externalLot.lot_number}${externalLotYearSuffix(externalLot)}${externalLot.product_name ? ` - ${externalLot.product_name}` : ""}${
                                       externalLot.style_names?.length ? ` - ${externalLot.style_names.join(", ")}` : ""
                                     }${externalLot.canonical_lots?.length ? ` -> ${externalLot.canonical_lots.join(", ")}` : ""}${
                                       externalLot.rows ? ` (${externalLot.rows} regels)` : ""
@@ -1621,17 +1954,29 @@ export function LotKostenWorkspace({
               </tr>
             </thead>
             <tbody>
-              {openingRows.map((row) => (
+              {openingRows.map((row, index) => (
                 <tr key={row.id}>
                   <td>
-                    <select className="editor-input" value={row.supplier} onChange={(e) => updateOpeningRow(row.id, { supplier: e.target.value })}>
+                    <select
+                      className="editor-input"
+                      value={row.supplier}
+                      disabled={index > 0}
+                      title={index > 0 ? "Leverancier komt van de eerste regel van deze LOT." : undefined}
+                      onChange={(e) => updateOpeningRow(row.id, { supplier: e.target.value })}
+                    >
                       {SUPPLIERS.map((supplier) => (
                         <option key={supplier} value={supplier}>{supplier}</option>
                       ))}
                     </select>
                   </td>
                   <td>
-                    <input className="editor-input" value={row.lot_number} onChange={(e) => updateOpeningRow(row.id, { lot_number: e.target.value })} />
+                    <input
+                      className="editor-input"
+                      value={row.lot_number}
+                      disabled={index > 0}
+                      title={index > 0 ? "LOT nummer komt van de eerste regel van deze LOT." : undefined}
+                      onChange={(e) => updateOpeningRow(row.id, { lot_number: e.target.value })}
+                    />
                   </td>
                   <td>
                     <select

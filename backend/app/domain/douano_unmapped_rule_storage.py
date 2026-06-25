@@ -7,7 +7,7 @@ from typing import Any, Literal
 from app.domain import postgres_storage
 
 MatchType = Literal["douano_product_id", "product0_description"]
-ActionType = Literal["categorize", "ignore", "map_to_sku"]
+ActionType = Literal["categorize", "ignore", "map_to_sku", "no_cost_required"]
 
 _SCHEMA_READY = False
 _SCHEMA_LOCK = Lock()
@@ -31,6 +31,7 @@ def ensure_schema() -> None:
                         line_description TEXT NOT NULL DEFAULT '',
                         action TEXT NOT NULL DEFAULT '',
                         sku_id TEXT NOT NULL DEFAULT '',
+                        internal_lot_number TEXT NOT NULL DEFAULT '',
                         category TEXT NOT NULL DEFAULT '',
                         include_revenue BOOLEAN NOT NULL DEFAULT TRUE,
                         include_liters BOOLEAN NOT NULL DEFAULT FALSE,
@@ -48,6 +49,9 @@ def ensure_schema() -> None:
                 # Idempotent evolutions for older databases.
                 cur.execute(
                     "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS sku_id TEXT NOT NULL DEFAULT ''"
+                )
+                cur.execute(
+                    "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS internal_lot_number TEXT NOT NULL DEFAULT ''"
                 )
                 cur.execute(
                     "ALTER TABLE douano_unmapped_rules ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT ''"
@@ -101,6 +105,7 @@ def upsert_rule(
     line_description: str = "",
     action: str,
     sku_id: str = "",
+    internal_lot_number: str = "",
     category: str = "",
     include_revenue: bool = True,
     include_liters: bool = False,
@@ -112,9 +117,10 @@ def upsert_rule(
         match_type=match_type, douano_product_id=douano_product_id, line_description=line_description
     )
     act = str(action or "").strip()
-    if act not in {"categorize", "ignore", "map_to_sku"}:
+    if act not in {"categorize", "ignore", "map_to_sku", "no_cost_required"}:
         raise ValueError("Ongeldige action")
     sku = str(sku_id or "").strip()
+    internal_lot = str(internal_lot_number or "").strip()
     cat = str(category or "").strip()
     if act == "categorize" and not cat:
         raise ValueError("category ontbreekt")
@@ -122,6 +128,12 @@ def upsert_rule(
         sku = ""
         cat = ""
         include_revenue = False
+        include_liters = False
+        include_break_even = False
+    if act == "no_cost_required":
+        sku = ""
+        cat = cat or "Geen kostprijs nodig"
+        include_revenue = True
         include_liters = False
         include_break_even = False
     if act == "map_to_sku":
@@ -144,6 +156,7 @@ def upsert_rule(
                     line_description,
                     action,
                     sku_id,
+                    internal_lot_number,
                     category,
                     include_revenue,
                     include_liters,
@@ -151,11 +164,12 @@ def upsert_rule(
                     note,
                     updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (match_type, douano_product_id, line_description)
                 DO UPDATE SET
                     action = EXCLUDED.action,
                     sku_id = EXCLUDED.sku_id,
+                    internal_lot_number = EXCLUDED.internal_lot_number,
                     category = EXCLUDED.category,
                     include_revenue = EXCLUDED.include_revenue,
                     include_liters = EXCLUDED.include_liters,
@@ -170,6 +184,7 @@ def upsert_rule(
                     desc,
                     act,
                     sku,
+                    internal_lot,
                     cat,
                     bool(include_revenue),
                     bool(include_liters),
@@ -190,6 +205,7 @@ def upsert_rule(
         "line_description": desc,
         "action": act,
         "sku_id": sku,
+        "internal_lot_number": internal_lot,
         "category": cat,
         "include_revenue": bool(include_revenue),
         "include_liters": bool(include_liters),
@@ -231,6 +247,7 @@ def list_rules(*, limit: int = 10000) -> list[dict[str, Any]]:
                     line_description,
                     action,
                     sku_id,
+                    internal_lot_number,
                     category,
                     include_revenue,
                     include_liters,
@@ -253,6 +270,7 @@ def list_rules(*, limit: int = 10000) -> list[dict[str, Any]]:
         line_description,
         action,
         sku_id,
+        internal_lot_number,
         category,
         include_revenue,
         include_liters,
@@ -269,6 +287,7 @@ def list_rules(*, limit: int = 10000) -> list[dict[str, Any]]:
                 "line_description": str(line_description or ""),
                 "action": str(action or ""),
                 "sku_id": str(sku_id or ""),
+                "internal_lot_number": str(internal_lot_number or ""),
                 "category": str(category or ""),
                 "include_revenue": bool(include_revenue),
                 "include_liters": bool(include_liters),
@@ -294,6 +313,7 @@ def get_rule(*, match_type: str, douano_product_id: int = 0, line_description: s
                     rule_id,
                     action,
                     sku_id,
+                    internal_lot_number,
                     category,
                     include_revenue,
                     include_liters,
@@ -313,6 +333,7 @@ def get_rule(*, match_type: str, douano_product_id: int = 0, line_description: s
         rule_id,
         action,
         sku_id,
+        internal_lot_number,
         category,
         include_revenue,
         include_liters,
@@ -328,6 +349,7 @@ def get_rule(*, match_type: str, douano_product_id: int = 0, line_description: s
         "line_description": desc,
         "action": str(action or ""),
         "sku_id": str(sku_id or ""),
+        "internal_lot_number": str(internal_lot_number or ""),
         "category": str(category or ""),
         "include_revenue": bool(include_revenue),
         "include_liters": bool(include_liters),

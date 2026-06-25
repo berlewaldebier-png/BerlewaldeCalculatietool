@@ -870,7 +870,7 @@ def list_lot_reconciliation(*, year: int = 0, limit: int = 500) -> list[dict[str
     return out
 
 
-def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
+def list_external_lots(*, year: int = 0, limit: int = 5000) -> list[dict[str, Any]]:
     """Return distinct Douano/API LOTs from stored stock-history allocations."""
     ensure_schema()
     try:
@@ -880,10 +880,17 @@ def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
     except Exception:
         pass
     lim = max(1, min(int(limit or 5000), 50000))
+    year_num = int(year or 0)
+    where_parts = ["COALESCE(NULLIF(a.lot_number, ''), '') <> ''"]
+    params: list[Any] = []
+    if year_num > 0:
+        where_parts.append("a.movement_date >= %s::date AND a.movement_date < %s::date")
+        params.extend([f"{year_num}-01-01", f"{year_num + 1}-01-01"])
+    where_sql = " AND ".join(where_parts)
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT
                     a.lot_number,
                     COUNT(*)::int AS rows,
@@ -904,14 +911,38 @@ def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
                     OR (COALESCE(alias.sku_code, '') <> '' AND LOWER(alias.sku_code) = LOWER(a.sku_code))
                     OR (COALESCE(alias.sku_id, '') = '' AND COALESCE(alias.sku_code, '') = '')
                  )
-                WHERE COALESCE(NULLIF(a.lot_number, ''), '') <> ''
+                WHERE {where_sql}
                 GROUP BY a.lot_number
                 ORDER BY a.lot_number
                 LIMIT %s
                 """,
-                (lim,),
+                (*params, lim),
             )
             rows = cur.fetchall() or []
+            cur.execute(
+                f"""
+                SELECT
+                    a.lot_number,
+                    a.sku_code,
+                    COUNT(*)::int AS rows,
+                    MAX(a.movement_date) AS last_movement_date,
+                    MAX(a.product_name) AS product_name,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(p.product_id, 0)), 0) AS douano_product_ids,
+                    COALESCE(MAX(m.sku_id), '') AS sku_id,
+                    COALESCE(MAX(s.name), '') AS sku_name,
+                    COALESCE(MAX(s.beer_id), '') AS style_id
+                FROM sales_lot_allocations a
+                LEFT JOIN douano_products p ON LOWER(p.sku) = LOWER(a.sku_code)
+                LEFT JOIN douano_product_mapping m ON m.douano_product_id = p.product_id
+                LEFT JOIN skus s ON s.id = m.sku_id
+                WHERE {where_sql}
+                GROUP BY a.lot_number, a.sku_code
+                ORDER BY a.lot_number, a.sku_code
+                LIMIT %s
+                """,
+                (*params, lim * 20),
+            )
+            sku_rows = cur.fetchall() or []
     style_name_by_id: dict[str, str] = {}
     try:
         from app.domain import dataset_store
@@ -927,6 +958,32 @@ def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
                     style_name_by_id[style_id] = style_name or style_id
     except Exception:
         style_name_by_id = {}
+    sku_rows_by_lot: dict[str, list[dict[str, Any]]] = {}
+    for (
+        lot_number,
+        sku_code,
+        count_rows,
+        last_movement_date,
+        product_name,
+        douano_product_ids,
+        sku_id,
+        sku_name,
+        style_id,
+    ) in sku_rows:
+        style_id_text = _text(style_id)
+        item = {
+            "lot_number": _text(lot_number),
+            "sku_code": _text(sku_code),
+            "rows": int(count_rows or 0),
+            "last_movement_date": last_movement_date.isoformat() if last_movement_date else "",
+            "product_name": _text(product_name),
+            "douano_product_ids": [int(product_id or 0) for product_id in (douano_product_ids or []) if int(product_id or 0) > 0],
+            "sku_id": _text(sku_id),
+            "sku_name": _text(sku_name),
+            "style_ids": [style_id_text] if style_id_text else [],
+            "style_names": [style_name_by_id.get(style_id_text, style_id_text)] if style_id_text else [],
+        }
+        sku_rows_by_lot.setdefault(_text(lot_number).lower(), []).append(item)
     return [
         {
             "lot_number": _text(lot_number),
@@ -942,6 +999,7 @@ def list_external_lots(*, limit: int = 5000) -> list[dict[str, Any]]:
                 for style_id in (style_ids or [])
                 if _text(style_id)
             ],
+            "sku_rows": sku_rows_by_lot.get(_text(lot_number).lower(), []),
         }
         for lot_number, count_rows, last_movement_date, product_name, sku_codes, douano_product_ids, style_ids, canonical_lots in rows
     ]

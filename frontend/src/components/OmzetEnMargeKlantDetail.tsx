@@ -63,6 +63,7 @@ type OrderLineRow = {
   cost_total_ex: number;
   margin_ex: number;
   cost_source?: string;
+  cost_status?: string;
   lot_number?: string;
   lot_internal_number?: string;
   lot_alias_id?: string;
@@ -97,6 +98,7 @@ type InvoiceLineRow = {
   cost_total_ex: number;
   margin_ex: number;
   cost_source?: string;
+  cost_status?: string;
   lot_number?: string;
   lot_internal_number?: string;
   lot_alias_id?: string;
@@ -154,6 +156,32 @@ function costStatus(line: OrderLineRow | InvoiceLineRow) {
   const nearVersionId = String(line.lot_near_match_version_id || "").trim();
   const nearVersionText = nearVersionLabel || (nearVersionId ? "kostprijsversie" : "");
   const nearLot = String(line.lot_near_match_number || "").trim();
+
+  if (line.cost_source === "no_cost_required" || line.cost_status === "no_cost_required") {
+    return {
+      label: "geen kostprijs nodig",
+      title: "Deze verkoopregel telt mee in omzet, maar is bewust gecategoriseerd als regel zonder kostprijsbron.",
+      background: "rgba(95,156,255,0.14)",
+    };
+  }
+
+  if (line.cost_status === "resolved_active_sku_cost" && versionText) {
+    return {
+      label: versionText,
+      title: hasLot
+        ? `Douano geeft een LOT mee, maar deze SKU gebruikt de actieve samengestelde/SKU-kostprijs ${versionText}.`
+        : `SKU gebruikt actieve kostprijs ${versionText}.`,
+      background: "rgba(95,255,156,0.16)",
+    };
+  }
+
+  if (line.cost_source === "sku_composition" || line.cost_status === "resolved_sku_composition") {
+    return {
+      label: "samenstelling",
+      title: "Kostprijs berekend uit de gekoppelde componenten van deze verkoopbare dienst/variant.",
+      background: "rgba(95,255,156,0.16)",
+    };
+  }
 
   if (
     hasLot &&

@@ -24,6 +24,8 @@ export type ActiveCostRow = {
   categorie: string;
   effectiefVanaf: string;
   versieLabel: string;
+  sourceLabel?: string;
+  supplierLabel?: string;
   versieTimestamp?: number;
   currentCost: number | null;
   hasUpdate: boolean;
@@ -73,10 +75,11 @@ export function ActiveKostprijzenSection({
     const map = new Map<string, { key: string; bierNaam: string; categorie: string; rows: ActiveCostRow[] }>();
     activeRows.forEach((row) => {
       const bierNaam = String(row.groupLabel || row.bierNaam || row.categorie || "Zonder bier").trim();
-      const categorie = String(row.categorie || "").trim();
-      const key = `${bierNaam.toLowerCase()}|${categorie.toLowerCase()}`;
-      const group = map.get(key) ?? { key, bierNaam, categorie, rows: [] };
+      const key = bierNaam.toLowerCase();
+      const group = map.get(key) ?? { key, bierNaam, categorie: "", rows: [] };
       group.rows.push(row);
+      const categories = Array.from(new Set(group.rows.map((item) => String(item.categorie || "").trim()).filter(Boolean)));
+      group.categorie = categories.length === 1 ? categories[0] : "";
       map.set(key, group);
     });
     return Array.from(map.values()).sort((a, b) => a.bierNaam.localeCompare(b.bierNaam, "nl-NL"));
@@ -196,7 +199,8 @@ export function ActiveKostprijzenSection({
                         <tr>
                           <th>Artikel</th>
                           <th>Actief sinds</th>
-                          <th>Kostprijsversie (bron)</th>
+                          <th>Kostprijsversie</th>
+                          <th>Leverancier</th>
                           <th>Kostprijs</th>
                           <th />
                           <th />
@@ -232,6 +236,10 @@ export function ActiveKostprijzenSection({
                                 </td>
                                 <td>{row.effectiefVanaf || "-"}</td>
                                 <td>{row.versieLabel}</td>
+                                <td>
+                                  <div>{row.supplierLabel || "-"}</div>
+                                  <div className="module-card-text">{row.sourceLabel || "-"}</div>
+                                </td>
                                 <td style={{ whiteSpace: "nowrap" }}>{row.currentCost == null ? "-" : formatEuro(row.currentCost)}</td>
                                 <td style={{ whiteSpace: "nowrap" }}>
                                   {row.hasUpdate ? (
@@ -263,7 +271,7 @@ export function ActiveKostprijzenSection({
                               </tr>
                               {showVersions && versionRowOpen ? (
                                 <tr>
-                                  <td colSpan={6} style={{ padding: 0 }}>
+                                  <td colSpan={7} style={{ padding: 0 }}>
                                     <div className="nested-card" style={{ margin: "8px 0 12px 0" }}>
                                       <table className="dataset-editor-table">
                                         <thead>

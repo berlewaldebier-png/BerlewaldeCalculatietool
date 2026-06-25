@@ -20,8 +20,14 @@ export function normalizeUnitLabel(value: unknown): string {
 
 export function makeBeerSkuLabel(beerName: unknown, unitLabel: unknown): string {
   const beer = String(beerName ?? "").trim();
-  const unit = normalizeUnitLabel(unitLabel);
+  const rawUnit = normalizeSkuLabel(unitLabel);
+  const beerPrefixPattern = new RegExp(`^${escapeRegExp(beer)}\\s+-\\s+`, "i");
+  const unit = normalizeUnitLabel(beer ? rawUnit.replace(beerPrefixPattern, "") : rawUnit);
   if (!beer) return unit;
   if (!unit) return beer;
   return `${beer} - ${unit}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -101,7 +101,7 @@ function titleForSegment(segment: string): string {
     productie: "Productie",
     "vaste-kosten": "Vaste kosten",
     inkoopfacturen: "Inkoopfacturen",
-    "recept-hercalculatie": "Recept hercalculatie",
+    "recept-hercalculatie": "Brouwmoment",
     beheer: "Beheer",
     users: "Gebruikers",
     devtools: "Devtools",

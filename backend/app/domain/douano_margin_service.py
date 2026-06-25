@@ -10,8 +10,10 @@ from app.domain import (
     douano_product_ignore_storage,
     douano_product_mapping_storage,
     douano_margin_snapshot_storage,
+    douano_unmapped_rule_storage,
     lot_costs_storage,
     postgres_storage,
+    product_model_storage,
 )
 
 
@@ -98,6 +100,65 @@ def _build_snapshot_components_index(
 ) -> dict[tuple[str, str], dict[str, float]]:
     version_list = [str(v or "").strip() for v in version_ids if str(v or "").strip()]
     return cost_versions_storage.load_cost_row_components_index_for_versions(version_list)
+
+
+def _build_packaging_component_cost_index() -> dict[tuple[int, str], float]:
+    """Active component prices for sellable merchandise SKUs.
+
+    These are explicit cost sources from `packaging-component-prices`, not a fallback:
+    a sellable packaging component such as a glass uses its active component price.
+    """
+    rows = dataset_store.load_dataset("packaging-component-prices")
+    index: dict[tuple[int, str], float] = {}
+    if not isinstance(rows, list):
+        return index
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        component_id = str(row.get("verpakkingsonderdeel_id", "") or row.get("component_id", "") or "").strip()
+        if not component_id:
+            continue
+        try:
+            year = int(row.get("jaar", 0) or 0)
+        except (TypeError, ValueError):
+            year = 0
+        if year <= 0:
+            continue
+        price = _num(row.get("prijs_per_stuk") or row.get("price_per_unit"))
+        index[(year, component_id)] = price
+    return index
+
+
+def _build_sku_composition_index() -> dict[str, list[dict[str, Any]]]:
+    """Component recipe per sellable SKU.
+
+    This is an explicit cost source for composed sellables such as tastings:
+    the parent SKU cost is the sum of the configured component SKUs/articles.
+    """
+    product_model_storage.ensure_schema()
+    index: dict[str, list[dict[str, Any]]] = {}
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT parent_sku_id, component_sku_id, component_article_id, quantity
+                FROM sku_composition_lines
+                WHERE parent_sku_id <> ''
+                ORDER BY parent_sku_id, updated_at, id
+                """
+            )
+            for parent_sku_id, component_sku_id, component_article_id, quantity in cur.fetchall() or []:
+                parent = str(parent_sku_id or "").strip()
+                if not parent:
+                    continue
+                index.setdefault(parent, []).append(
+                    {
+                        "component_sku_id": str(component_sku_id or "").strip(),
+                        "component_article_id": str(component_article_id or "").strip(),
+                        "quantity": _num(quantity),
+                    }
+                )
+    return index
 
 
 def _cost_version_label(versions_by_id: dict[str, dict[str, Any]], version_id: str) -> str:
@@ -446,6 +507,84 @@ def _resolve_cost_per_unit(
     return float(cost), version_id
 
 
+def _resolve_composed_sku_cost(
+    *,
+    sku_id: str,
+    as_of: date,
+    activations_index: dict[_ActivationKey, list[dict[str, Any]]],
+    versions_by_id: dict[str, dict[str, Any]],
+    snapshot_cost_index: dict[tuple[str, str], float],
+    sku_info_index: dict[str, dict[str, str]],
+    packaging_component_cost_index: dict[tuple[int, str], float],
+    sku_composition_index: dict[str, list[dict[str, Any]]],
+    visited: set[str] | None = None,
+) -> tuple[float | None, list[str]]:
+    """Resolve a composed SKU only when every configured component has a cost."""
+    sku_key = str(sku_id or "").strip()
+    if not sku_key:
+        return None, ["sku"]
+    seen = set(visited or set())
+    if sku_key in seen:
+        return None, [sku_key]
+    lines = sku_composition_index.get(sku_key, [])
+    if not lines:
+        return None, [sku_key]
+    seen.add(sku_key)
+
+    total = 0.0
+    missing: list[str] = []
+    for line in lines:
+        qty = max(0.0, _num(line.get("quantity")))
+        component_sku_id = str(line.get("component_sku_id", "") or "").strip()
+        component_article_id = str(line.get("component_article_id", "") or "").strip()
+        if qty <= 0:
+            continue
+        component_cost: float | None = None
+
+        if component_sku_id:
+            component_cost, _version_id = _resolve_cost_per_unit(
+                sku_id=component_sku_id,
+                as_of=as_of,
+                activations_index=activations_index,
+                versions_by_id=versions_by_id,
+                snapshot_cost_index=snapshot_cost_index,
+            )
+            if component_cost is None:
+                sku_meta = sku_info_index.get(component_sku_id, {})
+                article_id = str(sku_meta.get("article_id", "") or "").strip()
+                if article_id:
+                    component_cost = packaging_component_cost_index.get((int(as_of.year), article_id))
+            if component_cost is None and component_sku_id in sku_composition_index:
+                component_cost, nested_missing = _resolve_composed_sku_cost(
+                    sku_id=component_sku_id,
+                    as_of=as_of,
+                    activations_index=activations_index,
+                    versions_by_id=versions_by_id,
+                    snapshot_cost_index=snapshot_cost_index,
+                    sku_info_index=sku_info_index,
+                    packaging_component_cost_index=packaging_component_cost_index,
+                    sku_composition_index=sku_composition_index,
+                    visited=seen,
+                )
+                missing.extend(nested_missing)
+            if component_cost is None:
+                missing.append(component_sku_id)
+                continue
+            total += qty * float(component_cost)
+            continue
+
+        if component_article_id:
+            component_cost = packaging_component_cost_index.get((int(as_of.year), component_article_id))
+            if component_cost is None:
+                missing.append(component_article_id)
+                continue
+            total += qty * float(component_cost)
+
+    if missing:
+        return None, missing
+    return total, []
+
+
 def _resolve_cost_for_sale(
     *,
     transaction_number: str,
@@ -459,6 +598,10 @@ def _resolve_cost_for_sale(
     snapshot_cost_index: dict[tuple[str, str], float],
     snapshot_components_index: dict[tuple[str, str], dict[str, float]],
     resolution_context: dict[str, Any] | None = None,
+    sku_info_index: dict[str, dict[str, str]] | None = None,
+    packaging_component_cost_index: dict[tuple[int, str], float] | None = None,
+    sku_composition_index: dict[str, list[dict[str, Any]]] | None = None,
+    internal_lot_number_override: str = "",
 ) -> dict[str, Any]:
     """Resolve actual LOT cost first, then planning cost as fallback."""
     qty = _num(quantity)
@@ -488,6 +631,9 @@ def _resolve_cost_for_sale(
     if lot_number and lot_alias is None and not context_complete:
         lot_alias = lot_costs_storage.find_lot_alias(douano_lot_number=lot_number, sku_code=douano_sku, sku_id=sku_id)
     alias_lot_number = str((lot_alias or {}).get("internal_lot_number", "") or "").strip()
+    manual_internal_lot_number = str(internal_lot_number_override or "").strip()
+    if not alias_lot_number and manual_internal_lot_number:
+        alias_lot_number = manual_internal_lot_number
     lot_cost = None
     lot_cost_by_lot = context.get("lot_cost_by_lot")
     if lot_number and isinstance(lot_cost_by_lot, dict):
@@ -557,6 +703,62 @@ def _resolve_cost_for_sale(
         versions_by_id=versions_by_id,
         snapshot_cost_index=snapshot_cost_index,
     )
+    if cost_unit is None and sku_info_index is not None and packaging_component_cost_index is not None:
+        sku_meta = sku_info_index.get(sku_id, {})
+        if str(sku_meta.get("kind", "") or "").strip().lower() == "article":
+            article_id = str(sku_meta.get("article_id", "") or "").strip()
+            if article_id:
+                component_price = packaging_component_cost_index.get((int(as_of.year), article_id))
+                if component_price is not None:
+                    return {
+                        "cost_price_ex": float(component_price),
+                        "cost_total_ex": qty * float(component_price),
+                        "cost_source": "packaging_component_price",
+                        "lot_number": lot_number,
+                        "lot_internal_number": alias_lot_number,
+                        "lot_alias_id": str((lot_alias or {}).get("id", "") or ""),
+                        "lot_transaction_number": str((lot or {}).get("transaction_number", "") or "").strip(),
+                        "lot_cost_id": "",
+                        "lot_supplier": "",
+                        "lot_cost_missing": False,
+                        "kostprijsversie_id": "",
+                        "kostprijsversie_label": "",
+                        "missing_cost": False,
+                    }
+
+    if (
+        cost_unit is None
+        and sku_info_index is not None
+        and packaging_component_cost_index is not None
+        and sku_composition_index is not None
+        and sku_id in sku_composition_index
+    ):
+        composed_unit, missing_components = _resolve_composed_sku_cost(
+            sku_id=sku_id,
+            as_of=as_of,
+            activations_index=activations_index,
+            versions_by_id=versions_by_id,
+            snapshot_cost_index=snapshot_cost_index,
+            sku_info_index=sku_info_index,
+            packaging_component_cost_index=packaging_component_cost_index,
+            sku_composition_index=sku_composition_index,
+        )
+        if composed_unit is not None:
+            return {
+                "cost_price_ex": float(composed_unit),
+                "cost_total_ex": qty * float(composed_unit),
+                "cost_source": "sku_composition",
+                "lot_number": lot_number,
+                "lot_internal_number": alias_lot_number,
+                "lot_alias_id": str((lot_alias or {}).get("id", "") or ""),
+                "lot_transaction_number": str((lot or {}).get("transaction_number", "") or "").strip(),
+                "lot_cost_id": "",
+                "lot_supplier": "",
+                "lot_cost_missing": False,
+                "kostprijsversie_id": "",
+                "kostprijsversie_label": "",
+                "missing_cost": False,
+            }
 
     if lot_cost is not None:
         components = snapshot_components_index.get((kostprijsversie_id, sku_id), {}) if kostprijsversie_id else {}
@@ -572,10 +774,10 @@ def _resolve_cost_for_sale(
         return {
             "cost_price_ex": unit,
             "cost_total_ex": qty * unit,
-            "cost_source": "lot_alias" if lot_cost_via_alias else "lot",
+            "cost_source": "manual_internal_lot" if lot_cost_via_alias and manual_internal_lot_number and not lot_number else "lot_alias" if lot_cost_via_alias else "lot",
             "lot_number": lot_number,
             "lot_internal_number": lot_cost_lot_number if lot_cost_via_alias else "",
-            "lot_alias_id": str((lot_alias or {}).get("id", "") or ""),
+            "lot_alias_id": str((lot_alias or {}).get("id", "") or "") or ("manual_internal_lot" if manual_internal_lot_number and not lot_number else ""),
             "lot_transaction_number": str((lot or {}).get("transaction_number", "") or "").strip(),
             "lot_cost_id": str(lot_cost.get("id", "") or ""),
             "lot_supplier": str(lot_cost.get("supplier", "") or ""),
@@ -589,10 +791,10 @@ def _resolve_cost_for_sale(
         return {
             "cost_price_ex": float(version_lot_cost),
             "cost_total_ex": qty * float(version_lot_cost),
-            "cost_source": "cost_version_lot_alias" if version_lot_via_alias else "cost_version_lot",
+            "cost_source": "cost_version_manual_internal_lot" if version_lot_via_alias and manual_internal_lot_number and not lot_number else "cost_version_lot_alias" if version_lot_via_alias else "cost_version_lot",
             "lot_number": lot_number,
             "lot_internal_number": alias_lot_number if version_lot_via_alias else "",
-            "lot_alias_id": str((lot_alias or {}).get("id", "") or ""),
+            "lot_alias_id": str((lot_alias or {}).get("id", "") or "") or ("manual_internal_lot" if manual_internal_lot_number and not lot_number else ""),
             "lot_transaction_number": str((lot or {}).get("transaction_number", "") or "").strip(),
             "lot_cost_id": "",
             "lot_supplier": "",
@@ -700,7 +902,7 @@ def get_company_margin_summary(
                   ON l.douano_product_id = 0
                  AND r.match_type = 'product0_description'
                  AND r.douano_product_id = 0
-                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                 AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                 {where}
                 GROUP BY l.company_id, c.name, c.public_name, dc.distance_km_one_way
                 ORDER BY netto_omzet_ex DESC
@@ -803,7 +1005,7 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                   ON l.douano_product_id = 0
                  AND r.match_type = 'product0_description'
                  AND r.douano_product_id = 0
-                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                 AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                 {where}
                 GROUP BY l.company_id, c.name, c.public_name, dc.distance_km_one_way
                 ORDER BY netto_omzet_ex DESC
@@ -892,7 +1094,7 @@ def list_company_unmapped_products(*, company_id: int, since: str = "", limit: i
                     LEFT JOIN douano_unmapped_rules r
                       ON (
                         (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
-                        OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                        OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig'))
                       )
                     WHERE l.company_id = %s
                       AND ig.douano_product_id IS NULL
@@ -1180,7 +1382,7 @@ def list_company_orders(
                   ON l.douano_product_id = 0
                  AND r.match_type = 'product0_description'
                  AND r.douano_product_id = 0
-                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                 AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                 WHERE o.company_id = %s
                 {where}
                 GROUP BY o.sales_order_id, o.order_date, o.transaction_number, o.status
@@ -1292,7 +1494,7 @@ def list_company_invoices(
                   ON l.douano_product_id = 0
                  AND r.match_type = 'product0_description'
                  AND r.douano_product_id = 0
-                 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                 AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                 WHERE i.company_id = %s
                 {where}
                 GROUP BY i.sales_invoice_id, i.invoice_date, i.invoice_number, i.transaction_type, i.is_sent
@@ -1401,7 +1603,7 @@ def list_order_lines(
                 LEFT JOIN douano_unmapped_rules r
                   ON (
                     (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
-                    OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                    OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig'))
                   )
                 WHERE {where}
                 ORDER BY l.line_id ASC
@@ -1436,7 +1638,16 @@ def list_order_lines(
             sku_info[sid] = {
                 "beer_id": str(sku_row.get("beer_id", "") or ""),
                 "format_article_id": str(sku_row.get("format_article_id", "") or ""),
+                "article_id": str(sku_row.get("article_id", "") or ""),
+                "kind": str(sku_row.get("kind", "") or ""),
+                "product_group": str(
+                    sku_row.get("product_group", "")
+                    or ((sku_row.get("payload") if isinstance(sku_row.get("payload"), dict) else {}) or {}).get("product_group", "")
+                    or ""
+                ),
             }
+    packaging_component_cost_index = _build_packaging_component_cost_index()
+    sku_composition_index = _build_sku_composition_index()
 
     resolution_context = _build_cost_resolution_context(
         [
@@ -1486,6 +1697,9 @@ def list_order_lines(
         info = sku_info.get(sku_id_text, {})
         bier_id_text = str(info.get("beer_id", "") or "")
         product_id_text = str(info.get("format_article_id", "") or "")
+        sku_kind = str(info.get("kind", "") or "").strip().lower()
+        sku_product_group = str(info.get("product_group", "") or "").strip().lower()
+        lot_required = bool(sku_id_text) and sku_kind == "beer_format" and sku_product_group != "giftset"
         cost_unit: float | None = None
         cost_total = 0.0
         margin = 0.0
@@ -1504,6 +1718,9 @@ def list_order_lines(
                 snapshot_cost_index=snapshot_cost_index,
                 snapshot_components_index=snapshot_components_index,
                 resolution_context=resolution_context,
+                sku_info_index=sku_info,
+                packaging_component_cost_index=packaging_component_cost_index,
+                sku_composition_index=sku_composition_index,
             )
             cost_unit = resolved_cost.get("cost_price_ex")
             kostprijsversie_id = str(resolved_cost.get("kostprijsversie_id", "") or "")
@@ -1516,43 +1733,44 @@ def list_order_lines(
         if only_missing_cost and not missing_cost:
             continue
 
-        out.append(
-            {
-                "line_id": int(line_id or 0),
-                "sales_order_id": int(_sales_order_id or 0),
-                "company_id": int(company_id or 0),
-                "order_date": str(order_date_raw or ""),
-                "transaction_number": str(transaction_number or ""),
-                "douano_product_id": int(douano_product_id or 0),
-                "douano_product_name": str(product_name or ""),
-                "douano_sku": str(sku or ""),
-                "quantity": float(quantity or 0),
-                "unit_price_ex": float(unit_price_ex or 0),
-                "discount_ex": float(discount_ex or 0),
-                "charges_ex": float(charges_total_ex or 0),
-                "net_revenue_ex": float(net_revenue_ex or 0),
-                "sku_id": sku_id_text,
-                "bier_id": bier_id_text,
-                "product_id": product_id_text,
-                "ignored": bool(ignored),
-                "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
-                "cost_total_ex": float(cost_total),
-                "margin_ex": float(margin),
-                "missing_cost": bool(missing_cost),
-                "mapped": bool(sku_id_text),
-                "kostprijsversie_id": kostprijsversie_id,
-                "kostprijsversie_label": str(resolved_cost.get("kostprijsversie_label", "") or ""),
-                "cost_source": str(resolved_cost.get("cost_source", "") or ""),
-                "lot_number": str(resolved_cost.get("lot_number", "") or ""),
-                "lot_internal_number": str(resolved_cost.get("lot_internal_number", "") or ""),
-                "lot_transaction_number": str(resolved_cost.get("lot_transaction_number", "") or ""),
-                "lot_supplier": str(resolved_cost.get("lot_supplier", "") or ""),
-                "lot_cost_missing": bool(resolved_cost.get("lot_cost_missing", False)),
-                "lot_near_match_version_id": str(resolved_cost.get("lot_near_match_version_id", "") or ""),
-                "lot_near_match_version_label": str(resolved_cost.get("lot_near_match_version_label", "") or ""),
-                "lot_near_match_number": str(resolved_cost.get("lot_near_match_number", "") or ""),
-            }
-        )
+        item = {
+            "line_id": int(line_id or 0),
+            "sales_order_id": int(_sales_order_id or 0),
+            "company_id": int(company_id or 0),
+            "order_date": str(order_date_raw or ""),
+            "transaction_number": str(transaction_number or ""),
+            "douano_product_id": int(douano_product_id or 0),
+            "douano_product_name": str(product_name or ""),
+            "douano_sku": str(sku or ""),
+            "quantity": float(quantity or 0),
+            "unit_price_ex": float(unit_price_ex or 0),
+            "discount_ex": float(discount_ex or 0),
+            "charges_ex": float(charges_total_ex or 0),
+            "net_revenue_ex": float(net_revenue_ex or 0),
+            "sku_id": sku_id_text,
+            "bier_id": bier_id_text,
+            "product_id": product_id_text,
+            "ignored": bool(ignored),
+            "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
+            "cost_total_ex": float(cost_total),
+            "margin_ex": float(margin),
+            "missing_cost": bool(missing_cost),
+            "mapped": bool(sku_id_text),
+            "lot_required": lot_required,
+            "kostprijsversie_id": kostprijsversie_id,
+            "kostprijsversie_label": str(resolved_cost.get("kostprijsversie_label", "") or ""),
+            "cost_source": str(resolved_cost.get("cost_source", "") or ""),
+            "lot_number": str(resolved_cost.get("lot_number", "") or ""),
+            "lot_internal_number": str(resolved_cost.get("lot_internal_number", "") or ""),
+            "lot_transaction_number": str(resolved_cost.get("lot_transaction_number", "") or ""),
+            "lot_supplier": str(resolved_cost.get("lot_supplier", "") or ""),
+            "lot_cost_missing": bool(resolved_cost.get("lot_cost_missing", False)),
+            "lot_near_match_version_id": str(resolved_cost.get("lot_near_match_version_id", "") or ""),
+            "lot_near_match_version_label": str(resolved_cost.get("lot_near_match_version_label", "") or ""),
+            "lot_near_match_number": str(resolved_cost.get("lot_near_match_number", "") or ""),
+        }
+        item["cost_status"] = _snapshot_cost_status(item)
+        out.append(item)
     return out
 
 
@@ -1612,7 +1830,7 @@ def list_invoice_lines(
                 LEFT JOIN douano_unmapped_rules r
                   ON (
                     (l.douano_product_id <> 0 AND r.match_type = 'douano_product_id' AND r.douano_product_id = l.douano_product_id AND r.line_description = '')
-                    OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig'))
+                    OR (l.douano_product_id = 0 AND r.match_type = 'product0_description' AND r.douano_product_id = 0 AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig'))
                   )
                 WHERE {where}
                 ORDER BY l.line_id ASC
@@ -1647,7 +1865,16 @@ def list_invoice_lines(
             sku_info[sid] = {
                 "beer_id": str(sku_row.get("beer_id", "") or ""),
                 "format_article_id": str(sku_row.get("format_article_id", "") or ""),
+                "article_id": str(sku_row.get("article_id", "") or ""),
+                "kind": str(sku_row.get("kind", "") or ""),
+                "product_group": str(
+                    sku_row.get("product_group", "")
+                    or ((sku_row.get("payload") if isinstance(sku_row.get("payload"), dict) else {}) or {}).get("product_group", "")
+                    or ""
+                ),
             }
+    packaging_component_cost_index = _build_packaging_component_cost_index()
+    sku_composition_index = _build_sku_composition_index()
 
     resolution_context = _build_cost_resolution_context(
         [
@@ -1699,6 +1926,9 @@ def list_invoice_lines(
         info = sku_info.get(sku_id_text, {})
         bier_id_text = str(info.get("beer_id", "") or "")
         product_id_text = str(info.get("format_article_id", "") or "")
+        sku_kind = str(info.get("kind", "") or "").strip().lower()
+        sku_product_group = str(info.get("product_group", "") or "").strip().lower()
+        lot_required = bool(sku_id_text) and sku_kind == "beer_format" and sku_product_group != "giftset"
         cost_unit: float | None = None
         cost_total = 0.0
         margin = 0.0
@@ -1718,6 +1948,9 @@ def list_invoice_lines(
                 snapshot_cost_index=snapshot_cost_index,
                 snapshot_components_index=snapshot_components_index,
                 resolution_context=resolution_context,
+                sku_info_index=sku_info,
+                packaging_component_cost_index=packaging_component_cost_index,
+                sku_composition_index=sku_composition_index,
             )
             cost_unit = resolved_cost.get("cost_price_ex")
             kostprijsversie_id = str(resolved_cost.get("kostprijsversie_id", "") or "")
@@ -1730,49 +1963,52 @@ def list_invoice_lines(
         if only_missing_cost and not missing_cost:
             continue
 
-        out.append(
-            {
-                "line_id": int(line_id or 0),
-                "sales_invoice_id": int(_sales_invoice_id or 0),
-                "company_id": int(company_id or 0),
-                "invoice_date": str(invoice_date_raw or ""),
-                "transaction_number": str(transaction_number or ""),
-                "douano_product_id": int(douano_product_id or 0),
-                "douano_product_name": str(product_name or ""),
-                "douano_sku": str(sku or ""),
-                "quantity": float(quantity or 0),
-                "unit_price_ex": float(unit_price_ex or 0),
-                "discount_ex": float(discount_ex or 0),
-                "charges_ex": float(charges_total_ex or 0),
-                "net_revenue_ex": float(net_revenue_ex or 0),
-                "sku_id": sku_id_text,
-                "bier_id": bier_id_text,
-                "product_id": product_id_text,
-                "ignored": bool(ignored),
-                "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
-                "cost_total_ex": float(cost_total),
-                "margin_ex": float(margin),
-                "missing_cost": bool(missing_cost),
-                "mapped": bool(sku_id_text),
-                "kostprijsversie_id": kostprijsversie_id,
-                "kostprijsversie_label": str(resolved_cost.get("kostprijsversie_label", "") or ""),
-                "cost_source": str(resolved_cost.get("cost_source", "") or ""),
-                "lot_number": str(resolved_cost.get("lot_number", "") or ""),
-                "lot_internal_number": str(resolved_cost.get("lot_internal_number", "") or ""),
-                "lot_transaction_number": str(resolved_cost.get("lot_transaction_number", "") or ""),
-                "lot_supplier": str(resolved_cost.get("lot_supplier", "") or ""),
-                "lot_cost_missing": bool(resolved_cost.get("lot_cost_missing", False)),
-                "lot_near_match_version_id": str(resolved_cost.get("lot_near_match_version_id", "") or ""),
-                "lot_near_match_version_label": str(resolved_cost.get("lot_near_match_version_label", "") or ""),
-                "lot_near_match_number": str(resolved_cost.get("lot_near_match_number", "") or ""),
-            }
-        )
+        item = {
+            "line_id": int(line_id or 0),
+            "sales_invoice_id": int(_sales_invoice_id or 0),
+            "company_id": int(company_id or 0),
+            "invoice_date": str(invoice_date_raw or ""),
+            "transaction_number": str(transaction_number or ""),
+            "douano_product_id": int(douano_product_id or 0),
+            "douano_product_name": str(product_name or ""),
+            "douano_sku": str(sku or ""),
+            "quantity": float(quantity or 0),
+            "unit_price_ex": float(unit_price_ex or 0),
+            "discount_ex": float(discount_ex or 0),
+            "charges_ex": float(charges_total_ex or 0),
+            "net_revenue_ex": float(net_revenue_ex or 0),
+            "sku_id": sku_id_text,
+            "bier_id": bier_id_text,
+            "product_id": product_id_text,
+            "ignored": bool(ignored),
+            "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
+            "cost_total_ex": float(cost_total),
+            "margin_ex": float(margin),
+            "missing_cost": bool(missing_cost),
+            "mapped": bool(sku_id_text),
+            "lot_required": lot_required,
+            "kostprijsversie_id": kostprijsversie_id,
+            "kostprijsversie_label": str(resolved_cost.get("kostprijsversie_label", "") or ""),
+            "cost_source": str(resolved_cost.get("cost_source", "") or ""),
+            "lot_number": str(resolved_cost.get("lot_number", "") or ""),
+            "lot_internal_number": str(resolved_cost.get("lot_internal_number", "") or ""),
+            "lot_transaction_number": str(resolved_cost.get("lot_transaction_number", "") or ""),
+            "lot_supplier": str(resolved_cost.get("lot_supplier", "") or ""),
+            "lot_cost_missing": bool(resolved_cost.get("lot_cost_missing", False)),
+            "lot_near_match_version_id": str(resolved_cost.get("lot_near_match_version_id", "") or ""),
+            "lot_near_match_version_label": str(resolved_cost.get("lot_near_match_version_label", "") or ""),
+            "lot_near_match_number": str(resolved_cost.get("lot_near_match_number", "") or ""),
+        }
+        item["cost_status"] = _snapshot_cost_status(item)
+        out.append(item)
     return out
 
 
 def _snapshot_cost_status(line: dict[str, Any]) -> str:
     if bool(line.get("ignored")):
         return "ignored"
+    if str(line.get("cost_source", "") or "").strip().lower() == "no_cost_required":
+        return "no_cost_required"
     if not bool(line.get("mapped")):
         return "unmapped_sku"
     if bool(line.get("missing_cost")):
@@ -1780,9 +2016,13 @@ def _snapshot_cost_status(line: dict[str, Any]) -> str:
     source = str(line.get("cost_source", "") or "").strip().lower()
     if source in {"lot", "cost_version_lot"}:
         return "resolved_lot_cost"
-    if source in {"lot_alias", "cost_version_lot_alias"}:
+    if source in {"lot_alias", "cost_version_lot_alias", "manual_internal_lot", "cost_version_manual_internal_lot"}:
         return "resolved_lot_alias"
+    if source == "sku_composition":
+        return "resolved_sku_composition"
     if source == "baseline":
+        if not bool(line.get("lot_required")):
+            return "resolved_active_sku_cost"
         if str(line.get("lot_number", "") or "").strip():
             if str(line.get("lot_near_match_number", "") or "").strip():
                 return "lot_near_match_fallback"
@@ -1896,13 +2136,50 @@ def _build_snapshot_run_context() -> dict[str, Any]:
             sku_info[sid] = {
                 "beer_id": str(sku_row.get("beer_id", "") or ""),
                 "format_article_id": str(sku_row.get("format_article_id", "") or ""),
+                "article_id": str(sku_row.get("article_id", "") or ""),
+                "kind": str(sku_row.get("kind", "") or ""),
+                "product_group": str(
+                    sku_row.get("product_group", "")
+                    or ((sku_row.get("payload") if isinstance(sku_row.get("payload"), dict) else {}) or {}).get("product_group", "")
+                    or ""
+                ),
             }
+    douano_unmapped_rule_storage.ensure_schema()
+    unmapped_rules_by_product_id: dict[int, dict[str, Any]] = {}
+    unmapped_rules_by_description: dict[str, dict[str, Any]] = {}
+
+    def _rule_priority(rule: dict[str, Any] | None) -> int:
+        action = str((rule or {}).get("action", "") or "").strip()
+        if action == "no_cost_required":
+            return 30
+        if action == "map_to_sku":
+            return 20
+        if action == "categorize":
+            return 10
+        return 0
+
+    for rule in douano_unmapped_rule_storage.list_rules(limit=50000):
+        if str(rule.get("action", "") or "").strip() not in {"no_cost_required", "categorize", "map_to_sku"}:
+            continue
+        match_type = str(rule.get("match_type", "") or "").strip()
+        if match_type == "douano_product_id":
+            product_id = int(rule.get("douano_product_id", 0) or 0)
+            if product_id > 0 and _rule_priority(rule) >= _rule_priority(unmapped_rules_by_product_id.get(product_id)):
+                unmapped_rules_by_product_id[product_id] = rule
+        elif match_type == "product0_description":
+            desc_key = str(rule.get("line_description", "") or "").strip().lower()
+            if desc_key and _rule_priority(rule) >= _rule_priority(unmapped_rules_by_description.get(desc_key)):
+                unmapped_rules_by_description[desc_key] = rule
     return {
         "activation_index": activation_index,
         "versions_by_id": versions_by_id,
         "snapshot_cost_index": snapshot_cost_index,
         "snapshot_components_index": snapshot_components_index,
+        "packaging_component_cost_index": _build_packaging_component_cost_index(),
+        "sku_composition_index": _build_sku_composition_index(),
         "sku_info": sku_info,
+        "unmapped_rules_by_product_id": unmapped_rules_by_product_id,
+        "unmapped_rules_by_description": unmapped_rules_by_description,
     }
 
 
@@ -1931,6 +2208,8 @@ def _resolve_snapshot_batch(
 
     out: list[dict[str, Any]] = []
     sku_info: dict[str, dict[str, str]] = run_context["sku_info"]
+    rules_by_product_id: dict[int, dict[str, Any]] = run_context.get("unmapped_rules_by_product_id", {})
+    rules_by_description: dict[str, dict[str, Any]] = run_context.get("unmapped_rules_by_description", {})
     for row in rows:
         (
             line_id,
@@ -1956,17 +2235,33 @@ def _resolve_snapshot_batch(
         )
         transaction_number = tx_candidates[0] if tx_candidates else ""
         line_date = _parse_date(line_date_raw)
+        product_name_text = str(product_name or "")
+        rule = rules_by_product_id.get(int(douano_product_id or 0))
+        if rule is None:
+            rule = rules_by_description.get(product_name_text.strip().lower())
+        rule_action = str((rule or {}).get("action", "") or "").strip()
+        no_cost_required = rule_action == "no_cost_required"
+        rule_internal_lot_number = str((rule or {}).get("internal_lot_number", "") or "").strip()
         sku_id_text = str(sku_id or "")
         info = sku_info.get(sku_id_text, {})
         bier_id_text = str(info.get("beer_id", "") or "")
         product_id_text = str(info.get("format_article_id", "") or "")
+        sku_kind = str(info.get("kind", "") or "").strip().lower()
+        sku_product_group = str(info.get("product_group", "") or "").strip().lower()
+        lot_required = bool(sku_id_text) and sku_kind == "beer_format" and sku_product_group != "giftset"
         resolved_cost: dict[str, Any] = {}
         cost_unit: float | None = None
         cost_total = 0.0
         margin = 0.0
         missing_cost = False
         kostprijsversie_id = ""
-        if sku_id_text and line_date is not None:
+        if no_cost_required:
+            cost_unit = 0.0
+            cost_total = 0.0
+            margin = float(net_revenue_ex or 0.0)
+            missing_cost = False
+            resolved_cost = {"cost_source": "no_cost_required"}
+        elif sku_id_text and line_date is not None:
             resolved_cost = _resolve_cost_for_sale(
                 transaction_number=transaction_number,
                 transaction_numbers=tx_candidates,
@@ -1979,6 +2274,10 @@ def _resolve_snapshot_batch(
                 snapshot_cost_index=run_context["snapshot_cost_index"],
                 snapshot_components_index=run_context["snapshot_components_index"],
                 resolution_context=resolution_context,
+                sku_info_index=sku_info,
+                packaging_component_cost_index=run_context["packaging_component_cost_index"],
+                sku_composition_index=run_context["sku_composition_index"],
+                internal_lot_number_override=rule_internal_lot_number,
             )
             cost_unit = resolved_cost.get("cost_price_ex")
             kostprijsversie_id = str(resolved_cost.get("kostprijsversie_id", "") or "")
@@ -1991,7 +2290,7 @@ def _resolve_snapshot_batch(
             "company_id": int(company_id or 0),
             "transaction_number": str(transaction_number or ""),
             "douano_product_id": int(douano_product_id or 0),
-            "douano_product_name": str(product_name or ""),
+            "douano_product_name": product_name_text,
             "douano_sku": str(sku or ""),
             "quantity": float(quantity or 0),
             "unit_price_ex": float(unit_price_ex or 0),
@@ -2006,7 +2305,8 @@ def _resolve_snapshot_batch(
             "cost_total_ex": float(cost_total),
             "margin_ex": float(margin),
             "missing_cost": bool(missing_cost),
-            "mapped": bool(sku_id_text),
+            "mapped": bool(sku_id_text) or no_cost_required,
+            "lot_required": lot_required,
             "kostprijsversie_id": kostprijsversie_id,
             "kostprijsversie_label": str(resolved_cost.get("kostprijsversie_label", "") or ""),
             "cost_source": str(resolved_cost.get("cost_source", "") or ""),
@@ -2108,7 +2408,7 @@ def backfill_line_snapshots(
                          AND r.match_type = 'product0_description'
                          AND r.douano_product_id = 0
                          AND r.action = 'map_to_sku'
-                         AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                         AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                         {where}
                         ORDER BY l.line_id DESC
                         LIMIT %s
@@ -2185,7 +2485,7 @@ def backfill_line_snapshots(
                          AND r.match_type = 'product0_description'
                          AND r.douano_product_id = 0
                          AND r.action = 'map_to_sku'
-                         AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                         AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                         {where}
                         ORDER BY l.line_id DESC
                         LIMIT %s
@@ -2299,7 +2599,7 @@ def backfill_line_snapshots_for_lots(
                      AND r.match_type = 'product0_description'
                      AND r.douano_product_id = 0
                      AND r.action = 'map_to_sku'
-                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                     AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                     WHERE EXISTS (
                         SELECT 1
                         FROM sales_lot_allocations a
@@ -2355,7 +2655,7 @@ def backfill_line_snapshots_for_lots(
                      AND r.match_type = 'product0_description'
                      AND r.douano_product_id = 0
                      AND r.action = 'map_to_sku'
-                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                     AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                     WHERE EXISTS (
                         SELECT 1
                         FROM sales_lot_allocations a
@@ -2442,7 +2742,7 @@ def backfill_line_snapshots_for_douano_products(
                      AND r.match_type = 'product0_description'
                      AND r.douano_product_id = 0
                      AND r.action = 'map_to_sku'
-                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                     AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                     WHERE l.douano_product_id = ANY(%s::bigint[])
                     ORDER BY l.line_id DESC
                     LIMIT %s
@@ -2492,7 +2792,7 @@ def backfill_line_snapshots_for_douano_products(
                      AND r.match_type = 'product0_description'
                      AND r.douano_product_id = 0
                      AND r.action = 'map_to_sku'
-                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                     AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                     WHERE l.douano_product_id = ANY(%s::bigint[])
                     ORDER BY l.line_id DESC
                     LIMIT %s
@@ -2585,9 +2885,9 @@ def backfill_line_snapshots_for_unmapped_rule(
                      AND r.match_type = 'product0_description'
                      AND r.douano_product_id = 0
                      AND r.action = 'map_to_sku'
-                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                     AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                     WHERE l.douano_product_id = 0
-                      AND COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s
+                      AND COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig') = %s
                     ORDER BY l.line_id DESC
                     LIMIT %s
                     """,
@@ -2636,9 +2936,9 @@ def backfill_line_snapshots_for_unmapped_rule(
                      AND r.match_type = 'product0_description'
                      AND r.douano_product_id = 0
                      AND r.action = 'map_to_sku'
-                     AND r.line_description = COALESCE(NULLIF(l.line_description, ''), 'Overig')
+                     AND r.line_description = COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig')
                     WHERE l.douano_product_id = 0
-                      AND COALESCE(NULLIF(l.line_description, ''), 'Overig') = %s
+                      AND COALESCE(NULLIF(l.line_product_name, ''), NULLIF(l.line_description, ''), 'Overig') = %s
                     ORDER BY l.line_id DESC
                     LIMIT %s
                     """,

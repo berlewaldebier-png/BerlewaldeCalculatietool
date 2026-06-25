@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
 import { VerkoopbareArtikelenWorkspace } from "@/components/VerkoopbareArtikelenWorkspace";
 import { API_BASE_URL } from "@/lib/api";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 import { determineDefaultYear, type GenericRecord } from "@/components/producten-verpakking/productenVerpakkingUtils";
 import {
   buildAvailablePriceYears,
@@ -19,6 +20,288 @@ import { AfvuleenhedenTab } from "@/components/producten-verpakking/Afvuleenhede
 import { YearPricesTab } from "@/components/producten-verpakking/YearPricesTab";
 
 type TabKey = "verkoopbaar" | "verpakking" | "afvuleenheden" | "jaarprijzen" | "glasmaten";
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function makeDraftId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `component-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function PackagingComponentsEditor({
+  rows,
+  bieren,
+}: {
+  rows: GenericRecord[];
+  bieren: GenericRecord[];
+}) {
+  const router = useRouter();
+  const [draftRows, setDraftRows] = useState<GenericRecord[]>(() => rows.map((row) => ({ ...row })));
+  const [status, setStatus] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [modalRowId, setModalRowId] = useState("");
+  const [categoryType, setCategoryType] = useState<"merchandise" | "beer">("merchandise");
+  const [categoryId, setCategoryId] = useState("");
+
+  useEffect(() => {
+    setDraftRows(rows.map((row) => ({ ...row })));
+  }, [rows]);
+
+  const beerOptions = useMemo(() => {
+    return (Array.isArray(bieren) ? bieren : [])
+      .map((row) => ({
+        id: text((row as any).id),
+        label: text((row as any).biernaam || (row as any).naam || (row as any).name),
+      }))
+      .filter((row) => row.id && row.label)
+      .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
+  }, [bieren]);
+
+  const modalRow = useMemo(
+    () => draftRows.find((row) => text((row as any).id) === modalRowId) ?? null,
+    [draftRows, modalRowId]
+  );
+
+  function updateRow(rowId: string, patch: GenericRecord) {
+    setDraftRows((current) =>
+      current.map((row) => (text((row as any).id) === rowId ? { ...row, ...patch } : row))
+    );
+  }
+
+  function addRow() {
+    setDraftRows((current) => [
+      ...current,
+      {
+        id: makeDraftId(),
+        component_key: "",
+        omschrijving: "",
+        beschikbaar_voor_samengesteld: true,
+        beschikbaar_voor_offertes: false,
+      },
+    ]);
+  }
+
+  function deleteRow(rowId: string) {
+    setDraftRows((current) => current.filter((row) => text((row as any).id) !== rowId));
+  }
+
+  function toggleOffertes(row: GenericRecord, checked: boolean) {
+    const rowId = text((row as any).id);
+    if (!checked) {
+      updateRow(rowId, { beschikbaar_voor_offertes: false });
+      return;
+    }
+    const existingType = text((row as any).sellable_category_type);
+    const existingCategory = text((row as any).sellable_category_id);
+    setCategoryType(existingType === "beer" ? "beer" : "merchandise");
+    setCategoryId(existingType === "beer" ? existingCategory : "");
+    setModalRowId(rowId);
+  }
+
+  async function saveRows(nextRows = draftRows) {
+    setStatus("");
+    setIsSaving(true);
+    try {
+      await reconcileDatasetItems("packaging-components", nextRows as Array<Record<string, unknown>>);
+      setStatus("Opgeslagen.");
+      router.refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? `Opslaan mislukt: ${error.message}` : "Opslaan mislukt.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function confirmSellableSku() {
+    if (!modalRow) return;
+    const componentId = text((modalRow as any).id);
+    if (!componentId) return;
+    if (categoryType === "beer" && !categoryId) {
+      setStatus("Kies een stijl of gebruik Merchandise.");
+      return;
+    }
+    setIsSaving(true);
+    setStatus("Verkoopbare SKU maken...");
+    try {
+      const response = await fetch(`${API_BASE_URL}/data/packaging-components/${encodeURIComponent(componentId)}/sellable-sku`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category_type: categoryType,
+          category_id: categoryType === "beer" ? categoryId : "",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(String((payload as any)?.detail || response.statusText));
+      }
+      const nextRows = draftRows.map((row) =>
+        text((row as any).id) === componentId
+          ? {
+              ...row,
+              beschikbaar_voor_offertes: true,
+              sellable_sku_id: text((payload as any).sku_id),
+              sellable_category_type: categoryType,
+              sellable_category_id: categoryType === "beer" ? categoryId : "",
+            }
+          : row
+      );
+      setDraftRows(nextRows);
+      setModalRowId("");
+      setStatus("Verkoopbare SKU aangemaakt.");
+      router.refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? `SKU maken mislukt: ${error.message}` : "SKU maken mislukt.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <section className="module-card">
+      <div className="module-card-header">
+        <div className="module-card-title">Verpakkingsonderdelen</div>
+        <div className="module-card-text">
+          Onderdelen die je gebruikt in afvuleenheden en samengestelde artikelen. Zet `In offertes` aan om er ook een verkoopbare SKU van te maken.
+        </div>
+      </div>
+      <div className="data-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Omschrijving</th>
+              <th style={{ width: 170 }}>In samenstellingen</th>
+              <th style={{ width: 140 }}>In offertes</th>
+              <th style={{ width: 170 }}>Categorie</th>
+              <th style={{ width: 70 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {draftRows.map((row) => {
+              const rowId = text((row as any).id);
+              const categoryLabel =
+                text((row as any).sellable_category_type) === "beer"
+                  ? beerOptions.find((beer) => beer.id === text((row as any).sellable_category_id))?.label || "Stijl"
+                  : Boolean((row as any).beschikbaar_voor_offertes)
+                    ? "Merchandise"
+                    : "-";
+              return (
+                <tr key={rowId}>
+                  <td>
+                    <input
+                      className="dataset-input"
+                      value={text((row as any).omschrijving)}
+                      onChange={(event) => updateRow(rowId, { omschrijving: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <label className="dataset-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={Boolean((row as any).beschikbaar_voor_samengesteld)}
+                        onChange={(event) => updateRow(rowId, { beschikbaar_voor_samengesteld: event.target.checked })}
+                      />
+                      <span>{Boolean((row as any).beschikbaar_voor_samengesteld) ? "Ja" : "Nee"}</span>
+                    </label>
+                  </td>
+                  <td>
+                    <label className="dataset-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={Boolean((row as any).beschikbaar_voor_offertes)}
+                        onChange={(event) => toggleOffertes(row, event.target.checked)}
+                      />
+                      <span>{Boolean((row as any).beschikbaar_voor_offertes) ? "Ja" : "Nee"}</span>
+                    </label>
+                  </td>
+                  <td>{categoryLabel}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="editor-button editor-button-secondary"
+                      onClick={() => deleteRow(rowId)}
+                      style={{ minWidth: 0 }}
+                    >
+                      Wis
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="editor-actions">
+        <div className="editor-actions-group">
+          <button type="button" className="editor-button editor-button-secondary" onClick={addRow}>
+            Rij toevoegen
+          </button>
+        </div>
+        <div className="editor-actions-group">
+          {status ? <span className="editor-status">{status}</span> : null}
+          <button type="button" className="editor-button" onClick={() => void saveRows()} disabled={isSaving}>
+            {isSaving ? "Opslaan..." : "Opslaan"}
+          </button>
+        </div>
+      </div>
+
+      {modalRow ? (
+        <div className="cpq-modal-backdrop" role="dialog" aria-modal="true">
+          <div className="cpq-modal">
+            <div className="cpq-modal-header">
+              <div>
+                <div className="cpq-modal-title">Verkoopbare SKU maken</div>
+                <div className="cpq-modal-subtitle">{text((modalRow as any).omschrijving)}</div>
+              </div>
+              <button type="button" className="editor-button editor-button-secondary" onClick={() => setModalRowId("")}>
+                Sluiten
+              </button>
+            </div>
+            <div className="cpq-modal-body">
+              <label className="field-label">
+                Categorie
+                <select
+                  className="editor-input"
+                  value={categoryType === "merchandise" ? "merchandise" : categoryId}
+                  onChange={(event) => {
+                    if (event.target.value === "merchandise") {
+                      setCategoryType("merchandise");
+                      setCategoryId("");
+                      return;
+                    }
+                    setCategoryType("beer");
+                    setCategoryId(event.target.value);
+                  }}
+                >
+                  <option value="merchandise">Merchandise</option>
+                  {beerOptions.map((beer) => (
+                    <option key={beer.id} value={beer.id}>
+                      {beer.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="editor-actions" style={{ padding: "0 1.1rem 1rem" }}>
+              <div />
+              <div className="editor-actions-group">
+                <button type="button" className="editor-button editor-button-secondary" onClick={() => setModalRowId("")}>
+                  Annuleren
+                </button>
+                <button type="button" className="editor-button" onClick={() => void confirmSellableSku()} disabled={isSaving}>
+                  SKU maken
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 export function ProductenVerpakkingWorkspace({
   productie,
@@ -155,22 +438,9 @@ export function ProductenVerpakkingWorkspace({
 
       {activeTab === "verpakking" ? (
         <div className="content-card">
-          <DatasetTableEditor
-            endpoint="/data/packaging-components"
-            title="Verpakkingsonderdelen"
-            description="Onderdelen die je gebruikt in afvuleenheden en samengestelde artikelen (bijv. dop, doos, giftbox)."
-            columns={[
-              { key: "omschrijving", label: "Omschrijving", type: "text" },
-              { key: "beschikbaar_voor_samengesteld", label: "In samenstellingen", type: "checkbox", width: "170px" },
-              { key: "beschikbaar_voor_offertes", label: "In offertes", type: "checkbox", width: "140px" },
-            ]}
-            initialRows={Array.isArray(verpakkingsonderdelen) ? (verpakkingsonderdelen as any) : []}
-            addRowTemplate={{
-              id: "",
-              omschrijving: "",
-              beschikbaar_voor_samengesteld: true,
-              beschikbaar_voor_offertes: false,
-            }}
+          <PackagingComponentsEditor
+            rows={Array.isArray(verpakkingsonderdelen) ? (verpakkingsonderdelen as any) : []}
+            bieren={Array.isArray(bieren) ? (bieren as any) : []}
           />
         </div>
       ) : null}

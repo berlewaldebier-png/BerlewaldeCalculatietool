@@ -54,6 +54,11 @@ import { EigenProductieInputStep } from "@/components/berekeningen/steps/EigenPr
 import { SellableVariantsStep, type CostProductCandidate } from "@/components/berekeningen/steps/SellableVariantsStep";
 import { KoppelenStep } from "@/components/berekeningen/steps/KoppelenStep";
 import {
+  SupplierConfigStep,
+  applySupplierMetadataToRecord,
+  normalizeSupplierConfigState,
+} from "@/components/berekeningen/steps/SupplierConfigStep";
+import {
   buildWizardSteps,
   calculateEigenProductieKostenRecept,
   calculateEigenProductiePrijsPerEenheid,
@@ -62,7 +67,6 @@ import {
   calculateInkoopPrijsPerLiter,
   calculateVariabeleKostenPerLiter,
   createEmptyBerekening,
-  expandSelectedInkoopProductsToBasisproducten,
   getBerekeningProcessType,
   getDirecteVasteKostenPerLiter,
   getFactuurRegelAfvulkostenFust,
@@ -190,6 +194,7 @@ function createInvoiceVersionDraftFromSource(source: GenericRecord) {
   next.effectief_vanaf = "";
   next.brontype = "factuur";
   next.calculation_variant = "factuur";
+  next.is_test_version = true;
   next.bron_berekening_id = String((source as any)?.id ?? "");
   next.bron_id = String(factuur.id ?? "");
   next.versie_nummer = Number((source as any)?.versie_nummer ?? 0) || 0;
@@ -215,6 +220,7 @@ function createInvoiceVersionDraftFromSource(source: GenericRecord) {
     ...(((next as any).soort_berekening as GenericRecord | undefined) ?? {}),
     type: "Inkoop",
   };
+  applySupplierMetadataToRecord(next, normalizeSupplierConfigState({ ...source, cost_source: "purchase_invoice" }), "purchase_invoice");
   return normalizeBerekening(next);
 }
 
@@ -225,6 +231,7 @@ function createEmptyInvoiceVersionDraft() {
   next.status = "concept";
   next.brontype = "factuur";
   next.calculation_variant = "factuur";
+  next.is_test_version = true;
   next.bron_berekening_id = "";
   next.bron_id = String(factuur.id ?? "");
   next.created_at = nowIso;
@@ -232,6 +239,7 @@ function createEmptyInvoiceVersionDraft() {
   next.aangemaakt_op = nowIso;
   next.aangepast_op = nowIso;
   next.soort_berekening = { type: "Inkoop" };
+  applySupplierMetadataToRecord(next, normalizeSupplierConfigState({ cost_source: "purchase_invoice" }), "purchase_invoice");
   next.invoer = {
     inkoop: {
       factuurnummer: "",
@@ -481,6 +489,11 @@ export function BerekeningenWizard({
     rows.find((row) => String(row.id) === effectiveSelectedId) ?? rows[0] ?? createEmptyBerekening();
   const isEditingExisting = mode !== "invoice-version" && (!startWithNew || persistedIds.includes(effectiveSelectedId));
   const processType = getBerekeningProcessType(current);
+  const productionStatus = String(
+    (current as any)?.production_status ??
+      (((current as any)?.soort_berekening as GenericRecord | undefined)?.production_status ?? "")
+  ).trim();
+  const isPlannedRecipe = processType === "Eigen productie" && productionStatus === "planned_recipe";
   const stepsBase = buildWizardSteps(current);
   const isInvoiceVersionMode = mode === "invoice-version";
   const invoiceSourceRows = useMemo(
@@ -568,6 +581,15 @@ export function BerekeningenWizard({
     [current.id, kostprijsproductactiveringen]
   );
   const canDeleteCurrent = isEditingExisting && !isCurrentDefinitive && !isCurrentReferencedByActivation;
+  const currentSourceType = String((current as any)?.brontype ?? "").trim().toLowerCase();
+  const isTestVersion = Boolean((current as any)?.is_test_version);
+  // TODO: Remove temporary test-version rollback before production use.
+  const canDeleteTestVersion =
+    isEditingExisting &&
+    (canDeleteCurrent || (isTestVersion && isCurrentDefinitive)) &&
+    (currentSourceType === "factuur" ||
+      currentSourceType === "brouwmoment" ||
+      currentSourceType === "brew_moment");
   const pageHeader = useMemo(
     () => ({
       title: String((current.basisgegevens as GenericRecord)?.biernaam ?? "").trim() || "Nieuwe kostprijsberekening",
@@ -633,7 +655,6 @@ export function BerekeningenWizard({
       getProductDisplayName,
       calculateVariabeleKostenPerLiter,
       getSelectedInkoopProducts,
-      expandSelectedInkoopProductsToBasisproducten,
     });
   }
 
@@ -873,24 +894,26 @@ export function BerekeningenWizard({
         setStatusTone("error");
         return false;
       }
-      const sellableCoverage = buildSellableSkuOverview();
-      const missingSkuCount = sellableCoverage.filter((row) => row.missingSku).length;
-      const unmappedSkuCount = sellableCoverage.filter((row) => !row.missingSku && !row.mapped).length;
-      if (missingSkuCount > 0 || unmappedSkuCount > 0) {
-        setStatus(
-          `Afronden geblokkeerd: ${missingSkuCount} kostprijsproduct(en) missen nog een SKU en ${unmappedSkuCount} SKU('s) missen nog een Douano-koppeling. Controleer stap 5 en stap 6.`
-        );
-        setStatusTone("error");
-        return false;
+      if (!isPlannedRecipe) {
+        const sellableCoverage = buildSellableSkuOverview();
+        const missingSkuCount = sellableCoverage.filter((row) => row.missingSku).length;
+        const unmappedSkuCount = sellableCoverage.filter((row) => !row.missingSku && !row.mapped).length;
+        if (missingSkuCount > 0 || unmappedSkuCount > 0) {
+          setStatus(
+            `Afronden geblokkeerd: ${missingSkuCount} kostprijsproduct(en) missen nog een SKU en ${unmappedSkuCount} SKU('s) missen nog een Douano-koppeling. Controleer stap 5 en stap 6.`
+          );
+          setStatusTone("error");
+          return false;
+        }
       }
       const preparedStyle = prepareStyleForCurrent();
-      const firstTimeProductIds = buildFirstTimeActivationProductIds();
+      const firstTimeProductIds = isPlannedRecipe ? [] : buildFirstTimeActivationProductIds();
 
       const nowIso = new Date().toISOString();
       const nextCurrent = cloneRecord(current);
       syncPrimaryInkoopFactuur(nextCurrent);
-      nextCurrent.status = "definitief";
-      nextCurrent.finalized_at = nowIso;
+      nextCurrent.status = isPlannedRecipe ? "concept" : "definitief";
+      nextCurrent.finalized_at = isPlannedRecipe ? "" : nowIso;
       nextCurrent.updated_at = nowIso;
       nextCurrent.aangepast_op = nowIso;
       nextCurrent.bier_snapshot = cloneRecord((nextCurrent.basisgegevens as GenericRecord) ?? {});
@@ -912,8 +935,14 @@ export function BerekeningenWizard({
       onPersisted?.({
         id: String(current.id ?? ""),
         year: Number(((current.basisgegevens as GenericRecord)?.jaar ?? current.jaar ?? 0) || 0),
-        status: "definitief"
+        status: isPlannedRecipe ? "concept" : "definitief"
       });
+
+      if (isPlannedRecipe) {
+        setStatus("Geplande receptprijs opgeslagen. Maak later een brouwmoment om deze kostprijs operationeel te maken.");
+        setStatusTone("success");
+        return true;
+      }
 
       if (firstTimeProductIds.length > 0) {
         try {
@@ -1517,6 +1546,122 @@ export function BerekeningenWizard({
     );
   }
 
+  function currentCostSource() {
+    const brontype = String((current as any)?.brontype ?? "").trim().toLowerCase();
+    if (brontype === "factuur") return "purchase_invoice";
+    if (brontype === "brouwmoment" || brontype === "brew_moment") return "brew_moment";
+    if (brontype === "hercalculatie") return "recipe_recalculation";
+    if (isPlannedRecipe) return "recipe_estimate";
+    return processType === "Inkoop" ? "initial_calculation" : "recipe_recalculation";
+  }
+
+  function renderBrouwmomentStep() {
+    const basis = (current.basisgegevens as GenericRecord) ?? {};
+    const brouwmoment = ((current as any).brouwmoment as GenericRecord | undefined) ?? {};
+    const inkoop = (((current as any).invoer as GenericRecord | undefined)?.inkoop as GenericRecord | undefined) ?? {};
+    const lot = String((brouwmoment as any).lotnummer ?? (inkoop as any).lotnummer ?? "").trim();
+    const brouwdatum = String((brouwmoment as any).brouwdatum ?? (current as any).effectief_vanaf ?? "").slice(0, 10);
+
+    return (
+      <div className="wizard-stack">
+        <div className="stats-grid wizard-stats-grid">
+          <div className="stat-card">
+            <div className="stat-label">Bier</div>
+            <div className="stat-value small">{String((basis as any).biernaam ?? "-") || "-"}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Stijl</div>
+            <div className="stat-value small">{String((basis as any).stijl ?? "-") || "-"}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Bronversie</div>
+            <div className="stat-value small">{String((current as any).bron_berekening_label ?? (current as any).bron_berekening_id ?? "-") || "-"}</div>
+          </div>
+        </div>
+
+        <div className="wizard-form-grid">
+          <label className="nested-field">
+            <span>LOT nummer *</span>
+            <input
+              className="dataset-input"
+              value={lot}
+              onChange={(event) => {
+                const nextLot = event.target.value;
+                updateCurrent((draft) => {
+                  const nextBrouwmoment = (((draft as any).brouwmoment as GenericRecord | undefined) ?? {}) as GenericRecord;
+                  nextBrouwmoment.lotnummer = nextLot;
+                  (draft as any).brouwmoment = nextBrouwmoment;
+                  const invoer = (((draft as any).invoer as GenericRecord | undefined) ?? {}) as GenericRecord;
+                  const nextInkoop = ((invoer.inkoop as GenericRecord | undefined) ?? {}) as GenericRecord;
+                  nextInkoop.lotnummer = nextLot;
+                  const facturen = Array.isArray((nextInkoop as any).facturen)
+                    ? ((nextInkoop as any).facturen as GenericRecord[])
+                    : [];
+                  if (facturen.length === 0) {
+                    facturen.push({ id: createId(), factuurregels: [] });
+                  }
+                  (facturen[0] as GenericRecord).lotnummer = nextLot;
+                  nextInkoop.facturen = facturen;
+                  invoer.inkoop = nextInkoop;
+                  (draft as any).invoer = invoer;
+                });
+              }}
+              placeholder="Bijvoorbeeld P03270"
+            />
+          </label>
+          <label className="nested-field">
+            <span>Brouwdatum *</span>
+            <input
+              className="dataset-input"
+              type="date"
+              value={brouwdatum}
+              onChange={(event) => {
+                const nextDate = event.target.value;
+                updateCurrent((draft) => {
+                  const nextBrouwmoment = (((draft as any).brouwmoment as GenericRecord | undefined) ?? {}) as GenericRecord;
+                  nextBrouwmoment.brouwdatum = nextDate;
+                  (draft as any).brouwmoment = nextBrouwmoment;
+                  draft.effectief_vanaf = nextDate;
+                });
+              }}
+            />
+          </label>
+          <label className="nested-field">
+            <span>Notitie</span>
+            <input
+              className="dataset-input"
+              value={String((brouwmoment as any).notitie ?? "")}
+              onChange={(event) =>
+                updateCurrent((draft) => {
+                  const nextBrouwmoment = (((draft as any).brouwmoment as GenericRecord | undefined) ?? {}) as GenericRecord;
+                  nextBrouwmoment.notitie = event.target.value;
+                  (draft as any).brouwmoment = nextBrouwmoment;
+                })
+              }
+            />
+          </label>
+        </div>
+      </div>
+    );
+  }
+
+  function renderSupplierConfigStep() {
+    return (
+      <SupplierConfigStep
+        value={normalizeSupplierConfigState({
+          ...current,
+          cost_source: String((current as any)?.cost_source || currentCostSource()),
+        })}
+        productRows={buildCostProductCandidates()}
+        onChange={(next) => {
+          updateCurrent((draft) => {
+            applySupplierMetadataToRecord(draft, next, currentCostSource());
+          });
+        }}
+      />
+    );
+  }
+
   function renderSellableVariantsStep() {
     return (
       <SellableVariantsStep
@@ -1563,6 +1708,13 @@ export function BerekeningenWizard({
     );
   }
 
+  function isCostProductEnabled(productId: unknown) {
+    const id = String(productId ?? "").trim();
+    if (!id) return false;
+    if (!enabledFormatIdsForUi) return true;
+    return enabledFormatIdsForUi.includes(id);
+  }
+
   function buildCostProductCandidates(): CostProductCandidate[] {
     const snapshot = buildResultaatSnapshot(current);
     const rows = [
@@ -1591,6 +1743,7 @@ export function BerekeningenWizard({
     for (const row of rows) {
       const productId = String(row?.product_id ?? "").trim();
       if (!productId || seen.has(productId)) continue;
+      if (!isCostProductEnabled(productId)) continue;
       seen.add(productId);
       const productType = String(row?.product_type ?? "").trim().toLowerCase();
       const basisProduct = basisById.get(productId);
@@ -1690,6 +1843,8 @@ export function BerekeningenWizard({
         const skuId = String(sku?.id ?? "").trim();
         if (skuId && seenSkuIds.has(skuId)) return false;
         const kind = String(sku?.kind ?? "").trim().toLowerCase();
+        const productId = String(sku?.article_id || sku?.format_article_id || "").trim();
+        if (productId && !isCostProductEnabled(productId)) return false;
         return kind === "beer_format" || kind === "article";
       })
       .map((sku: any) => {
@@ -2035,6 +2190,19 @@ export function BerekeningenWizard({
   }
 
   function renderFinalSummaryStep() {
+    if (isPlannedRecipe) {
+      return (
+        <div className="wizard-stack">
+          <div className="module-card compact-card">
+            <div className="module-card-title">Geplande receptprijs</div>
+            <div className="module-card-text">
+              Deze kostprijs wordt opgeslagen als planning. Er wordt nog geen LOT vastgelegd en er worden geen SKU's of Douano-koppelingen verplicht gemaakt.
+            </div>
+          </div>
+          {renderSummaryStep()}
+        </div>
+      );
+    }
     const skuOverview = buildSellableSkuOverview();
     const variantCostRows = buildVariantCostRows();
     const variantVisibilityFallbackIds = variantCostRows.flatMap((row) => row.visibilityIds ?? []);
@@ -2192,10 +2360,12 @@ export function BerekeningenWizard({
     if (currentStep.id === "basis") return renderBasisStep();
     if (currentStep.id === "type") return renderTypeStep();
     if (currentStep.id === "classificeren") return renderClassificatieStep();
+    if (currentStep.id === "brouwmoment") return renderBrouwmomentStep();
     if (currentStep.id === "input") {
       const type = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
       return type === "Inkoop" ? renderInkoopInput() : renderEigenProductieInputModern();
     }
+    if (currentStep.id === "supplier") return renderSupplierConfigStep();
     if (currentStep.id === "facturen") return renderFacturenStep();
     if (currentStep.id === "kostprijs") return renderSummaryStep();
     if (currentStep.id === "varianten") return renderSellableVariantsStep();
@@ -2209,6 +2379,12 @@ export function BerekeningenWizard({
   const headerType = String(((current.soort_berekening as GenericRecord)?.type ?? "Eigen productie")).trim();
   const headerStatus = String(current.status ?? "concept");
   const headerActive = Boolean(current.is_actief);
+  const primaryActionLabel =
+    currentStep.id === "summary"
+      ? isPlannedRecipe
+        ? "Opslaan als gepland"
+        : "Afronden"
+      : "Volgende";
   return (
     <div className="cpq-root">
       <div className="cpq-frame">
@@ -2223,6 +2399,29 @@ export function BerekeningenWizard({
                 Terug
               </button>
             ) : null}
+            {canDeleteTestVersion ? (
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                disabled={isSaving}
+                onClick={() => {
+                  const label =
+                    currentSourceType === "factuur"
+                      ? "concept-inkoopfactuurversie"
+                      : "concept-brouwmoment";
+                  requestDelete(
+                    "Testversie verwijderen",
+                    `Weet je zeker dat je deze ${label} wilt verwijderen? Deze tijdelijke testversie wordt teruggedraaid. Als je deze versie al actief had gemaakt, activeer daarna de gewenste echte versie opnieuw.`,
+                    () => {
+                      void handleDeleteCurrent();
+                    }
+                  );
+                }}
+              >
+                Testversie verwijderen
+              </button>
+            ) : null}
+            {isTestVersion ? <span className="pill status-warning">TEST</span> : null}
             {isEditingExisting ? (
               <button
                 type="button"
@@ -2348,7 +2547,7 @@ export function BerekeningenWizard({
                           }}
                           disabled={isSaving}
                         >
-                          {isSaving ? "Opslaan..." : currentStep.id === "summary" ? "Afronden" : "Volgende"}
+                          {isSaving ? "Opslaan..." : primaryActionLabel}
                         </button>
                       </>
                     ) : (

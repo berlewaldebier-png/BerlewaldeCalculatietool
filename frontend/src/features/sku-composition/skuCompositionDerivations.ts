@@ -97,7 +97,7 @@ export function computeTotals(args: {
   let liters = 0;
   let cost = 0;
 
-  if (mode === "verkoopbaar" && sellableKind === "dienst") {
+  if (mode === "verkoopbaar" && sellableKind === "dienst" && composition.length === 0) {
     cost = Math.max(0, toNumber(manualRateEx, 0));
     return { liters: 0, cost, packagingCost: 0, totalCost: cost };
   }

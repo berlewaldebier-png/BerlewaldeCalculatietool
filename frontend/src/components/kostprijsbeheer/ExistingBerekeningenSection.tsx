@@ -8,6 +8,8 @@ export type ExistingBerekeningRow = {
   jaar: number | null;
   status: string;
   type: string;
+  sourceLabel: string;
+  supplierLabel: string;
   kostprijsPerLiter: number | null;
   ts: string;
 };
@@ -83,6 +85,7 @@ export function ExistingBerekeningenSection({
                 <th>Jaar</th>
                 <th>Status</th>
                 <th>Type</th>
+                <th>Leverancier</th>
                 <th>Kostprijs</th>
                 <th>Laatst gewijzigd</th>
                 <th />
@@ -96,6 +99,10 @@ export function ExistingBerekeningenSection({
                     <td>{row.jaar || "-"}</td>
                     <td>{row.status || "-"}</td>
                     <td>{row.type || "-"}</td>
+                    <td>
+                      <div>{row.supplierLabel || "-"}</div>
+                      <div className="module-card-text">{row.sourceLabel || "-"}</div>
+                    </td>
                     <td style={{ whiteSpace: "nowrap" }}>{row.kostprijsPerLiter == null ? "—" : formatEuro(row.kostprijsPerLiter)}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{row.ts || "-"}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
@@ -113,7 +120,7 @@ export function ExistingBerekeningenSection({
                 ))
               ) : (
                 <tr>
-                  <td className="dataset-empty" colSpan={7}>
+                  <td className="dataset-empty" colSpan={8}>
                     Geen berekeningen gevonden voor {selectedYear}.
                   </td>
                 </tr>

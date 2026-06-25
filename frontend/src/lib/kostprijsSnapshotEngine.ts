@@ -399,6 +399,7 @@ export function computeSummaryRows(params: {
   calcType?: KostprijsCalcType;
   productieYear?: any;
   includePackagingCosts: boolean;
+  includeExciseCosts?: boolean;
   packagingCost: (productId: string, productType: ProductType, year: number) => number;
   litersPerUnit: (productId: string, productType: ProductType, year: number) => number;
   productLabel: (product: GenericRecord) => string;
@@ -418,6 +419,7 @@ export function computeSummaryRows(params: {
     calcType,
     productieYear,
     includePackagingCosts,
+    includeExciseCosts = true,
     packagingCost,
     litersPerUnit,
     productLabel
@@ -427,13 +429,15 @@ export function computeSummaryRows(params: {
     const productId = String((product as any)?.id ?? "");
     const label = productLabel(product);
     const liters = Number(litersPerUnit(productId, productType, year) ?? 0) || 0;
-    const accijns = computeAccijnsForLiters({
-      year,
-      liters,
-      basisgegevens,
-      bierSnapshot,
-      tarievenHeffingenRow
-    });
+    const accijns = includeExciseCosts
+      ? computeAccijnsForLiters({
+          year,
+          liters,
+          basisgegevens,
+          bierSnapshot,
+          tarievenHeffingenRow
+        })
+      : 0;
     const manufacturingPerLiter = overheadPerLiter?.manufacturingPerLiter ?? fixedCostPerLiter;
     const businessPerLiter = overheadPerLiter?.businessPerLiter ?? 0;
     const manufacturingOverhead = manufacturingPerLiter * liters;
@@ -526,6 +530,7 @@ export function computeResultaatSnapshot(params: {
   basisRows: SummaryInputRow[];
   samengRows: SummaryInputRow[];
   includePackagingCosts: boolean;
+  includeExciseCosts?: boolean;
   packagingCost: (productId: string, productType: ProductType, year: number) => number;
   litersPerUnit: (productId: string, productType: ProductType, year: number) => number;
   productLabel: (product: GenericRecord) => string;
@@ -547,6 +552,7 @@ export function computeResultaatSnapshot(params: {
     basisRows,
     samengRows,
     includePackagingCosts,
+    includeExciseCosts = true,
     packagingCost,
     litersPerUnit,
     productLabel
@@ -567,6 +573,7 @@ export function computeResultaatSnapshot(params: {
     calcType,
     productieYear,
     includePackagingCosts,
+    includeExciseCosts,
     packagingCost,
     litersPerUnit,
     productLabel
@@ -586,6 +593,7 @@ export function computeResultaatSnapshot(params: {
     calcType,
     productieYear,
     includePackagingCosts,
+    includeExciseCosts,
     packagingCost,
     litersPerUnit,
     productLabel

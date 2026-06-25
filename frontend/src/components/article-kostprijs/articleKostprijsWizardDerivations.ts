@@ -214,22 +214,24 @@ export function buildBomCostLines(args: {
       const label = text((componentSku as any)?.name) || componentSkuId;
       const activeVid = activeVersionIdBySku.get(componentSkuId) ?? "";
       const version = activeVid ? versionById.get(activeVid) ?? null : null;
-      if (!activeVid || !version) warnings.push("Geen actieve kostprijs gevonden voor component.");
+      const skuArticleId = text((componentSku as any)?.article_id);
+      const componentPrice = skuArticleId ? packagingPriceById.get(skuArticleId) : undefined;
+      if ((!activeVid || !version) && componentPrice === undefined) warnings.push("Geen actieve kostprijs gevonden voor component.");
       const snap = findSnapshotRowForSku({ version, skuId: componentSkuId, skuById }) ?? {};
 
-      const productkosten = toNumber(
+      const productkosten = componentPrice !== undefined ? componentPrice : toNumber(
         (snap as any).inkoop ?? (snap as any).primaire_kosten ?? (snap as any).variabele_kosten,
         0
       );
-      const verpakkingskosten = toNumber((snap as any).verpakkingskosten, 0);
-      const opslag = toNumber(
+      const verpakkingskosten = componentPrice !== undefined ? 0 : toNumber((snap as any).verpakkingskosten, 0);
+      const opslag = componentPrice !== undefined ? 0 : toNumber(
         (snap as any).vaste_kosten ??
           (snap as any).vaste_directe_kosten ??
           (snap as any).indirecte_kosten,
         0
       );
-      const accijns = toNumber((snap as any).accijns, 0);
-      const kostprijs = toNumber(
+      const accijns = componentPrice !== undefined ? 0 : toNumber((snap as any).accijns, 0);
+      const kostprijs = componentPrice !== undefined ? componentPrice : toNumber(
         (snap as any).kostprijs,
         productkosten + verpakkingskosten + opslag + accijns
       );
@@ -304,12 +306,14 @@ export function summarizeBomCostLines(args: { bomCostLines: BomCostLine[]; selec
     accijnzen += line.accijnzen;
     warnings.push(...line.warnings);
     if (line.componentSkuId) {
-      componentVersionRefs.push({
-        componentSkuId: line.componentSkuId,
-        componentLabel: line.label,
-        quantity: line.qty,
-        activeVersionId: line.activeVersionId ?? "",
-      });
+      if (line.activeVersionId) {
+        componentVersionRefs.push({
+          componentSkuId: line.componentSkuId,
+          componentLabel: line.label,
+          quantity: line.qty,
+          activeVersionId: line.activeVersionId,
+        });
+      }
     }
     compositionSnapshot.push({
       type: line.componentSkuId ? "sku" : line.componentArticleId ? "packaging" : "unknown",

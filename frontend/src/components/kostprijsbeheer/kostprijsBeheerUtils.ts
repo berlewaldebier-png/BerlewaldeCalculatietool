@@ -55,6 +55,28 @@ export function buildVersionLabel(version: GenericRecord | undefined) {
   return parts.join(" - ");
 }
 
+export function buildCostSourceLabel(version: GenericRecord | undefined) {
+  const source = String((version as any)?.cost_source ?? "").trim();
+  if (source === "purchase_invoice") return "Inkoopfactuur";
+  if (source === "brew_moment") return "Brouwmoment";
+  if (source === "recipe_recalculation") return "Recept/hercalculatie";
+  if (source === "initial_calculation") return "Initiële kostprijs";
+  const type = String((version as any)?.type ?? "").trim().toLowerCase();
+  if (type === "inkoop") return "Inkoopfactuur";
+  if (type === "hercalculatie") return "Recept/hercalculatie";
+  return source || "-";
+}
+
+export function buildSupplierLabel(version: GenericRecord | undefined) {
+  const supplierName = String(
+    (version as any)?.supplier_name ??
+      ((version as any)?.supplier && typeof (version as any).supplier === "object" ? (version as any).supplier.name : "") ??
+      (version as any)?.leverancier ??
+      ""
+  ).trim();
+  return supplierName || "-";
+}
+
 export function parseSortTimestamp(value: unknown) {
   const text = String(value ?? "").trim();
   if (!text) return 0;
