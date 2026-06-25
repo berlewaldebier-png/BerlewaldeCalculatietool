@@ -1,7 +1,6 @@
 import Link from "next/link";
 
 import { DataQualityIntegrationWorkspace } from "@/components/beheer/DataQualityIntegrationWorkspace";
-import { LotKostenWorkspace } from "@/components/lot-kosten/LotKostenWorkspace";
 import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
 import { OrsDistanceRunner } from "@/components/instellingen/OrsDistanceRunner";
@@ -72,7 +71,7 @@ export default async function ApiIntegratiesPage({ searchParams }: { searchParam
   return (
     <PageShell
       title="Datakwaliteit & integratie"
-      subtitle="Doorloop Douano sync, productkoppeling, LOT-dekking en kostprijsdekking als een begeleide flow."
+      subtitle="Werkvoorraad voor Douano data, productkoppelingen, LOT-dekking en kostprijsbronnen."
       activePath="/beheer"
       navigation={navigation}
     >
@@ -143,7 +142,6 @@ export default async function ApiIntegratiesPage({ searchParams }: { searchParam
               </div>
             </SectionCard>
 
-            <LotKostenWorkspace skus={skus} articles={articles} />
             <CostpriceModelWorkspace />
 
             <SectionCard title="Gebruikte aanroepen" description="Interne endpoints voor de Douano OAuth flow en technische diagnose.">

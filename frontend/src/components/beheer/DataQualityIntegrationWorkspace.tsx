@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -12,81 +11,24 @@ import { DouanoUnmappedRulesCard } from "@/components/DouanoUnmappedRulesCard";
 import { LotKostenWorkspace } from "@/components/lot-kosten/LotKostenWorkspace";
 import { SkuSearchSelect } from "@/components/SkuSearchSelect";
 import { WizardSteps } from "@/components/WizardSteps";
-
-type GenericRecord = Record<string, any>;
-
-type SetupCheck = {
-  id: string;
-  label: string;
-  done: boolean;
-  current: number;
-  total: number;
-  missing: GenericRecord[];
-  group?: string;
-  description?: string;
-  href?: string;
-};
-
-type SetupStatus = {
-  year: number;
-  can_complete: boolean;
-  mode: string;
-  summary: GenericRecord;
-  checks: SetupCheck[];
-};
-
-type StepKey = "overview" | "sync" | "lots" | "exceptions" | "advanced";
-
-type StepDefinition = {
-  id: StepKey;
-  title: string;
-  description: string;
-};
-
-const STEPS: StepDefinition[] = [
-  {
-    id: "overview",
-    title: "Overzicht",
-    description: "Stoplicht voor margeanalyse",
-  },
-  {
-    id: "sync",
-    title: "Basisdata",
-    description: "Douano data ophalen",
-  },
-  {
-    id: "lots",
-    title: "LOT & kostprijs",
-    description: "Omzetregels oplossen",
-  },
-  {
-    id: "exceptions",
-    title: "Uitvalregels",
-    description: "Regels buiten de berekening",
-  },
-  {
-    id: "advanced",
-    title: "Geavanceerd",
-    description: "Technische status en fallback",
-  },
-];
-
-const API_RESOURCES = [
-  { id: "companies", label: "Companies" },
-  { id: "products", label: "Products" },
-  { id: "sales_orders", label: "Sales orders" },
-  { id: "sales_invoices", label: "Invoices" },
-  { id: "stock_history_lots", label: "Stock-history LOTs" },
-];
-
-type SyncStateItem = {
-  resource: string;
-  last_success_at?: string;
-  last_since_date?: string;
-  last_error?: string;
-  stats?: GenericRecord;
-  updated_at?: string;
-};
+import {
+  ApiRunStatusTable,
+  CheckGrid,
+  DATA_QUALITY_WORKSTREAMS,
+  ReliabilityBanner,
+  WorkstreamIntro,
+  YearSelector,
+  checkById,
+  defaultHistoricalDate,
+  hasMissing,
+  missingRowKey,
+  readDataSet,
+  rowMatchPayload,
+  skuLabel,
+  valuePreview,
+  type GenericRecord,
+  type SetupStatus,
+} from "@/components/beheer/data-quality/DataQualityWorkbenchParts";
 
 type ClassificationOption = {
   id: string;
@@ -95,126 +37,6 @@ type ClassificationOption = {
   active?: boolean;
   allowed_product_groups?: string[];
 };
-
-function pct(check: SetupCheck) {
-  if (!check.total) return check.done ? 100 : 0;
-  return Math.max(0, Math.min(100, Math.round((Number(check.current || 0) / Number(check.total || 1)) * 100)));
-}
-
-function statusLabel(check: SetupCheck) {
-  if (check.done) return "ok";
-  if (check.current > 0) return "actie nodig";
-  return "niet gestart";
-}
-
-function valuePreview(row: GenericRecord) {
-  const parts = [
-    row.douano_name || row.product_name,
-    row.sku_id,
-    row.sku_code || row.sku,
-    row.lot_number,
-    row.transaction_number,
-    row.oorzaak,
-    row.cost_status,
-    row.douano_product_id,
-    row.actie,
-    row.regels ? `${row.regels} regels` : "",
-  ]
-    .map((value) => String(value ?? "").trim())
-    .filter(Boolean);
-  return parts.length ? parts.join(" - ") : JSON.stringify(row);
-}
-
-function missingRowKey(row: GenericRecord) {
-  const match = rowMatchPayload(row);
-  return `${match.match_type}:${match.douano_product_id}:${match.line_description}`;
-}
-
-function searchableMissingRowText(row: GenericRecord) {
-  return [
-    valuePreview(row),
-    row.douano_name,
-    row.product_name,
-    row.sku_id,
-    row.sku_code,
-    row.sku,
-    row.lot_number,
-    row.transaction_number,
-    row.oorzaak,
-    row.cost_status,
-    row.douano_product_id,
-  ]
-    .map((value) => String(value ?? "").toLowerCase())
-    .join(" ");
-}
-
-function checkById(status: SetupStatus, ids: string[]) {
-  return ids.map((id) => status.checks.find((check) => check.id === id)).filter(Boolean) as SetupCheck[];
-}
-
-function qualityChecks(status: SetupStatus) {
-  return checkById(status, [
-    "douano_products",
-    "sales_invoices",
-    "product_mappings",
-    "stock_history_sync",
-    "stock_history_lots",
-    "sales_rows_cost_source",
-  ]);
-}
-
-function hasMissing(checks: SetupCheck[]) {
-  return checks.some((check) => Array.isArray(check.missing) && check.missing.length > 0);
-}
-
-function flowHref(href?: string) {
-  if (!href) return "";
-  if (href === "/beheer/productkoppelingen") return "/beheer/productkoppeling";
-  if (href === "/instellingen/kostprijsbeheer") return "/nieuwe-kostprijsberekening";
-  return href;
-}
-
-function StatusPill({ check }: { check: SetupCheck }) {
-  const ok = Boolean(check.done);
-  return <span className={`status-pill ${ok ? "status-ok" : "status-warning"}`}>{statusLabel(check)}</span>;
-}
-
-function rowMatchPayload(row: GenericRecord) {
-  const douanoProductId = Number(row.douano_product_id ?? 0) || 0;
-  if (douanoProductId > 0) {
-    return {
-      match_type: "douano_product_id",
-      douano_product_id: douanoProductId,
-      line_description: "",
-    };
-  }
-  return {
-    match_type: "product0_description",
-    douano_product_id: 0,
-    line_description: String(row.douano_name || row.product_name || "").trim(),
-  };
-}
-
-function skuLabel(row: GenericRecord) {
-  const name = String(row.name || row.sku_name || "").trim();
-  const code = String(row.code || row.sku || "").trim();
-  return [name, code].filter(Boolean).join(" - ") || String(row.id || "");
-}
-
-function defaultHistoricalDate(year: number) {
-  const safeYear = Number(year || new Date().getFullYear()) || new Date().getFullYear();
-  return `${safeYear}-01-01`;
-}
-
-async function readDataSet<T = GenericRecord>(name: string): Promise<T[]> {
-  const response = await fetch(`/api/data/${encodeURIComponent(name)}`, { cache: "no-store", credentials: "include" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(String((payload as any)?.detail || response.statusText));
-  if (Array.isArray(payload)) return payload as T[];
-  if (Array.isArray((payload as any)?.items)) return (payload as any).items as T[];
-  if (Array.isArray((payload as any)?.data)) return (payload as any).data as T[];
-  return [];
-}
 
 function CostSourceRowAction({
   row,
@@ -710,385 +532,6 @@ function CostSourceRowAction({
   );
 }
 
-function CheckCard({ check, onOpenMissing }: { check: SetupCheck; onOpenMissing: (id: string) => void }) {
-  const href = flowHref(check.href);
-  return (
-    <div className="module-card compact-card">
-      <div className="module-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <div className="module-card-title">{check.label}</div>
-          {check.description ? <div className="module-card-text">{check.description}</div> : null}
-        </div>
-        <StatusPill check={check} />
-      </div>
-      <div style={{ display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontWeight: 800 }}>
-          <span>
-            {check.current} / {check.total}
-          </span>
-          <span>{pct(check)}%</span>
-        </div>
-        <div className="progress-track">
-          <div className="progress-fill" style={{ width: `${pct(check)}%` }} />
-        </div>
-        <div className="editor-actions" style={{ marginTop: 2 }}>
-          <div className="editor-actions-group">
-            {href ? (
-              <Link className="editor-button editor-button-secondary" href={href as any}>
-                Open
-              </Link>
-            ) : null}
-            {check.missing?.length ? (
-              <button type="button" className="editor-button editor-button-secondary" onClick={() => onOpenMissing(check.id)}>
-                Bekijk {check.missing.length}
-              </button>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MissingPanel({
-  checks,
-  openId,
-  setOpenId,
-  skus,
-  year,
-}: {
-  checks: SetupCheck[];
-  openId: string;
-  setOpenId: (id: string) => void;
-  skus: GenericRecord[];
-  year: number;
-}) {
-  const [search, setSearch] = useState("");
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
-  const openCheck = checks.find((check) => check.id === openId);
-  if (!openCheck || !openCheck.missing?.length) return null;
-  const rows = Array.isArray(openCheck.missing) ? openCheck.missing : [];
-  const query = search.trim().toLowerCase();
-  const filteredRows = query ? rows.filter((row) => searchableMissingRowText(row).includes(query)) : rows;
-  const visibleKeys = filteredRows.map(missingRowKey);
-  const selectedSet = new Set(selectedKeys);
-  const selectedRows = rows.filter((row) => selectedSet.has(missingRowKey(row)));
-  const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedSet.has(key));
-
-  function toggleVisibleRows(checked: boolean) {
-    setSelectedKeys((current) => {
-      const next = new Set(current);
-      for (const key of visibleKeys) {
-        if (checked) next.add(key);
-        else next.delete(key);
-      }
-      return Array.from(next);
-    });
-  }
-
-  function toggleRow(row: GenericRecord, checked: boolean) {
-    const key = missingRowKey(row);
-    setSelectedKeys((current) => {
-      const next = new Set(current);
-      if (checked) next.add(key);
-      else next.delete(key);
-      return Array.from(next);
-    });
-  }
-
-  return (
-    <section className="module-card compact-card">
-      <div className="module-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <div className="module-card-title">Ontbrekend: {openCheck.label}</div>
-          <div className="module-card-text">Deze regels houden de datakwaliteit nog tegen.</div>
-        </div>
-        <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenId("")}>
-          Sluiten
-        </button>
-      </div>
-      {openCheck.id === "sales_rows_cost_source" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) auto", gap: 12, alignItems: "center", marginBottom: 12 }}>
-          <input
-            className="editor-input"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Zoek op product, SKU, LOT, transactie of oorzaak"
-          />
-          <span className="status-pill">{selectedRows.length ? `${selectedRows.length} geselecteerd` : `${filteredRows.length} zichtbaar`}</span>
-        </div>
-      ) : null}
-      <div className="data-table">
-        <table>
-          {openCheck.id === "sales_rows_cost_source" ? (
-            <thead>
-              <tr>
-                <th style={{ width: 44 }}>
-                  <input
-                    type="checkbox"
-                    aria-label="Selecteer zichtbare regels"
-                    checked={allVisibleSelected}
-                    onChange={(event) => toggleVisibleRows(event.target.checked)}
-                  />
-                </th>
-                <th>Regel</th>
-                <th style={{ width: 56, textAlign: "right" }}>Actie</th>
-              </tr>
-            </thead>
-          ) : null}
-          <tbody>
-            {filteredRows.map((row, index) => (
-              <tr key={`${openCheck.id}-${index}`}>
-                {openCheck.id === "sales_rows_cost_source" ? (
-                  <td style={{ width: 44 }}>
-                    <input
-                      type="checkbox"
-                      aria-label="Selecteer regel"
-                      checked={selectedSet.has(missingRowKey(row))}
-                      onChange={(event) => toggleRow(row, event.target.checked)}
-                    />
-                  </td>
-                ) : null}
-                <td>{valuePreview(row)}</td>
-                {openCheck.id === "sales_rows_cost_source" ? (
-                  <td style={{ width: 56, textAlign: "right" }}>
-                    <CostSourceRowAction row={row} scopeRows={selectedRows} skus={skus} year={year} />
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function CheckGrid({
-  checks,
-  openId,
-  setOpenId,
-  skus,
-  year,
-}: {
-  checks: SetupCheck[];
-  openId: string;
-  setOpenId: (id: string) => void;
-  skus: GenericRecord[];
-  year: number;
-}) {
-  return (
-    <div className="wizard-stack">
-      <div className="home-grid">
-        {checks.map((check) => (
-          <CheckCard key={check.id} check={check} onOpenMissing={(id) => setOpenId(openId === id ? "" : id)} />
-        ))}
-      </div>
-      <MissingPanel checks={checks} openId={openId} setOpenId={setOpenId} skus={skus} year={year} />
-    </div>
-  );
-}
-
-function SummaryMetric({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="stat-card">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value small">{value}</div>
-    </div>
-  );
-}
-
-function formatDateTime(value?: string) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("nl-NL");
-}
-
-function syncDelta(stats?: GenericRecord) {
-  if (!stats) return "-";
-  const values = [
-    ["opgehaald", stats.fetched],
-    ["opgeslagen", stats.saved],
-    ["upserted", stats.upserted],
-    ["regels", stats.lines],
-    ["zonder LOT", stats.missing_lot],
-  ]
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
-    .map(([label, value]) => `${label}: ${Number(value) || 0}`);
-  return values.length ? values.join(" / ") : "-";
-}
-
-function ApiRunStatusTable() {
-  const [items, setItems] = useState<SyncStateItem[]>([]);
-  const [error, setError] = useState("");
-
-  async function load() {
-    setError("");
-    try {
-      const response = await fetch("/api/integrations/douano/sync-status", { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(String(payload?.detail ?? response.statusText));
-      setItems(Array.isArray(payload?.items) ? payload.items : []);
-    } catch (err) {
-      setItems([]);
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  const byResource = useMemo(() => {
-    const map = new Map<string, SyncStateItem>();
-    items.forEach((item) => {
-      const key = String(item?.resource ?? "").trim();
-      if (key) map.set(key, item);
-    });
-    return map;
-  }, [items]);
-
-  return (
-    <section className="module-card">
-      <div className="module-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <div className="module-card-title">API runs</div>
-          <div className="module-card-text">
-            Laatste Douano sync per bron. De kolom delta toont de laatst bekende run-statistiek; echte verschilmeting tussen runs vraagt nog runhistorie.
-          </div>
-        </div>
-        <button type="button" className="editor-button editor-button-secondary" onClick={() => void load()}>
-          Ververs
-        </button>
-      </div>
-      {error ? (
-        <div className="placeholder-block">
-          <strong>API status niet beschikbaar</strong>
-          {error}
-        </div>
-      ) : null}
-      <div className="data-table">
-        <table>
-          <thead>
-            <tr>
-              <th>API</th>
-              <th>Status</th>
-              <th>Laatst succes</th>
-              <th>Since</th>
-              <th>Delta laatste run</th>
-              <th>Laatste fout</th>
-            </tr>
-          </thead>
-          <tbody>
-            {API_RESOURCES.map((resource) => {
-              const row = byResource.get(resource.id);
-              const ok = Boolean(row?.last_success_at && !String(row?.last_error ?? "").trim());
-              return (
-                <tr key={resource.id}>
-                  <td>{resource.label}</td>
-                  <td>
-                    <span className={`status-pill ${ok ? "status-ok" : "status-warning"}`}>{ok ? "gedraaid" : "niet gedraaid"}</span>
-                  </td>
-                  <td>{formatDateTime(row?.last_success_at)}</td>
-                  <td>{row?.last_since_date || "-"}</td>
-                  <td>{syncDelta(row?.stats)}</td>
-                  <td>{row?.last_error || "-"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function YearSelector({ status }: { status: SetupStatus }) {
-  const currentYear = Number(status.year || new Date().getFullYear());
-  const productionYears = Array.isArray(status.summary.production_years)
-    ? status.summary.production_years.map((value: unknown) => Number(value)).filter((value: number) => Number.isFinite(value) && value > 0)
-    : [];
-  const years = Array.from(new Set([...productionYears, currentYear])).sort((a, b) => b - a);
-  return (
-    <section className="module-card compact-card">
-      <div className="module-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
-        <div>
-          <div className="module-card-title">Productiejaar</div>
-          <div className="module-card-text">Datakwaliteit controleert Omzet & Marge voor het geselecteerde jaar.</div>
-        </div>
-        <select
-          className="editor-input"
-          value={String(currentYear)}
-          onChange={(event) => {
-            const nextYear = event.target.value;
-            const url = new URL(window.location.href);
-            url.searchParams.set("year", nextYear);
-            window.location.href = url.toString();
-          }}
-          style={{ maxWidth: 220 }}
-        >
-          {years.map((year) => (
-            <option key={year} value={year}>
-              {year}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="editor-actions" style={{ marginTop: 10 }}>
-        <div className="editor-actions-group">
-          {years.map((year) => (
-            <Link
-              key={year}
-              href={`/beheer/api?year=${year}` as any}
-              className={`status-pill ${year === currentYear ? (status.can_complete ? "status-ok" : "status-warning") : "pill"}`}
-            >
-              {year}{year === currentYear ? ` - ${status.can_complete ? "ok" : "controle"}` : ""}
-            </Link>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ReliabilityBanner({ status }: { status: SetupStatus }) {
-  const checks = qualityChecks(status);
-  const blockers = checks.filter((check) => !check.done);
-  return (
-    <section className="module-card">
-      <div className="module-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-        <div>
-          <div className="module-card-title">Margeanalyse betrouwbaar: {status.can_complete ? "ja" : "nee"}</div>
-          <div className="module-card-text">
-            De flow controleert of Douano data, productkoppelingen, LOTs en kostprijsbronnen compleet genoeg zijn voor Omzet & Marge.
-          </div>
-        </div>
-        <span className={`status-pill ${status.can_complete ? "status-ok" : "status-warning"}`}>
-          {status.can_complete ? "klaar" : `${blockers.length} acties`}
-        </span>
-      </div>
-      <div className="stats-grid wizard-stats-grid" style={{ marginBottom: 0 }}>
-        <SummaryMetric label="Douano producten" value={status.summary.douano_products ?? 0} />
-        <SummaryMetric label="Verkochte producten gekoppeld" value={`${status.summary.sold_products_mapped ?? 0}/${status.summary.sold_products ?? 0}`} />
-        <SummaryMetric label="LOT regels zonder LOT" value={status.summary.sales_lot_without_lot ?? 0} />
-        <SummaryMetric
-          label="SKU-regels met kostprijsbron"
-          value={`${status.summary.sales_rows_sku_with_cost_source ?? 0}/${status.summary.sales_rows_sku_total ?? 0}`}
-        />
-        <SummaryMetric
-          label="Niet-SKU regels gecategoriseerd"
-          value={`${status.summary.sales_rows_non_sku_categorized ?? 0}/${status.summary.sales_rows_non_sku_total ?? 0}`}
-        />
-        <SummaryMetric
-          label="Verkoopregels verwerkt"
-          value={`${status.summary.sales_rows_processed ?? status.summary.sales_rows_with_cost_source ?? 0}/${status.summary.sales_rows_total ?? status.summary.sales_rows_cost_source_total ?? 0}`}
-        />
-      </div>
-    </section>
-  );
-}
-
 export function DataQualityIntegrationWorkspace({
   initialStatus,
   skus,
@@ -1103,39 +546,69 @@ export function DataQualityIntegrationWorkspace({
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [openMissingId, setOpenMissingId] = useState("");
 
-  const activeStep = STEPS[activeStepIndex] ?? STEPS[0];
+  const activeStep = DATA_QUALITY_WORKSTREAMS[activeStepIndex] ?? DATA_QUALITY_WORKSTREAMS[0];
   const overviewChecks = useMemo(() => checkById(initialStatus, ["product_mappings", "stock_history_lots", "sales_rows_cost_source"]), [initialStatus]);
   const syncChecks = useMemo(() => checkById(initialStatus, ["douano_products", "sales_invoices", "stock_history_sync"]), [initialStatus]);
   const productChecks = useMemo(() => checkById(initialStatus, ["product_mappings"]), [initialStatus]);
-  const lotChecks = useMemo(() => checkById(initialStatus, ["stock_history_lots", "sales_rows_cost_source"]), [initialStatus]);
+  const costSourceChecks = useMemo(() => checkById(initialStatus, ["sales_rows_cost_source"]), [initialStatus]);
+  const lotChecks = useMemo(() => checkById(initialStatus, ["stock_history_lots"]), [initialStatus]);
   const exceptionChecks = useMemo(
-    () => [...productChecks, ...lotChecks].filter((check, index, rows) => rows.findIndex((row) => row.id === check.id) === index),
-    [lotChecks, productChecks]
+    () => checkById(initialStatus, ["sales_rows_cost_source"]),
+    [initialStatus]
   );
+
+  function renderCostSourceRowAction(row: GenericRecord, scopeRows: GenericRecord[]) {
+    return <CostSourceRowAction row={row} scopeRows={scopeRows} skus={skus} year={initialStatus.year} />;
+  }
 
   function renderStepBody() {
     if (activeStep.id === "overview") {
       return (
         <div className="wizard-stack">
+          <WorkstreamIntro step={activeStep} />
           <YearSelector status={initialStatus} />
           <ReliabilityBanner status={initialStatus} />
-          <section>
-            <div className="module-card-title" style={{ marginBottom: 8 }}>Resultaten om op te lossen</div>
-            <div className="module-card-text" style={{ marginBottom: 12 }}>
-              Deze kaarten tonen alleen wat Omzet & Marge voor dit jaar onbetrouwbaar maakt.
-            </div>
-          </section>
-          <CheckGrid checks={overviewChecks} openId={openMissingId} setOpenId={setOpenMissingId} skus={skus} year={initialStatus.year} />
+          <CheckGrid
+            checks={overviewChecks}
+            openId={openMissingId}
+            setOpenId={setOpenMissingId}
+            renderRowAction={renderCostSourceRowAction}
+            title="Blokkeert margeanalyse"
+            description="Deze kaarten tonen alleen wat Omzet & Marge voor dit jaar onbetrouwbaar maakt."
+          />
         </div>
       );
     }
 
-    if (activeStep.id === "sync") {
+    if (activeStep.id === "products") {
       return (
         <div className="wizard-stack">
-          <ApiRunStatusTable />
-          <CheckGrid checks={syncChecks} openId={openMissingId} setOpenId={setOpenMissingId} skus={skus} year={initialStatus.year} />
-          <DouanoSyncPanel />
+          <WorkstreamIntro step={activeStep} />
+          <CheckGrid
+            checks={productChecks}
+            openId={openMissingId}
+            setOpenId={setOpenMissingId}
+            renderRowAction={renderCostSourceRowAction}
+            title="Productkoppelingen"
+            description="Verkochte Douano producten moeten naar een interne SKU wijzen voordat kostprijs en rapportage betrouwbaar zijn."
+          />
+          <DouanoProductMappingCard />
+        </div>
+      );
+    }
+
+    if (activeStep.id === "cost_sources") {
+      return (
+        <div className="wizard-stack">
+          <WorkstreamIntro step={activeStep} />
+          <CheckGrid
+            checks={costSourceChecks}
+            openId={openMissingId}
+            setOpenId={setOpenMissingId}
+            renderRowAction={renderCostSourceRowAction}
+            title="Verkoopregels zonder kostprijsbron"
+            description="Los regels op via SKU-koppeling, historische kostprijs, LOT alias of een expliciete categorie zonder kostprijs."
+          />
         </div>
       );
     }
@@ -1143,7 +616,15 @@ export function DataQualityIntegrationWorkspace({
     if (activeStep.id === "lots") {
       return (
         <div className="wizard-stack">
-          <CheckGrid checks={lotChecks} openId={openMissingId} setOpenId={setOpenMissingId} skus={skus} year={initialStatus.year} />
+          <WorkstreamIntro step={activeStep} />
+          <CheckGrid
+            checks={lotChecks}
+            openId={openMissingId}
+            setOpenId={setOpenMissingId}
+            renderRowAction={renderCostSourceRowAction}
+            title="LOT-dekking verkoopregels"
+            description="Bier-SKU's moeten een bruikbare LOT-route hebben. Geschenkverpakkingen gebruiken de kostprijs uit hun samenstelling."
+          />
           <LotKostenWorkspace skus={skus} articles={articles} year={initialStatus.year} />
         </div>
       );
@@ -1152,23 +633,55 @@ export function DataQualityIntegrationWorkspace({
     if (activeStep.id === "exceptions") {
       return (
         <div className="wizard-stack">
+          <WorkstreamIntro step={activeStep} />
           {hasMissing(exceptionChecks) ? (
-            <CheckGrid checks={exceptionChecks} openId={openMissingId} setOpenId={setOpenMissingId} skus={skus} year={initialStatus.year} />
-          ) : null}
-          <DouanoProductMappingCard />
+            <CheckGrid
+              checks={exceptionChecks}
+              openId={openMissingId}
+              setOpenId={setOpenMissingId}
+              renderRowAction={renderCostSourceRowAction}
+              title="Nog te categoriseren uitzonderingen"
+              description="Regels die buiten de normale SKU/LOT-route lopen moeten expliciet verklaard zijn."
+            />
+          ) : (
+            <div className="placeholder-block">Geen openstaande uitzonderingen voor het geselecteerde jaar.</div>
+          )}
           <DouanoUnmappedRulesCard initialYear={initialStatus.year} />
         </div>
       );
     }
 
-    return <div className="wizard-stack">{advanced}</div>;
+    if (activeStep.id === "api") {
+      return (
+        <div className="wizard-stack">
+          <WorkstreamIntro step={activeStep} />
+          <ApiRunStatusTable />
+          <CheckGrid
+            checks={syncChecks}
+            openId={openMissingId}
+            setOpenId={setOpenMissingId}
+            renderRowAction={renderCostSourceRowAction}
+            title="Sync voorwaarden"
+            description="Deze checks laten zien of de benodigde Douano bronnen recent genoeg gevuld zijn."
+          />
+          <DouanoSyncPanel />
+        </div>
+      );
+    }
+
+    return (
+      <div className="wizard-stack">
+        <WorkstreamIntro step={activeStep} />
+        {advanced}
+      </div>
+    );
   }
 
   return (
     <div className="cpq-shell data-quality-shell">
       <WizardSteps
-        title="Datakwaliteit"
-        steps={STEPS.map((step) => ({
+        title="Werkstromen"
+        steps={DATA_QUALITY_WORKSTREAMS.map((step) => ({
           id: step.id,
           title: step.title,
           description: step.description,
@@ -1183,35 +696,11 @@ export function DataQualityIntegrationWorkspace({
         <div className="wizard-step-card wizard-step-stage-card">
           <div className="wizard-step-header">
             <div className="wizard-step-title">
-              Stap {activeStepIndex + 1}: {activeStep.title}
+              {activeStep.title}
             </div>
             <div className="wizard-step-description">{activeStep.description}</div>
           </div>
           <div className="wizard-step-body">{renderStepBody()}</div>
-          <div className="wizard-footer-actions">
-            <button
-              type="button"
-              className="editor-button editor-button-secondary"
-              onClick={() => {
-                setOpenMissingId("");
-                setActiveStepIndex((index) => Math.max(0, index - 1));
-              }}
-              disabled={activeStepIndex === 0}
-            >
-              Vorige
-            </button>
-            <button
-              type="button"
-              className="editor-button"
-              onClick={() => {
-                setOpenMissingId("");
-                setActiveStepIndex((index) => Math.min(STEPS.length - 1, index + 1));
-              }}
-              disabled={activeStepIndex >= STEPS.length - 1}
-            >
-              Volgende
-            </button>
-          </div>
         </div>
       </div>
     </div>
