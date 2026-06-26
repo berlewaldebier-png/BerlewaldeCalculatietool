@@ -89,3 +89,13 @@ export const STEP_HELP: Record<WorkstreamKey, { title: string; description: stri
     outcome: "Alleen gebruiken voor diagnose, configuratie of uitzonderlijke onderhoudsacties.",
   },
 };
+
+export const DATA_QUALITY_CHECK_GROUPS: Record<WorkstreamKey, string[]> = {
+  overview: ["product_mappings", "stock_history_lots", "sales_rows_cost_source"],
+  products: ["product_mappings"],
+  cost_sources: ["sales_rows_cost_source"],
+  lots: ["stock_history_lots"],
+  exceptions: ["sales_rows_cost_source"],
+  api: ["douano_products", "sales_invoices", "stock_history_sync"],
+  advanced: [],
+};

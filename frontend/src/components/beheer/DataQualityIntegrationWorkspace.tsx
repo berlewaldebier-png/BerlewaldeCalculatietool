@@ -10,6 +10,7 @@ import { CostSourceRowAction } from "@/components/beheer/data-quality/CostSource
 import {
   ApiRunStatusTable,
   CheckGrid,
+  DATA_QUALITY_CHECK_GROUPS,
   DATA_QUALITY_WORKSTREAMS,
   ReliabilityBanner,
   WorkstreamIntro,
@@ -35,15 +36,12 @@ export function DataQualityIntegrationWorkspace({
   const [openMissingId, setOpenMissingId] = useState("");
 
   const activeStep = DATA_QUALITY_WORKSTREAMS[activeStepIndex] ?? DATA_QUALITY_WORKSTREAMS[0];
-  const overviewChecks = useMemo(() => checkById(initialStatus, ["product_mappings", "stock_history_lots", "sales_rows_cost_source"]), [initialStatus]);
-  const syncChecks = useMemo(() => checkById(initialStatus, ["douano_products", "sales_invoices", "stock_history_sync"]), [initialStatus]);
-  const productChecks = useMemo(() => checkById(initialStatus, ["product_mappings"]), [initialStatus]);
-  const costSourceChecks = useMemo(() => checkById(initialStatus, ["sales_rows_cost_source"]), [initialStatus]);
-  const lotChecks = useMemo(() => checkById(initialStatus, ["stock_history_lots"]), [initialStatus]);
-  const exceptionChecks = useMemo(
-    () => checkById(initialStatus, ["sales_rows_cost_source"]),
-    [initialStatus]
-  );
+  const checksByWorkstream = useMemo(() => {
+    return DATA_QUALITY_WORKSTREAMS.reduce((acc, step) => {
+      acc[step.id] = checkById(initialStatus, DATA_QUALITY_CHECK_GROUPS[step.id] ?? []);
+      return acc;
+    }, {} as Record<(typeof DATA_QUALITY_WORKSTREAMS)[number]["id"], ReturnType<typeof checkById>>);
+  }, [initialStatus]);
 
   function renderCostSourceRowAction(row: GenericRecord, scopeRows: GenericRecord[]) {
     return <CostSourceRowAction row={row} scopeRows={scopeRows} skus={skus} year={initialStatus.year} />;
@@ -57,7 +55,7 @@ export function DataQualityIntegrationWorkspace({
           <YearSelector status={initialStatus} />
           <ReliabilityBanner status={initialStatus} />
           <CheckGrid
-            checks={overviewChecks}
+            checks={checksByWorkstream.overview}
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
@@ -73,7 +71,7 @@ export function DataQualityIntegrationWorkspace({
         <div className="wizard-stack">
           <WorkstreamIntro step={activeStep} />
           <CheckGrid
-            checks={productChecks}
+            checks={checksByWorkstream.products}
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
@@ -90,7 +88,7 @@ export function DataQualityIntegrationWorkspace({
         <div className="wizard-stack">
           <WorkstreamIntro step={activeStep} />
           <CheckGrid
-            checks={costSourceChecks}
+            checks={checksByWorkstream.cost_sources}
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
@@ -106,7 +104,7 @@ export function DataQualityIntegrationWorkspace({
         <div className="wizard-stack">
           <WorkstreamIntro step={activeStep} />
           <CheckGrid
-            checks={lotChecks}
+            checks={checksByWorkstream.lots}
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
@@ -122,9 +120,9 @@ export function DataQualityIntegrationWorkspace({
       return (
         <div className="wizard-stack">
           <WorkstreamIntro step={activeStep} />
-          {hasMissing(exceptionChecks) ? (
+          {hasMissing(checksByWorkstream.exceptions) ? (
             <CheckGrid
-              checks={exceptionChecks}
+              checks={checksByWorkstream.exceptions}
               openId={openMissingId}
               setOpenId={setOpenMissingId}
               renderRowAction={renderCostSourceRowAction}
@@ -145,7 +143,7 @@ export function DataQualityIntegrationWorkspace({
           <WorkstreamIntro step={activeStep} />
           <ApiRunStatusTable />
           <CheckGrid
-            checks={syncChecks}
+            checks={checksByWorkstream.api}
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
