@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { SkuSearchSelect } from "@/components/SkuSearchSelect";
 import {
   defaultHistoricalDate,
   missingRowKey,
@@ -22,6 +21,13 @@ import {
   markRowsNoCostRequired,
   type ClassificationOption,
 } from "@/components/beheer/data-quality/costSourceActions";
+import {
+  CostSourceActionSelect,
+  HistoricalCostFields,
+  InternalLotFields,
+  MapToSkuFields,
+  type CostSourceActionKind,
+} from "@/components/beheer/data-quality/CostSourceActionFields";
 
 export function CostSourceRowAction({
   row,
@@ -36,7 +42,7 @@ export function CostSourceRowAction({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [action, setAction] = useState<"map_to_sku" | "no_cost_required" | "lot_alias" | "internal_lot" | "historical_cost">("map_to_sku");
+  const [action, setAction] = useState<CostSourceActionKind>("map_to_sku");
   const [selectedSkuId, setSelectedSkuId] = useState("");
   const [modalSkus, setModalSkus] = useState<GenericRecord[]>(skus);
   const [productGroup, setProductGroup] = useState("");
@@ -267,123 +273,51 @@ export function CostSourceRowAction({
               </button>
             </div>
             <div className="cpq-modal-body">
-              <label className="field-label">
-                Actie
-                <select className="editor-input" value={action} onChange={(event) => setAction(event.target.value as any)}>
-                  <option value="map_to_sku">Koppel aan SKU</option>
-                  {canAddHistoricalCost ? <option value="historical_cost">Kostprijs toevoegen</option> : null}
-                  {!isBulkAction ? <option value="internal_lot">Koppel aan interne LOT</option> : null}
-                  {!isBulkAction ? <option value="lot_alias">Koppel LOT alias</option> : null}
-                  <option value="no_cost_required">Geen kostprijs nodig</option>
-                </select>
-              </label>
+              <CostSourceActionSelect
+                action={action}
+                canAddHistoricalCost={canAddHistoricalCost}
+                isBulkAction={isBulkAction}
+                onChange={setAction}
+              />
               {action === "map_to_sku" ? (
-                <>
-                  <label className="field-label">
-                    SKU
-                    <SkuSearchSelect
-                      className="editor-input"
-                      value={selectedSkuId}
-                      placeholder="Zoek SKU"
-                      options={skuOptions}
-                      onChange={(nextSkuId) => {
-                        setSelectedSkuId(nextSkuId);
-                        applySkuDefaults(nextSkuId);
-                      }}
-                    />
-                  </label>
-                  <label className="field-label">
-                    Productgroep
-                    <select className="editor-input" value={productGroup} onChange={(event) => setProductGroup(event.target.value)}>
-                      <option value="">Kies productgroep</option>
-                      {activeProductGroups.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field-label">
-                    Alcohol
-                    <select
-                      className="editor-input"
-                      value={alcoholCategory}
-                      onChange={(event) => setAlcoholCategory(event.target.value)}
-                      disabled={productGroup !== "drank" && productGroup !== "giftset"}
-                    >
-                      <option value="">-</option>
-                      {activeAlcoholCategories.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field-label">
-                    Verpakkingstype
-                    <select className="editor-input" value={packagingType} onChange={(event) => setPackagingType(event.target.value)}>
-                      <option value="">Kies verpakkingstype</option>
-                      {activePackagingTypes.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
+                <MapToSkuFields
+                  selectedSkuId={selectedSkuId}
+                  skuOptions={skuOptions}
+                  productGroup={productGroup}
+                  alcoholCategory={alcoholCategory}
+                  packagingType={packagingType}
+                  productGroups={activeProductGroups}
+                  alcoholCategories={activeAlcoholCategories}
+                  packagingTypes={activePackagingTypes}
+                  onSkuChange={(nextSkuId) => {
+                    setSelectedSkuId(nextSkuId);
+                    applySkuDefaults(nextSkuId);
+                  }}
+                  onProductGroupChange={setProductGroup}
+                  onAlcoholCategoryChange={setAlcoholCategory}
+                  onPackagingTypeChange={setPackagingType}
+                />
               ) : null}
               {action === "lot_alias" || action === "internal_lot" ? (
-                <label className="field-label">
-                  Interne LOT
-                  <select className="editor-input" value={selectedInternalLot} onChange={(event) => setSelectedInternalLot(event.target.value)}>
-                    <option value="">Kies interne LOT</option>
-                    {internalLotOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  {action === "internal_lot" ? (
-                    <span className="module-card-text">
-                      Gebruik dit voor verkoopregels zonder Douano LOT. De gekozen interne LOT wordt expliciet op deze productregel toegepast.
-                    </span>
-                  ) : null}
-                </label>
+                <InternalLotFields
+                  action={action}
+                  selectedInternalLot={selectedInternalLot}
+                  internalLotOptions={internalLotOptions}
+                  onChange={setSelectedInternalLot}
+                />
               ) : null}
               {action === "historical_cost" ? (
-                <>
-                  <label className="field-label">
-                    Interne SKU
-                    <input className="editor-input" value={String(row.sku_id || selectedSkuId || "")} readOnly />
-                  </label>
-                  <label className="field-label">
-                    Inkoopprijs per eenheid
-                    <input
-                      className="editor-input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={historicalCost}
-                      onChange={(event) => setHistoricalCost(event.target.value)}
-                      placeholder="Bijvoorbeeld 66.20"
-                    />
-                  </label>
-                  <label className="field-label">
-                    Actief sinds
-                    <input className="editor-input" type="date" value={historicalDate} onChange={(event) => setHistoricalDate(event.target.value)} />
-                  </label>
-                  <label className="field-label">
-                    Leverancier / bron
-                    <input className="editor-input" value={historicalSupplier} onChange={(event) => setHistoricalSupplier(event.target.value)} />
-                  </label>
-                  <label className="field-label">
-                    Notitie
-                    <input className="editor-input" value={historicalNote} onChange={(event) => setHistoricalNote(event.target.value)} />
-                  </label>
-                  <span className="module-card-text">
-                    Gebruik dit alleen voor bekende verkoopbare SKU's zonder Douano LOT en zonder bestaande kostprijs. De app maakt een historische kostprijsversie aan en telt overhead en accijns automatisch op bij de inkoopprijs.
-                  </span>
-                </>
+                <HistoricalCostFields
+                  skuId={String(row.sku_id || selectedSkuId || "")}
+                  historicalCost={historicalCost}
+                  historicalDate={historicalDate}
+                  historicalSupplier={historicalSupplier}
+                  historicalNote={historicalNote}
+                  onHistoricalCostChange={setHistoricalCost}
+                  onHistoricalDateChange={setHistoricalDate}
+                  onHistoricalSupplierChange={setHistoricalSupplier}
+                  onHistoricalNoteChange={setHistoricalNote}
+                />
               ) : null}
               {status ? <div className="editor-status">{status}</div> : null}
             </div>
