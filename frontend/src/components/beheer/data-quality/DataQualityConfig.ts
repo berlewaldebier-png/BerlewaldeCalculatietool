@@ -4,32 +4,32 @@ export const DATA_QUALITY_WORKSTREAMS: WorkstreamDefinition[] = [
   {
     id: "overview",
     title: "Overzicht",
-    description: "Werkvoorraad en betrouwbaarheid",
+    description: "Wat blokkeert margeanalyse",
   },
   {
     id: "products",
     title: "Producten & SKU's",
-    description: "Douano koppelen aan intern",
+    description: "Verkochte producten koppelen",
   },
   {
     id: "cost_sources",
     title: "Kostprijsbronnen",
-    description: "Verkoopregels verwerkbaar maken",
+    description: "Regels verwerkbaar maken",
   },
   {
     id: "lots",
     title: "LOT-register",
-    description: "Interne en Douano LOTs",
+    description: "LOTs en aliases beheren",
   },
   {
     id: "exceptions",
     title: "Uitvalregels",
-    description: "Bewuste uitzonderingen",
+    description: "Niet-SKU omzet categoriseren",
   },
   {
     id: "advanced",
-    title: "Geavanceerd",
-    description: "Technische status en fallback",
+    title: "Onderhoud",
+    description: "Diagnose en hulpfuncties",
   },
 ];
 
@@ -43,10 +43,10 @@ export const API_RESOURCES = [
 
 export const STEP_HELP: Record<WorkstreamKey, { title: string; description: string; outcome: string }> = {
   overview: {
-    title: "Datakwaliteit workbench",
+    title: "Datakwaliteit",
     description:
-      "Dit scherm is geen lineaire wizard. Het toont welke werkvoorraad nog voorkomt dat Omzet & Marge betrouwbaar is voor het gekozen jaar.",
-    outcome: "Doel: alle blokkerende kaarten op ok, met zichtbare acties voor wat nog open staat.",
+      "Hier zie je welke werkvoorraad nog voorkomt dat Omzet & Marge betrouwbaar is voor het gekozen jaar.",
+    outcome: "Alle blokkerende kaarten staan op ok, of hebben een duidelijke actie.",
   },
   products: {
     title: "Producten en SKU's",
@@ -73,7 +73,7 @@ export const STEP_HELP: Record<WorkstreamKey, { title: string; description: stri
     outcome: "Elke uitzondering moet expliciet gecategoriseerd zijn, zodat niets stilletjes uit de margeanalyse verdwijnt.",
   },
   advanced: {
-    title: "Geavanceerd beheer",
+    title: "Onderhoud",
     description: "Technische controles en onderhoudstools die niet in de dagelijkse datakwaliteit-flow horen.",
     outcome: "Alleen gebruiken voor diagnose, configuratie of uitzonderlijke onderhoudsacties.",
   },

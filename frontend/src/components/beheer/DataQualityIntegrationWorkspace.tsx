@@ -40,6 +40,16 @@ export function DataQualityIntegrationWorkspace({
       return acc;
     }, {} as Record<(typeof DATA_QUALITY_WORKSTREAMS)[number]["id"], ReturnType<typeof checkById>>);
   }, [initialStatus]);
+  const tabBadges = useMemo(() => {
+    return DATA_QUALITY_WORKSTREAMS.reduce((acc, step) => {
+      const checks = checksByWorkstream[step.id] ?? [];
+      const open = checks.filter((check) => !check.done).length;
+      acc[step.id] = open > 0
+        ? { label: String(open), tone: "warning" as const }
+        : { label: "ok", tone: checks.length > 0 ? ("ok" as const) : ("neutral" as const) };
+      return acc;
+    }, {} as Record<(typeof DATA_QUALITY_WORKSTREAMS)[number]["id"], { label: string; tone: "ok" | "warning" | "neutral" }>);
+  }, [checksByWorkstream]);
   const sectionCopy = DATA_QUALITY_SECTION_COPY[activeStep.id];
 
   function renderCostSourceRowAction(row: GenericRecord, scopeRows: GenericRecord[]) {
@@ -138,19 +148,20 @@ export function DataQualityIntegrationWorkspace({
       <DataQualityTabs
         steps={DATA_QUALITY_WORKSTREAMS}
         activeIndex={activeStepIndex}
+        badges={tabBadges}
         onSelect={(index) => {
           setOpenMissingId("");
           setActiveStepIndex(index);
         }}
       />
-      <div className="wizard-step-card wizard-step-stage-card">
-        <div className="wizard-step-header">
-          <div className="wizard-step-title">
+      <div className="data-quality-panel">
+        <div className="data-quality-panel-header">
+          <div className="data-quality-panel-title">
             {activeStep.title}
           </div>
-          <div className="wizard-step-description">{sectionCopy?.description ?? activeStep.description}</div>
+          <div className="data-quality-panel-description">{sectionCopy?.description ?? activeStep.description}</div>
         </div>
-        <div className="wizard-step-body">{renderStepBody()}</div>
+        <div className="data-quality-panel-body">{renderStepBody()}</div>
       </div>
     </div>
   );

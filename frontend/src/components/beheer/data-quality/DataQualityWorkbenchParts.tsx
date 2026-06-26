@@ -143,7 +143,7 @@ export function WorkstreamIntro({ step }: { step: WorkstreamDefinition }) {
         <div className="module-card-title">{help.title}</div>
         <div className="module-card-text">{help.description}</div>
         <div className="module-card-text">
-          <strong>Uitkomst:</strong> {help.outcome}
+          <strong>Resultaat:</strong> {help.outcome}
         </div>
       </div>
     </section>
