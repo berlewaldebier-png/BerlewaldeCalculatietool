@@ -3,254 +3,53 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { API_BASE_URL } from "@/lib/api";
+import { API_RESOURCES, STEP_HELP } from "@/components/beheer/data-quality/DataQualityConfig";
+import {
+  flowHref,
+  formatDateTime,
+  missingRowKey,
+  pct,
+  qualityChecks,
+  searchableMissingRowText,
+  statusLabel,
+  syncDelta,
+  valuePreview,
+} from "@/components/beheer/data-quality/DataQualityHelpers";
+import type {
+  GenericRecord,
+  RowActionRenderer,
+  SetupCheck,
+  SetupStatus,
+  SyncStateItem,
+  WorkstreamDefinition,
+} from "@/components/beheer/data-quality/DataQualityTypes";
 
-export type GenericRecord = Record<string, any>;
-
-export type SetupCheck = {
-  id: string;
-  label: string;
-  done: boolean;
-  current: number;
-  total: number;
-  missing: GenericRecord[];
-  group?: string;
-  description?: string;
-  href?: string;
-};
-
-export type SetupStatus = {
-  year: number;
-  can_complete: boolean;
-  mode: string;
-  summary: GenericRecord;
-  checks: SetupCheck[];
-};
-
-export type WorkstreamKey = "overview" | "products" | "cost_sources" | "lots" | "exceptions" | "api" | "advanced";
-
-export type WorkstreamDefinition = {
-  id: WorkstreamKey;
-  title: string;
-  description: string;
-};
-
-export type RowActionRenderer = (row: GenericRecord, scopeRows: GenericRecord[]) => ReactNode;
-
-export const DATA_QUALITY_WORKSTREAMS: WorkstreamDefinition[] = [
-  {
-    id: "overview",
-    title: "Overzicht",
-    description: "Werkvoorraad en betrouwbaarheid",
-  },
-  {
-    id: "products",
-    title: "Producten & SKU's",
-    description: "Douano koppelen aan intern",
-  },
-  {
-    id: "cost_sources",
-    title: "Kostprijsbronnen",
-    description: "Verkoopregels verwerkbaar maken",
-  },
-  {
-    id: "lots",
-    title: "LOT-register",
-    description: "Interne en Douano LOTs",
-  },
-  {
-    id: "exceptions",
-    title: "Uitvalregels",
-    description: "Bewuste uitzonderingen",
-  },
-  {
-    id: "api",
-    title: "API-status",
-    description: "Sync runs en delta's",
-  },
-  {
-    id: "advanced",
-    title: "Geavanceerd",
-    description: "Technische status en fallback",
-  },
-];
-
-const API_RESOURCES = [
-  { id: "companies", label: "Companies" },
-  { id: "products", label: "Products" },
-  { id: "sales_orders", label: "Sales orders" },
-  { id: "sales_invoices", label: "Invoices" },
-  { id: "stock_history_lots", label: "Stock-history LOTs" },
-];
-
-const STEP_HELP: Record<WorkstreamKey, { title: string; description: string; outcome: string }> = {
-  overview: {
-    title: "Datakwaliteit workbench",
-    description:
-      "Dit scherm is geen lineaire wizard. Het toont welke werkvoorraad nog voorkomt dat Omzet & Marge betrouwbaar is voor het gekozen jaar.",
-    outcome: "Doel: alle blokkerende kaarten op ok, met zichtbare acties voor wat nog open staat.",
-  },
-  products: {
-    title: "Producten en SKU's",
-    description:
-      "Hier los je Douano producten op die nog niet naar een interne SKU wijzen. Douano blijft de bron voor verkochte producten; de app gebruikt de interne SKU voor kostprijs en rapportage.",
-    outcome: "Na oplossen verdwijnen nieuwe/onbekende producten uit de werkvoorraad en kunnen verkoopregels naar kostprijsbronnen zoeken.",
-  },
-  cost_sources: {
-    title: "Kostprijsbronnen",
-    description:
-      "Hier los je verkoopregels op die nog geen bruikbare kostprijsbron hebben. Denk aan SKU koppelen, historische kostprijs toevoegen, LOT alias koppelen of bewust geen kostprijs nodig.",
-    outcome: "Na opslaan worden alleen de geraakte snapshots ververst en hoort de rij uit de blokkade te verdwijnen.",
-  },
-  lots: {
-    title: "LOT-register",
-    description:
-      "Hier beheer je de relatie tussen interne LOTs uit kostprijzen/inkoopfacturen/opening voorraad en externe Douano LOTs. Matching is jaaroverstijgend; het jaar bepaalt alleen urgentie.",
-    outcome: "Exacte matches en expliciete aliases zorgen dat Omzet & Marge de juiste kostprijsversie gebruikt.",
-  },
-  exceptions: {
-    title: "Uitvalregels en bewuste uitzonderingen",
-    description:
-      "Hier staan regels die niet via de normale bier/SKU/LOT-route lopen, zoals afrondingen, diensten, giftsets en overige omzetregels.",
-    outcome: "Elke uitzondering moet expliciet gecategoriseerd zijn, zodat niets stilletjes uit de margeanalyse verdwijnt.",
-  },
-  api: {
-    title: "API-status",
-    description:
-      "Hier zie je de technische Douano runs en kun je syncs starten. Datakwaliteit zelf gebruikt vooral de laatste run en de nieuwe delta's.",
-    outcome: "Na nieuwe API-runs ontstaan alleen nieuwe issues; bestaande expliciete oplossingen blijven staan.",
-  },
-  advanced: {
-    title: "Geavanceerd beheer",
-    description: "Technische controles, verbindingen en fallback-tools die niet in de dagelijkse datakwaliteit-flow horen.",
-    outcome: "Alleen gebruiken voor diagnose, configuratie of uitzonderlijke onderhoudsacties.",
-  },
-};
-
-type SyncStateItem = {
-  resource: string;
-  last_success_at?: string;
-  last_since_date?: string;
-  last_error?: string;
-  stats?: GenericRecord;
-  updated_at?: string;
-};
-
-export function pct(check: SetupCheck) {
-  if (!check.total) return check.done ? 100 : 0;
-  return Math.max(0, Math.min(100, Math.round((Number(check.current || 0) / Number(check.total || 1)) * 100)));
-}
-
-export function statusLabel(check: SetupCheck) {
-  if (check.done) return "ok";
-  if (check.current > 0) return "actie nodig";
-  return "niet gestart";
-}
-
-export function valuePreview(row: GenericRecord) {
-  const parts = [
-    row.douano_name || row.product_name,
-    row.sku_id,
-    row.sku_code || row.sku,
-    row.lot_number,
-    row.transaction_number,
-    row.oorzaak,
-    row.cost_status,
-    row.douano_product_id,
-    row.actie,
-    row.regels ? `${row.regels} regels` : "",
-  ]
-    .map((value) => String(value ?? "").trim())
-    .filter(Boolean);
-  return parts.length ? parts.join(" - ") : JSON.stringify(row);
-}
-
-export function rowMatchPayload(row: GenericRecord) {
-  const douanoProductId = Number(row.douano_product_id ?? 0) || 0;
-  if (douanoProductId > 0) {
-    return {
-      match_type: "douano_product_id",
-      douano_product_id: douanoProductId,
-      line_description: "",
-    };
-  }
-  return {
-    match_type: "product0_description",
-    douano_product_id: 0,
-    line_description: String(row.douano_name || row.product_name || "").trim(),
-  };
-}
-
-export function missingRowKey(row: GenericRecord) {
-  const match = rowMatchPayload(row);
-  return `${match.match_type}:${match.douano_product_id}:${match.line_description}`;
-}
-
-export function searchableMissingRowText(row: GenericRecord) {
-  return [
-    valuePreview(row),
-    row.douano_name,
-    row.product_name,
-    row.sku_id,
-    row.sku_code,
-    row.sku,
-    row.lot_number,
-    row.transaction_number,
-    row.oorzaak,
-    row.cost_status,
-    row.douano_product_id,
-  ]
-    .map((value) => String(value ?? "").toLowerCase())
-    .join(" ");
-}
-
-export function checkById(status: SetupStatus, ids: string[]) {
-  return ids.map((id) => status.checks.find((check) => check.id === id)).filter(Boolean) as SetupCheck[];
-}
-
-export function qualityChecks(status: SetupStatus) {
-  return checkById(status, [
-    "douano_products",
-    "sales_invoices",
-    "product_mappings",
-    "stock_history_sync",
-    "stock_history_lots",
-    "sales_rows_cost_source",
-  ]);
-}
-
-export function hasMissing(checks: SetupCheck[]) {
-  return checks.some((check) => Array.isArray(check.missing) && check.missing.length > 0);
-}
-
-export function flowHref(href?: string) {
-  if (!href) return "";
-  if (href === "/beheer/productkoppelingen") return "/beheer/productkoppeling";
-  if (href === "/instellingen/kostprijsbeheer") return "/nieuwe-kostprijsberekening";
-  return href;
-}
-
-export function skuLabel(row: GenericRecord) {
-  const name = String(row.name || row.sku_name || "").trim();
-  const code = String(row.code || row.sku || "").trim();
-  return [name, code].filter(Boolean).join(" - ") || String(row.id || "");
-}
-
-export function defaultHistoricalDate(year: number) {
-  const safeYear = Number(year || new Date().getFullYear()) || new Date().getFullYear();
-  return `${safeYear}-01-01`;
-}
-
-export async function readDataSet<T = GenericRecord>(name: string): Promise<T[]> {
-  const response = await fetch(`/api/data/${encodeURIComponent(name)}`, { cache: "no-store", credentials: "include" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(String((payload as any)?.detail || response.statusText));
-  if (Array.isArray(payload)) return payload as T[];
-  if (Array.isArray((payload as any)?.items)) return (payload as any).items as T[];
-  if (Array.isArray((payload as any)?.data)) return (payload as any).data as T[];
-  return [];
-}
-
+export { DATA_QUALITY_WORKSTREAMS } from "@/components/beheer/data-quality/DataQualityConfig";
+export {
+  checkById,
+  defaultHistoricalDate,
+  flowHref,
+  formatDateTime,
+  hasMissing,
+  missingRowKey,
+  pct,
+  qualityChecks,
+  readDataSet,
+  rowMatchPayload,
+  searchableMissingRowText,
+  skuLabel,
+  statusLabel,
+  syncDelta,
+  valuePreview,
+} from "@/components/beheer/data-quality/DataQualityHelpers";
+export type {
+  GenericRecord,
+  RowActionRenderer,
+  SetupCheck,
+  SetupStatus,
+  WorkstreamDefinition,
+  WorkstreamKey,
+} from "@/components/beheer/data-quality/DataQualityTypes";
 export function StatusPill({ check }: { check: SetupCheck }) {
   const ok = Boolean(check.done);
   return <span className={`status-pill ${ok ? "status-ok" : "status-warning"}`}>{statusLabel(check)}</span>;
@@ -450,27 +249,6 @@ export function SummaryMetric({ label, value }: { label: string; value: ReactNod
       <div className="stat-value small">{value}</div>
     </div>
   );
-}
-
-function formatDateTime(value?: string) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("nl-NL");
-}
-
-function syncDelta(stats?: GenericRecord) {
-  if (!stats) return "-";
-  const values = [
-    ["opgehaald", stats.fetched],
-    ["opgeslagen", stats.saved],
-    ["upserted", stats.upserted],
-    ["regels", stats.lines],
-    ["zonder LOT", stats.missing_lot],
-  ]
-    .filter(([, value]) => value !== undefined && value !== null && value !== "")
-    .map(([label, value]) => `${label}: ${Number(value) || 0}`);
-  return values.length ? values.join(" / ") : "-";
 }
 
 export function ApiRunStatusTable() {
