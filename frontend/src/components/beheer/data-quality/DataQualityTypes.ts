@@ -22,7 +22,7 @@ export type SetupStatus = {
   checks: SetupCheck[];
 };
 
-export type WorkstreamKey = "overview" | "products" | "cost_sources" | "lots" | "exceptions" | "api" | "advanced";
+export type WorkstreamKey = "overview" | "products" | "cost_sources" | "lots" | "exceptions" | "advanced";
 
 export type WorkstreamDefinition = {
   id: WorkstreamKey;

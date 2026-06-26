@@ -170,10 +170,19 @@ const SEARCH_INDEX: SearchIndexEntry[] = [
     id: "setting-api",
     type: "setting",
     title: "Beheer > Datakwaliteit",
-    subtitle: "Douano sync, productkoppeling en LOT-dekking",
+    subtitle: "Productkoppeling, LOT-dekking en kostprijsbronnen",
     meta: "Instellingen",
     href: "/beheer/api",
-    keywords: ["api", "integratie", "integraties", "datakwaliteit", "douano", "lot", "productkoppeling", "beheer"]
+    keywords: ["datakwaliteit", "douano", "lot", "productkoppeling", "kostprijsbron", "beheer"]
+  },
+  {
+    id: "setting-api-integratie",
+    type: "setting",
+    title: "Beheer > API-integratie",
+    subtitle: "Douano verbinding, sync-runs en technische status",
+    meta: "Instellingen",
+    href: "/beheer/api-integratie",
+    keywords: ["api", "integratie", "integraties", "douano", "sync", "stock history", "orders", "invoices", "beheer"]
   },
   {
     id: "help-manual",

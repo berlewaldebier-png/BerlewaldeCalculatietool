@@ -3739,6 +3739,53 @@ a {
   font-weight: 700;
 }
 
+.data-quality-shell {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.data-quality-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.data-quality-tab {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 150px;
+  max-width: 220px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.75rem 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.data-quality-tab span {
+  font-weight: 900;
+}
+
+.data-quality-tab small {
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.data-quality-tab:hover,
+.data-quality-tab.active {
+  border-color: var(--btn-primary-border);
+  background: var(--btn-secondary-bg);
+}
+
 .editor-status.success {
   color: var(--status-success-text);
   background: var(--status-success-bg);

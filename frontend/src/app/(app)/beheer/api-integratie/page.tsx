@@ -1,0 +1,152 @@
+import Link from "next/link";
+
+import { CompanyDistanceOverview } from "@/components/beheer/CompanyDistanceOverview";
+import { ApiRunStatusTable } from "@/components/beheer/data-quality/ApiRunStatusTable";
+import { DouanoSyncPanel } from "@/components/DouanoSyncPanel";
+import { OrsDistanceRunner } from "@/components/instellingen/OrsDistanceRunner";
+import { PageShell } from "@/components/PageShell";
+import { SectionCard } from "@/components/SectionCard";
+import { apiGetServer, getBootstrap } from "@/lib/apiServer";
+
+type DouanoStatus = {
+  connected: boolean;
+  provider?: string;
+  base_url?: string;
+  scope?: string;
+  token_type?: string;
+  expires_at?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+function formatDate(value?: string) {
+  if (!value) return "-";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value;
+  return dt.toLocaleString("nl-NL");
+}
+
+export default async function ApiIntegratiePage() {
+  const bootstrap = await getBootstrap(["auth-status"], true, "/beheer/api-integratie");
+  const navigation = bootstrap.navigation ?? [];
+
+  let douano: DouanoStatus | null = null;
+  let douanoError = "";
+  try {
+    douano = await apiGetServer<DouanoStatus>("/integrations/douano/status", "/beheer/api-integratie");
+  } catch (error) {
+    douanoError = error instanceof Error ? error.message : "Kon Douano status niet laden.";
+  }
+
+  const calls = [
+    { name: "Connect", method: "GET", path: "/api/integrations/douano/connect", note: "Start OAuth2 authorization code flow." },
+    { name: "Callback", method: "GET", path: "/api/integrations/douano/callback", note: "Ontvangt code en wisselt token(s) om." },
+    { name: "Status", method: "GET", path: "/api/integrations/douano/status", note: "Toont verbinding en token-metadata (zonder tokens)." },
+    { name: "Companies (discover)", method: "GET", path: "/api/integrations/douano/discover-companies", note: "Probeert bekende paden om customers endpoint te vinden." },
+    { name: "HTTP debug", method: "GET", path: "/api/integrations/douano/debug?path=/api", note: "Debug helper om te zien of je een HTML pagina of API JSON raakt." },
+  ];
+
+  return (
+    <PageShell
+      title="API-integratie"
+      subtitle="Technische Douano verbinding, sync-runs en API-diagnose."
+      activePath="/beheer"
+      navigation={navigation}
+    >
+      <div className="wizard-stack">
+        <SectionCard title="Douano verbinding" description="OAuth2 verbinding en basisinformatie. Tokens worden server-side opgeslagen in PostgreSQL.">
+          <div className="record-card-grid">
+            <div className="wizard-toggle-card">
+              <span>
+                <strong>Status</strong>
+                <small>{douanoError ? "Fout" : douano?.connected ? "Verbonden" : "Niet verbonden"}</small>
+              </span>
+            </div>
+            <div className="wizard-toggle-card">
+              <span>
+                <strong>Base URL</strong>
+                <small>{douano?.base_url || "-"}</small>
+              </span>
+            </div>
+            <div className="wizard-toggle-card">
+              <span>
+                <strong>Token geldig tot</strong>
+                <small>{formatDate(douano?.expires_at)}</small>
+              </span>
+            </div>
+            <div className="wizard-toggle-card">
+              <span>
+                <strong>Laatst bijgewerkt</strong>
+                <small>{formatDate(douano?.updated_at)}</small>
+              </span>
+            </div>
+          </div>
+
+          {douanoError ? (
+            <div className="placeholder-block">
+              <strong>Douano status niet beschikbaar</strong>
+              {douanoError}
+            </div>
+          ) : null}
+
+          <div className="editor-actions" style={{ marginTop: 16 }}>
+            <div className="editor-actions-group">
+              <Link href="/api/integrations/douano/connect" className="editor-button">
+                {douano?.connected ? "Opnieuw koppelen" : "Koppelen"}
+              </Link>
+              <Link href="/api/integrations/douano/status" className="editor-button editor-button-secondary">
+                Bekijk status JSON
+              </Link>
+            </div>
+          </div>
+        </SectionCard>
+
+        <ApiRunStatusTable />
+        <DouanoSyncPanel />
+
+        <SectionCard
+          title="OpenRouteService (ORS) afstanden"
+          description="Bereken rijafstanden naar klanten (km enkele reis) op basis van Douano invoice-adres. Dit gebruikt ORS geocoding + routing en cached resultaten."
+        >
+          <OrsDistanceRunner defaultExcludeParticulier />
+          <CompanyDistanceOverview />
+          <div className="placeholder-block" style={{ marginTop: 12 }}>
+            <strong>Configuratie</strong>
+            <div className="muted">
+              Vereist backend env var <code>CALCULATIETOOL_ORS_API_KEY</code> (optioneel <code>CALCULATIETOOL_ORS_BASE_URL</code>).
+            </div>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Gebruikte aanroepen" description="Interne endpoints voor de Douano OAuth flow en technische diagnose.">
+          <div className="data-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Naam</th>
+                  <th>Methode</th>
+                  <th>Endpoint</th>
+                  <th>Doel</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calls.map((row) => (
+                  <tr key={row.path}>
+                    <td>{row.name}</td>
+                    <td>
+                      <span className="pill">{row.method}</span>
+                    </td>
+                    <td>
+                      <code>{row.path}</code>
+                    </td>
+                    <td>{row.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      </div>
+    </PageShell>
+  );
+}

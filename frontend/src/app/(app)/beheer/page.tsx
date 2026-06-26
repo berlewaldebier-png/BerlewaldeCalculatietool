@@ -51,7 +51,12 @@ export default async function BeheerPage() {
             <Link href="/beheer/api" className="home-card">
               <div className="home-card-section">Technisch beheer</div>
               <div className="home-card-title">Datakwaliteit</div>
-              <div className="home-card-text">Doorloop Douano sync, productkoppeling, LOT-dekking en kostprijsdekking.</div>
+              <div className="home-card-text">Controleer productkoppelingen, LOT-dekking, kostprijsbronnen en uitzonderingen.</div>
+            </Link>
+            <Link href="/beheer/api-integratie" className="home-card">
+              <div className="home-card-section">Technisch beheer</div>
+              <div className="home-card-title">API-integratie</div>
+              <div className="home-card-text">Beheer Douano verbinding, sync-runs, delta's en technische API-status.</div>
             </Link>
             <Link href="/beheer/productkoppeling" className="home-card">
               <div className="home-card-section">Technisch beheer</div>

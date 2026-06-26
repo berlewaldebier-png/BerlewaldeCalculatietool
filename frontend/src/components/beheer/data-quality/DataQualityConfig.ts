@@ -27,11 +27,6 @@ export const DATA_QUALITY_WORKSTREAMS: WorkstreamDefinition[] = [
     description: "Bewuste uitzonderingen",
   },
   {
-    id: "api",
-    title: "API-status",
-    description: "Sync runs en delta's",
-  },
-  {
     id: "advanced",
     title: "Geavanceerd",
     description: "Technische status en fallback",
@@ -77,15 +72,9 @@ export const STEP_HELP: Record<WorkstreamKey, { title: string; description: stri
       "Hier staan regels die niet via de normale bier/SKU/LOT-route lopen, zoals afrondingen, diensten, giftsets en overige omzetregels.",
     outcome: "Elke uitzondering moet expliciet gecategoriseerd zijn, zodat niets stilletjes uit de margeanalyse verdwijnt.",
   },
-  api: {
-    title: "API-status",
-    description:
-      "Hier zie je de technische Douano runs en kun je syncs starten. Datakwaliteit zelf gebruikt vooral de laatste run en de nieuwe delta's.",
-    outcome: "Na nieuwe API-runs ontstaan alleen nieuwe issues; bestaande expliciete oplossingen blijven staan.",
-  },
   advanced: {
     title: "Geavanceerd beheer",
-    description: "Technische controles, verbindingen en fallback-tools die niet in de dagelijkse datakwaliteit-flow horen.",
+    description: "Technische controles en onderhoudstools die niet in de dagelijkse datakwaliteit-flow horen.",
     outcome: "Alleen gebruiken voor diagnose, configuratie of uitzonderlijke onderhoudsacties.",
   },
 };
@@ -96,7 +85,6 @@ export const DATA_QUALITY_CHECK_GROUPS: Record<WorkstreamKey, string[]> = {
   cost_sources: ["sales_rows_cost_source"],
   lots: ["stock_history_lots"],
   exceptions: [],
-  api: ["douano_products", "sales_invoices", "stock_history_sync"],
   advanced: [],
 };
 
@@ -128,10 +116,6 @@ export const DATA_QUALITY_SECTION_COPY: Record<
     title: "Bewuste uitzonderingen",
     description: "Regels zonder normale bier/SKU/LOT-route beheer je hier als expliciete categorie, zodat omzet wel meetelt en marge niet stilletjes vervuilt.",
     emptyText: "Uitzonderingen staan hieronder in de uitvalregelskaart.",
-  },
-  api: {
-    title: "Sync voorwaarden",
-    description: "Deze checks laten zien of de benodigde Douano bronnen recent genoeg gevuld zijn.",
   },
   advanced: {
     title: "Technische hulpmiddelen",

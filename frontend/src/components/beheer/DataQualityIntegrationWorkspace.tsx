@@ -2,13 +2,11 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { DouanoProductMappingCard } from "@/components/DouanoProductMappingCard";
-import { DouanoSyncPanel } from "@/components/DouanoSyncPanel";
 import { DouanoUnmappedRulesCard } from "@/components/DouanoUnmappedRulesCard";
 import { LotKostenWorkspace } from "@/components/lot-kosten/LotKostenWorkspace";
-import { WizardSteps } from "@/components/WizardSteps";
 import { CostSourceRowAction } from "@/components/beheer/data-quality/CostSourceRowAction";
+import { DataQualityTabs } from "@/components/beheer/data-quality/DataQualityTabs";
 import {
-  ApiRunStatusTable,
   CheckGrid,
   DATA_QUALITY_CHECK_GROUPS,
   DATA_QUALITY_SECTION_COPY,
@@ -127,24 +125,6 @@ export function DataQualityIntegrationWorkspace({
       );
     }
 
-    if (activeStep.id === "api") {
-      return (
-        <div className="wizard-stack">
-          <WorkstreamIntro step={activeStep} />
-          <ApiRunStatusTable />
-          <CheckGrid
-            checks={checksByWorkstream.api}
-            openId={openMissingId}
-            setOpenId={setOpenMissingId}
-            renderRowAction={renderCostSourceRowAction}
-            title={DATA_QUALITY_SECTION_COPY.api.title}
-            description={DATA_QUALITY_SECTION_COPY.api.description}
-          />
-          <DouanoSyncPanel />
-        </div>
-      );
-    }
-
     return (
       <div className="wizard-stack">
         <WorkstreamIntro step={activeStep} />
@@ -154,30 +134,23 @@ export function DataQualityIntegrationWorkspace({
   }
 
   return (
-    <div className="cpq-shell data-quality-shell">
-      <WizardSteps
-        title="Werkstromen"
-        steps={DATA_QUALITY_WORKSTREAMS.map((step) => ({
-          id: step.id,
-          title: step.title,
-          description: step.description,
-        }))}
+    <div className="data-quality-shell">
+      <DataQualityTabs
+        steps={DATA_QUALITY_WORKSTREAMS}
         activeIndex={activeStepIndex}
         onSelect={(index) => {
           setOpenMissingId("");
           setActiveStepIndex(index);
         }}
       />
-      <div className="cpq-main">
-        <div className="wizard-step-card wizard-step-stage-card">
-          <div className="wizard-step-header">
-            <div className="wizard-step-title">
-              {activeStep.title}
-            </div>
-            <div className="wizard-step-description">{sectionCopy?.description ?? activeStep.description}</div>
+      <div className="wizard-step-card wizard-step-stage-card">
+        <div className="wizard-step-header">
+          <div className="wizard-step-title">
+            {activeStep.title}
           </div>
-          <div className="wizard-step-body">{renderStepBody()}</div>
+          <div className="wizard-step-description">{sectionCopy?.description ?? activeStep.description}</div>
         </div>
+        <div className="wizard-step-body">{renderStepBody()}</div>
       </div>
     </div>
   );
