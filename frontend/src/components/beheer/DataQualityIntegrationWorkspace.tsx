@@ -11,12 +11,12 @@ import {
   ApiRunStatusTable,
   CheckGrid,
   DATA_QUALITY_CHECK_GROUPS,
+  DATA_QUALITY_SECTION_COPY,
   DATA_QUALITY_WORKSTREAMS,
   ReliabilityBanner,
   WorkstreamIntro,
   YearSelector,
   checkById,
-  hasMissing,
   type GenericRecord,
   type SetupStatus,
 } from "@/components/beheer/data-quality/DataQualityWorkbenchParts";
@@ -42,6 +42,7 @@ export function DataQualityIntegrationWorkspace({
       return acc;
     }, {} as Record<(typeof DATA_QUALITY_WORKSTREAMS)[number]["id"], ReturnType<typeof checkById>>);
   }, [initialStatus]);
+  const sectionCopy = DATA_QUALITY_SECTION_COPY[activeStep.id];
 
   function renderCostSourceRowAction(row: GenericRecord, scopeRows: GenericRecord[]) {
     return <CostSourceRowAction row={row} scopeRows={scopeRows} skus={skus} year={initialStatus.year} />;
@@ -59,8 +60,8 @@ export function DataQualityIntegrationWorkspace({
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
-            title="Blokkeert margeanalyse"
-            description="Deze kaarten tonen alleen wat Omzet & Marge voor dit jaar onbetrouwbaar maakt."
+            title={DATA_QUALITY_SECTION_COPY.overview.title}
+            description={DATA_QUALITY_SECTION_COPY.overview.description}
           />
         </div>
       );
@@ -75,8 +76,8 @@ export function DataQualityIntegrationWorkspace({
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
-            title="Productkoppelingen"
-            description="Verkochte Douano producten moeten naar een interne SKU wijzen voordat kostprijs en rapportage betrouwbaar zijn."
+            title={DATA_QUALITY_SECTION_COPY.products.title}
+            description={DATA_QUALITY_SECTION_COPY.products.description}
           />
           <DouanoProductMappingCard />
         </div>
@@ -92,8 +93,8 @@ export function DataQualityIntegrationWorkspace({
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
-            title="Verkoopregels zonder kostprijsbron"
-            description="Los regels op via SKU-koppeling, historische kostprijs, LOT alias of een expliciete categorie zonder kostprijs."
+            title={DATA_QUALITY_SECTION_COPY.cost_sources.title}
+            description={DATA_QUALITY_SECTION_COPY.cost_sources.description}
           />
         </div>
       );
@@ -108,8 +109,8 @@ export function DataQualityIntegrationWorkspace({
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
-            title="LOT-dekking verkoopregels"
-            description="Bier-SKU's moeten een bruikbare LOT-route hebben. Geschenkverpakkingen gebruiken de kostprijs uit hun samenstelling."
+            title={DATA_QUALITY_SECTION_COPY.lots.title}
+            description={DATA_QUALITY_SECTION_COPY.lots.description}
           />
           <LotKostenWorkspace skus={skus} articles={articles} year={initialStatus.year} />
         </div>
@@ -120,18 +121,7 @@ export function DataQualityIntegrationWorkspace({
       return (
         <div className="wizard-stack">
           <WorkstreamIntro step={activeStep} />
-          {hasMissing(checksByWorkstream.exceptions) ? (
-            <CheckGrid
-              checks={checksByWorkstream.exceptions}
-              openId={openMissingId}
-              setOpenId={setOpenMissingId}
-              renderRowAction={renderCostSourceRowAction}
-              title="Nog te categoriseren uitzonderingen"
-              description="Regels die buiten de normale SKU/LOT-route lopen moeten expliciet verklaard zijn."
-            />
-          ) : (
-            <div className="placeholder-block">Geen openstaande uitzonderingen voor het geselecteerde jaar.</div>
-          )}
+          <div className="placeholder-block">{DATA_QUALITY_SECTION_COPY.exceptions.description}</div>
           <DouanoUnmappedRulesCard initialYear={initialStatus.year} />
         </div>
       );
@@ -147,8 +137,8 @@ export function DataQualityIntegrationWorkspace({
             openId={openMissingId}
             setOpenId={setOpenMissingId}
             renderRowAction={renderCostSourceRowAction}
-            title="Sync voorwaarden"
-            description="Deze checks laten zien of de benodigde Douano bronnen recent genoeg gevuld zijn."
+            title={DATA_QUALITY_SECTION_COPY.api.title}
+            description={DATA_QUALITY_SECTION_COPY.api.description}
           />
           <DouanoSyncPanel />
         </div>
@@ -184,7 +174,7 @@ export function DataQualityIntegrationWorkspace({
             <div className="wizard-step-title">
               {activeStep.title}
             </div>
-            <div className="wizard-step-description">{activeStep.description}</div>
+            <div className="wizard-step-description">{sectionCopy?.description ?? activeStep.description}</div>
           </div>
           <div className="wizard-step-body">{renderStepBody()}</div>
         </div>

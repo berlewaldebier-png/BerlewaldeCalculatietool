@@ -13,7 +13,7 @@ import type {
   WorkstreamDefinition,
 } from "@/components/beheer/data-quality/DataQualityTypes";
 
-export { DATA_QUALITY_CHECK_GROUPS, DATA_QUALITY_WORKSTREAMS } from "@/components/beheer/data-quality/DataQualityConfig";
+export { DATA_QUALITY_CHECK_GROUPS, DATA_QUALITY_SECTION_COPY, DATA_QUALITY_WORKSTREAMS } from "@/components/beheer/data-quality/DataQualityConfig";
 export { CheckCard, CheckGrid, MissingPanel, StatusPill } from "@/components/beheer/data-quality/DataQualityCheckPanels";
 export { ApiRunStatusTable } from "@/components/beheer/data-quality/ApiRunStatusTable";
 export {

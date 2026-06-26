@@ -95,7 +95,74 @@ export const DATA_QUALITY_CHECK_GROUPS: Record<WorkstreamKey, string[]> = {
   products: ["product_mappings"],
   cost_sources: ["sales_rows_cost_source"],
   lots: ["stock_history_lots"],
-  exceptions: ["sales_rows_cost_source"],
+  exceptions: [],
   api: ["douano_products", "sales_invoices", "stock_history_sync"],
   advanced: [],
+};
+
+export const DATA_QUALITY_SECTION_COPY: Record<
+  WorkstreamKey,
+  {
+    title: string;
+    description: string;
+    emptyText?: string;
+  }
+> = {
+  overview: {
+    title: "Blokkeert margeanalyse",
+    description: "Deze kaarten tonen alleen wat Omzet & Marge voor dit jaar onbetrouwbaar maakt.",
+  },
+  products: {
+    title: "Productkoppelingen",
+    description: "Verkochte Douano producten moeten naar een interne SKU wijzen voordat kostprijs en rapportage betrouwbaar zijn.",
+  },
+  cost_sources: {
+    title: "Verkoopregels zonder kostprijsbron",
+    description: "Los regels op via SKU-koppeling, historische kostprijs, LOT alias of een expliciete categorie zonder kostprijs.",
+  },
+  lots: {
+    title: "LOT-dekking verkoopregels",
+    description: "Bier-SKU's moeten een bruikbare LOT-route hebben. Geschenkverpakkingen gebruiken de kostprijs uit hun samenstelling.",
+  },
+  exceptions: {
+    title: "Bewuste uitzonderingen",
+    description: "Regels zonder normale bier/SKU/LOT-route beheer je hier als expliciete categorie, zodat omzet wel meetelt en marge niet stilletjes vervuilt.",
+    emptyText: "Uitzonderingen staan hieronder in de uitvalregelskaart.",
+  },
+  api: {
+    title: "Sync voorwaarden",
+    description: "Deze checks laten zien of de benodigde Douano bronnen recent genoeg gevuld zijn.",
+  },
+  advanced: {
+    title: "Technische hulpmiddelen",
+    description: "Gebruik deze onderdelen alleen voor diagnose of onderhoud.",
+  },
+};
+
+export const DATA_QUALITY_CHECK_PANEL_COPY: Record<string, { title: string; description: string; searchPlaceholder?: string }> = {
+  product_mappings: {
+    title: "Douano producten zonder goede SKU-koppeling",
+    description: "Koppel deze Douano producten aan een interne SKU voordat kostprijs en rapportage betrouwbaar kunnen rekenen.",
+  },
+  stock_history_lots: {
+    title: "LOT-plichtige regels zonder bruikbare LOT",
+    description: "Deze bierregels missen nog een LOT-route uit Douano of een expliciete interne oplossing.",
+  },
+  sales_rows_cost_source: {
+    title: "Te verwerken verkoopregels",
+    description: "Deze regels hebben nog geen bruikbare kostprijsbron of bewuste categorie. Kies per rij of selectie de passende actie.",
+    searchPlaceholder: "Zoek op product, SKU, LOT, transactie of oorzaak",
+  },
+  douano_products: {
+    title: "Douano productsync ontbreekt",
+    description: "Synchroniseer de Douano productcatalogus voordat productkoppelingen compleet kunnen zijn.",
+  },
+  sales_invoices: {
+    title: "Factuursync ontbreekt",
+    description: "Synchroniseer sales invoices zodat Omzet & Marge de verkoopregels voor dit jaar ziet.",
+  },
+  stock_history_sync: {
+    title: "Stock-history LOT sync ontbreekt",
+    description: "Synchroniseer stock-history LOTs om verkoopregels met Douano LOTs te verrijken.",
+  },
 };

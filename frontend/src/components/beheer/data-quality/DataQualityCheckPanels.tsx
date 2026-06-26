@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
+import { DATA_QUALITY_CHECK_PANEL_COPY } from "@/components/beheer/data-quality/DataQualityConfig";
 import {
   flowHref,
   missingRowKey,
@@ -73,6 +74,10 @@ export function MissingPanel({
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const openCheck = checks.find((check) => check.id === openId);
   if (!openCheck || !openCheck.missing?.length) return null;
+  const copy = DATA_QUALITY_CHECK_PANEL_COPY[openCheck.id] ?? {
+    title: `Ontbrekend: ${openCheck.label}`,
+    description: "Deze regels houden de datakwaliteit nog tegen.",
+  };
   const rows = Array.isArray(openCheck.missing) ? openCheck.missing : [];
   const query = search.trim().toLowerCase();
   const filteredRows = query ? rows.filter((row) => searchableMissingRowText(row).includes(query)) : rows;
@@ -106,8 +111,8 @@ export function MissingPanel({
     <section className="module-card compact-card">
       <div className="module-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <div className="module-card-title">Ontbrekend: {openCheck.label}</div>
-          <div className="module-card-text">Deze regels houden de datakwaliteit nog tegen.</div>
+          <div className="module-card-title">{copy.title}</div>
+          <div className="module-card-text">{copy.description}</div>
         </div>
         <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenId("")}>
           Sluiten
@@ -119,7 +124,7 @@ export function MissingPanel({
             className="editor-input"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Zoek op product, SKU, LOT, transactie of oorzaak"
+            placeholder={copy.searchPlaceholder ?? "Zoek in zichtbare regels"}
           />
           <span className="status-pill">{selectedRows.length ? `${selectedRows.length} geselecteerd` : `${filteredRows.length} zichtbaar`}</span>
         </div>
