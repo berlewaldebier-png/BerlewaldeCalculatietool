@@ -3858,6 +3858,118 @@ a {
   padding: 1rem;
 }
 
+.be-next-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.be-next-hero,
+.be-next-table-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.be-next-table-header .editor-input {
+  max-width: 360px;
+}
+
+.be-next-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.be-next-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.be-next-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.be-next-wide {
+  grid-column: 1 / -1;
+}
+
+.be-next-metric {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.be-next-metric span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.be-next-metric strong {
+  color: var(--text);
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+
+.be-next-metric small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.be-next-metric.positive strong,
+.be-next-positive {
+  color: var(--status-success-text);
+}
+
+.be-next-metric.negative strong,
+.be-next-negative {
+  color: var(--status-error-text);
+}
+
+.be-next-progress-row {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
+.be-next-explain {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.be-next-explain strong {
+  font-size: 1.05rem;
+}
+
+.be-next-explain p {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.be-next-chart {
+  min-height: 340px;
+  margin-top: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .be-next-grid-2,
+  .be-next-grid-3,
+  .be-next-progress-row {
+    grid-template-columns: 1fr;
+  }
+
+  .be-next-hero,
+  .be-next-table-header {
+    display: grid;
+  }
+
+  .be-next-table-header .editor-input {
+    max-width: none;
+  }
+}
+
 .editor-status.success {
   color: var(--status-success-text);
   background: var(--status-success-bg);

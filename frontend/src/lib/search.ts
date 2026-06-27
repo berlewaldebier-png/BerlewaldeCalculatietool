@@ -185,6 +185,15 @@ const SEARCH_INDEX: SearchIndexEntry[] = [
     keywords: ["api", "integratie", "integraties", "douano", "sync", "stock history", "orders", "invoices", "beheer"]
   },
   {
+    id: "break-even-next",
+    type: "report",
+    title: "Break-even next mock-up",
+    subtitle: "Plan, actuals, reforecast en variantie-analyse",
+    meta: "Analyse",
+    href: "/break-even-next",
+    keywords: ["break-even", "mock-up", "reforecast", "variantie", "bezettingsresultaat", "resultaatrekening"]
+  },
+  {
     id: "help-manual",
     type: "setting",
     title: "Helpcentrum",
