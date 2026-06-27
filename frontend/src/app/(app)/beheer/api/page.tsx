@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { DataQualityIntegrationWorkspace } from "@/components/beheer/DataQualityIntegrationWorkspace";
 import { PageShell } from "@/components/PageShell";
 import { apiGetServer, getBootstrap } from "@/lib/apiServer";
@@ -40,21 +38,6 @@ export default async function DatakwaliteitPage({ searchParams }: { searchParams
         initialStatus={setupStatusPayload.result}
         skus={skus}
         articles={articles}
-        advanced={
-          <section className="module-card">
-            <div className="module-card-header">
-              <div className="module-card-title">Technische integratie</div>
-              <div className="module-card-text">
-                Sync-runs, Douano verbinding en API-diagnose staan los van deze datakwaliteit-flow.
-              </div>
-            </div>
-            <div className="editor-actions">
-              <Link href="/beheer/api-integratie" className="editor-button">
-                Open API-integratie
-              </Link>
-            </div>
-          </section>
-        }
       />
     </PageShell>
   );

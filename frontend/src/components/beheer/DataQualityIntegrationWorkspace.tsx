@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
+
+import { useMemo, useState } from "react";
 import { DouanoProductMappingCard } from "@/components/DouanoProductMappingCard";
 import { DouanoUnmappedRulesCard } from "@/components/DouanoUnmappedRulesCard";
 import { LotKostenWorkspace } from "@/components/lot-kosten/LotKostenWorkspace";
@@ -23,12 +25,10 @@ export function DataQualityIntegrationWorkspace({
   initialStatus,
   skus,
   articles = [],
-  advanced,
 }: {
   initialStatus: SetupStatus;
   skus: GenericRecord[];
   articles?: GenericRecord[];
-  advanced: ReactNode;
 }) {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [openMissingId, setOpenMissingId] = useState("");
@@ -138,7 +138,19 @@ export function DataQualityIntegrationWorkspace({
     return (
       <div className="wizard-stack">
         <WorkstreamIntro step={activeStep} />
-        {advanced}
+        <section className="module-card">
+          <div className="module-card-header">
+            <div className="module-card-title">Technische integratie</div>
+            <div className="module-card-text">
+              Sync-runs, Douano verbinding en API-diagnose staan los van deze datakwaliteit-flow.
+            </div>
+          </div>
+          <div className="editor-actions">
+            <Link href="/beheer/api-integratie" className="editor-button">
+              Open API-integratie
+            </Link>
+          </div>
+        </section>
       </div>
     );
   }
