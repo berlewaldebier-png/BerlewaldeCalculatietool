@@ -24,6 +24,10 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _money_ratio(numerator: float, denominator: float) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
 def _year_fixed_cost_total(year: int) -> float:
     grouped = fixed_costs_storage.load_grouped_by_year()
     rows = grouped.get(str(int(year or 0)), [])
@@ -44,6 +48,113 @@ def _sku_labels() -> dict[str, dict[str, str]]:
                 if sid:
                     labels[sid] = {"sku_id": sid, "sku_code": _text(code), "sku_name": _text(name)}
     return labels
+
+
+def _latest_active_plan(year: int) -> dict[str, Any] | None:
+    plans = break_even_planning_storage.list_plan_snapshots(year=int(year or 0), include_archived=False)
+    active = [plan for plan in plans if _text(plan.get("status")) == "active"]
+    return active[0] if active else None
+
+
+def _sku_category(row: dict[str, Any], labels: dict[str, dict[str, str]]) -> str:
+    sku_id = _text(row.get("sku_id"))
+    label = labels.get(sku_id, {})
+    haystack = f"{label.get('sku_name', '')} {label.get('sku_code', '')} {sku_id}".lower()
+    if "geschenk" in haystack or "gift" in haystack:
+        return "giftset"
+    if "proeverij" in haystack or "rondleiding" in haystack:
+        return "service"
+    if "glas" in haystack or "merch" in haystack:
+        return "merchandise"
+    return "beer"
+
+
+def _category_treatment(category: str) -> str:
+    if category == "giftset":
+        return "Omzet als product; liters en mix via onderliggende samenstelling zodra bekend."
+    if category == "service":
+        return "Service-omzet; bierverbruik alleen als variabele kost wanneer geconfigureerd."
+    if category == "merchandise":
+        return "Contributie telt mee; geen bierliters."
+    return "Omzet, contributie, liters en mix."
+
+
+def _contribution_row(row: dict[str, Any], labels: dict[str, dict[str, str]]) -> dict[str, Any]:
+    sku_id = _text(row.get("sku_id"))
+    label = labels.get(sku_id, {"sku_id": sku_id, "sku_code": "", "sku_name": sku_id})
+    revenue = _num(row.get("net_revenue_ex"))
+    variable = _num(row.get("cost_total_ex")) - _num(row.get("fixed_total_ex"))
+    contribution = revenue - variable
+    category = _sku_category(row, labels)
+    units = _num(row.get("units"))
+    return {
+        "sku_id": sku_id,
+        "sku_code": _text(label.get("sku_code")),
+        "sku_name": _text(label.get("sku_name")) or sku_id,
+        "category": category,
+        "units": units,
+        "revenue": revenue,
+        "variable_cost": variable,
+        "purchase": _num(row.get("inkoop_total_ex")),
+        "packaging": _num(row.get("packaging_total_ex")),
+        "excise": _num(row.get("excise_total_ex")),
+        "fixed_allocation": _num(row.get("fixed_total_ex")),
+        "contribution": contribution,
+        "allocated_margin": contribution - _num(row.get("fixed_total_ex")),
+        "contribution_ratio": _money_ratio(contribution, revenue),
+        "missing_cost_lines": int(row.get("missing_cost_lines", 0) or 0),
+    }
+
+
+def _category_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        category = _text(row.get("category")) or "beer"
+        bucket = buckets.setdefault(
+            category,
+            {
+                "category": category,
+                "rows": 0,
+                "revenue": 0.0,
+                "variable_cost": 0.0,
+                "contribution": 0.0,
+                "fixed_allocation": 0.0,
+                "allocated_margin": 0.0,
+                "units": 0.0,
+                "treatment": _category_treatment(category),
+            },
+        )
+        bucket["rows"] += 1
+        bucket["revenue"] += _num(row.get("revenue"))
+        bucket["variable_cost"] += _num(row.get("variable_cost"))
+        bucket["contribution"] += _num(row.get("contribution"))
+        bucket["fixed_allocation"] += _num(row.get("fixed_allocation"))
+        bucket["allocated_margin"] += _num(row.get("allocated_margin"))
+        bucket["units"] += _num(row.get("units"))
+    order = {"beer": 0, "giftset": 1, "service": 2, "merchandise": 3}
+    return sorted(buckets.values(), key=lambda item: (order.get(_text(item.get("category")), 99), _text(item.get("category"))))
+
+
+def _period_timeline(periods: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, float | str]] = {}
+    for row in periods:
+        period = _text(row.get("period"))
+        if not period:
+            continue
+        bucket = buckets.setdefault(period, {"period": period, "revenue": 0.0, "variable_cost": 0.0, "contribution": 0.0, "fixed_allocation": 0.0})
+        bucket["revenue"] = _num(bucket.get("revenue")) + _num(row.get("net_revenue_ex"))
+        bucket["variable_cost"] = _num(bucket.get("variable_cost")) + _num(row.get("cost_total_ex")) - _num(row.get("fixed_total_ex"))
+        bucket["contribution"] = _num(bucket.get("contribution")) + _num(row.get("net_revenue_ex")) - (_num(row.get("cost_total_ex")) - _num(row.get("fixed_total_ex")))
+        bucket["fixed_allocation"] = _num(bucket.get("fixed_allocation")) + _num(row.get("fixed_total_ex"))
+    running_revenue = 0.0
+    running_contribution = 0.0
+    timeline: list[dict[str, Any]] = []
+    for period in sorted(buckets):
+        bucket = buckets[period]
+        running_revenue += _num(bucket.get("revenue"))
+        running_contribution += _num(bucket.get("contribution"))
+        timeline.append({**bucket, "running_revenue": running_revenue, "running_contribution": running_contribution})
+    return timeline
 
 
 def _active_planning_rows(year: int) -> list[dict[str, Any]]:
@@ -197,6 +308,122 @@ def create_reforecast(
         basis=basis_value,
         payload=payload,
     )
+
+
+def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str, Any]:
+    """
+    Return the read contract for the next break-even screen.
+
+    This function is intentionally read-only. It does not create or refresh snapshots.
+    Missing planning inputs are reported as warnings instead of being guessed.
+    """
+    year_value = int(year or 0)
+    if year_value <= 0:
+        raise ValueError("Jaar is verplicht.")
+    basis_value = _text(basis) or "invoice"
+    plan_snapshot = _latest_active_plan(year_value)
+    plan_payload = plan_snapshot.get("payload") if isinstance(plan_snapshot, dict) else {}
+    plan_payload = plan_payload if isinstance(plan_payload, dict) else {}
+    sales = _sales_totals(year_value, basis_value)
+    labels = _sku_labels()
+    source_rows = [row for row in sales.get("rows", []) if isinstance(row, dict)]
+    contribution_rows = [_contribution_row(row, labels) for row in source_rows]
+    contribution_rows.sort(key=lambda row: _num(row.get("contribution")), reverse=True)
+    category_rows = _category_rows(contribution_rows)
+    timeline = _period_timeline([row for row in sales.get("period_totals", []) if isinstance(row, dict)])
+
+    fixed_cost_total = _num(plan_payload.get("fixed_cost_total")) if plan_payload else 0.0
+    if fixed_cost_total <= 0:
+        fixed_cost_total = _year_fixed_cost_total(year_value)
+
+    totals = sales.get("totals") if isinstance(sales.get("totals"), dict) else {}
+    actual_revenue = _num(totals.get("revenue"))
+    actual_variable = _num(totals.get("variable_cost"))
+    actual_contribution = _num(totals.get("contribution"))
+    contribution_ratio = _money_ratio(actual_contribution, actual_revenue)
+    break_even_revenue = fixed_cost_total / contribution_ratio if contribution_ratio > 0 else 0.0
+    break_even_variable = break_even_revenue * _money_ratio(actual_variable, actual_revenue)
+    break_even_result = break_even_revenue - break_even_variable - fixed_cost_total
+
+    plan_targets = plan_payload.get("targets") if isinstance(plan_payload.get("targets"), dict) else {}
+    plan_revenue = _num(plan_targets.get("revenue"))
+    plan_contribution = _num(plan_targets.get("contribution"))
+    warnings: list[dict[str, str]] = []
+    if not plan_snapshot:
+        warnings.append({"code": "missing_plan_snapshot", "message": "Geen actief break-even plan gevonden; planwaarden blijven leeg."})
+    if plan_revenue <= 0:
+        warnings.append({"code": "missing_plan_revenue", "message": "Actief plan bevat nog geen frozen plan-omzet."})
+    if plan_contribution <= 0:
+        warnings.append({"code": "missing_plan_contribution", "message": "Actief plan bevat nog geen frozen plan-contributie."})
+    missing_cost_lines = int(totals.get("missing_cost_lines", 0) or 0)
+    if missing_cost_lines:
+        warnings.append({"code": "missing_cost_lines", "message": f"{missing_cost_lines} verkoopregels missen nog een kostprijsbron."})
+
+    return {
+        "kind": "break_even_analysis_read_model",
+        "version": 1,
+        "year": year_value,
+        "basis": basis_value,
+        "generated_at": date.today().isoformat(),
+        "sources": {
+            "plan_snapshot_id": _text((plan_snapshot or {}).get("id")),
+            "plan_source": "active_plan_snapshot" if plan_snapshot else "missing",
+            "actual_source": "douano_sales_mix_service",
+            "fixed_cost_source": "active_plan_snapshot" if _num(plan_payload.get("fixed_cost_total")) > 0 else "fixed_costs_by_year",
+        },
+        "dashboard": {
+            "plan": {
+                "revenue": plan_revenue,
+                "contribution": plan_contribution,
+                "fixed_costs": _num(plan_payload.get("fixed_cost_total")),
+                "result": plan_contribution - _num(plan_payload.get("fixed_cost_total")) if plan_contribution else 0.0,
+            },
+            "actual": {
+                "revenue": actual_revenue,
+                "variable_cost": actual_variable,
+                "contribution": actual_contribution,
+                "fixed_costs": fixed_cost_total,
+                "result": actual_contribution - fixed_cost_total,
+            },
+            "reforecast": {
+                "revenue": actual_revenue,
+                "variable_cost": actual_variable,
+                "contribution": actual_contribution,
+                "fixed_costs": fixed_cost_total,
+                "result": actual_contribution - fixed_cost_total,
+            },
+        },
+        "pnl": {
+            "revenue": actual_revenue,
+            "variable_cost": actual_variable,
+            "contribution": actual_contribution,
+            "fixed_costs": fixed_cost_total,
+            "operating_result": actual_contribution - fixed_cost_total,
+        },
+        "break_even": {
+            "revenue": break_even_revenue,
+            "variable_cost": break_even_variable,
+            "contribution": break_even_revenue - break_even_variable,
+            "fixed_costs": fixed_cost_total,
+            "result_check": break_even_result,
+            "contribution_ratio": contribution_ratio,
+        },
+        "contribution": {
+            "rows": contribution_rows,
+            "categories": category_rows,
+        },
+        "timeline": timeline,
+        "data_quality": {
+            "missing_cost_lines": missing_cost_lines,
+            "unmapped_revenue": _num(totals.get("unmapped_revenue")),
+            "warnings": warnings,
+        },
+        "model_notes": {
+            "read_only": True,
+            "plan_policy": "Plan targets are never guessed. Missing targets are returned as warnings.",
+            "actual_policy": "Actuals are read from existing margin/sales mix summaries; this endpoint does not refresh snapshots.",
+        },
+    }
 
 
 def build_year_close_payload(*, year: int, basis: str = "invoice") -> dict[str, Any]:

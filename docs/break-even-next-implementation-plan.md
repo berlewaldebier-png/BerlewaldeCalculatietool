@@ -363,6 +363,40 @@ Acceptance:
 
 Goal: define the read model before replacing current break-even.
 
+First endpoint:
+
+```text
+GET /api/integrations/break-even/analysis-read-model?year={year}&basis=invoice
+```
+
+Rules:
+
+- Read-only.
+- Does not refresh margin snapshots.
+- Does not create plan/reforecast/year-close snapshots.
+- Does not guess missing plan targets.
+- Returns warnings when frozen plan revenue/contribution are not available yet.
+
+Top-level contract:
+
+```text
+kind
+version
+year
+basis
+sources
+dashboard
+pnl
+break_even
+contribution.rows
+contribution.categories
+timeline
+data_quality
+model_notes
+```
+
+The frontend mock-up can later be wired to this endpoint one section at a time.
+
 Proposed snapshots:
 
 - `break_even_plan_snapshots`

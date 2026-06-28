@@ -2076,6 +2076,21 @@ def get_break_even_model_review(_: dict = Depends(require_admin)) -> dict[str, A
         raise HTTPException(status_code=500, detail="Datamodel review kon niet worden geladen.") from exc
 
 
+@router.get("/break-even/analysis-read-model")
+def get_break_even_analysis_read_model(
+    year: int = Query(...),
+    basis: str = Query("invoice"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"item": break_even_planning_service.build_analysis_read_model(year=int(year), basis=str(basis or "invoice"))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even analysis read model failed")
+        raise HTTPException(status_code=500, detail="Break-even analyse read-model kon niet worden geladen.") from exc
+
+
 @router.get("/lot-costs")
 def get_lot_costs(limit: int = Query(2000, ge=1, le=10000)) -> dict[str, Any]:
     return {"items": lot_costs_storage.list_lot_cost_records(limit=int(limit))}
