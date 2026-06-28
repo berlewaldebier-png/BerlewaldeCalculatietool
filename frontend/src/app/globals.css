@@ -3949,12 +3949,12 @@ a {
 }
 
 .be-next-chart {
-  min-height: 340px;
+  height: 340px;
   margin-top: 1rem;
 }
 
 .be-next-revenue-chart {
-  min-height: 360px;
+  height: 360px;
 }
 
 .be-next-advice {
