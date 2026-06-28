@@ -346,6 +346,7 @@ Tasks:
   - pagination
   - top contributor and margin-risk summary
   - row signal for mix driver, volume variance or margin risk
+  - explicit category treatment for beer, giftsets, services and merchandise
 - Build P&L and variance bridge with example numbers.
 - Keep all old break-even functionality intact.
 

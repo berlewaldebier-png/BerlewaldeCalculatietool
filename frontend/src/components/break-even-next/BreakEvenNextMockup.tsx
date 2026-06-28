@@ -19,9 +19,12 @@ type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual"
 
 type ProductRow = {
   id: string;
+  category: "beer" | "giftset" | "service" | "merchandise";
   style: string;
   skuType: string;
   sku: string;
+  componentStyles?: string[];
+  reportingNote: string;
   plannedUnits: number;
   actualUnitsYtd: number;
   reforecastUnits: number;
@@ -52,14 +55,15 @@ const tabs: Array<{ id: TabId; title: string; description: string }> = [
 ];
 
 const products: ProductRow[] = [
-  { id: "blond-fust", style: "Blond", skuType: "Fust", sku: "Berlewalde Blond - Fust 20L", plannedUnits: 360, actualUnitsYtd: 170, reforecastUnits: 330, litersPerUnit: 20, plannedPrice: 89, actualPrice: 88.4, purchase: 60.5, excise: 9.7, packaging: 0, abcAllocation: 18.4 },
-  { id: "blond-doos", style: "Blond", skuType: "Doos", sku: "Berlewalde Blond - Doos 24 x 33cl", plannedUnits: 720, actualUnitsYtd: 420, reforecastUnits: 800, litersPerUnit: 7.92, plannedPrice: 44.2, actualPrice: 44.8, purchase: 22.9, excise: 3.9, packaging: 0.8, abcAllocation: 10.2 },
-  { id: "ipa-doos", style: "IPA", skuType: "Doos", sku: "Berlewalde IPA - Doos 24 x 33cl", plannedUnits: 540, actualUnitsYtd: 250, reforecastUnits: 500, litersPerUnit: 7.92, plannedPrice: 46.5, actualPrice: 45.6, purchase: 24.5, excise: 4.1, packaging: 0.8, abcAllocation: 10.7 },
-  { id: "triple-doos", style: "Triple", skuType: "Doos", sku: "Berlewalde Triple - Doos 24 x 33cl", plannedUnits: 610, actualUnitsYtd: 330, reforecastUnits: 640, litersPerUnit: 7.92, plannedPrice: 48.8, actualPrice: 49.1, purchase: 25.9, excise: 5.2, packaging: 0.8, abcAllocation: 11.4 },
-  { id: "weizen-fust", style: "Weizen", skuType: "Fust", sku: "Berlewalde Weizen - Fust 20L", plannedUnits: 260, actualUnitsYtd: 145, reforecastUnits: 290, litersPerUnit: 20, plannedPrice: 88.5, actualPrice: 88.5, purchase: 61.1, excise: 9.7, packaging: 0, abcAllocation: 18.1 },
-  { id: "dubbel-fust", style: "Dubbel", skuType: "Fust", sku: "Berlewalde Dubbel - Fust 20L", plannedUnits: 210, actualUnitsYtd: 80, reforecastUnits: 170, litersPerUnit: 20, plannedPrice: 91, actualPrice: 89.8, purchase: 58.9, excise: 10.2, packaging: 0, abcAllocation: 18.8 },
-  { id: "giftset", style: "Geschenken", skuType: "Geschenk", sku: "Geschenkverpakking 4 x 33cl", plannedUnits: 900, actualUnitsYtd: 260, reforecastUnits: 760, litersPerUnit: 1.32, plannedPrice: 16.49, actualPrice: 16.49, purchase: 7.9, excise: 0.8, packaging: 2.5, abcAllocation: 2.4 },
-  { id: "glas", style: "Merchandise", skuType: "Merchandise", sku: "Berlewalde Glas 33cl", plannedUnits: 800, actualUnitsYtd: 300, reforecastUnits: 690, litersPerUnit: 0, plannedPrice: 3.95, actualPrice: 3.95, purchase: 1.95, excise: 0, packaging: 0, abcAllocation: 0.4 },
+  { id: "blond-fust", category: "beer", style: "Blond", skuType: "Fust", sku: "Berlewalde Blond - Fust 20L", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 360, actualUnitsYtd: 170, reforecastUnits: 330, litersPerUnit: 20, plannedPrice: 89, actualPrice: 88.4, purchase: 60.5, excise: 9.7, packaging: 0, abcAllocation: 18.4 },
+  { id: "blond-doos", category: "beer", style: "Blond", skuType: "Doos", sku: "Berlewalde Blond - Doos 24 x 33cl", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 720, actualUnitsYtd: 420, reforecastUnits: 800, litersPerUnit: 7.92, plannedPrice: 44.2, actualPrice: 44.8, purchase: 22.9, excise: 3.9, packaging: 0.8, abcAllocation: 10.2 },
+  { id: "ipa-doos", category: "beer", style: "IPA", skuType: "Doos", sku: "Berlewalde IPA - Doos 24 x 33cl", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 540, actualUnitsYtd: 250, reforecastUnits: 500, litersPerUnit: 7.92, plannedPrice: 46.5, actualPrice: 45.6, purchase: 24.5, excise: 4.1, packaging: 0.8, abcAllocation: 10.7 },
+  { id: "triple-doos", category: "beer", style: "Triple", skuType: "Doos", sku: "Berlewalde Triple - Doos 24 x 33cl", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 610, actualUnitsYtd: 330, reforecastUnits: 640, litersPerUnit: 7.92, plannedPrice: 48.8, actualPrice: 49.1, purchase: 25.9, excise: 5.2, packaging: 0.8, abcAllocation: 11.4 },
+  { id: "weizen-fust", category: "beer", style: "Weizen", skuType: "Fust", sku: "Berlewalde Weizen - Fust 20L", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 260, actualUnitsYtd: 145, reforecastUnits: 290, litersPerUnit: 20, plannedPrice: 88.5, actualPrice: 88.5, purchase: 61.1, excise: 9.7, packaging: 0, abcAllocation: 18.1 },
+  { id: "dubbel-fust", category: "beer", style: "Dubbel", skuType: "Fust", sku: "Berlewalde Dubbel - Fust 20L", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 210, actualUnitsYtd: 80, reforecastUnits: 170, litersPerUnit: 20, plannedPrice: 91, actualPrice: 89.8, purchase: 58.9, excise: 10.2, packaging: 0, abcAllocation: 18.8 },
+  { id: "giftset", category: "giftset", style: "Geschenken", skuType: "Geschenk", sku: "Geschenkverpakking 4 x 33cl", componentStyles: ["Blond", "IPA", "Triple", "Weizen"], reportingNote: "omzet als giftset, liters en mix via onderliggende bieren", plannedUnits: 900, actualUnitsYtd: 260, reforecastUnits: 760, litersPerUnit: 1.32, plannedPrice: 16.49, actualPrice: 16.49, purchase: 7.9, excise: 0.8, packaging: 2.5, abcAllocation: 2.4 },
+  { id: "tasting", category: "service", style: "Diensten", skuType: "Proeverij", sku: "Rondleiding + proeverij 4 bieren", componentStyles: ["Blond", "IPA", "Triple", "Weizen"], reportingNote: "service-omzet, bierverbruik als variabele kost wanneer geconfigureerd", plannedUnits: 240, actualUnitsYtd: 110, reforecastUnits: 260, litersPerUnit: 1.32, plannedPrice: 22.5, actualPrice: 22.5, purchase: 4.8, excise: 0.8, packaging: 0, abcAllocation: 1.2 },
+  { id: "glas", category: "merchandise", style: "Merchandise", skuType: "Merchandise", sku: "Berlewalde Glas 33cl", reportingNote: "contributie telt mee, geen bierliters", plannedUnits: 800, actualUnitsYtd: 300, reforecastUnits: 690, litersPerUnit: 0, plannedPrice: 3.95, actualPrice: 3.95, purchase: 1.95, excise: 0, packaging: 0, abcAllocation: 0.4 },
 ];
 
 const planFixedCosts = 80000;
@@ -162,6 +166,52 @@ function contributionSignal(row: ProductRow) {
   return { label: "stabiel", tone: "neutral" };
 }
 
+function categoryLabel(category: ProductRow["category"]) {
+  switch (category) {
+    case "beer":
+      return "Bier";
+    case "giftset":
+      return "Geschenk";
+    case "service":
+      return "Dienst";
+    case "merchandise":
+      return "Merchandise";
+  }
+}
+
+function categoryTreatment(category: ProductRow["category"]) {
+  switch (category) {
+    case "beer":
+      return "Omzet, contributie, liters en mix";
+    case "giftset":
+      return "Omzet als product, liters via samenstelling";
+    case "service":
+      return "Service-omzet, bierverbruik optioneel als kost";
+    case "merchandise":
+      return "Contributie, geen bierliters";
+  }
+}
+
+function summarizeByCategory(rows: ProductRow[]) {
+  const categories: ProductRow["category"][] = ["beer", "giftset", "service", "merchandise"];
+  return categories
+    .map((category) => {
+      const categoryRows = rows.filter((row) => row.category === category);
+      const revenue = categoryRows.reduce((sum, row) => sum + row.reforecastUnits * row.plannedPrice, 0);
+      const contribution = categoryRows.reduce((sum, row) => sum + row.reforecastUnits * contributionUnit(row, "reforecast"), 0);
+      const liters = categoryRows.reduce((sum, row) => sum + row.reforecastUnits * row.litersPerUnit, 0);
+      return {
+        category,
+        rows: categoryRows.length,
+        revenue,
+        contribution,
+        liters,
+        treatment: categoryTreatment(category),
+      };
+    })
+    .filter((row) => row.rows > 0);
+}
+
 function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: number }>, breakEvenRevenue: number) {
   const hit = timeline.find((point) => point.reforecast >= breakEvenRevenue);
   return hit?.month ?? "niet binnen dit jaar";
@@ -235,6 +285,7 @@ export function BreakEvenNextMockup() {
   const pagedContributionRows = contributionRows.slice((safeContributionPage - 1) * contributionPageSize, safeContributionPage * contributionPageSize);
   const topContributor = contributionRows[0];
   const marginRiskCount = contributionRows.filter((row) => contributionSignal(row).tone === "error").length;
+  const categoryRows = useMemo(() => summarizeByCategory(products), []);
 
   const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / reforecastFixedCosts) * 100));
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
@@ -403,80 +454,121 @@ export function BreakEvenNextMockup() {
       ) : null}
 
       {activeTab === "contribution" ? (
-        <section className="module-card">
-          <div className="module-card-header be-next-table-header">
-            <div>
-              <div className="module-card-title">Van verkoopprijs naar contributie</div>
-              <div className="module-card-text">Groepeerbaar per stijl/SKU-type; start met contributors en risico's, niet met alle 90 SKU's tegelijk.</div>
+        <div className="wizard-stack">
+          <section className="module-card">
+            <div className="module-card-header">
+              <div className="module-card-title">Categoriebehandeling</div>
+              <div className="module-card-text">Deze laag voorkomt dat giftsets, diensten en merchandise de bierliters of mixanalyse vervuilen.</div>
             </div>
-            <input
-              className="editor-input"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setContributionPage(1);
-              }}
-              placeholder="Zoek stijl, type of SKU"
-            />
-          </div>
-          <div className="be-next-grid be-next-grid-3 be-next-contribution-summary">
-            <MetricCard label="Zichtbare regels" value={`${contributionRows.length}`} helper="na filter/search" />
-            <MetricCard
-              label="Top contributor"
-              value={topContributor ? money(topContributor.reforecastUnits * contributionUnit(topContributor, "reforecast")) : "-"}
-              helper={topContributor?.sku ?? "geen regels"}
-            />
-            <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="contributie onder 25% van prijs" tone={marginRiskCount > 0 ? "negative" : "positive"} />
-          </div>
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>SKU</th>
-                  <th>Signaal</th>
-                  <th>Prijs</th>
-                  <th>Inkoop/productie</th>
-                  <th>Accijns</th>
-                  <th>Verpakking</th>
-                  <th>Contributie</th>
-                  <th>ABC allocatie</th>
-                  <th>Marge na allocatie</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagedContributionRows.map((row) => {
-                  const signal = contributionSignal(row);
-                  return (
-                    <tr key={row.id}>
-                      <td><strong>{row.sku}</strong><br /><small>{row.style} - {row.skuType}</small></td>
-                      <td><span className={`status-pill status-${signal.tone}`}>{signal.label}</span></td>
-                      <td>{money2(row.plannedPrice)}</td>
-                      <td>{money2(row.purchase)}</td>
-                      <td>{money2(row.excise)}</td>
-                      <td>{money2(row.packaging)}</td>
-                      <td><strong>{money2(contributionUnit(row))}</strong></td>
-                      <td>{money2(row.abcAllocation)}</td>
-                      <td>{money2(allocatedMarginUnit(row))}</td>
+            <div className="data-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Categorie</th>
+                    <th>Omzet</th>
+                    <th>Contributie</th>
+                    <th>Liters/mix</th>
+                    <th>Behandeling</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categoryRows.map((row) => (
+                    <tr key={row.category}>
+                      <td><strong>{categoryLabel(row.category)}</strong><br /><small>{row.rows} verkoopbare regels</small></td>
+                      <td>{money(row.revenue)}</td>
+                      <td><strong>{money(row.contribution)}</strong></td>
+                      <td>{row.liters > 0 ? `${number(row.liters)} L` : "-"}</td>
+                      <td>{row.treatment}</td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="be-next-pagination">
-            <span>
-              Pagina {safeContributionPage} van {contributionPageCount} - {contributionRows.length} regels
-            </span>
-            <div>
-              <button type="button" className="secondary-button" disabled={safeContributionPage <= 1} onClick={() => setContributionPage((page) => Math.max(1, page - 1))}>
-                Vorige
-              </button>
-              <button type="button" className="secondary-button" disabled={safeContributionPage >= contributionPageCount} onClick={() => setContributionPage((page) => Math.min(contributionPageCount, page + 1))}>
-                Volgende
-              </button>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-        </section>
+          </section>
+
+          <section className="module-card">
+            <div className="module-card-header be-next-table-header">
+              <div>
+                <div className="module-card-title">Van verkoopprijs naar contributie</div>
+                <div className="module-card-text">Groepeerbaar per stijl/SKU-type; start met contributors en risico's, niet met alle 90 SKU's tegelijk.</div>
+              </div>
+              <input
+                className="editor-input"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setContributionPage(1);
+                }}
+                placeholder="Zoek stijl, type of SKU"
+              />
+            </div>
+            <div className="be-next-grid be-next-grid-3 be-next-contribution-summary">
+              <MetricCard label="Zichtbare regels" value={`${contributionRows.length}`} helper="na filter/search" />
+              <MetricCard
+                label="Top contributor"
+                value={topContributor ? money(topContributor.reforecastUnits * contributionUnit(topContributor, "reforecast")) : "-"}
+                helper={topContributor?.sku ?? "geen regels"}
+              />
+              <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="contributie onder 25% van prijs" tone={marginRiskCount > 0 ? "negative" : "positive"} />
+            </div>
+            <div className="data-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Categorie</th>
+                    <th>Signaal</th>
+                    <th>Prijs</th>
+                    <th>Inkoop/productie</th>
+                    <th>Accijns</th>
+                    <th>Verpakking</th>
+                    <th>Contributie</th>
+                    <th>ABC allocatie</th>
+                    <th>Marge na allocatie</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagedContributionRows.map((row) => {
+                    const signal = contributionSignal(row);
+                    return (
+                      <tr key={row.id}>
+                        <td>
+                          <strong>{row.sku}</strong><br />
+                          <small>
+                            {row.style} - {row.skuType}
+                            {row.componentStyles?.length ? ` - componenten: ${row.componentStyles.join(", ")}` : ""}
+                          </small>
+                        </td>
+                        <td><span className="status-pill status-neutral">{categoryLabel(row.category)}</span></td>
+                        <td><span className={`status-pill status-${signal.tone}`}>{signal.label}</span></td>
+                        <td>{money2(row.plannedPrice)}</td>
+                        <td>{money2(row.purchase)}</td>
+                        <td>{money2(row.excise)}</td>
+                        <td>{money2(row.packaging)}</td>
+                        <td><strong>{money2(contributionUnit(row))}</strong></td>
+                        <td>{money2(row.abcAllocation)}</td>
+                        <td>{money2(allocatedMarginUnit(row))}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="be-next-pagination">
+              <span>
+                Pagina {safeContributionPage} van {contributionPageCount} - {contributionRows.length} regels
+              </span>
+              <div>
+                <button type="button" className="secondary-button" disabled={safeContributionPage <= 1} onClick={() => setContributionPage((page) => Math.max(1, page - 1))}>
+                  Vorige
+                </button>
+                <button type="button" className="secondary-button" disabled={safeContributionPage >= contributionPageCount} onClick={() => setContributionPage((page) => Math.min(contributionPageCount, page + 1))}>
+                  Volgende
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {activeTab === "plan_actual" ? (
