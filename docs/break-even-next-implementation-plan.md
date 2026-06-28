@@ -328,6 +328,12 @@ Tasks:
 - Build tabs and cards.
 - Build dashboard revenue timeline with plan, actual and reforecast.
 - Build conclusion/advice card based on plan gap.
+- Build dedicated Break-even tab:
+  - break-even revenue
+  - break-even liters and weighted units
+  - remaining contribution needed
+  - expected break-even month
+  - control calculation where result equals zero
 - Build `Van verkoopprijs naar contributie`.
 - Build P&L and variance bridge with example numbers.
 - Keep all old break-even functionality intact.
@@ -339,6 +345,7 @@ Acceptance:
 - The screen makes bezettingsresultaat understandable.
 - Dashboard shows whether revenue/reforecast is above or below plan.
 - Dashboard makes clear that contribution is the main steering metric.
+- Break-even tab makes the zero-result calculation auditable.
 
 ### Phase 2: Backend Snapshot Read Model
 

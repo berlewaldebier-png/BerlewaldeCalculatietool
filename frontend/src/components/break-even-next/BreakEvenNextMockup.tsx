@@ -15,7 +15,7 @@ import {
   YAxis,
 } from "recharts";
 
-type TabId = "dashboard" | "pnl" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
+type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
 
 type ProductRow = {
   id: string;
@@ -43,6 +43,7 @@ type ScenarioState = {
 const tabs: Array<{ id: TabId; title: string; description: string }> = [
   { id: "dashboard", title: "Dashboard", description: "Zijn we op koers?" },
   { id: "pnl", title: "Resultaatrekening", description: "Exact-achtige opbouw" },
+  { id: "break_even", title: "Break-even", description: "Waar is resultaat nul?" },
   { id: "contribution", title: "Contributie", description: "Van verkoopprijs naar marge" },
   { id: "plan_actual", title: "Plan vs actual", description: "Volume en omzet" },
   { id: "variance", title: "Varianties", description: "Waarom wijken we af?" },
@@ -149,6 +150,11 @@ function buildRevenueTimeline(planRevenue: number, actualRevenue: number, refore
   }));
 }
 
+function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: number }>, breakEvenRevenue: number) {
+  const hit = timeline.find((point) => point.reforecast >= breakEvenRevenue);
+  return hit?.month ?? "niet binnen dit jaar";
+}
+
 export function BreakEvenNextMockup() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
@@ -167,6 +173,18 @@ export function BreakEvenNextMockup() {
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
   const neededPricePct = reforecast.revenue > 0 ? Math.max(0, (plan.revenue / reforecast.revenue - 1) * 100) : 0;
   const neededVolumePct = reforecast.contribution > 0 ? Math.max(0, ((plan.contribution / reforecast.contribution) - 1) * 100) : 0;
+  const reforecastContributionRatio = reforecast.revenue > 0 ? reforecast.contribution / reforecast.revenue : 0;
+  const reforecastVariableRatio = reforecast.revenue > 0 ? reforecast.variable / reforecast.revenue : 0;
+  const contributionPerLiter = reforecast.liters > 0 ? reforecast.contribution / reforecast.liters : 0;
+  const contributionPerUnit = reforecast.units > 0 ? reforecast.contribution / reforecast.units : 0;
+  const breakEvenRevenue = reforecastContributionRatio > 0 ? reforecastFixedCosts / reforecastContributionRatio : 0;
+  const breakEvenVariableCost = breakEvenRevenue * reforecastVariableRatio;
+  const breakEvenContribution = breakEvenRevenue - breakEvenVariableCost;
+  const breakEvenLiters = contributionPerLiter > 0 ? reforecastFixedCosts / contributionPerLiter : 0;
+  const breakEvenUnits = contributionPerUnit > 0 ? reforecastFixedCosts / contributionPerUnit : 0;
+  const breakEvenResultCheck = breakEvenRevenue - breakEvenVariableCost - reforecastFixedCosts;
+  const remainingContributionYtd = Math.max(0, reforecastFixedCosts - actual.contribution);
+  const expectedBreakEvenMonth = estimateBreakEvenMonth(revenueTimeline, breakEvenRevenue);
 
   const varianceRows = useMemo(() => {
     const priceVariance = products.reduce((sum, row) => sum + (row.actualPrice - row.plannedPrice) * row.reforecastUnits, 0);
@@ -307,6 +325,55 @@ export function BreakEvenNextMockup() {
           <section className="module-card be-next-wide">
             <div className="module-card-title">Van resultaatrekening naar verklaard resultaat</div>
             <VarianceBridge rows={varianceRows} />
+          </section>
+        </div>
+      ) : null}
+
+      {activeTab === "break_even" ? (
+        <div className="wizard-stack">
+          <div className="be-next-grid be-next-grid-3">
+            <MetricCard label="Break-even omzet" value={money(breakEvenRevenue)} helper="om vaste kosten te dekken" />
+            <MetricCard label="Break-even liters" value={`${number(breakEvenLiters)} L`} helper="op huidige reforecast mix" />
+            <MetricCard label="Break-even units" value={number(breakEvenUnits)} helper="gewogen gemiddelde units" />
+            <MetricCard label="Nog contributie nodig" value={money(remainingContributionYtd)} helper="vanaf actual YTD tot vaste kosten" />
+            <MetricCard label="Verwachte break-even maand" value={expectedBreakEvenMonth} helper="op basis van reforecast omzetlijn" />
+            <MetricCard label="Controle resultaat" value={money(breakEvenResultCheck)} tone={Math.abs(breakEvenResultCheck) < 1 ? "positive" : "negative"} helper="moet rond nul zijn" />
+          </div>
+
+          <section className="module-card">
+            <div className="module-card-header be-next-table-header">
+              <div>
+                <div className="module-card-title">Controleberekening bij break-even</div>
+                <div className="module-card-text">Deze berekening bewijst dat de break-even omzet precies genoeg contributie oplevert om de vaste kosten te dragen.</div>
+              </div>
+              <span className="status-pill status-ok">resultaat = 0</span>
+            </div>
+            <div className="data-table">
+              <table>
+                <tbody>
+                  <PnlRow label="Omzet op break-even" value={breakEvenRevenue} />
+                  <PnlRow label="Variabele kosten bij huidige mix" value={-breakEvenVariableCost} />
+                  <PnlRow label="Contributie" value={breakEvenContribution} strong />
+                  <PnlRow label="Vaste kosten" value={-reforecastFixedCosts} />
+                  <PnlRow label="Resultaat" value={breakEvenResultCheck} strong />
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="module-card be-next-advice">
+            <div>
+              <div className="module-card-title">Interpretatie</div>
+              <p>
+                Bij de huidige mix levert elke euro omzet gemiddeld {number(reforecastContributionRatio * 100, 1)}% contributie op.
+                Daardoor is {money(breakEvenRevenue)} omzet nodig om {money(reforecastFixedCosts)} vaste kosten te dekken.
+              </p>
+            </div>
+            <div className="be-next-advice-actions">
+              <span>Rekenbasis</span>
+              <strong>{money2(contributionPerLiter)} / L</strong>
+              <small>contributie per liter</small>
+            </div>
           </section>
         </div>
       ) : null}
