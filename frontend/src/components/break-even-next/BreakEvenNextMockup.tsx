@@ -66,6 +66,7 @@ const planFixedCosts = 80000;
 const actualFixedCostsYtd = 41500;
 const reforecastFixedCosts = 83500;
 const plannedNormalLiters = 40000;
+const contributionPageSize = 5;
 
 const revenuePhasing = [
   { month: "Jan", planPct: 0.05, actualPct: 0.052, reforecastPct: 0.052 },
@@ -150,6 +151,17 @@ function buildRevenueTimeline(planRevenue: number, actualRevenue: number, refore
   }));
 }
 
+function contributionSignal(row: ProductRow) {
+  const contribution = contributionUnit(row, "reforecast");
+  const contributionPct = row.plannedPrice > 0 ? contribution / row.plannedPrice : 0;
+  const totalContribution = row.reforecastUnits * contribution;
+  if (contributionPct < 0.25) return { label: "marge-risico", tone: "error" };
+  if (totalContribution > 9000) return { label: "mixdrager", tone: "ok" };
+  if (row.reforecastUnits > row.plannedUnits * 1.1) return { label: "volume boven plan", tone: "ok" };
+  if (row.reforecastUnits < row.plannedUnits * 0.9) return { label: "volume onder plan", tone: "warning" };
+  return { label: "stabiel", tone: "neutral" };
+}
+
 function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: number }>, breakEvenRevenue: number) {
   const hit = timeline.find((point) => point.reforecast >= breakEvenRevenue);
   return hit?.month ?? "niet binnen dit jaar";
@@ -158,6 +170,7 @@ function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: num
 export function BreakEvenNextMockup() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
+  const [contributionPage, setContributionPage] = useState(1);
   const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 5, volumePct: 8, fixedCostPct: 0 });
 
   const plan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
@@ -217,6 +230,11 @@ export function BreakEvenNextMockup() {
       })
       .sort((a, b) => b.reforecastUnits * contributionUnit(b, "reforecast") - a.reforecastUnits * contributionUnit(a, "reforecast"));
   }, [query]);
+  const contributionPageCount = Math.max(1, Math.ceil(contributionRows.length / contributionPageSize));
+  const safeContributionPage = Math.min(contributionPage, contributionPageCount);
+  const pagedContributionRows = contributionRows.slice((safeContributionPage - 1) * contributionPageSize, safeContributionPage * contributionPageSize);
+  const topContributor = contributionRows[0];
+  const marginRiskCount = contributionRows.filter((row) => contributionSignal(row).tone === "error").length;
 
   const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / reforecastFixedCosts) * 100));
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
@@ -391,13 +409,31 @@ export function BreakEvenNextMockup() {
               <div className="module-card-title">Van verkoopprijs naar contributie</div>
               <div className="module-card-text">Groepeerbaar per stijl/SKU-type; start met contributors en risico's, niet met alle 90 SKU's tegelijk.</div>
             </div>
-            <input className="editor-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Zoek stijl, type of SKU" />
+            <input
+              className="editor-input"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setContributionPage(1);
+              }}
+              placeholder="Zoek stijl, type of SKU"
+            />
+          </div>
+          <div className="be-next-grid be-next-grid-3 be-next-contribution-summary">
+            <MetricCard label="Zichtbare regels" value={`${contributionRows.length}`} helper="na filter/search" />
+            <MetricCard
+              label="Top contributor"
+              value={topContributor ? money(topContributor.reforecastUnits * contributionUnit(topContributor, "reforecast")) : "-"}
+              helper={topContributor?.sku ?? "geen regels"}
+            />
+            <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="contributie onder 25% van prijs" tone={marginRiskCount > 0 ? "negative" : "positive"} />
           </div>
           <div className="data-table">
             <table>
               <thead>
                 <tr>
                   <th>SKU</th>
+                  <th>Signaal</th>
                   <th>Prijs</th>
                   <th>Inkoop/productie</th>
                   <th>Accijns</th>
@@ -408,20 +444,37 @@ export function BreakEvenNextMockup() {
                 </tr>
               </thead>
               <tbody>
-                {contributionRows.map((row) => (
-                  <tr key={row.id}>
-                    <td><strong>{row.sku}</strong><br /><small>{row.style} - {row.skuType}</small></td>
-                    <td>{money2(row.plannedPrice)}</td>
-                    <td>{money2(row.purchase)}</td>
-                    <td>{money2(row.excise)}</td>
-                    <td>{money2(row.packaging)}</td>
-                    <td><strong>{money2(contributionUnit(row))}</strong></td>
-                    <td>{money2(row.abcAllocation)}</td>
-                    <td>{money2(allocatedMarginUnit(row))}</td>
-                  </tr>
-                ))}
+                {pagedContributionRows.map((row) => {
+                  const signal = contributionSignal(row);
+                  return (
+                    <tr key={row.id}>
+                      <td><strong>{row.sku}</strong><br /><small>{row.style} - {row.skuType}</small></td>
+                      <td><span className={`status-pill status-${signal.tone}`}>{signal.label}</span></td>
+                      <td>{money2(row.plannedPrice)}</td>
+                      <td>{money2(row.purchase)}</td>
+                      <td>{money2(row.excise)}</td>
+                      <td>{money2(row.packaging)}</td>
+                      <td><strong>{money2(contributionUnit(row))}</strong></td>
+                      <td>{money2(row.abcAllocation)}</td>
+                      <td>{money2(allocatedMarginUnit(row))}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+          <div className="be-next-pagination">
+            <span>
+              Pagina {safeContributionPage} van {contributionPageCount} - {contributionRows.length} regels
+            </span>
+            <div>
+              <button type="button" className="secondary-button" disabled={safeContributionPage <= 1} onClick={() => setContributionPage((page) => Math.max(1, page - 1))}>
+                Vorige
+              </button>
+              <button type="button" className="secondary-button" disabled={safeContributionPage >= contributionPageCount} onClick={() => setContributionPage((page) => Math.min(contributionPageCount, page + 1))}>
+                Volgende
+              </button>
+            </div>
           </div>
         </section>
       ) : null}
