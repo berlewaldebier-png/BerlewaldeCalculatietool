@@ -171,8 +171,14 @@ export function BreakEvenNextMockup() {
   const revenueTimeline = useMemo(() => buildRevenueTimeline(plan.revenue, actual.revenue, reforecast.revenue), [actual.revenue, plan.revenue, reforecast.revenue]);
   const revenueGap = reforecast.revenue - plan.revenue;
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
+  const contributionGap = plan.contribution - reforecast.contribution;
+  const resultGap = planResult - reforecastResult;
   const neededPricePct = reforecast.revenue > 0 ? Math.max(0, (plan.revenue / reforecast.revenue - 1) * 100) : 0;
   const neededVolumePct = reforecast.contribution > 0 ? Math.max(0, ((plan.contribution / reforecast.contribution) - 1) * 100) : 0;
+  const neededResultPricePct = reforecast.revenue > 0 ? Math.max(0, resultGap / reforecast.revenue * 100) : 0;
+  const neededResultVolumePct = reforecast.contribution > 0 ? Math.max(0, resultGap / reforecast.contribution * 100) : 0;
+  const balancedPricePct = neededResultPricePct / 2;
+  const balancedVolumePct = neededResultVolumePct / 2;
   const reforecastContributionRatio = reforecast.revenue > 0 ? reforecast.contribution / reforecast.revenue : 0;
   const reforecastVariableRatio = reforecast.revenue > 0 ? reforecast.variable / reforecast.revenue : 0;
   const contributionPerLiter = reforecast.liters > 0 ? reforecast.contribution / reforecast.liters : 0;
@@ -488,21 +494,56 @@ export function BreakEvenNextMockup() {
       ) : null}
 
       {activeTab === "scenario" ? (
-        <div className="be-next-grid be-next-grid-2">
+        <div className="wizard-stack">
+          <div className="be-next-grid be-next-grid-2">
+            <section className="module-card">
+              <div className="module-card-title">Scenario lab</div>
+              <ScenarioSlider label="Prijs" value={scenario.pricePct} min={-10} max={15} onChange={(pricePct) => setScenario((current) => ({ ...current, pricePct }))} />
+              <ScenarioSlider label="Volume" value={scenario.volumePct} min={-25} max={30} onChange={(volumePct) => setScenario((current) => ({ ...current, volumePct }))} />
+              <ScenarioSlider label="Vaste kosten" value={scenario.fixedCostPct} min={-20} max={20} onChange={(fixedCostPct) => setScenario((current) => ({ ...current, fixedCostPct }))} />
+            </section>
+            <section className="module-card">
+              <div className="module-card-title">Scenario uitkomst</div>
+              <div className="record-card-grid">
+                <MetricCard label="Omzet" value={money(scenarioResult.revenue)} />
+                <MetricCard label="Contributie" value={money(scenarioResult.contribution)} />
+                <MetricCard label="Vaste kosten" value={money(scenarioResult.fixedCosts)} />
+                <MetricCard label="Resultaat" value={money(scenarioResult.result)} tone={scenarioResult.result >= 0 ? "positive" : "negative"} />
+                <MetricCard label="Break-even omzet" value={money(scenarioResult.breakEvenRevenue)} />
+              </div>
+            </section>
+          </div>
+
           <section className="module-card">
-            <div className="module-card-title">Scenario lab</div>
-            <ScenarioSlider label="Prijs" value={scenario.pricePct} min={-10} max={15} onChange={(pricePct) => setScenario((current) => ({ ...current, pricePct }))} />
-            <ScenarioSlider label="Volume" value={scenario.volumePct} min={-25} max={30} onChange={(volumePct) => setScenario((current) => ({ ...current, volumePct }))} />
-            <ScenarioSlider label="Vaste kosten" value={scenario.fixedCostPct} min={-20} max={20} onChange={(fixedCostPct) => setScenario((current) => ({ ...current, fixedCostPct }))} />
-          </section>
-          <section className="module-card">
-            <div className="module-card-title">Scenario uitkomst</div>
-            <div className="record-card-grid">
-              <MetricCard label="Omzet" value={money(scenarioResult.revenue)} />
-              <MetricCard label="Contributie" value={money(scenarioResult.contribution)} />
-              <MetricCard label="Vaste kosten" value={money(scenarioResult.fixedCosts)} />
-              <MetricCard label="Resultaat" value={money(scenarioResult.result)} tone={scenarioResult.result >= 0 ? "positive" : "negative"} />
-              <MetricCard label="Break-even omzet" value={money(scenarioResult.breakEvenRevenue)} />
+            <div className="module-card-header">
+              <div className="module-card-title">Advieskaarten om het gat te sluiten</div>
+              <div className="module-card-text">Indicatief op basis van huidige reforecast. Deze kaarten schrijven niets weg en zijn bedoeld als stuurinformatie.</div>
+            </div>
+            <div className="be-next-grid be-next-grid-4">
+              <AdviceCard
+                title="Prijs"
+                value={`+${number(neededResultPricePct, 1)}%`}
+                helper={`prijs nodig om ${money(Math.max(0, resultGap))} resultaatgat te sluiten`}
+                mutedValue={`omzetgat: +${number(neededPricePct, 1)}%`}
+              />
+              <AdviceCard
+                title="Volume"
+                value={`+${number(neededResultVolumePct, 1)}%`}
+                helper="extra contributievolume bij gelijke prijs en mix"
+                mutedValue={`contributiegat: ${money(Math.max(0, contributionGap))}`}
+              />
+              <AdviceCard
+                title="Gebalanceerd"
+                value={`+${number(balancedPricePct, 1)}% / +${number(balancedVolumePct, 1)}%`}
+                helper="helft via prijs, helft via volume"
+                mutedValue="eerste realistische stuurvariant"
+              />
+              <AdviceCard
+                title="Vaste kosten"
+                value={money(Math.max(0, resultGap))}
+                helper="kostenreductie nodig als prijs en volume gelijk blijven"
+                mutedValue={`huidige vaste kosten: ${money(reforecastFixedCosts)}`}
+              />
             </div>
           </section>
         </div>
@@ -546,6 +587,17 @@ function MetricCard({ label, value, helper, tone }: { label: string; value: stri
       <span>{label}</span>
       <strong>{value}</strong>
       {helper ? <small>{helper}</small> : null}
+    </section>
+  );
+}
+
+function AdviceCard({ title, value, helper, mutedValue }: { title: string; value: string; helper: string; mutedValue: string }) {
+  return (
+    <section className="be-next-advice-card">
+      <span>{title}</span>
+      <strong>{value}</strong>
+      <p>{helper}</p>
+      <small>{mutedValue}</small>
     </section>
   );
 }

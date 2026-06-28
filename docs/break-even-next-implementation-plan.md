@@ -289,6 +289,8 @@ When reforecast is below plan, show suggested scenarios:
 - fixed-cost reduction needed to close the gap
 - combined balanced scenario
 
+The first mock-up version should show these as read-only advice cards. Later they can become one-click scenario presets, but they must still remain analysis-only until explicitly promoted into planning.
+
 #### 8. Year Close Preview
 
 Shows:
@@ -334,6 +336,11 @@ Tasks:
   - remaining contribution needed
   - expected break-even month
   - control calculation where result equals zero
+- Build Scenario lab advice cards:
+  - price lever
+  - volume/contribution lever
+  - balanced lever
+  - fixed-cost lever
 - Build `Van verkoopprijs naar contributie`.
 - Build P&L and variance bridge with example numbers.
 - Keep all old break-even functionality intact.

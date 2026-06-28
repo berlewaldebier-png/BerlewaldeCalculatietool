@@ -3888,6 +3888,10 @@ a {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.be-next-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .be-next-wide {
   grid-column: 1 / -1;
 }
@@ -4003,9 +4007,45 @@ a {
   font-size: 1.1rem;
 }
 
+.be-next-advice-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface-subtle);
+}
+
+.be-next-advice-card span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.be-next-advice-card strong {
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1.15;
+}
+
+.be-next-advice-card p {
+  margin: 0;
+  color: var(--text);
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.be-next-advice-card small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 @media (max-width: 1100px) {
   .be-next-grid-2,
   .be-next-grid-3,
+  .be-next-grid-4,
   .be-next-progress-row {
     grid-template-columns: 1fr;
   }
