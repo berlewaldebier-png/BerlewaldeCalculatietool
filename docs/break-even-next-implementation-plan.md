@@ -148,8 +148,28 @@ Cards:
 Visuals:
 
 - break-even progress
-- plan vs reforecast status
+- revenue over time:
+  - blue line: frozen revenue plan
+  - actual YTD line: green when on/above plan, red when below plan
+  - dotted reforecast line to year-end
+  - status conclusion above/below plan
 - short explanation of the largest variance driver
+- suggested steering action when reforecast is below plan:
+  - required price increase
+  - required contribution volume increase
+  - combination scenario
+
+Primary steering metric:
+
+- contribution
+
+Secondary reference metrics:
+
+- revenue
+- liters
+- units
+
+Revenue remains visible because it is intuitive, but the app should steer decisions on contribution and operating result.
 
 #### 2. Resultaatrekening
 
@@ -177,7 +197,23 @@ Planned result
 = explained result
 ```
 
-#### 3. Van Verkoopprijs Naar Contributie
+#### 3. Break-Even
+
+Dedicated control tab to prove and explain the break-even calculation.
+
+Shows:
+
+- break-even revenue
+- break-even liters
+- break-even units where meaningful
+- current progress toward break-even
+- expected break-even date based on reforecast
+- remaining contribution needed
+- control calculation proving that result is zero at break-even
+
+This tab should make the calculation auditable for a controller and readable for a CEO.
+
+#### 4. Van Verkoopprijs Naar Contributie
 
 SKU/style drilldown. Because there are around 90 SKUs, do not start with a giant table.
 
@@ -188,6 +224,7 @@ Required grouping:
 - top contributors
 - margin risks
 - search/filter
+- pagination
 
 Each row must explain:
 
@@ -200,7 +237,7 @@ Each row must explain:
 - ABC overhead allocation
 - allocated margin
 
-#### 4. Plan Vs Actual
+#### 5. Plan Vs Actual
 
 Shows:
 
@@ -212,7 +249,17 @@ Shows:
 - reforecast contribution
 - plan vs actual by style and SKU group
 
-#### 5. Variance Analysis
+Avoid requiring manual plans for every SKU by default. Start with high-level assumptions:
+
+- total revenue
+- total liters
+- price change
+- volume growth
+- mix correction
+
+Allow SKU/style exceptions only where needed. Closed 2025 actuals can become the starting point for 2026 planning after explicit confirmation.
+
+#### 6. Variance Analysis
 
 Waterfall and table:
 
@@ -223,7 +270,7 @@ Waterfall and table:
 - fixed cost budget variance
 - bezettingsresultaat
 
-#### 6. Scenario Lab
+#### 7. Scenario Lab
 
 Controls:
 
@@ -235,7 +282,14 @@ Controls:
 
 Scenarios must not write to plan or actual data. They are analysis-only until explicitly promoted into a planning process.
 
-#### 7. Year Close Preview
+When reforecast is below plan, show suggested scenarios:
+
+- price needed to close the gap
+- volume/contribution needed to close the gap
+- fixed-cost reduction needed to close the gap
+- combined balanced scenario
+
+#### 8. Year Close Preview
 
 Shows:
 
@@ -244,6 +298,22 @@ Shows:
 - data quality dependency
 - variance vs frozen plan
 - what will be handed to `Nieuw jaar voorbereiden`
+
+### Category Handling
+
+Giftsets, tastings and merchandise must not disappear into a generic SKU bucket.
+
+- Giftsets:
+  - show as their own sold product for revenue/contribution
+  - roll component beers into style/liter/mix analysis where the composition is known
+- Tastings/services:
+  - show as service revenue/contribution
+  - optionally allocate beer usage as variable cost when configured
+- Merchandise:
+  - show as merchandise contribution
+  - exclude from beer liters
+
+This allows scenario questions like "how many glasses do we need to sell to reach break-even?" without polluting beer volume reporting.
 
 ## Real Implementation Phases
 
@@ -256,6 +326,8 @@ Tasks:
 - Add `/break-even-next`.
 - Add static example dataset.
 - Build tabs and cards.
+- Build dashboard revenue timeline with plan, actual and reforecast.
+- Build conclusion/advice card based on plan gap.
 - Build `Van verkoopprijs naar contributie`.
 - Build P&L and variance bridge with example numbers.
 - Keep all old break-even functionality intact.
@@ -265,6 +337,8 @@ Acceptance:
 - User can click through the complete flow.
 - The screen explains contribution vs allocated margin.
 - The screen makes bezettingsresultaat understandable.
+- Dashboard shows whether revenue/reforecast is above or below plan.
+- Dashboard makes clear that contribution is the main steering metric.
 
 ### Phase 2: Backend Snapshot Read Model
 
@@ -395,4 +469,3 @@ Acceptance:
 - Should packaging be split into variable packaging and fixed packaging overhead? Current recommendation: yes where data supports it.
 - How should giftsets and tastings appear in contribution analysis: own line, component rollup, or both?
 - Which Exact Online P&L lines should be mirrored for reconciliation?
-

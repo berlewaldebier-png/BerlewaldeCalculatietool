@@ -6,6 +6,9 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -62,6 +65,21 @@ const planFixedCosts = 80000;
 const actualFixedCostsYtd = 41500;
 const reforecastFixedCosts = 83500;
 const plannedNormalLiters = 40000;
+
+const revenuePhasing = [
+  { month: "Jan", planPct: 0.05, actualPct: 0.052, reforecastPct: 0.052 },
+  { month: "Feb", planPct: 0.11, actualPct: 0.105, reforecastPct: 0.105 },
+  { month: "Mrt", planPct: 0.18, actualPct: 0.165, reforecastPct: 0.165 },
+  { month: "Apr", planPct: 0.27, actualPct: 0.238, reforecastPct: 0.238 },
+  { month: "Mei", planPct: 0.37, actualPct: 0.335, reforecastPct: 0.335 },
+  { month: "Jun", planPct: 0.48, actualPct: 0.445, reforecastPct: 0.445 },
+  { month: "Jul", planPct: 0.58, actualPct: null, reforecastPct: 0.545 },
+  { month: "Aug", planPct: 0.67, actualPct: null, reforecastPct: 0.625 },
+  { month: "Sep", planPct: 0.76, actualPct: null, reforecastPct: 0.715 },
+  { month: "Okt", planPct: 0.86, actualPct: null, reforecastPct: 0.82 },
+  { month: "Nov", planPct: 0.94, actualPct: null, reforecastPct: 0.91 },
+  { month: "Dec", planPct: 1, actualPct: null, reforecastPct: 1 },
+];
 
 function money(value: number) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
@@ -122,6 +140,15 @@ function buildScenario(rows: ProductRow[], scenario: ScenarioState) {
   };
 }
 
+function buildRevenueTimeline(planRevenue: number, actualRevenue: number, reforecastRevenue: number) {
+  return revenuePhasing.map((point) => ({
+    month: point.month,
+    plan: planRevenue * point.planPct,
+    actual: point.actualPct === null ? null : actualRevenue * (point.actualPct / 0.445),
+    reforecast: reforecastRevenue * point.reforecastPct,
+  }));
+}
+
 export function BreakEvenNextMockup() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
@@ -135,6 +162,11 @@ export function BreakEvenNextMockup() {
   const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
   const planResult = plan.contribution - planFixedCosts;
   const reforecastResult = reforecast.contribution - reforecastFixedCosts;
+  const revenueTimeline = useMemo(() => buildRevenueTimeline(plan.revenue, actual.revenue, reforecast.revenue), [actual.revenue, plan.revenue, reforecast.revenue]);
+  const revenueGap = reforecast.revenue - plan.revenue;
+  const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
+  const neededPricePct = reforecast.revenue > 0 ? Math.max(0, (plan.revenue / reforecast.revenue - 1) * 100) : 0;
+  const neededVolumePct = reforecast.contribution > 0 ? Math.max(0, ((plan.contribution / reforecast.contribution) - 1) * 100) : 0;
 
   const varianceRows = useMemo(() => {
     const priceVariance = products.reduce((sum, row) => sum + (row.actualPrice - row.plannedPrice) * row.reforecastUnits, 0);
@@ -221,6 +253,48 @@ export function BreakEvenNextMockup() {
                   De mock-up houdt de geplande kostprijs vast en verklaart het verschil via prijs, volume, mix, kostprijs en bezettingsresultaat.
                 </p>
               </div>
+            </div>
+          </section>
+
+          <section className="module-card">
+            <div className="module-card-header be-next-table-header">
+              <div>
+                <div className="module-card-title">Omzet over tijd: plan, actual en reforecast</div>
+                <div className="module-card-text">Blauw is het oorspronkelijke plan. De actuele/reforecast lijn kleurt groen als we boven plan eindigen en rood als we eronder blijven.</div>
+              </div>
+              <span className={`status-pill ${revenueGap >= 0 ? "status-ok" : "status-error"}`}>
+                {revenueGap >= 0 ? "boven plan" : "onder plan"} {number(revenueGapPct, 1)}%
+              </span>
+            </div>
+            <div className="be-next-chart be-next-revenue-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={revenueTimeline} margin={{ top: 16, right: 24, bottom: 8, left: 8 }}>
+                  <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} />
+                  <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `€ ${Math.round(Number(value) / 1000)}k`} />
+                  <Tooltip formatter={(value: number) => money(Number(value))} />
+                  <Legend />
+                  <Line type="monotone" dataKey="plan" name="Plan" stroke="#2563eb" strokeWidth={3} dot={false} />
+                  <Line type="monotone" dataKey="actual" name="Actual YTD" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} connectNulls={false} />
+                  <Line type="monotone" dataKey="reforecast" name="Reforecast" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} strokeDasharray="7 7" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className={`module-card be-next-advice ${revenueGap >= 0 ? "positive" : "negative"}`}>
+            <div>
+              <div className="module-card-title">Conclusie</div>
+              <p>
+                {revenueGap >= 0
+                  ? `De reforecast ligt ${money(Math.abs(revenueGap))} boven plan. Stuur vooral op behoud van mix en contributie, niet alleen op extra omzet.`
+                  : `De reforecast ligt ${money(Math.abs(revenueGap))} onder plan. Om het plan te halen is indicatief ${number(neededPricePct, 1)}% prijsverhoging of ${number(neededVolumePct, 1)}% extra contributievolume nodig.`}
+              </p>
+            </div>
+            <div className="be-next-advice-actions">
+              <span>Stuurgetal</span>
+              <strong>Contributie</strong>
+              <small>omzet blijft referentie</small>
             </div>
           </section>
         </div>
