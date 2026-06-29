@@ -172,6 +172,7 @@ type ReadModelTimelinePoint = {
   contribution: number;
   fixed_allocation: number;
   running_revenue: number;
+  running_variable_cost: number;
   running_contribution: number;
 };
 
@@ -417,6 +418,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
         contribution: asNumber(row.contribution),
         fixed_allocation: asNumber(row.fixed_allocation),
         running_revenue: asNumber(row.running_revenue),
+        running_variable_cost: asNumber(row.running_variable_cost),
         running_contribution: asNumber(row.running_contribution),
       };
     }).filter((row) => row.period),
@@ -521,12 +523,15 @@ function buildScenarioFromTotals(base: { revenue: number; variable: number }, sc
   };
 }
 
-function buildRevenueTimeline(planRevenue: number, actualRevenue: number, reforecastRevenue: number) {
+function buildRevenueTimeline(planRevenue: number, planVariable: number, actualRevenue: number, actualVariable: number, reforecastRevenue: number, reforecastVariable: number) {
   return revenuePhasing.map((point) => ({
     month: point.month,
     plan: planRevenue * point.planPct,
+    planCost: planVariable * point.planPct,
     actual: point.actualPct === null ? null : actualRevenue * (point.actualPct / 0.445),
+    actualCost: point.actualPct === null ? null : actualVariable * (point.actualPct / 0.445),
     reforecast: reforecastRevenue * point.reforecastPct,
+    reforecastCost: reforecastVariable * point.reforecastPct,
   }));
 }
 
@@ -538,8 +543,16 @@ function monthLabel(period: string, fallback: string) {
   return monthNames[monthIndex] ?? fallback;
 }
 
-function buildRevenueTimelineFromReadModel(planRevenue: number, actualRevenue: number, reforecastRevenue: number, readModelTimeline: ReadModelTimelinePoint[] | undefined) {
-  const fallback = buildRevenueTimeline(planRevenue, actualRevenue, reforecastRevenue);
+function buildRevenueTimelineFromReadModel(
+  planRevenue: number,
+  planVariable: number,
+  actualRevenue: number,
+  actualVariable: number,
+  reforecastRevenue: number,
+  reforecastVariable: number,
+  readModelTimeline: ReadModelTimelinePoint[] | undefined,
+) {
+  const fallback = buildRevenueTimeline(planRevenue, planVariable, actualRevenue, actualVariable, reforecastRevenue, reforecastVariable);
   if (!readModelTimeline?.length) return fallback;
 
   const byMonth = new Map<string, ReadModelTimelinePoint>();
@@ -552,21 +565,28 @@ function buildRevenueTimelineFromReadModel(planRevenue: number, actualRevenue: n
 
   const year = sortedKeys[0].slice(0, 4);
   const actualByMonth = new Map(sortedKeys.map((key) => [Number(key.slice(5, 7)), byMonth.get(key)?.running_revenue ?? null]));
+  const actualCostByMonth = new Map(sortedKeys.map((key) => [Number(key.slice(5, 7)), byMonth.get(key)?.running_variable_cost ?? null]));
   const lastActualMonth = Math.max(...[...actualByMonth.keys()]);
   const lastActualRevenue = actualByMonth.get(lastActualMonth) ?? 0;
+  const lastActualCost = actualCostByMonth.get(lastActualMonth) ?? 0;
 
   return fallback.map((point, index) => {
     const monthNumber = index + 1;
     const actual = actualByMonth.get(monthNumber) ?? null;
+    const actualCost = actualCostByMonth.get(monthNumber) ?? null;
     const futureMonths = Math.max(1, 12 - lastActualMonth);
     const futureStep = Math.max(0, reforecastRevenue - lastActualRevenue) / futureMonths;
+    const futureCostStep = Math.max(0, reforecastVariable - lastActualCost) / futureMonths;
     const reforecastPoint = monthNumber <= lastActualMonth ? (actual ?? lastActualRevenue) : lastActualRevenue + futureStep * (monthNumber - lastActualMonth);
+    const reforecastCostPoint = monthNumber <= lastActualMonth ? (actualCost ?? lastActualCost) : lastActualCost + futureCostStep * (monthNumber - lastActualMonth);
     const period = `${year}-${String(monthNumber).padStart(2, "0")}`;
     return {
       ...point,
       month: monthLabel(period, point.month),
       actual,
+      actualCost,
       reforecast: reforecastPoint,
+      reforecastCost: reforecastCostPoint,
     };
   });
 }
@@ -713,8 +733,8 @@ export function BreakEvenNextMockup({
   const actualResult = parsedReadModel?.dashboard?.actual?.result ?? (actual.contribution - activeReforecastFixedCosts);
   const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result ?? (reforecast.contribution - activeReforecastFixedCosts);
   const revenueTimeline = useMemo(
-    () => buildRevenueTimelineFromReadModel(plan.revenue, actual.revenue, reforecast.revenue, readModelTimeline),
-    [actual.revenue, plan.revenue, readModelTimeline, reforecast.revenue],
+    () => buildRevenueTimelineFromReadModel(plan.revenue, plan.variable, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, readModelTimeline),
+    [actual.revenue, actual.variable, plan.revenue, plan.variable, readModelTimeline, reforecast.revenue, reforecast.variable],
   );
   const revenueGap = reforecast.revenue - plan.revenue;
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
@@ -764,6 +784,15 @@ export function BreakEvenNextMockup({
 
   const progressPct = activeReforecastFixedCosts > 0 ? Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100)) : 0;
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
+  const revenueChartMax = Math.max(20000, Math.ceil(Math.max(
+    plan.revenue,
+    plan.variable,
+    actual.revenue,
+    actual.variable,
+    reforecast.revenue,
+    reforecast.variable,
+  ) / 20000) * 20000);
+  const revenueChartTicks = Array.from({ length: Math.floor(revenueChartMax / 20000) + 1 }, (_, index) => index * 20000);
   const fixedCostSource = selectedYear <= 2025 ? "Vaste kosten ABC van afgesloten/actueel jaar" : "Vaste kosten ABC uit plan of aangepaste jaarbasis";
   const dashboardColumns: DashboardColumn[] = [
     {
@@ -967,21 +996,6 @@ export function BreakEvenNextMockup({
           },
         },
         {
-          label: "Forecast break-even omzet",
-          value: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast),
-          helper: "vaste kosten / forecast contributieratio",
-          formula: {
-            title: "Forecast break-even omzet",
-            formula: "Vaste kosten ABC / (forecast contributie / forecast omzet).",
-            source: hasExplicitReforecast ? "Bron: reforecast snapshot plus vaste kosten ABC." : "Bron: actuals als tijdelijke reforecast plus vaste kosten ABC.",
-            rows: [
-              { label: "Forecast contributieratio", value: reforecastContributionRatio > 0 ? `${number(reforecastContributionRatio * 100, 1)}%` : "-" },
-              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
-              { label: "Forecast break-even omzet", value: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast) },
-            ],
-          },
-        },
-        {
           label: "Verwacht resultaat",
           value: moneyOrMissing(reforecastResult, hasTemporaryReforecast),
           helper: `grootste driver: ${largestVariance?.label ?? "-"}`,
@@ -995,6 +1009,21 @@ export function BreakEvenNextMockup({
               { label: "Forecast kostprijs", value: moneyOrMissing(-reforecast.variable, hasTemporaryReforecast) },
               { label: "Vaste kosten ABC", value: moneyOrMissing(-activeReforecastFixedCosts, hasTemporaryReforecast) },
               { label: "Verwacht resultaat", value: moneyOrMissing(reforecastResult, hasTemporaryReforecast) },
+            ],
+          },
+        },
+        {
+          label: "Forecast break-even omzet",
+          value: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast),
+          helper: "vaste kosten / forecast contributieratio",
+          formula: {
+            title: "Forecast break-even omzet",
+            formula: "Vaste kosten ABC / (forecast contributie / forecast omzet).",
+            source: hasExplicitReforecast ? "Bron: reforecast snapshot plus vaste kosten ABC." : "Bron: actuals als tijdelijke reforecast plus vaste kosten ABC.",
+            rows: [
+              { label: "Forecast contributieratio", value: reforecastContributionRatio > 0 ? `${number(reforecastContributionRatio * 100, 1)}%` : "-" },
+              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
+              { label: "Forecast break-even omzet", value: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast) },
             ],
           },
         },
@@ -1235,7 +1264,7 @@ export function BreakEvenNextMockup({
             <div className="module-card-header be-next-table-header">
               <div>
                 <div className="module-card-title">Omzet over tijd: plan, actual en reforecast</div>
-                <div className="module-card-text">Blauw is het oorspronkelijke plan. De actuele/reforecast lijn kleurt groen als we boven plan eindigen en rood als we eronder blijven.</div>
+                <div className="module-card-text">Omzet staat in blauw/groen; kostprijs staat in oranje/rood. Zo kun je het resultaatverschil per maand vergelijken met Exact.</div>
               </div>
               <span className={`status-pill ${revenueGap >= 0 ? "status-ok" : "status-error"}`}>
                 {revenueGap >= 0 ? "boven plan" : "onder plan"} {number(revenueGapPct, 1)}%
@@ -1246,12 +1275,15 @@ export function BreakEvenNextMockup({
                 <LineChart data={revenueTimeline} margin={{ top: 16, right: 24, bottom: 8, left: 8 }}>
                   <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
                   <XAxis dataKey="month" tickLine={false} axisLine={false} />
-                  <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `€ ${Math.round(Number(value) / 1000)}k`} />
+                  <YAxis tickLine={false} axisLine={false} ticks={revenueChartTicks} domain={[0, revenueChartMax]} tickFormatter={(value) => `EUR ${Math.round(Number(value) / 1000)}k`} />
                   <Tooltip formatter={(value: number) => money(Number(value))} />
                   <Legend />
-                  <Line type="monotone" dataKey="plan" name="Plan" stroke="#2563eb" strokeWidth={3} dot={false} />
-                  <Line type="monotone" dataKey="actual" name="Actual YTD" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} connectNulls={false} />
-                  <Line type="monotone" dataKey="reforecast" name="Reforecast" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} strokeDasharray="7 7" dot={false} />
+                  <Line type="monotone" dataKey="plan" name="Plan omzet" stroke="#2563eb" strokeWidth={3} dot={false} />
+                  <Line type="monotone" dataKey="planCost" name="Plan kostprijs" stroke="#f59e0b" strokeWidth={3} dot={false} />
+                  <Line type="monotone" dataKey="actual" name="Actual YTD omzet" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} connectNulls={false} />
+                  <Line type="monotone" dataKey="actualCost" name="Actual YTD kostprijs" stroke="#dc2626" strokeWidth={3} connectNulls={false} />
+                  <Line type="monotone" dataKey="reforecast" name="Reforecast omzet" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} strokeDasharray="7 7" dot={false} />
+                  <Line type="monotone" dataKey="reforecastCost" name="Reforecast kostprijs" stroke="#dc2626" strokeWidth={3} strokeDasharray="7 7" dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

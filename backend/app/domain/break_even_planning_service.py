@@ -187,13 +187,15 @@ def _period_timeline(periods: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bucket["contribution"] = _num(bucket.get("contribution")) + contribution
         bucket["fixed_allocation"] = _num(bucket.get("fixed_allocation")) + fixed_allocation
     running_revenue = 0.0
+    running_variable_cost = 0.0
     running_contribution = 0.0
     timeline: list[dict[str, Any]] = []
     for period in sorted(buckets):
         bucket = buckets[period]
         running_revenue += _num(bucket.get("revenue"))
+        running_variable_cost += _num(bucket.get("variable_cost"))
         running_contribution += _num(bucket.get("contribution"))
-        timeline.append({**bucket, "running_revenue": running_revenue, "running_contribution": running_contribution})
+        timeline.append({**bucket, "running_revenue": running_revenue, "running_variable_cost": running_variable_cost, "running_contribution": running_contribution})
     return timeline
 
 
