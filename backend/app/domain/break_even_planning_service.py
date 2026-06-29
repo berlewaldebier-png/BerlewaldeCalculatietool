@@ -532,9 +532,16 @@ def create_reforecast(
     basis_value = _text(basis) or "invoice"
     sales = _sales_totals(year_value, basis_value)
     fixed_total = _year_fixed_cost_total(year_value)
-    contribution = _num((sales.get("totals") or {}).get("contribution"))
+    totals = sales.get("totals") if isinstance(sales.get("totals"), dict) else {}
+    revenue = _num(totals.get("revenue"))
+    variable = _num(totals.get("variable_cost"))
+    contribution = _num(totals.get("contribution"))
     months = len(sales.get("period_totals") or [])
+    annualization_factor = 12 / months if months else 0.0
     monthly = contribution / months if months else 0.0
+    reforecast_revenue = revenue * annualization_factor if annualization_factor else revenue
+    reforecast_variable = variable * annualization_factor if annualization_factor else variable
+    reforecast_contribution = contribution * annualization_factor if annualization_factor else contribution
     estimated_months_to_break_even = fixed_total / monthly if monthly > 0 else 0.0
     payload = {
         "kind": "break_even_reforecast",
@@ -545,9 +552,16 @@ def create_reforecast(
         "fixed_cost_total": fixed_total,
         "actuals": sales,
         "reforecast": {
+            "months_elapsed": months,
+            "annualization_factor": annualization_factor,
+            "revenue": reforecast_revenue,
+            "variable_cost": reforecast_variable,
+            "contribution": reforecast_contribution,
+            "fixed_costs": fixed_total,
+            "result": reforecast_contribution - fixed_total,
             "monthly_contribution_average": monthly,
             "estimated_months_to_break_even": estimated_months_to_break_even,
-            "break_even_revenue_estimate": fixed_total / (contribution / _num((sales.get("totals") or {}).get("revenue"))) if contribution > 0 and _num((sales.get("totals") or {}).get("revenue")) > 0 else 0.0,
+            "break_even_revenue_estimate": fixed_total / (contribution / revenue) if contribution > 0 and revenue > 0 else 0.0,
         },
     }
     return break_even_planning_storage.create_reforecast_snapshot(
@@ -582,6 +596,10 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     timeline = _period_timeline([row for row in sales.get("period_totals", []) if isinstance(row, dict)])
     plan_actual_rows = _plan_actual_rows(plan_payload, contribution_rows)
     sales_processing = _sales_processing_diagnostics(year=year_value)
+    reforecast_snapshot = break_even_planning_storage.latest_reforecast_snapshot(year=year_value, basis=basis_value)
+    reforecast_payload = reforecast_snapshot.get("payload") if isinstance(reforecast_snapshot, dict) else {}
+    reforecast_payload = reforecast_payload if isinstance(reforecast_payload, dict) else {}
+    explicit_reforecast = reforecast_payload.get("reforecast") if isinstance(reforecast_payload.get("reforecast"), dict) else {}
 
     fixed_cost_total = _num(plan_payload.get("fixed_cost_total")) if plan_payload else 0.0
     if fixed_cost_total <= 0:
@@ -608,12 +626,16 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     plan_contribution = _num(plan_targets.get("contribution"))
     plan_fixed_costs = _num(plan_payload.get("fixed_cost_total"))
     plan_result = plan_contribution - plan_fixed_costs if plan_contribution else 0.0
-    reforecast_result = actual_contribution - fixed_cost_total
+    reforecast_revenue = _num(explicit_reforecast.get("revenue")) or actual_revenue
+    reforecast_variable = _num(explicit_reforecast.get("variable_cost")) or actual_variable
+    reforecast_contribution = _num(explicit_reforecast.get("contribution")) or actual_contribution
+    reforecast_fixed_costs = _num(explicit_reforecast.get("fixed_costs")) or fixed_cost_total
+    reforecast_result = _num(explicit_reforecast.get("result")) if explicit_reforecast else reforecast_contribution - reforecast_fixed_costs
     variance_bridge = _variance_bridge_rows(
         plan_contribution=plan_contribution,
         plan_fixed_costs=plan_fixed_costs,
-        reforecast_contribution=actual_contribution,
-        reforecast_fixed_costs=fixed_cost_total,
+        reforecast_contribution=reforecast_contribution,
+        reforecast_fixed_costs=reforecast_fixed_costs,
     )
     warnings: list[dict[str, str]] = []
     if not plan_snapshot:
@@ -641,6 +663,8 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "plan_snapshot_id": _text((plan_snapshot or {}).get("id")),
             "plan_source": "active_plan_snapshot" if plan_snapshot else "missing",
             "actual_source": "erp_dashboard",
+            "reforecast_snapshot_id": _text((reforecast_snapshot or {}).get("id")),
+            "reforecast_source": "reforecast_snapshot" if reforecast_snapshot else "actual_ytd_temporary",
             "fixed_cost_source": "active_plan_snapshot" if _num(plan_payload.get("fixed_cost_total")) > 0 else "fixed_costs_by_year",
             "actual_revenue_source": "erp_dashboard",
             "contribution_source": "douano_sales_mix_service",
@@ -660,10 +684,10 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
                 "result": actual_contribution - fixed_cost_total,
             },
             "reforecast": {
-                "revenue": actual_revenue,
-                "variable_cost": actual_variable,
-                "contribution": actual_contribution,
-                "fixed_costs": fixed_cost_total,
+                "revenue": reforecast_revenue,
+                "variable_cost": reforecast_variable,
+                "contribution": reforecast_contribution,
+                "fixed_costs": reforecast_fixed_costs,
                 "result": reforecast_result,
             },
         },
@@ -703,6 +727,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "read_only": True,
             "plan_policy": "Plan targets are never guessed. Missing targets are returned as warnings.",
             "actual_policy": "Actuals are read from existing margin/sales mix summaries; this endpoint does not refresh snapshots.",
+            "reforecast_policy": "Reforecast uses the latest explicit reforecast snapshot when available; otherwise it is temporarily equal to actual YTD.",
         },
     }
 

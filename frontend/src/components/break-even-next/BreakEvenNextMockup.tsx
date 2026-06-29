@@ -196,6 +196,8 @@ type BreakEvenReadModel = {
     plan_snapshot_id?: string;
     plan_source?: string;
     actual_source?: string;
+    reforecast_snapshot_id?: string;
+    reforecast_source?: string;
     fixed_cost_source?: string;
   };
   contribution?: {
@@ -347,6 +349,8 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       plan_snapshot_id: asText(sources.plan_snapshot_id),
       plan_source: asText(sources.plan_source),
       actual_source: asText(sources.actual_source),
+      reforecast_snapshot_id: asText(sources.reforecast_snapshot_id),
+      reforecast_source: asText(sources.reforecast_source),
       fixed_cost_source: asText(sources.fixed_cost_source),
     },
     contribution: {
@@ -678,6 +682,7 @@ export function BreakEvenNextMockup({
   );
   const hasActuals = Boolean(parsedReadModel && (parsedReadModel.dashboard?.actual?.revenue ?? 0) > 0);
   const hasTemporaryReforecast = Boolean(parsedReadModel && (parsedReadModel.dashboard?.reforecast?.revenue ?? 0) > 0);
+  const hasExplicitReforecast = parsedReadModel?.sources?.reforecast_source === "reforecast_snapshot";
   const plan = {
     ...emptyTotals,
     revenue: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.revenue ?? 0 : 0,
@@ -866,7 +871,7 @@ export function BreakEvenNextMockup({
           <div className="be-next-grid be-next-grid-3">
             <MetricCard label="Plan omzet" value={moneyOrMissing(plan.revenue, hasPlanTargets)} helper={hasPlanTargets ? "frozen plan" : "maak eerst een break-even plan"} />
             <MetricCard label="Actual YTD omzet" value={moneyOrMissing(actual.revenue, hasActuals)} helper={hasActuals ? "SSOT: backend actuals op invoice-basis" : "geen actuals gevonden"} />
-            <MetricCard label="Reforecast omzet" value={moneyOrMissing(reforecast.revenue, hasTemporaryReforecast)} helper={hasTemporaryReforecast ? "tijdelijk gelijk aan actual YTD tot reforecastmodel bestaat" : "reforecast nog niet ingericht"} />
+            <MetricCard label="Reforecast omzet" value={moneyOrMissing(reforecast.revenue, hasTemporaryReforecast)} helper={hasExplicitReforecast ? "expliciete reforecast snapshot" : hasTemporaryReforecast ? "tijdelijk gelijk aan actual YTD" : "reforecast nog niet ingericht"} />
             <MetricCard label="Plan break-even omzet" value={moneyOrMissing(planBreakEvenRevenue, hasPlanTargets)} helper="op basis van frozen plan" />
             <MetricCard label="Huidige break-even omzet" value={moneyOrMissing(breakEvenRevenue, hasActuals)} helper="op basis van actual contributieratio" />
             <MetricCard label="Verwacht resultaat" value={moneyOrMissing(reforecastResult, hasTemporaryReforecast)} tone={reforecastResult >= 0 ? "positive" : "negative"} helper={`grootste driver: ${largestVariance?.label ?? "-"}`} />
@@ -999,7 +1004,7 @@ export function BreakEvenNextMockup({
               <div className="be-next-explain">
                 <strong>Dit vertelt of de verwachte contributie genoeg is om vaste kosten te dragen.</strong>
                 <p>
-                  De analyse houdt plan, actuals en reforecast gescheiden. Ontbrekende planwaarden worden niet automatisch aangevuld.
+                  De analyse houdt plan, actuals en reforecast gescheiden. {hasExplicitReforecast ? "De reforecast komt uit een vastgelegde snapshot." : "Zonder reforecast-snapshot blijft dit tijdelijk gelijk aan actual YTD."}
                 </p>
               </div>
             </div>

@@ -284,6 +284,40 @@ def create_reforecast_snapshot(
     }
 
 
+def latest_reforecast_snapshot(*, year: int, basis: str = "") -> dict[str, Any] | None:
+    ensure_schema()
+    clauses = ["jaar = %s"]
+    params: list[Any] = [int(year or 0)]
+    basis_value = _text(basis)
+    if basis_value:
+        clauses.append("basis = %s")
+        params.append(basis_value)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, jaar, plan_snapshot_id, as_of_date, basis, created_at, payload
+                FROM break_even_reforecast_snapshots
+                WHERE {' AND '.join(clauses)}
+                ORDER BY as_of_date DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """,
+                tuple(params),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": _text(row[0]),
+        "jaar": int(row[1] or 0),
+        "plan_snapshot_id": _text(row[2]),
+        "as_of_date": _text(row[3].isoformat() if hasattr(row[3], "isoformat") else row[3]),
+        "basis": _text(row[4]),
+        "created_at": _text(row[5].isoformat() if hasattr(row[5], "isoformat") else row[5]),
+        "payload": row[6] if isinstance(row[6], dict) else {},
+    }
+
+
 def close_year_snapshot(*, year: int, payload: dict[str, Any], overwrite: bool = False) -> dict[str, Any]:
     ensure_schema()
     year_value = int(year or 0)
