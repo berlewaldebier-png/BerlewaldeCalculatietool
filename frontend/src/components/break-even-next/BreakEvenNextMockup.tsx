@@ -565,15 +565,25 @@ function buildRevenueTimelineFromReadModel(
 
   const year = sortedKeys[0].slice(0, 4);
   const actualByMonth = new Map(sortedKeys.map((key) => [Number(key.slice(5, 7)), byMonth.get(key)?.running_revenue ?? null]));
-  const actualCostByMonth = new Map(sortedKeys.map((key) => [Number(key.slice(5, 7)), byMonth.get(key)?.running_variable_cost ?? null]));
+  let runningCostFallback = 0;
+  const actualCostByMonth = new Map(sortedKeys.map((key) => {
+    const monthNumber = Number(key.slice(5, 7));
+    const point = byMonth.get(key);
+    runningCostFallback += point?.variable_cost ?? 0;
+    const runningCost = point?.running_variable_cost && point.running_variable_cost > 0
+      ? point.running_variable_cost
+      : runningCostFallback;
+    return [monthNumber, runningCost || null];
+  }));
   const lastActualMonth = Math.max(...[...actualByMonth.keys()]);
   const lastActualRevenue = actualByMonth.get(lastActualMonth) ?? 0;
-  const lastActualCost = actualCostByMonth.get(lastActualMonth) ?? 0;
+  const costRatioFallback = actualRevenue > 0 ? actualVariable / actualRevenue : 0;
+  const lastActualCost = actualCostByMonth.get(lastActualMonth) ?? (lastActualRevenue * costRatioFallback);
 
   return fallback.map((point, index) => {
     const monthNumber = index + 1;
     const actual = actualByMonth.get(monthNumber) ?? null;
-    const actualCost = actualCostByMonth.get(monthNumber) ?? null;
+    const actualCost = actualCostByMonth.get(monthNumber) ?? (actual === null ? null : actual * costRatioFallback);
     const futureMonths = Math.max(1, 12 - lastActualMonth);
     const futureStep = Math.max(0, reforecastRevenue - lastActualRevenue) / futureMonths;
     const futureCostStep = Math.max(0, reforecastVariable - lastActualCost) / futureMonths;
@@ -1275,7 +1285,7 @@ export function BreakEvenNextMockup({
                 <LineChart data={revenueTimeline} margin={{ top: 16, right: 24, bottom: 8, left: 8 }}>
                   <CartesianGrid stroke="#e5e7eb" strokeDasharray="4 4" />
                   <XAxis dataKey="month" tickLine={false} axisLine={false} />
-                  <YAxis tickLine={false} axisLine={false} ticks={revenueChartTicks} domain={[0, revenueChartMax]} tickFormatter={(value) => `EUR ${Math.round(Number(value) / 1000)}k`} />
+                  <YAxis tickLine={false} axisLine={false} ticks={revenueChartTicks} domain={[0, revenueChartMax]} tickFormatter={(value) => `€ ${Math.round(Number(value) / 1000)}k`} />
                   <Tooltip formatter={(value: number) => money(Number(value))} />
                   <Legend />
                   <Line type="monotone" dataKey="plan" name="Plan omzet" stroke="#2563eb" strokeWidth={3} dot={false} />
