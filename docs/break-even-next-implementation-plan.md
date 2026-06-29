@@ -134,6 +134,7 @@ Current testing rule:
 - Once a section is wired to the backend read model, missing data must be shown as empty or as a warning.
 - Real analysis cards must not silently fall back to example plan, actual or SKU data.
 - Actual revenue uses the same source as Dashboard > Omzet over tijd. The read model exposes a reconciliation between that dashboard revenue and the break-even contribution revenue, because contribution can only explain rows with a usable category/cost basis.
+- If no frozen plan exists, the break-even dashboard offers an explicit first-time plan action. It stores user-entered plan revenue, contribution, liters and units as an active plan snapshot; it does not infer plan from actuals.
 
 ### Mock-Up Screens
 
@@ -164,6 +165,11 @@ Visuals:
   - dashboard revenue is the actual revenue SSOT
   - contribution revenue explains the cost/contribution layer
   - any difference remains visible until data quality/category mapping is complete
+- first-time plan setup when no active plan exists:
+  - explicit plan revenue
+  - explicit plan contribution
+  - optional plan liters and units
+  - optional plan assumption text
 - suggested steering action when reforecast is below plan:
   - required price increase
   - required contribution volume increase

@@ -15,6 +15,8 @@ import {
   YAxis,
 } from "recharts";
 
+import { API_BASE_URL } from "@/lib/api";
+
 type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
 
 type RevenueCategory = "beer" | "giftset" | "service" | "merchandise";
@@ -23,6 +25,14 @@ type ScenarioState = {
   pricePct: number;
   volumePct: number;
   fixedCostPct: number;
+};
+
+type PlanSetupState = {
+  revenue: string;
+  contribution: string;
+  liters: string;
+  units: string;
+  mixAssumption: string;
 };
 
 type ReadModelWarning = {
@@ -250,6 +260,15 @@ function asNumber(value: unknown): number {
 
 function asText(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+async function readJson(response: Response) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { detail: text };
+  }
 }
 
 function normalizeCategory(value: unknown): RevenueCategory {
@@ -577,6 +596,9 @@ export function BreakEvenNextMockup({
   const [query, setQuery] = useState("");
   const [contributionPage, setContributionPage] = useState(1);
   const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 5, volumePct: 8, fixedCostPct: 0 });
+  const [planSetup, setPlanSetup] = useState<PlanSetupState>({ revenue: "", contribution: "", liters: "", units: "", mixAssumption: "" });
+  const [planSetupStatus, setPlanSetupStatus] = useState("");
+  const [planSetupBusy, setPlanSetupBusy] = useState(false);
 
   const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
   const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
@@ -680,6 +702,45 @@ export function BreakEvenNextMockup({
   const progressPct = activeReforecastFixedCosts > 0 ? Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100)) : 0;
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
 
+  async function createPlanSnapshotFromDashboard() {
+    if (!Number(planSetup.revenue || 0) || !Number(planSetup.contribution || 0)) {
+      setPlanSetupStatus("Vul minimaal planomzet en plancontributie in.");
+      return;
+    }
+    setPlanSetupBusy(true);
+    setPlanSetupStatus("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/integrations/break-even/plans`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          year: selectedYear,
+          scenario_name: `Basis ${selectedYear}`,
+          replace_active: true,
+          targets: {
+            revenue: Number(planSetup.revenue || 0),
+            contribution: Number(planSetup.contribution || 0),
+            liters: Number(planSetup.liters || 0),
+            units: Number(planSetup.units || 0),
+            mix_assumption: planSetup.mixAssumption,
+          },
+        }),
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(String(payload?.detail || response.statusText));
+      }
+      setPlanSetupStatus("Frozen plansnapshot opgeslagen. De analyse wordt opnieuw geladen.");
+      window.location.reload();
+    } catch (error) {
+      setPlanSetupStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPlanSetupBusy(false);
+    }
+  }
+
   return (
     <div className="be-next-page">
       <section className="module-card">
@@ -778,6 +839,48 @@ export function BreakEvenNextMockup({
               </div>
               <div className="module-card-text">
                 Basis {revenueReconciliation.basis || "-"}; periode {revenueReconciliation.since || "-"} t/m {revenueReconciliation.until || "-"}.
+              </div>
+            </section>
+          ) : null}
+
+          {!hasPlanTargets ? (
+            <section className="module-card">
+              <div className="module-card-header be-next-table-header">
+                <div>
+                  <div className="module-card-title">Eerste plansnapshot vastleggen</div>
+                  <div className="module-card-text">
+                    Planwaarden worden nooit uit actuals geraden. Vul hier expliciet het frozen jaarplan in; de actieve kostprijzen van {selectedYear} worden als planning-basis opgeslagen.
+                  </div>
+                </div>
+                <span className="status-pill status-warning">plan ontbreekt</span>
+              </div>
+              <div className="wizard-form-grid">
+                <label className="form-field">
+                  <span>Plan omzet</span>
+                  <input value={planSetup.revenue} onChange={(event) => setPlanSetup((current) => ({ ...current, revenue: event.target.value }))} inputMode="decimal" placeholder="bijv. 157000" />
+                </label>
+                <label className="form-field">
+                  <span>Plan contributie</span>
+                  <input value={planSetup.contribution} onChange={(event) => setPlanSetup((current) => ({ ...current, contribution: event.target.value }))} inputMode="decimal" placeholder="bijv. 65000" />
+                </label>
+                <label className="form-field">
+                  <span>Plan liters</span>
+                  <input value={planSetup.liters} onChange={(event) => setPlanSetup((current) => ({ ...current, liters: event.target.value }))} inputMode="decimal" placeholder="optioneel" />
+                </label>
+                <label className="form-field">
+                  <span>Plan units</span>
+                  <input value={planSetup.units} onChange={(event) => setPlanSetup((current) => ({ ...current, units: event.target.value }))} inputMode="decimal" placeholder="optioneel" />
+                </label>
+                <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                  <span>Plan-aanname</span>
+                  <input value={planSetup.mixAssumption} onChange={(event) => setPlanSetup((current) => ({ ...current, mixAssumption: event.target.value }))} placeholder="bijv. 2025 begroting, verkoopmix gebaseerd op werkelijkheid tot juni" />
+                </label>
+              </div>
+              <div className="editor-actions" style={{ marginTop: 12 }}>
+                <button type="button" className="editor-button" onClick={createPlanSnapshotFromDashboard} disabled={planSetupBusy}>
+                  Frozen plan opslaan
+                </button>
+                {planSetupStatus ? <span className="module-card-text">{planSetupStatus}</span> : null}
               </div>
             </section>
           ) : null}
