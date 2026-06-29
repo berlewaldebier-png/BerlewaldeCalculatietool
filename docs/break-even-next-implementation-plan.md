@@ -397,6 +397,14 @@ model_notes
 
 The frontend mock-up can later be wired to this endpoint one section at a time.
 
+Initial wiring order:
+
+1. Read-model status and warnings.
+2. Contribution category treatment.
+3. Dashboard, P&L and break-even totals.
+4. Contribution rows.
+5. Timeline and variance bridge.
+
 Proposed snapshots:
 
 - `break_even_plan_snapshots`

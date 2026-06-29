@@ -57,6 +57,31 @@ type ReadModelCategory = {
   treatment: string;
 };
 
+type ReadModelFinancialSet = {
+  revenue: number;
+  variable_cost: number;
+  contribution: number;
+  fixed_costs: number;
+  result: number;
+};
+
+type ReadModelPnl = {
+  revenue: number;
+  variable_cost: number;
+  contribution: number;
+  fixed_costs: number;
+  operating_result: number;
+};
+
+type ReadModelBreakEven = {
+  revenue: number;
+  variable_cost: number;
+  contribution: number;
+  fixed_costs: number;
+  result_check: number;
+  contribution_ratio: number;
+};
+
 type BreakEvenReadModel = {
   year?: number;
   basis?: string;
@@ -69,6 +94,13 @@ type BreakEvenReadModel = {
   contribution?: {
     categories?: ReadModelCategory[];
   };
+  dashboard?: {
+    plan?: ReadModelFinancialSet;
+    actual?: ReadModelFinancialSet;
+    reforecast?: ReadModelFinancialSet;
+  };
+  pnl?: ReadModelPnl;
+  break_even?: ReadModelBreakEven;
   data_quality?: {
     warnings?: ReadModelWarning[];
     missing_cost_lines?: number;
@@ -100,7 +132,6 @@ const products: ProductRow[] = [
 ];
 
 const planFixedCosts = 80000;
-const actualFixedCostsYtd = 41500;
 const reforecastFixedCosts = 83500;
 const plannedNormalLiters = 40000;
 const contributionPageSize = 5;
@@ -156,8 +187,21 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   const contribution = asRecord(value.contribution);
   const dataQuality = asRecord(value.data_quality);
   const sources = asRecord(value.sources);
+  const dashboard = asRecord(value.dashboard);
+  const pnl = asRecord(value.pnl);
+  const breakEven = asRecord(value.break_even);
   const rawCategories = Array.isArray(contribution.categories) ? contribution.categories : [];
   const warnings = Array.isArray(dataQuality.warnings) ? dataQuality.warnings : [];
+  const financialSet = (raw: unknown): ReadModelFinancialSet => {
+    const row = asRecord(raw);
+    return {
+      revenue: asNumber(row.revenue),
+      variable_cost: asNumber(row.variable_cost),
+      contribution: asNumber(row.contribution),
+      fixed_costs: asNumber(row.fixed_costs),
+      result: asNumber(row.result),
+    };
+  };
   return {
     year: asNumber(value.year),
     basis: asText(value.basis),
@@ -179,6 +223,26 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
           treatment: asText(row.treatment) || categoryTreatment(normalizeCategory(row.category)),
         };
       }),
+    },
+    dashboard: {
+      plan: financialSet(dashboard.plan),
+      actual: financialSet(dashboard.actual),
+      reforecast: financialSet(dashboard.reforecast),
+    },
+    pnl: {
+      revenue: asNumber(pnl.revenue),
+      variable_cost: asNumber(pnl.variable_cost),
+      contribution: asNumber(pnl.contribution),
+      fixed_costs: asNumber(pnl.fixed_costs),
+      operating_result: asNumber(pnl.operating_result),
+    },
+    break_even: {
+      revenue: asNumber(breakEven.revenue),
+      variable_cost: asNumber(breakEven.variable_cost),
+      contribution: asNumber(breakEven.contribution),
+      fixed_costs: asNumber(breakEven.fixed_costs),
+      result_check: asNumber(breakEven.result_check),
+      contribution_ratio: asNumber(breakEven.contribution_ratio),
     },
     data_quality: {
       missing_cost_lines: asNumber(dataQuality.missing_cost_lines),
@@ -220,14 +284,14 @@ function sumBy(rows: ProductRow[], unitsKey: "plannedUnits" | "actualUnitsYtd" |
   };
 }
 
-function buildScenario(rows: ProductRow[], scenario: ScenarioState) {
+function buildScenario(rows: ProductRow[], scenario: ScenarioState, baseFixedCosts: number) {
   const priceFactor = 1 + scenario.pricePct / 100;
   const volumeFactor = 1 + scenario.volumePct / 100;
   const fixedFactor = 1 + scenario.fixedCostPct / 100;
   const revenue = rows.reduce((sum, row) => sum + row.reforecastUnits * volumeFactor * row.plannedPrice * priceFactor, 0);
   const variable = rows.reduce((sum, row) => sum + row.reforecastUnits * volumeFactor * variableCost(row), 0);
   const contribution = revenue - variable;
-  const fixedCosts = reforecastFixedCosts * fixedFactor;
+  const fixedCosts = baseFixedCosts * fixedFactor;
   return {
     revenue,
     variable,
@@ -315,17 +379,41 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const [contributionPage, setContributionPage] = useState(1);
   const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 5, volumePct: 8, fixedCostPct: 0 });
 
-  const plan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
-  const actual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
-  const reforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
-  const scenarioResult = useMemo(() => buildScenario(products, scenario), [scenario]);
-  const fixedRate = planFixedCosts / plannedNormalLiters;
+  const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
+  const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
+  const readModelCategories = parsedReadModel?.contribution?.categories ?? [];
+  const mockPlan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
+  const mockActual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
+  const mockReforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
+  const plan = {
+    ...mockPlan,
+    revenue: parsedReadModel?.dashboard?.plan?.revenue || mockPlan.revenue,
+    variable: parsedReadModel?.dashboard?.plan?.variable_cost || mockPlan.variable,
+    contribution: parsedReadModel?.dashboard?.plan?.contribution || mockPlan.contribution,
+  };
+  const actual = {
+    ...mockActual,
+    revenue: parsedReadModel?.dashboard?.actual?.revenue || mockActual.revenue,
+    variable: parsedReadModel?.dashboard?.actual?.variable_cost || mockActual.variable,
+    contribution: parsedReadModel?.dashboard?.actual?.contribution || mockActual.contribution,
+  };
+  const reforecast = {
+    ...mockReforecast,
+    revenue: parsedReadModel?.dashboard?.reforecast?.revenue || mockReforecast.revenue,
+    variable: parsedReadModel?.dashboard?.reforecast?.variable_cost || mockReforecast.variable,
+    contribution: parsedReadModel?.dashboard?.reforecast?.contribution || mockReforecast.contribution,
+  };
+  const scenarioResult = useMemo(() => buildScenario(products, scenario, parsedReadModel?.dashboard?.reforecast?.fixed_costs || reforecastFixedCosts), [parsedReadModel?.dashboard?.reforecast?.fixed_costs, scenario]);
+  const activePlanFixedCosts = parsedReadModel?.dashboard?.plan?.fixed_costs || planFixedCosts;
+  const activeReforecastFixedCosts = parsedReadModel?.dashboard?.reforecast?.fixed_costs || reforecastFixedCosts;
+  const fixedRate = activePlanFixedCosts / plannedNormalLiters;
   const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
-  const planResult = plan.contribution - planFixedCosts;
-  const reforecastResult = reforecast.contribution - reforecastFixedCosts;
+  const planResult = parsedReadModel?.dashboard?.plan?.result || (plan.contribution - activePlanFixedCosts);
+  const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result || (reforecast.contribution - activeReforecastFixedCosts);
   const revenueTimeline = useMemo(() => buildRevenueTimeline(plan.revenue, actual.revenue, reforecast.revenue), [actual.revenue, plan.revenue, reforecast.revenue]);
   const revenueGap = reforecast.revenue - plan.revenue;
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
+  const planBreakEvenRevenue = plan.contribution > 0 && plan.revenue > 0 ? activePlanFixedCosts / (plan.contribution / plan.revenue) : 0;
   const contributionGap = plan.contribution - reforecast.contribution;
   const resultGap = planResult - reforecastResult;
   const neededPricePct = reforecast.revenue > 0 ? Math.max(0, (plan.revenue / reforecast.revenue - 1) * 100) : 0;
@@ -338,13 +426,13 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const reforecastVariableRatio = reforecast.revenue > 0 ? reforecast.variable / reforecast.revenue : 0;
   const contributionPerLiter = reforecast.liters > 0 ? reforecast.contribution / reforecast.liters : 0;
   const contributionPerUnit = reforecast.units > 0 ? reforecast.contribution / reforecast.units : 0;
-  const breakEvenRevenue = reforecastContributionRatio > 0 ? reforecastFixedCosts / reforecastContributionRatio : 0;
-  const breakEvenVariableCost = breakEvenRevenue * reforecastVariableRatio;
+  const breakEvenRevenue = parsedReadModel?.break_even?.revenue || (reforecastContributionRatio > 0 ? activeReforecastFixedCosts / reforecastContributionRatio : 0);
+  const breakEvenVariableCost = parsedReadModel?.break_even?.variable_cost || (breakEvenRevenue * reforecastVariableRatio);
   const breakEvenContribution = breakEvenRevenue - breakEvenVariableCost;
-  const breakEvenLiters = contributionPerLiter > 0 ? reforecastFixedCosts / contributionPerLiter : 0;
-  const breakEvenUnits = contributionPerUnit > 0 ? reforecastFixedCosts / contributionPerUnit : 0;
-  const breakEvenResultCheck = breakEvenRevenue - breakEvenVariableCost - reforecastFixedCosts;
-  const remainingContributionYtd = Math.max(0, reforecastFixedCosts - actual.contribution);
+  const breakEvenLiters = contributionPerLiter > 0 ? activeReforecastFixedCosts / contributionPerLiter : 0;
+  const breakEvenUnits = contributionPerUnit > 0 ? activeReforecastFixedCosts / contributionPerUnit : 0;
+  const breakEvenResultCheck = parsedReadModel?.break_even?.result_check ?? (breakEvenRevenue - breakEvenVariableCost - activeReforecastFixedCosts);
+  const remainingContributionYtd = Math.max(0, activeReforecastFixedCosts - actual.contribution);
   const expectedBreakEvenMonth = estimateBreakEvenMonth(revenueTimeline, breakEvenRevenue);
 
   const varianceRows = useMemo(() => {
@@ -377,12 +465,9 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const pagedContributionRows = contributionRows.slice((safeContributionPage - 1) * contributionPageSize, safeContributionPage * contributionPageSize);
   const topContributor = contributionRows[0];
   const marginRiskCount = contributionRows.filter((row) => contributionSignal(row).tone === "error").length;
-  const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
-  const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
-  const readModelCategories = parsedReadModel?.contribution?.categories ?? [];
   const categoryRows = readModelCategories.length ? readModelCategories : summarizeByCategory(products);
 
-  const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / reforecastFixedCosts) * 100));
+  const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100));
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
 
   return (
@@ -448,8 +533,8 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
             <MetricCard label="Plan omzet" value={money(plan.revenue)} helper={`${number(plan.liters)} liter gepland`} />
             <MetricCard label="Actual YTD omzet" value={money(actual.revenue)} helper={`${number(actual.liters)} liter tot nu`} />
             <MetricCard label="Reforecast omzet" value={money(reforecast.revenue)} helper={`${number(reforecast.liters)} liter verwacht`} />
-            <MetricCard label="Plan break-even omzet" value={money(planFixedCosts / (plan.contribution / plan.revenue))} helper="op basis van frozen plan" />
-            <MetricCard label="Huidige break-even omzet" value={money(reforecastFixedCosts / (reforecast.contribution / reforecast.revenue))} helper="op basis van reforecast" />
+            <MetricCard label="Plan break-even omzet" value={money(planBreakEvenRevenue)} helper="op basis van frozen plan" />
+            <MetricCard label="Huidige break-even omzet" value={money(breakEvenRevenue)} helper="op basis van reforecast" />
             <MetricCard label="Verwacht resultaat" value={money(reforecastResult)} tone={reforecastResult >= 0 ? "positive" : "negative"} helper={`grootste driver: ${largestVariance?.label ?? "-"}`} />
           </div>
 
@@ -517,8 +602,8 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
 
       {activeTab === "pnl" ? (
         <div className="be-next-grid be-next-grid-2">
-          <PnlCard title="Plan" revenue={plan.revenue} variable={plan.variable} fixedCosts={planFixedCosts} />
-          <PnlCard title="Reforecast" revenue={reforecast.revenue} variable={reforecast.variable} fixedCosts={reforecastFixedCosts} />
+          <PnlCard title="Plan" revenue={plan.revenue} variable={plan.variable} fixedCosts={activePlanFixedCosts} />
+          <PnlCard title="Reforecast" revenue={reforecast.revenue} variable={reforecast.variable} fixedCosts={activeReforecastFixedCosts} />
           <section className="module-card be-next-wide">
             <div className="module-card-title">Van resultaatrekening naar verklaard resultaat</div>
             <VarianceBridge rows={varianceRows} />
@@ -551,7 +636,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
                   <PnlRow label="Omzet op break-even" value={breakEvenRevenue} />
                   <PnlRow label="Variabele kosten bij huidige mix" value={-breakEvenVariableCost} />
                   <PnlRow label="Contributie" value={breakEvenContribution} strong />
-                  <PnlRow label="Vaste kosten" value={-reforecastFixedCosts} />
+                  <PnlRow label="Vaste kosten" value={-activeReforecastFixedCosts} />
                   <PnlRow label="Resultaat" value={breakEvenResultCheck} strong />
                 </tbody>
               </table>
@@ -563,7 +648,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
               <div className="module-card-title">Interpretatie</div>
               <p>
                 Bij de huidige mix levert elke euro omzet gemiddeld {number(reforecastContributionRatio * 100, 1)}% contributie op.
-                Daardoor is {money(breakEvenRevenue)} omzet nodig om {money(reforecastFixedCosts)} vaste kosten te dekken.
+                Daardoor is {money(breakEvenRevenue)} omzet nodig om {money(activeReforecastFixedCosts)} vaste kosten te dekken.
               </p>
             </div>
             <div className="be-next-advice-actions">
@@ -809,7 +894,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
                 title="Vaste kosten"
                 value={money(Math.max(0, resultGap))}
                 helper="kostenreductie nodig als prijs en volume gelijk blijven"
-                mutedValue={`huidige vaste kosten: ${money(reforecastFixedCosts)}`}
+                mutedValue={`huidige vaste kosten: ${money(activeReforecastFixedCosts)}`}
               />
             </div>
           </section>
@@ -826,7 +911,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
                   <PnlRow label="Omzet" value={reforecast.revenue} />
                   <PnlRow label="Variabele kosten" value={-reforecast.variable} />
                   <PnlRow label="Contributie" value={reforecast.contribution} strong />
-                  <PnlRow label="Vaste kosten" value={-reforecastFixedCosts} />
+                  <PnlRow label="Vaste kosten" value={-activeReforecastFixedCosts} />
                   <PnlRow label="Operationeel resultaat" value={reforecastResult} strong />
                   <PnlRow label="Bezettingsresultaat t.o.v. plan" value={occupancyResult} />
                 </tbody>
