@@ -133,7 +133,7 @@ Current testing rule:
 
 - Once a section is wired to the backend read model, missing data must be shown as empty or as a warning.
 - Real analysis cards must not silently fall back to example plan, actual or SKU data.
-- Actual revenue uses the same source as Dashboard > Omzet over tijd. The read model exposes a reconciliation between that dashboard revenue and the break-even contribution revenue, because contribution can only explain rows with a usable category/cost basis.
+- Actual revenue and contribution use the processed `douano_sales_line_cost_snapshots` from Omzet & Marge. The read model exposes a reconciliation against Dashboard > Omzet over tijd, but the expected status is a match once snapshots are current.
 - If no frozen plan exists, the break-even dashboard offers an explicit first-time plan action. It stores user-entered plan revenue, contribution, liters and units as an active plan snapshot; it does not infer plan from actuals.
 - Reforecast values use the latest explicit reforecast snapshot when one exists. Until then, the screen clearly labels reforecast as temporarily equal to actual YTD.
 

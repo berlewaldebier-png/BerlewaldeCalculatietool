@@ -8,7 +8,6 @@ from app.domain import (
     cost_versions_storage,
     dataset_store,
     douano_margin_snapshot_storage,
-    douano_sales_mix_service,
     erp_dashboard_service,
     fixed_costs_storage,
     postgres_storage,
@@ -92,7 +91,7 @@ def _latest_active_plan(year: int) -> dict[str, Any] | None:
 def _sku_category(row: dict[str, Any], labels: dict[str, dict[str, str]]) -> str:
     sku_id = _text(row.get("sku_id"))
     label = labels.get(sku_id, {})
-    haystack = f"{label.get('sku_name', '')} {label.get('sku_code', '')} {sku_id}".lower()
+    haystack = f"{label.get('sku_name', '')} {label.get('sku_code', '')} {row.get('sku_name', '')} {row.get('sku_code', '')} {sku_id}".lower()
     if "geschenk" in haystack or "gift" in haystack:
         return "giftset"
     if "proeverij" in haystack or "rondleiding" in haystack:
@@ -122,8 +121,8 @@ def _contribution_row(row: dict[str, Any], labels: dict[str, dict[str, str]]) ->
     units = _num(row.get("units"))
     return {
         "sku_id": sku_id,
-        "sku_code": _text(label.get("sku_code")),
-        "sku_name": _text(label.get("sku_name")) or sku_id,
+        "sku_code": _text(label.get("sku_code")) or _text(row.get("sku_code")),
+        "sku_name": _text(label.get("sku_name")) or _text(row.get("sku_name")) or sku_id,
         "category": category,
         "units": units,
         "revenue": revenue,
@@ -351,39 +350,122 @@ def create_plan_from_active_costs(
 
 
 def _sales_totals(year: int, basis: str) -> dict[str, Any]:
-    summary = douano_sales_mix_service.get_sales_by_sku_summary(year=int(year or 0), basis=basis)
-    items = summary.get("items") if isinstance(summary, dict) else []
-    periods = summary.get("periods") if isinstance(summary, dict) else []
-    rows = [row for row in (items if isinstance(items, list) else []) if isinstance(row, dict)]
-    period_rows = [row for row in (periods if isinstance(periods, list) else []) if isinstance(row, dict)]
-    revenue = sum(_num(row.get("net_revenue_ex")) for row in rows)
-    cost = sum(_num(row.get("cost_total_ex")) for row in rows)
-    fixed_alloc = sum(_num(row.get("fixed_total_ex")) for row in rows)
-    contribution = revenue - (cost - fixed_alloc)
+    year_start, year_end = _year_bounds(int(year or 0))
+    basis_norm = _text(basis).lower() or "invoice"
+    source_type = "invoice" if basis_norm == "invoice" else "order"
+    if not year_start or not year_end:
+        return {"raw": {}, "rows": [], "period_totals": [], "totals": {}}
+
+    douano_margin_snapshot_storage.ensure_schema()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT sku_id, douano_sku, kostprijsversie_id, quantity, net_revenue_ex, cost_total_ex,
+                       cost_source, cost_status, line_date, payload
+                FROM douano_sales_line_cost_snapshots
+                WHERE source_type = %s
+                  AND line_date >= %s::date
+                  AND line_date < %s::date
+                  AND NOT ignored
+                ORDER BY line_date ASC NULLS LAST, source_line_id ASC
+                """,
+                (source_type, year_start, year_end),
+            )
+            snapshot_rows = cur.fetchall() or []
+
+    version_ids = sorted({_text(row[2]) for row in snapshot_rows if _text(row[2])})
+    component_index = cost_versions_storage.load_cost_row_components_index_for_versions(version_ids)
+
+    rows_by_key: dict[str, dict[str, Any]] = {}
     period_totals: dict[str, dict[str, float]] = {}
-    for row in period_rows:
-        period = _text(row.get("period"))
-        if not period:
-            continue
-        bucket = period_totals.setdefault(period, {"revenue": 0.0, "variable_cost": 0.0, "fixed_alloc": 0.0, "contribution": 0.0})
-        row_cost = _num(row.get("cost_total_ex"))
-        row_fixed = _num(row.get("fixed_total_ex"))
-        bucket["revenue"] += _num(row.get("net_revenue_ex"))
-        bucket["variable_cost"] += row_cost - row_fixed
-        bucket["fixed_alloc"] += row_fixed
-        bucket["contribution"] += _num(row.get("net_revenue_ex")) - (row_cost - row_fixed)
+    total_revenue = 0.0
+    total_cost = 0.0
+    total_fixed_alloc = 0.0
+    missing_cost_lines = 0
+
+    for sku_id_raw, sku_code_raw, version_id_raw, qty_raw, revenue_raw, cost_raw, cost_source_raw, cost_status_raw, line_date_raw, payload_raw in snapshot_rows:
+        sku_id = _text(sku_id_raw)
+        sku_code = _text(sku_code_raw)
+        version_id = _text(version_id_raw)
+        payload = payload_raw if isinstance(payload_raw, dict) else {}
+        product_name = _text(payload.get("douano_product_name")) or "Niet-SKU omzet"
+        cost_status = _text(cost_status_raw)
+        cost_source = _text(cost_source_raw)
+        qty = _num(qty_raw)
+        revenue = _num(revenue_raw)
+        cost = _num(cost_raw)
+        components = component_index.get((version_id, sku_id)) if version_id and sku_id else None
+        fixed_unit = _num((components or {}).get("indirecte_kosten"))
+        fixed_alloc = min(cost, max(0.0, fixed_unit * qty)) if fixed_unit and qty else 0.0
+        missing = cost_status in {"unmapped_sku", "missing_cost", "missing_lot_cost", "lot_near_match_fallback", "lot_unmatched_fallback"} or cost_source == ""
+        if cost_source == "no_cost_required":
+            missing = False
+        if missing:
+            missing_cost_lines += 1
+
+        row_key = sku_id or f"non-sku:{cost_source or cost_status or product_name}".lower().replace(" ", "-")
+        bucket = rows_by_key.setdefault(
+            row_key,
+            {
+                "sku_id": row_key,
+                "sku_code": sku_code,
+                "sku_name": product_name if not sku_id else "",
+                "units": 0.0,
+                "net_revenue_ex": 0.0,
+                "inkoop_total_ex": 0.0,
+                "packaging_total_ex": 0.0,
+                "excise_total_ex": 0.0,
+                "cost_total_ex": 0.0,
+                "fixed_total_ex": 0.0,
+                "missing_cost_lines": 0,
+            },
+        )
+        if sku_code and not _text(bucket.get("sku_code")):
+            bucket["sku_code"] = sku_code
+        if product_name and not _text(bucket.get("sku_name")):
+            bucket["sku_name"] = product_name
+        bucket["units"] += qty
+        bucket["net_revenue_ex"] += revenue
+        bucket["cost_total_ex"] += cost
+        bucket["fixed_total_ex"] += fixed_alloc
+        if missing:
+            bucket["missing_cost_lines"] = int(bucket["missing_cost_lines"] or 0) + 1
+
+        if components:
+            bucket["inkoop_total_ex"] += qty * _num(components.get("inkoop"))
+            bucket["packaging_total_ex"] += qty * _num(components.get("verpakkingskosten"))
+            bucket["excise_total_ex"] += qty * _num(components.get("accijns"))
+        else:
+            bucket["inkoop_total_ex"] += max(0.0, cost - fixed_alloc)
+
+        period = _text(line_date_raw)[:7]
+        if period:
+            period_bucket = period_totals.setdefault(period, {"revenue": 0.0, "variable_cost": 0.0, "fixed_alloc": 0.0, "contribution": 0.0})
+            period_bucket["revenue"] += revenue
+            period_bucket["variable_cost"] += cost - fixed_alloc
+            period_bucket["fixed_alloc"] += fixed_alloc
+            period_bucket["contribution"] += revenue - (cost - fixed_alloc)
+
+        total_revenue += revenue
+        total_cost += cost
+        total_fixed_alloc += fixed_alloc
+
+    rows = list(rows_by_key.values())
+    rows.sort(key=lambda row: _num(row.get("net_revenue_ex")), reverse=True)
+    contribution = total_revenue - (total_cost - total_fixed_alloc)
     return {
-        "raw": summary,
+        "raw": {"source": "douano_sales_line_cost_snapshots", "source_type": source_type},
         "rows": rows,
         "period_totals": [{"period": key, **value} for key, value in sorted(period_totals.items())],
         "totals": {
-            "revenue": revenue,
-            "cost": cost,
-            "variable_cost": cost - fixed_alloc,
-            "fixed_alloc": fixed_alloc,
+            "revenue": total_revenue,
+            "cost": total_cost,
+            "variable_cost": total_cost - total_fixed_alloc,
+            "fixed_alloc": total_fixed_alloc,
             "contribution": contribution,
-            "missing_cost_lines": int((summary.get("meta") or {}).get("missing_cost_lines", 0) if isinstance(summary, dict) else 0),
-            "unmapped_revenue": _num(((summary.get("unmapped") or {}) if isinstance(summary, dict) else {}).get("total_net_revenue_ex")),
+            "missing_cost_lines": missing_cost_lines,
+            "unmapped_revenue": 0.0,
         },
     }
 
@@ -662,12 +744,12 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         "sources": {
             "plan_snapshot_id": _text((plan_snapshot or {}).get("id")),
             "plan_source": "active_plan_snapshot" if plan_snapshot else "missing",
-            "actual_source": "erp_dashboard",
+            "actual_source": "douano_sales_line_cost_snapshots",
             "reforecast_snapshot_id": _text((reforecast_snapshot or {}).get("id")),
             "reforecast_source": "reforecast_snapshot" if reforecast_snapshot else "actual_ytd_temporary",
             "fixed_cost_source": "active_plan_snapshot" if _num(plan_payload.get("fixed_cost_total")) > 0 else "fixed_costs_by_year",
-            "actual_revenue_source": "erp_dashboard",
-            "contribution_source": "douano_sales_mix_service",
+            "actual_revenue_source": "douano_sales_line_cost_snapshots",
+            "contribution_source": "douano_sales_line_cost_snapshots",
         },
         "dashboard": {
             "plan": {
@@ -726,7 +808,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         "model_notes": {
             "read_only": True,
             "plan_policy": "Plan targets are never guessed. Missing targets are returned as warnings.",
-            "actual_policy": "Actuals are read from existing margin/sales mix summaries; this endpoint does not refresh snapshots.",
+            "actual_policy": "Actuals are read from existing Omzet en Marge line cost snapshots; this endpoint does not refresh snapshots.",
             "reforecast_policy": "Reforecast uses the latest explicit reforecast snapshot when available; otherwise it is temporarily equal to actual YTD.",
         },
     }
