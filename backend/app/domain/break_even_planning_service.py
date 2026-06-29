@@ -181,6 +181,35 @@ def _period_timeline(periods: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return timeline
 
 
+def _variance_bridge_rows(
+    *,
+    plan_contribution: float,
+    plan_fixed_costs: float,
+    reforecast_contribution: float,
+    reforecast_fixed_costs: float,
+) -> list[dict[str, Any]]:
+    plan_result = plan_contribution - plan_fixed_costs if plan_contribution else 0.0
+    contribution_variance = reforecast_contribution - plan_contribution if plan_contribution else 0.0
+    fixed_cost_variance = plan_fixed_costs - reforecast_fixed_costs if plan_fixed_costs or reforecast_fixed_costs else 0.0
+    reforecast_result = reforecast_contribution - reforecast_fixed_costs
+    return [
+        {"key": "plan", "label": "Gepland resultaat", "value": plan_result, "kind": "result"},
+        {
+            "key": "contribution",
+            "label": "Contributieverschil",
+            "value": contribution_variance,
+            "kind": "positive" if contribution_variance >= 0 else "negative",
+        },
+        {
+            "key": "fixed_cost",
+            "label": "Vastekostenverschil",
+            "value": fixed_cost_variance,
+            "kind": "positive" if fixed_cost_variance >= 0 else "negative",
+        },
+        {"key": "result", "label": "Reforecast resultaat", "value": reforecast_result, "kind": "result"},
+    ]
+
+
 def _active_planning_rows(year: int) -> list[dict[str, Any]]:
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
     active = [
@@ -375,6 +404,15 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     plan_targets = plan_payload.get("targets") if isinstance(plan_payload.get("targets"), dict) else {}
     plan_revenue = _num(plan_targets.get("revenue"))
     plan_contribution = _num(plan_targets.get("contribution"))
+    plan_fixed_costs = _num(plan_payload.get("fixed_cost_total"))
+    plan_result = plan_contribution - plan_fixed_costs if plan_contribution else 0.0
+    reforecast_result = actual_contribution - fixed_cost_total
+    variance_bridge = _variance_bridge_rows(
+        plan_contribution=plan_contribution,
+        plan_fixed_costs=plan_fixed_costs,
+        reforecast_contribution=actual_contribution,
+        reforecast_fixed_costs=fixed_cost_total,
+    )
     warnings: list[dict[str, str]] = []
     if not plan_snapshot:
         warnings.append({"code": "missing_plan_snapshot", "message": "Geen actief break-even plan gevonden; planwaarden blijven leeg."})
@@ -402,8 +440,8 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "plan": {
                 "revenue": plan_revenue,
                 "contribution": plan_contribution,
-                "fixed_costs": _num(plan_payload.get("fixed_cost_total")),
-                "result": plan_contribution - _num(plan_payload.get("fixed_cost_total")) if plan_contribution else 0.0,
+                "fixed_costs": plan_fixed_costs,
+                "result": plan_result,
             },
             "actual": {
                 "revenue": actual_revenue,
@@ -417,7 +455,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
                 "variable_cost": actual_variable,
                 "contribution": actual_contribution,
                 "fixed_costs": fixed_cost_total,
-                "result": actual_contribution - fixed_cost_total,
+                "result": reforecast_result,
             },
         },
         "pnl": {
@@ -440,6 +478,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "categories": category_rows,
         },
         "timeline": timeline,
+        "variance_bridge": variance_bridge,
         "data_quality": {
             "missing_cost_lines": missing_cost_lines,
             "unmapped_revenue": _num(totals.get("unmapped_revenue")),

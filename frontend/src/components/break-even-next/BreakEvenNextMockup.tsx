@@ -131,6 +131,13 @@ type ReadModelTimelinePoint = {
   running_contribution: number;
 };
 
+type VarianceRow = {
+  key: string;
+  label: string;
+  value: number;
+  kind: string;
+};
+
 type BreakEvenReadModel = {
   year?: number;
   basis?: string;
@@ -152,6 +159,7 @@ type BreakEvenReadModel = {
   pnl?: ReadModelPnl;
   break_even?: ReadModelBreakEven;
   timeline?: ReadModelTimelinePoint[];
+  variance_bridge?: VarianceRow[];
   data_quality?: {
     warnings?: ReadModelWarning[];
     missing_cost_lines?: number;
@@ -233,6 +241,13 @@ function normalizeCategory(value: unknown): ProductRow["category"] {
   return "beer";
 }
 
+function normalizeVarianceKind(value: unknown, amount: number) {
+  const text = asText(value);
+  if (text === "result") return "result";
+  if (text === "positive" || text === "negative") return text;
+  return amount >= 0 ? "positive" : "negative";
+}
+
 function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadModel | null {
   if (!value) return null;
   const contribution = asRecord(value.contribution);
@@ -242,6 +257,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   const pnl = asRecord(value.pnl);
   const breakEven = asRecord(value.break_even);
   const rawTimeline = Array.isArray(value.timeline) ? value.timeline : [];
+  const rawVarianceBridge = Array.isArray(value.variance_bridge) ? value.variance_bridge : [];
   const rawCategories = Array.isArray(contribution.categories) ? contribution.categories : [];
   const rawContributionRows = Array.isArray(contribution.rows) ? contribution.rows : [];
   const warnings = Array.isArray(dataQuality.warnings) ? dataQuality.warnings : [];
@@ -329,6 +345,16 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
         running_contribution: asNumber(row.running_contribution),
       };
     }).filter((row) => row.period),
+    variance_bridge: rawVarianceBridge.map((item) => {
+      const row = asRecord(item);
+      const value = asNumber(row.value);
+      return {
+        key: asText(row.key),
+        label: asText(row.label),
+        value,
+        kind: normalizeVarianceKind(row.kind, value),
+      };
+    }).filter((row) => row.key && row.label),
     data_quality: {
       missing_cost_lines: asNumber(dataQuality.missing_cost_lines),
       unmapped_revenue: asNumber(dataQuality.unmapped_revenue),
@@ -570,6 +596,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const readModelCategories = parsedReadModel?.contribution?.categories ?? [];
   const readModelContributionRows = parsedReadModel?.contribution?.rows ?? [];
   const readModelTimeline = parsedReadModel?.timeline ?? [];
+  const readModelVarianceBridge = parsedReadModel?.variance_bridge ?? [];
   const mockPlan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
   const mockActual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
   const mockReforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
@@ -627,6 +654,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const expectedBreakEvenMonth = estimateBreakEvenMonth(revenueTimeline, breakEvenRevenue);
 
   const varianceRows = useMemo(() => {
+    if (readModelVarianceBridge.length) return readModelVarianceBridge;
     const priceVariance = products.reduce((sum, row) => sum + (row.actualPrice - row.plannedPrice) * row.reforecastUnits, 0);
     const volumeVariance = products.reduce((sum, row) => sum + (row.reforecastUnits - row.plannedUnits) * contributionUnit(row, "plan"), 0);
     const variableCostVariance = products.reduce((sum, row) => sum + (row.purchase * 0.02) * row.reforecastUnits * -1, 0);
@@ -640,7 +668,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
       { key: "occupancy", label: "Bezettingsresultaat", value: occupancyResult, kind: occupancyResult >= 0 ? "positive" : "negative" },
       { key: "result", label: "Reforecast resultaat", value: reforecastResult, kind: "result" },
     ];
-  }, [fixedRate, occupancyResult, planResult, reforecastResult, reforecast.liters]);
+  }, [occupancyResult, planResult, readModelVarianceBridge, reforecastResult]);
 
   const contributionRows = useMemo(() => {
     const sourceRows = readModelContributionRows.length ? contributionRowsFromReadModel(readModelContributionRows) : contributionRowsFromMock(products);
@@ -1172,7 +1200,7 @@ function PnlRow({ label, value, strong = false }: { label: string; value: number
   );
 }
 
-function VarianceBridge({ rows }: { rows: Array<{ key: string; label: string; value: number; kind: string }> }) {
+function VarianceBridge({ rows }: { rows: VarianceRow[] }) {
   return (
     <div className="data-table">
       <table>
