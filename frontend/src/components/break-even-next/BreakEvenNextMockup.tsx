@@ -121,6 +121,16 @@ type ReadModelBreakEven = {
   contribution_ratio: number;
 };
 
+type ReadModelTimelinePoint = {
+  period: string;
+  revenue: number;
+  variable_cost: number;
+  contribution: number;
+  fixed_allocation: number;
+  running_revenue: number;
+  running_contribution: number;
+};
+
 type BreakEvenReadModel = {
   year?: number;
   basis?: string;
@@ -141,6 +151,7 @@ type BreakEvenReadModel = {
   };
   pnl?: ReadModelPnl;
   break_even?: ReadModelBreakEven;
+  timeline?: ReadModelTimelinePoint[];
   data_quality?: {
     warnings?: ReadModelWarning[];
     missing_cost_lines?: number;
@@ -230,6 +241,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   const dashboard = asRecord(value.dashboard);
   const pnl = asRecord(value.pnl);
   const breakEven = asRecord(value.break_even);
+  const rawTimeline = Array.isArray(value.timeline) ? value.timeline : [];
   const rawCategories = Array.isArray(contribution.categories) ? contribution.categories : [];
   const rawContributionRows = Array.isArray(contribution.rows) ? contribution.rows : [];
   const warnings = Array.isArray(dataQuality.warnings) ? dataQuality.warnings : [];
@@ -305,6 +317,18 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       result_check: asNumber(breakEven.result_check),
       contribution_ratio: asNumber(breakEven.contribution_ratio),
     },
+    timeline: rawTimeline.map((item) => {
+      const row = asRecord(item);
+      return {
+        period: asText(row.period),
+        revenue: asNumber(row.revenue),
+        variable_cost: asNumber(row.variable_cost),
+        contribution: asNumber(row.contribution),
+        fixed_allocation: asNumber(row.fixed_allocation),
+        running_revenue: asNumber(row.running_revenue),
+        running_contribution: asNumber(row.running_contribution),
+      };
+    }).filter((row) => row.period),
     data_quality: {
       missing_cost_lines: asNumber(dataQuality.missing_cost_lines),
       unmapped_revenue: asNumber(dataQuality.unmapped_revenue),
@@ -370,6 +394,47 @@ function buildRevenueTimeline(planRevenue: number, actualRevenue: number, refore
     actual: point.actualPct === null ? null : actualRevenue * (point.actualPct / 0.445),
     reforecast: reforecastRevenue * point.reforecastPct,
   }));
+}
+
+function monthLabel(period: string, fallback: string) {
+  const monthNames = ["Jan", "Feb", "Mrt", "Apr", "Mei", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"];
+  const match = /^(\d{4})-(\d{2})/.exec(period);
+  if (!match) return fallback;
+  const monthIndex = Number(match[2]) - 1;
+  return monthNames[monthIndex] ?? fallback;
+}
+
+function buildRevenueTimelineFromReadModel(planRevenue: number, actualRevenue: number, reforecastRevenue: number, readModelTimeline: ReadModelTimelinePoint[] | undefined) {
+  const fallback = buildRevenueTimeline(planRevenue, actualRevenue, reforecastRevenue);
+  if (!readModelTimeline?.length) return fallback;
+
+  const byMonth = new Map<string, ReadModelTimelinePoint>();
+  for (const point of readModelTimeline) {
+    const key = point.period.slice(0, 7);
+    if (key) byMonth.set(key, point);
+  }
+  const sortedKeys = [...byMonth.keys()].sort();
+  if (!sortedKeys.length) return fallback;
+
+  const year = sortedKeys[0].slice(0, 4);
+  const actualByMonth = new Map(sortedKeys.map((key) => [Number(key.slice(5, 7)), byMonth.get(key)?.running_revenue ?? null]));
+  const lastActualMonth = Math.max(...[...actualByMonth.keys()]);
+  const lastActualRevenue = actualByMonth.get(lastActualMonth) ?? 0;
+
+  return fallback.map((point, index) => {
+    const monthNumber = index + 1;
+    const actual = actualByMonth.get(monthNumber) ?? null;
+    const futureMonths = Math.max(1, 12 - lastActualMonth);
+    const futureStep = Math.max(0, reforecastRevenue - lastActualRevenue) / futureMonths;
+    const reforecastPoint = monthNumber <= lastActualMonth ? (actual ?? lastActualRevenue) : lastActualRevenue + futureStep * (monthNumber - lastActualMonth);
+    const period = `${year}-${String(monthNumber).padStart(2, "0")}`;
+    return {
+      ...point,
+      month: monthLabel(period, point.month),
+      actual,
+      reforecast: reforecastPoint,
+    };
+  });
 }
 
 function contributionSignal(row: ProductRow): ContributionDisplayRow["signal"] {
@@ -504,6 +569,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
   const readModelCategories = parsedReadModel?.contribution?.categories ?? [];
   const readModelContributionRows = parsedReadModel?.contribution?.rows ?? [];
+  const readModelTimeline = parsedReadModel?.timeline ?? [];
   const mockPlan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
   const mockActual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
   const mockReforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
@@ -532,7 +598,10 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
   const planResult = parsedReadModel?.dashboard?.plan?.result || (plan.contribution - activePlanFixedCosts);
   const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result || (reforecast.contribution - activeReforecastFixedCosts);
-  const revenueTimeline = useMemo(() => buildRevenueTimeline(plan.revenue, actual.revenue, reforecast.revenue), [actual.revenue, plan.revenue, reforecast.revenue]);
+  const revenueTimeline = useMemo(
+    () => buildRevenueTimelineFromReadModel(plan.revenue, actual.revenue, reforecast.revenue, readModelTimeline),
+    [actual.revenue, plan.revenue, readModelTimeline, reforecast.revenue],
+  );
   const revenueGap = reforecast.revenue - plan.revenue;
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
   const planBreakEvenRevenue = plan.contribution > 0 && plan.revenue > 0 ? activePlanFixedCosts / (plan.contribution / plan.revenue) : 0;

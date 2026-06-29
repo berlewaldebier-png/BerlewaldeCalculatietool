@@ -403,7 +403,7 @@ Initial wiring order:
 2. Contribution category treatment.
 3. Dashboard, P&L and break-even totals.
 4. Contribution rows. The mock-up should use backend `contribution.rows` when available and keep example rows only as fallback.
-5. Timeline and variance bridge.
+5. Timeline and variance bridge. Start by wiring actual cumulative revenue from backend `timeline`; keep plan/reforecast phasing explicit until a real reforecast model exists.
 
 Proposed snapshots:
 
