@@ -25,6 +25,27 @@ type ScenarioState = {
   fixedCostPct: number;
 };
 
+type FormulaInfo = {
+  title: string;
+  formula: string;
+  source: string;
+  rows: Array<{ label: string; value: string }>;
+};
+
+type DashboardMetric = {
+  label: string;
+  value: string;
+  helper: string;
+  tone?: "positive" | "negative";
+  formula: FormulaInfo;
+};
+
+type DashboardColumn = {
+  title: string;
+  subtitle: string;
+  metrics: DashboardMetric[];
+};
+
 type ReadModelWarning = {
   code: string;
   message: string;
@@ -637,6 +658,7 @@ export function BreakEvenNextMockup({
   const [query, setQuery] = useState("");
   const [contributionPage, setContributionPage] = useState(1);
   const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 5, volumePct: 8, fixedCostPct: 0 });
+  const [selectedFormula, setSelectedFormula] = useState<FormulaInfo | null>(null);
 
   const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
   const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
@@ -688,6 +710,7 @@ export function BreakEvenNextMockup({
   const fixedRate = activePlanFixedCosts > 0 ? activePlanFixedCosts / plannedNormalLiters : 0;
   const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
   const planResult = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.result ?? (plan.contribution - activePlanFixedCosts) : 0;
+  const actualResult = parsedReadModel?.dashboard?.actual?.result ?? (actual.contribution - activeReforecastFixedCosts);
   const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result ?? (reforecast.contribution - activeReforecastFixedCosts);
   const revenueTimeline = useMemo(
     () => buildRevenueTimelineFromReadModel(plan.revenue, actual.revenue, reforecast.revenue, readModelTimeline),
@@ -741,6 +764,228 @@ export function BreakEvenNextMockup({
 
   const progressPct = activeReforecastFixedCosts > 0 ? Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100)) : 0;
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
+  const fixedCostSource = selectedYear <= 2025 ? "Vaste kosten ABC van afgesloten/actueel jaar" : "Vaste kosten ABC uit plan of aangepaste jaarbasis";
+  const dashboardColumns: DashboardColumn[] = [
+    {
+      title: "Plan",
+      subtitle: "Frozen plan voor het jaar",
+      metrics: [
+        {
+          label: "Plan omzet",
+          value: moneyOrMissing(plan.revenue, hasPlanTargets),
+          helper: hasPlanTargets ? "bron: break-even plan" : "maak eerst een break-even plan",
+          formula: {
+            title: "Plan omzet",
+            formula: "Vastgelegde planomzet uit Jaarbeheer.",
+            source: "Bron: actief break-even plan / jaarset.",
+            rows: [
+              { label: "Plan omzet", value: moneyOrMissing(plan.revenue, hasPlanTargets) },
+            ],
+          },
+        },
+        {
+          label: "Plan kostprijs",
+          value: moneyOrMissing(plan.variable, hasPlanTargets),
+          helper: "planmix x variabele kostprijs",
+          formula: {
+            title: "Plan kostprijs",
+            formula: "Som van geplande verkoopaantallen x variabele kostprijs per SKU.",
+            source: "Bron: frozen plan snapshot.",
+            rows: [
+              { label: "Plan variabele kostprijs", value: moneyOrMissing(plan.variable, hasPlanTargets) },
+              { label: "Plan contributie", value: moneyOrMissing(plan.contribution, hasPlanTargets) },
+            ],
+          },
+        },
+        {
+          label: "Plan vaste kosten",
+          value: moneyOrMissing(activePlanFixedCosts, hasPlanTargets),
+          helper: "vaste kosten ABC in plan",
+          formula: {
+            title: "Plan vaste kosten",
+            formula: "Vaste kosten die bij het plan zijn vastgelegd.",
+            source: "Bron: Jaarbeheer break-even plan.",
+            rows: [
+              { label: "Plan vaste kosten", value: moneyOrMissing(activePlanFixedCosts, hasPlanTargets) },
+            ],
+          },
+        },
+        {
+          label: "Plan resultaat",
+          value: moneyOrMissing(planResult, hasPlanTargets),
+          helper: "omzet - kostprijs - vaste kosten",
+          tone: planResult >= 0 ? "positive" : "negative",
+          formula: {
+            title: "Plan resultaat",
+            formula: "Plan omzet - plan kostprijs - plan vaste kosten.",
+            source: "Bron: break-even plan.",
+            rows: [
+              { label: "Plan omzet", value: moneyOrMissing(plan.revenue, hasPlanTargets) },
+              { label: "Plan kostprijs", value: moneyOrMissing(-plan.variable, hasPlanTargets) },
+              { label: "Plan vaste kosten", value: moneyOrMissing(-activePlanFixedCosts, hasPlanTargets) },
+              { label: "Plan resultaat", value: moneyOrMissing(planResult, hasPlanTargets) },
+            ],
+          },
+        },
+        {
+          label: "Plan break-even omzet",
+          value: moneyOrMissing(planBreakEvenRevenue, hasPlanTargets),
+          helper: "vaste kosten / contributieratio",
+          formula: {
+            title: "Plan break-even omzet",
+            formula: "Plan vaste kosten / (plan contributie / plan omzet).",
+            source: "Bron: frozen plan.",
+            rows: [
+              { label: "Plan contributieratio", value: hasPlanTargets && plan.revenue > 0 ? `${number((plan.contribution / plan.revenue) * 100, 1)}%` : "-" },
+              { label: "Plan vaste kosten", value: moneyOrMissing(activePlanFixedCosts, hasPlanTargets) },
+              { label: "Plan break-even omzet", value: moneyOrMissing(planBreakEvenRevenue, hasPlanTargets) },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      title: "Huidig",
+      subtitle: "Werkelijke stand tot nu",
+      metrics: [
+        {
+          label: "Real omzet",
+          value: moneyOrMissing(actual.revenue, hasActuals),
+          helper: "SSOT: Omzet & Marge",
+          formula: {
+            title: "Real omzet",
+            formula: "Som van verkoopregels/facturen in Omzet & Marge voor dit jaar.",
+            source: "Bron: dashboard omzet over tijd / backend actuals.",
+            rows: [
+              { label: "Real omzet", value: moneyOrMissing(actual.revenue, hasActuals) },
+            ],
+          },
+        },
+        {
+          label: "Real kostprijs",
+          value: moneyOrMissing(actual.variable, hasActuals),
+          helper: "kostprijsbronnen per verkoopregel",
+          formula: {
+            title: "Real kostprijs",
+            formula: "Som van variabele kostprijs uit de verkoopregels die verwerkt zijn.",
+            source: "Bron: Omzet & Marge snapshots.",
+            rows: [
+              { label: "Real kostprijs", value: moneyOrMissing(actual.variable, hasActuals) },
+              { label: "Real contributie", value: moneyOrMissing(actual.contribution, hasActuals) },
+            ],
+          },
+        },
+        {
+          label: "Vaste kosten ABC",
+          value: moneyOrMissing(activeReforecastFixedCosts, hasActuals),
+          helper: fixedCostSource,
+          formula: {
+            title: "Vaste kosten ABC huidig",
+            formula: "Zelfde vaste-kostenbron als de jaaranalyse; niet opnieuw verdeeld per klik.",
+            source: fixedCostSource,
+            rows: [
+              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasActuals) },
+            ],
+          },
+        },
+        {
+          label: "Real resultaat",
+          value: moneyOrMissing(actualResult, hasActuals),
+          helper: "real contributie - vaste kosten",
+          tone: actualResult >= 0 ? "positive" : "negative",
+          formula: {
+            title: "Real resultaat",
+            formula: "Real omzet - real kostprijs - vaste kosten ABC.",
+            source: "Bron: Omzet & Marge plus vaste kosten ABC.",
+            rows: [
+              { label: "Real omzet", value: moneyOrMissing(actual.revenue, hasActuals) },
+              { label: "Real kostprijs", value: moneyOrMissing(-actual.variable, hasActuals) },
+              { label: "Vaste kosten ABC", value: moneyOrMissing(-activeReforecastFixedCosts, hasActuals) },
+              { label: "Real resultaat", value: moneyOrMissing(actualResult, hasActuals) },
+            ],
+          },
+        },
+        {
+          label: "Huidige break-even omzet",
+          value: moneyOrMissing(breakEvenRevenue, hasActuals),
+          helper: "op actual/reforecast mix",
+          formula: {
+            title: "Huidige break-even omzet",
+            formula: "Vaste kosten ABC / actuele contributieratio.",
+            source: "Bron: backend break-even read-model.",
+            rows: [
+              { label: "Contributieratio", value: reforecastContributionRatio > 0 ? `${number(reforecastContributionRatio * 100, 1)}%` : "-" },
+              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasActuals) },
+              { label: "Break-even omzet", value: moneyOrMissing(breakEvenRevenue, hasActuals) },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      title: "Einde jaar",
+      subtitle: hasExplicitReforecast ? "Vastgelegde reforecast" : "Tijdelijk gelijk aan actuals",
+      metrics: [
+        {
+          label: "Forecast omzet",
+          value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast),
+          helper: hasExplicitReforecast ? "reforecast snapshot" : "nog geen aparte forecast",
+          formula: {
+            title: "Forecast omzet",
+            formula: "Verwachte jaaromzet. Voor 2025 is dit nu gelijk aan actuals zolang er geen aparte reforecast is.",
+            source: hasExplicitReforecast ? "Bron: reforecast snapshot." : "Bron: actuals als tijdelijke reforecast.",
+            rows: [
+              { label: "Forecast omzet", value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast) },
+            ],
+          },
+        },
+        {
+          label: "Forecast kostprijs",
+          value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast),
+          helper: "verwachte variabele kosten",
+          formula: {
+            title: "Forecast kostprijs",
+            formula: "Verwachte omzetmix x variabele kostprijs.",
+            source: hasExplicitReforecast ? "Bron: reforecast snapshot." : "Bron: actuals als tijdelijke reforecast.",
+            rows: [
+              { label: "Forecast kostprijs", value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast) },
+              { label: "Forecast contributie", value: moneyOrMissing(reforecast.contribution, hasTemporaryReforecast) },
+            ],
+          },
+        },
+        {
+          label: "Vaste kosten ABC",
+          value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast),
+          helper: fixedCostSource,
+          formula: {
+            title: "Vaste kosten ABC einde jaar",
+            formula: "De jaaranalyse gebruikt dezelfde vaste-kostenbron; bij voorbereiding komt die eerst uit het plan en kan later worden aangepast.",
+            source: fixedCostSource,
+            rows: [
+              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
+            ],
+          },
+        },
+        {
+          label: "Verwacht resultaat",
+          value: moneyOrMissing(reforecastResult, hasTemporaryReforecast),
+          helper: `grootste driver: ${largestVariance?.label ?? "-"}`,
+          tone: reforecastResult >= 0 ? "positive" : "negative",
+          formula: {
+            title: "Verwacht resultaat",
+            formula: "Forecast omzet - forecast kostprijs - vaste kosten ABC.",
+            source: "Bron: reforecast/actuals plus vaste kosten ABC.",
+            rows: [
+              { label: "Forecast omzet", value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast) },
+              { label: "Forecast kostprijs", value: moneyOrMissing(-reforecast.variable, hasTemporaryReforecast) },
+              { label: "Vaste kosten ABC", value: moneyOrMissing(-activeReforecastFixedCosts, hasTemporaryReforecast) },
+              { label: "Verwacht resultaat", value: moneyOrMissing(reforecastResult, hasTemporaryReforecast) },
+            ],
+          },
+        },
+      ],
+    },
+  ];
 
   return (
     <div className="be-next-page">
@@ -807,14 +1052,59 @@ export function BreakEvenNextMockup({
 
       {activeTab === "dashboard" ? (
         <div className="wizard-stack">
-          <div className="be-next-grid be-next-grid-3">
-            <MetricCard label="Plan omzet" value={moneyOrMissing(plan.revenue, hasPlanTargets)} helper={hasPlanTargets ? "frozen plan" : "maak eerst een break-even plan"} />
-            <MetricCard label="Actual YTD omzet" value={moneyOrMissing(actual.revenue, hasActuals)} helper={hasActuals ? "SSOT: backend actuals op invoice-basis" : "geen actuals gevonden"} />
-            <MetricCard label="Reforecast omzet" value={moneyOrMissing(reforecast.revenue, hasTemporaryReforecast)} helper={hasExplicitReforecast ? "expliciete reforecast snapshot" : hasTemporaryReforecast ? "tijdelijk gelijk aan actual YTD" : "reforecast nog niet ingericht"} />
-            <MetricCard label="Plan break-even omzet" value={moneyOrMissing(planBreakEvenRevenue, hasPlanTargets)} helper="op basis van frozen plan" />
-            <MetricCard label="Huidige break-even omzet" value={moneyOrMissing(breakEvenRevenue, hasActuals)} helper="op basis van actual contributieratio" />
-            <MetricCard label="Verwacht resultaat" value={moneyOrMissing(reforecastResult, hasTemporaryReforecast)} tone={reforecastResult >= 0 ? "positive" : "negative"} helper={`grootste driver: ${largestVariance?.label ?? "-"}`} />
-          </div>
+          <section className="module-card">
+            <div className="module-card-header be-next-table-header">
+              <div>
+                <div className="module-card-title">Dashboard per stuurlaag</div>
+                <div className="module-card-text">
+                  Plan, huidige stand en einde jaar blijven gescheiden. Klik op een kaart om formule en bron te controleren.
+                </div>
+              </div>
+              <span className="status-pill status-neutral">{selectedYear}</span>
+            </div>
+            <div className="be-next-grid be-next-grid-3">
+              {dashboardColumns.map((column) => (
+                <div key={column.title} className="wizard-stack">
+                  <div>
+                    <strong>{column.title}</strong>
+                    <div className="module-card-text">{column.subtitle}</div>
+                  </div>
+                  {column.metrics.map((metric) => (
+                    <FormulaMetricCard
+                      key={metric.label}
+                      label={metric.label}
+                      value={metric.value}
+                      helper={metric.helper}
+                      tone={metric.tone}
+                      onClick={() => setSelectedFormula(metric.formula)}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+            {selectedFormula ? (
+              <div className="data-table" style={{ marginTop: 16 }}>
+                <table>
+                  <tbody>
+                    <tr>
+                      <td><strong>{selectedFormula.title}</strong></td>
+                      <td>{selectedFormula.formula}</td>
+                    </tr>
+                    {selectedFormula.rows.map((row) => (
+                      <tr key={`${selectedFormula.title}-${row.label}`}>
+                        <td>{row.label}</td>
+                        <td style={{ textAlign: "right" }}>{row.value}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td>Bron</td>
+                      <td>{selectedFormula.source}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </section>
 
           {revenueReconciliation ? (
             <section className="module-card">
@@ -973,9 +1263,10 @@ export function BreakEvenNextMockup({
       ) : null}
 
       {activeTab === "pnl" ? (
-        <div className="be-next-grid be-next-grid-2">
+        <div className="be-next-grid be-next-grid-3">
           <PnlCard title="Plan" revenue={plan.revenue} variable={plan.variable} fixedCosts={activePlanFixedCosts} />
-          <PnlCard title="Reforecast" revenue={reforecast.revenue} variable={reforecast.variable} fixedCosts={activeReforecastFixedCosts} />
+          <PnlCard title="Huidig" revenue={actual.revenue} variable={actual.variable} fixedCosts={activeReforecastFixedCosts} />
+          <PnlCard title="Einde jaar" revenue={reforecast.revenue} variable={reforecast.variable} fixedCosts={activeReforecastFixedCosts} />
           <section className="module-card be-next-wide">
             <div className="module-card-title">Van resultaatrekening naar verklaard resultaat</div>
             <VarianceBridge rows={varianceRows} />
@@ -1350,6 +1641,34 @@ function MetricCard({ label, value, helper, tone }: { label: string; value: stri
       <strong>{value}</strong>
       {helper ? <small>{helper}</small> : null}
     </section>
+  );
+}
+
+function FormulaMetricCard({
+  label,
+  value,
+  helper,
+  tone,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  helper?: string;
+  tone?: "positive" | "negative";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`module-card be-next-metric ${tone ?? ""}`}
+      onClick={onClick}
+      style={{ cursor: "pointer", textAlign: "left", width: "100%" }}
+      title="Toon formule en bron"
+    >
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {helper ? <small>{helper}</small> : null}
+    </button>
   );
 }
 
