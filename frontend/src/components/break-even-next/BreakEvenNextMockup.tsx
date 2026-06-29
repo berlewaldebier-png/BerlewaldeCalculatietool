@@ -43,6 +43,39 @@ type ScenarioState = {
   fixedCostPct: number;
 };
 
+type ReadModelWarning = {
+  code: string;
+  message: string;
+};
+
+type ReadModelCategory = {
+  category: ProductRow["category"];
+  rows: number;
+  revenue: number;
+  contribution: number;
+  units: number;
+  treatment: string;
+};
+
+type BreakEvenReadModel = {
+  year?: number;
+  basis?: string;
+  sources?: {
+    plan_snapshot_id?: string;
+    plan_source?: string;
+    actual_source?: string;
+    fixed_cost_source?: string;
+  };
+  contribution?: {
+    categories?: ReadModelCategory[];
+  };
+  data_quality?: {
+    warnings?: ReadModelWarning[];
+    missing_cost_lines?: number;
+    unmapped_revenue?: number;
+  };
+};
+
 const tabs: Array<{ id: TabId; title: string; description: string }> = [
   { id: "dashboard", title: "Dashboard", description: "Zijn we op koers?" },
   { id: "pnl", title: "Resultaatrekening", description: "Exact-achtige opbouw" },
@@ -97,6 +130,65 @@ function money2(value: number) {
 
 function number(value: number, digits = 0) {
   return new Intl.NumberFormat("nl-NL", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(Number.isFinite(value) ? value : 0);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asNumber(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function asText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function normalizeCategory(value: unknown): ProductRow["category"] {
+  const text = asText(value);
+  if (text === "giftset" || text === "service" || text === "merchandise") return text;
+  return "beer";
+}
+
+function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadModel | null {
+  if (!value) return null;
+  const contribution = asRecord(value.contribution);
+  const dataQuality = asRecord(value.data_quality);
+  const sources = asRecord(value.sources);
+  const rawCategories = Array.isArray(contribution.categories) ? contribution.categories : [];
+  const warnings = Array.isArray(dataQuality.warnings) ? dataQuality.warnings : [];
+  return {
+    year: asNumber(value.year),
+    basis: asText(value.basis),
+    sources: {
+      plan_snapshot_id: asText(sources.plan_snapshot_id),
+      plan_source: asText(sources.plan_source),
+      actual_source: asText(sources.actual_source),
+      fixed_cost_source: asText(sources.fixed_cost_source),
+    },
+    contribution: {
+      categories: rawCategories.map((item) => {
+        const row = asRecord(item);
+        return {
+          category: normalizeCategory(row.category),
+          rows: asNumber(row.rows),
+          revenue: asNumber(row.revenue),
+          contribution: asNumber(row.contribution),
+          units: asNumber(row.units),
+          treatment: asText(row.treatment) || categoryTreatment(normalizeCategory(row.category)),
+        };
+      }),
+    },
+    data_quality: {
+      missing_cost_lines: asNumber(dataQuality.missing_cost_lines),
+      unmapped_revenue: asNumber(dataQuality.unmapped_revenue),
+      warnings: warnings.map((item) => {
+        const row = asRecord(item);
+        return { code: asText(row.code), message: asText(row.message) };
+      }).filter((item) => item.message),
+    },
+  };
 }
 
 function variableCost(row: ProductRow) {
@@ -217,7 +309,7 @@ function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: num
   return hit?.month ?? "niet binnen dit jaar";
 }
 
-export function BreakEvenNextMockup() {
+export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readModel?: Record<string, unknown> | null; readModelError?: string }) {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
   const [contributionPage, setContributionPage] = useState(1);
@@ -285,7 +377,10 @@ export function BreakEvenNextMockup() {
   const pagedContributionRows = contributionRows.slice((safeContributionPage - 1) * contributionPageSize, safeContributionPage * contributionPageSize);
   const topContributor = contributionRows[0];
   const marginRiskCount = contributionRows.filter((row) => contributionSignal(row).tone === "error").length;
-  const categoryRows = useMemo(() => summarizeByCategory(products), []);
+  const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
+  const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
+  const readModelCategories = parsedReadModel?.contribution?.categories ?? [];
+  const categoryRows = readModelCategories.length ? readModelCategories : summarizeByCategory(products);
 
   const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / reforecastFixedCosts) * 100));
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
@@ -302,6 +397,33 @@ export function BreakEvenNextMockup() {
           </div>
           <span className="status-pill status-warning">mock-up</span>
         </div>
+      </section>
+
+      <section className="module-card">
+        <div className="module-card-header be-next-table-header">
+          <div>
+            <div className="module-card-title">Read-model koppeling</div>
+            <div className="module-card-text">
+              Deze mock-up gebruikt voorbeelddata voor de berekeningen, maar leest alvast backend-waarschuwingen en categorieën uit het nieuwe read-only model.
+            </div>
+          </div>
+          <span className={`status-pill ${readModelError ? "status-error" : parsedReadModel ? "status-ok" : "status-warning"}`}>
+            {readModelError ? "niet geladen" : parsedReadModel ? "backend gekoppeld" : "mock data"}
+          </span>
+        </div>
+        {readModelError ? (
+          <div className="editor-status error">Read-model kon niet worden geladen. De mock-up blijft werken met voorbeelddata.</div>
+        ) : readModelWarnings.length ? (
+          <div className="be-next-warning-list">
+            {readModelWarnings.map((warning) => (
+              <div key={`${warning.code}-${warning.message}`} className="editor-status warning">
+                <strong>{warning.code || "waarschuwing"}</strong>: {warning.message}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="editor-status success">Read-model is geladen zonder waarschuwingen.</div>
+        )}
       </section>
 
       <div className="data-quality-tabs" role="tablist" aria-label="Break-even next onderdelen">
@@ -477,7 +599,7 @@ export function BreakEvenNextMockup() {
                       <td><strong>{categoryLabel(row.category)}</strong><br /><small>{row.rows} verkoopbare regels</small></td>
                       <td>{money(row.revenue)}</td>
                       <td><strong>{money(row.contribution)}</strong></td>
-                      <td>{row.liters > 0 ? `${number(row.liters)} L` : "-"}</td>
+                      <td>{"liters" in row && row.liters > 0 ? `${number(row.liters)} L` : "units" in row && row.units > 0 ? `${number(row.units)} st` : "-"}</td>
                       <td>{row.treatment}</td>
                     </tr>
                   ))}
