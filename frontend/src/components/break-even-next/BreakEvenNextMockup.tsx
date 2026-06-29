@@ -57,6 +57,45 @@ type ReadModelCategory = {
   treatment: string;
 };
 
+type ReadModelContributionRow = {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  category: ProductRow["category"];
+  units: number;
+  revenue: number;
+  variable_cost: number;
+  purchase: number;
+  packaging: number;
+  excise: number;
+  fixed_allocation: number;
+  contribution: number;
+  allocated_margin: number;
+  contribution_ratio: number;
+  missing_cost_lines: number;
+};
+
+type ContributionDisplayRow = {
+  id: string;
+  sku: string;
+  subtitle: string;
+  category: ProductRow["category"];
+  price: number;
+  purchase: number;
+  excise: number;
+  packaging: number;
+  contribution: number;
+  fixedAllocation: number;
+  allocatedMargin: number;
+  units: number;
+  totalContribution: number;
+  missingCostLines: number;
+  signal: {
+    label: string;
+    tone: "ok" | "warning" | "error" | "neutral";
+  };
+};
+
 type ReadModelFinancialSet = {
   revenue: number;
   variable_cost: number;
@@ -92,6 +131,7 @@ type BreakEvenReadModel = {
     fixed_cost_source?: string;
   };
   contribution?: {
+    rows?: ReadModelContributionRow[];
     categories?: ReadModelCategory[];
   };
   dashboard?: {
@@ -191,6 +231,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   const pnl = asRecord(value.pnl);
   const breakEven = asRecord(value.break_even);
   const rawCategories = Array.isArray(contribution.categories) ? contribution.categories : [];
+  const rawContributionRows = Array.isArray(contribution.rows) ? contribution.rows : [];
   const warnings = Array.isArray(dataQuality.warnings) ? dataQuality.warnings : [];
   const financialSet = (raw: unknown): ReadModelFinancialSet => {
     const row = asRecord(raw);
@@ -212,6 +253,26 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       fixed_cost_source: asText(sources.fixed_cost_source),
     },
     contribution: {
+      rows: rawContributionRows.map((item) => {
+        const row = asRecord(item);
+        return {
+          sku_id: asText(row.sku_id),
+          sku_code: asText(row.sku_code),
+          sku_name: asText(row.sku_name),
+          category: normalizeCategory(row.category),
+          units: asNumber(row.units),
+          revenue: asNumber(row.revenue),
+          variable_cost: asNumber(row.variable_cost),
+          purchase: asNumber(row.purchase),
+          packaging: asNumber(row.packaging),
+          excise: asNumber(row.excise),
+          fixed_allocation: asNumber(row.fixed_allocation),
+          contribution: asNumber(row.contribution),
+          allocated_margin: asNumber(row.allocated_margin),
+          contribution_ratio: asNumber(row.contribution_ratio),
+          missing_cost_lines: asNumber(row.missing_cost_lines),
+        };
+      }),
       categories: rawCategories.map((item) => {
         const row = asRecord(item);
         return {
@@ -311,7 +372,7 @@ function buildRevenueTimeline(planRevenue: number, actualRevenue: number, refore
   }));
 }
 
-function contributionSignal(row: ProductRow) {
+function contributionSignal(row: ProductRow): ContributionDisplayRow["signal"] {
   const contribution = contributionUnit(row, "reforecast");
   const contributionPct = row.plannedPrice > 0 ? contribution / row.plannedPrice : 0;
   const totalContribution = row.reforecastUnits * contribution;
@@ -320,6 +381,66 @@ function contributionSignal(row: ProductRow) {
   if (row.reforecastUnits > row.plannedUnits * 1.1) return { label: "volume boven plan", tone: "ok" };
   if (row.reforecastUnits < row.plannedUnits * 0.9) return { label: "volume onder plan", tone: "warning" };
   return { label: "stabiel", tone: "neutral" };
+}
+
+function contributionDisplaySignal(row: ReadModelContributionRow): ContributionDisplayRow["signal"] {
+  if (row.missing_cost_lines > 0) return { label: "kostprijs ontbreekt", tone: "error" };
+  if (row.contribution_ratio > 0 && row.contribution_ratio < 0.25) return { label: "marge-risico", tone: "error" };
+  if (row.contribution > 9000) return { label: "mixdrager", tone: "ok" };
+  if (row.contribution > 0) return { label: "contributie", tone: "neutral" };
+  return { label: "controle nodig", tone: "warning" };
+}
+
+function perUnit(total: number, units: number) {
+  return units > 0 ? total / units : 0;
+}
+
+function contributionRowsFromReadModel(rows: ReadModelContributionRow[] | undefined): ContributionDisplayRow[] {
+  if (!rows?.length) return [];
+  return rows.map((row) => {
+    const sku = row.sku_name || row.sku_code || row.sku_id;
+    const code = row.sku_code ? `SKU ${row.sku_code}` : row.sku_id;
+    return {
+      id: row.sku_id || `${sku}-${row.sku_code}`,
+      sku,
+      subtitle: `${code} - ${number(row.units)} st verkocht`,
+      category: row.category,
+      price: perUnit(row.revenue, row.units),
+      purchase: perUnit(row.purchase, row.units),
+      excise: perUnit(row.excise, row.units),
+      packaging: perUnit(row.packaging, row.units),
+      contribution: perUnit(row.contribution, row.units),
+      fixedAllocation: perUnit(row.fixed_allocation, row.units),
+      allocatedMargin: perUnit(row.allocated_margin, row.units),
+      units: row.units,
+      totalContribution: row.contribution,
+      missingCostLines: row.missing_cost_lines,
+      signal: contributionDisplaySignal(row),
+    };
+  });
+}
+
+function contributionRowsFromMock(rows: ProductRow[]): ContributionDisplayRow[] {
+  return rows.map((row) => {
+    const signal = contributionSignal(row);
+    return {
+      id: row.id,
+      sku: row.sku,
+      subtitle: `${row.style} - ${row.skuType}${row.componentStyles?.length ? ` - componenten: ${row.componentStyles.join(", ")}` : ""}`,
+      category: row.category,
+      price: row.plannedPrice,
+      purchase: row.purchase,
+      excise: row.excise,
+      packaging: row.packaging,
+      contribution: contributionUnit(row),
+      fixedAllocation: row.abcAllocation,
+      allocatedMargin: allocatedMarginUnit(row),
+      units: row.reforecastUnits,
+      totalContribution: row.reforecastUnits * contributionUnit(row, "reforecast"),
+      missingCostLines: 0,
+      signal,
+    };
+  });
 }
 
 function categoryLabel(category: ProductRow["category"]) {
@@ -382,6 +503,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
   const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
   const readModelCategories = parsedReadModel?.contribution?.categories ?? [];
+  const readModelContributionRows = parsedReadModel?.contribution?.rows ?? [];
   const mockPlan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
   const mockActual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
   const mockReforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
@@ -452,19 +574,20 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   }, [fixedRate, occupancyResult, planResult, reforecastResult, reforecast.liters]);
 
   const contributionRows = useMemo(() => {
+    const sourceRows = readModelContributionRows.length ? contributionRowsFromReadModel(readModelContributionRows) : contributionRowsFromMock(products);
     const normalized = query.trim().toLowerCase();
-    return products
+    return sourceRows
       .filter((row) => {
         if (!normalized) return true;
-        return `${row.style} ${row.skuType} ${row.sku}`.toLowerCase().includes(normalized);
+        return `${row.sku} ${row.subtitle} ${categoryLabel(row.category)}`.toLowerCase().includes(normalized);
       })
-      .sort((a, b) => b.reforecastUnits * contributionUnit(b, "reforecast") - a.reforecastUnits * contributionUnit(a, "reforecast"));
-  }, [query]);
+      .sort((a, b) => b.totalContribution - a.totalContribution);
+  }, [query, readModelContributionRows]);
   const contributionPageCount = Math.max(1, Math.ceil(contributionRows.length / contributionPageSize));
   const safeContributionPage = Math.min(contributionPage, contributionPageCount);
   const pagedContributionRows = contributionRows.slice((safeContributionPage - 1) * contributionPageSize, safeContributionPage * contributionPageSize);
   const topContributor = contributionRows[0];
-  const marginRiskCount = contributionRows.filter((row) => contributionSignal(row).tone === "error").length;
+  const marginRiskCount = contributionRows.filter((row) => row.signal.tone === "error").length;
   const categoryRows = readModelCategories.length ? readModelCategories : summarizeByCategory(products);
 
   const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100));
@@ -713,7 +836,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
               <MetricCard label="Zichtbare regels" value={`${contributionRows.length}`} helper="na filter/search" />
               <MetricCard
                 label="Top contributor"
-                value={topContributor ? money(topContributor.reforecastUnits * contributionUnit(topContributor, "reforecast")) : "-"}
+                value={topContributor ? money(topContributor.totalContribution) : "-"}
                 helper={topContributor?.sku ?? "geen regels"}
               />
               <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="contributie onder 25% van prijs" tone={marginRiskCount > 0 ? "negative" : "positive"} />
@@ -736,25 +859,21 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
                 </thead>
                 <tbody>
                   {pagedContributionRows.map((row) => {
-                    const signal = contributionSignal(row);
                     return (
                       <tr key={row.id}>
                         <td>
                           <strong>{row.sku}</strong><br />
-                          <small>
-                            {row.style} - {row.skuType}
-                            {row.componentStyles?.length ? ` - componenten: ${row.componentStyles.join(", ")}` : ""}
-                          </small>
+                          <small>{row.subtitle}</small>
                         </td>
                         <td><span className="status-pill status-neutral">{categoryLabel(row.category)}</span></td>
-                        <td><span className={`status-pill status-${signal.tone}`}>{signal.label}</span></td>
-                        <td>{money2(row.plannedPrice)}</td>
+                        <td><span className={`status-pill status-${row.signal.tone}`}>{row.signal.label}</span></td>
+                        <td>{money2(row.price)}</td>
                         <td>{money2(row.purchase)}</td>
                         <td>{money2(row.excise)}</td>
                         <td>{money2(row.packaging)}</td>
-                        <td><strong>{money2(contributionUnit(row))}</strong></td>
-                        <td>{money2(row.abcAllocation)}</td>
-                        <td>{money2(allocatedMarginUnit(row))}</td>
+                        <td><strong>{money2(row.contribution)}</strong></td>
+                        <td>{money2(row.fixedAllocation)}</td>
+                        <td>{money2(row.allocatedMargin)}</td>
                       </tr>
                     );
                   })}

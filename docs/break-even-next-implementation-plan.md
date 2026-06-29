@@ -402,7 +402,7 @@ Initial wiring order:
 1. Read-model status and warnings.
 2. Contribution category treatment.
 3. Dashboard, P&L and break-even totals.
-4. Contribution rows.
+4. Contribution rows. The mock-up should use backend `contribution.rows` when available and keep example rows only as fallback.
 5. Timeline and variance bridge.
 
 Proposed snapshots:
