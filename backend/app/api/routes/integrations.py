@@ -2002,6 +2002,7 @@ def post_break_even_plan(
                 year=year,
                 scenario_name=scenario_name,
                 replace_active=replace_active,
+                targets=payload.get("targets") if isinstance(payload.get("targets"), dict) else None,
             )
         }
     except ValueError as exc:

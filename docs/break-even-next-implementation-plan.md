@@ -401,6 +401,14 @@ Proposed snapshots:
 
 - `break_even_plan_snapshots`
   - frozen plan
+  - explicit targets:
+    - planned revenue
+    - planned contribution
+    - planned liters
+    - planned units
+    - price assumption percentage
+    - volume assumption percentage
+    - mix assumption text
   - planned volume
   - planned prices
   - planned SKU mix
@@ -424,6 +432,8 @@ Proposed snapshots:
   - bezettingsresultaat
 
 Existing snapshot tables may be extended where clean. If the shape no longer fits, introduce new versioned payload keys rather than hidden fallback logic.
+
+Plan targets are explicit user input. The app must not derive or guess them from actuals unless the user explicitly chooses a "use closed actuals as baseline" flow in `Nieuw jaar voorbereiden`.
 
 ### Phase 3: Real Data Service
 

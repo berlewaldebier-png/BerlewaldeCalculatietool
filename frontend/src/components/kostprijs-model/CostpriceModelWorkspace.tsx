@@ -30,6 +30,13 @@ export function CostpriceModelWorkspace() {
   const [audit, setAudit] = useState<GenericRecord | null>(null);
   const [review, setReview] = useState<GenericRecord | null>(null);
   const [plans, setPlans] = useState<GenericRecord[]>([]);
+  const [planRevenue, setPlanRevenue] = useState("");
+  const [planContribution, setPlanContribution] = useState("");
+  const [planLiters, setPlanLiters] = useState("");
+  const [planUnits, setPlanUnits] = useState("");
+  const [planPriceChangePct, setPlanPriceChangePct] = useState("");
+  const [planVolumeChangePct, setPlanVolumeChangePct] = useState("");
+  const [planMixAssumption, setPlanMixAssumption] = useState("");
 
   async function request(path: string, options?: RequestInit) {
     const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -103,7 +110,20 @@ export function CostpriceModelWorkspace() {
     try {
       await request("/integrations/break-even/plans", {
         method: "POST",
-        body: JSON.stringify({ year: Number(year), scenario_name: `Basis ${year}`, replace_active: true }),
+        body: JSON.stringify({
+          year: Number(year),
+          scenario_name: `Basis ${year}`,
+          replace_active: true,
+          targets: {
+            revenue: Number(planRevenue || 0),
+            contribution: Number(planContribution || 0),
+            liters: Number(planLiters || 0),
+            units: Number(planUnits || 0),
+            price_change_pct: Number(planPriceChangePct || 0),
+            volume_change_pct: Number(planVolumeChangePct || 0),
+            mix_assumption: planMixAssumption,
+          },
+        }),
       });
       setStatus("Break-even plansnapshot opgeslagen.");
       setTone("success");
@@ -224,19 +244,57 @@ export function CostpriceModelWorkspace() {
         </div>
       </div>
 
-      <div className="editor-actions" style={{ marginTop: 16 }}>
-        <div className="editor-actions-group">
-          <button type="button" className="editor-button" onClick={createPlan} disabled={busy}>
-            Plansnapshot maken
-          </button>
-          <button type="button" className="editor-button editor-button-secondary" onClick={actualizeForecast} disabled={busy}>
-            Actualiseer prognose
-          </button>
-          <button type="button" className="editor-button editor-button-secondary" onClick={closeYear} disabled={busy}>
-            Jaar afsluiten
-          </button>
+      <section className="module-card" style={{ marginTop: 16 }}>
+        <div className="module-card-header">
+          <div className="module-card-title">Frozen plan targets</div>
+          <div className="module-card-text">
+            Leg expliciet vast waar het jaarplan op stuurt. Leeg laten mag, maar dan blijft Break-even next eerlijk waarschuwen dat planwaarden ontbreken.
+          </div>
         </div>
-      </div>
+        <div className="wizard-form-grid">
+          <label className="form-field">
+            <span>Plan omzet</span>
+            <input value={planRevenue} onChange={(event) => setPlanRevenue(event.target.value)} inputMode="decimal" placeholder="bijv. 100000" />
+          </label>
+          <label className="form-field">
+            <span>Plan contributie</span>
+            <input value={planContribution} onChange={(event) => setPlanContribution(event.target.value)} inputMode="decimal" placeholder="bijv. 65000" />
+          </label>
+          <label className="form-field">
+            <span>Plan liters</span>
+            <input value={planLiters} onChange={(event) => setPlanLiters(event.target.value)} inputMode="decimal" placeholder="bijv. 40000" />
+          </label>
+          <label className="form-field">
+            <span>Plan units</span>
+            <input value={planUnits} onChange={(event) => setPlanUnits(event.target.value)} inputMode="decimal" placeholder="optioneel" />
+          </label>
+          <label className="form-field">
+            <span>Prijsaanname %</span>
+            <input value={planPriceChangePct} onChange={(event) => setPlanPriceChangePct(event.target.value)} inputMode="decimal" placeholder="bijv. 3" />
+          </label>
+          <label className="form-field">
+            <span>Volumeaanname %</span>
+            <input value={planVolumeChangePct} onChange={(event) => setPlanVolumeChangePct(event.target.value)} inputMode="decimal" placeholder="bijv. 5" />
+          </label>
+          <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+            <span>Mix-aanname</span>
+            <input value={planMixAssumption} onChange={(event) => setPlanMixAssumption(event.target.value)} placeholder="bijv. 2025 realisatie als basis, extra groei op fust" />
+          </label>
+        </div>
+        <div className="editor-actions" style={{ marginTop: 16 }}>
+          <div className="editor-actions-group">
+            <button type="button" className="editor-button" onClick={createPlan} disabled={busy}>
+              Plansnapshot maken
+            </button>
+            <button type="button" className="editor-button editor-button-secondary" onClick={actualizeForecast} disabled={busy}>
+              Actualiseer prognose
+            </button>
+            <button type="button" className="editor-button editor-button-secondary" onClick={closeYear} disabled={busy}>
+              Jaar afsluiten
+            </button>
+          </div>
+        </div>
+      </section>
 
       <div className="data-table" style={{ marginTop: 16 }}>
         <table>
@@ -246,6 +304,8 @@ export function CostpriceModelWorkspace() {
               <th>Jaar</th>
               <th>Status</th>
               <th>Vaste kosten</th>
+              <th>Plan omzet</th>
+              <th>Plan contributie</th>
               <th>SKU regels</th>
               <th>Aangemaakt</th>
             </tr>
@@ -258,13 +318,15 @@ export function CostpriceModelWorkspace() {
                   <td>{row.jaar}</td>
                   <td><span className="pill">{row.status || "-"}</span></td>
                   <td>{euro(row.payload?.fixed_cost_total)}</td>
+                  <td>{euro(row.payload?.targets?.revenue)}</td>
+                  <td>{euro(row.payload?.targets?.contribution)}</td>
                   <td>{row.payload?.summary?.sku_count ?? 0}</td>
                   <td>{row.created_at ? new Date(row.created_at).toLocaleString("nl-NL") : "-"}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={6}>Nog geen plansnapshots.</td>
+                <td colSpan={8}>Nog geen plansnapshots.</td>
               </tr>
             )}
           </tbody>

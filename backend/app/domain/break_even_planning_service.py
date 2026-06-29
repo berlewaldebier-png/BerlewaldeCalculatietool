@@ -28,6 +28,30 @@ def _money_ratio(numerator: float, denominator: float) -> float:
     return numerator / denominator if denominator else 0.0
 
 
+def _plan_targets_payload(raw: dict[str, Any] | None, *, fixed_cost_total: float) -> dict[str, Any]:
+    source = raw if isinstance(raw, dict) else {}
+    revenue = _num(source.get("revenue"))
+    contribution = _num(source.get("contribution"))
+    liters = _num(source.get("liters"))
+    units = _num(source.get("units"))
+    price_change_pct = _num(source.get("price_change_pct"))
+    volume_change_pct = _num(source.get("volume_change_pct"))
+    mix_assumption = _text(source.get("mix_assumption"))
+    return {
+        "revenue": revenue,
+        "contribution": contribution,
+        "liters": liters,
+        "units": units,
+        "fixed_costs": fixed_cost_total,
+        "operating_result": contribution - fixed_cost_total if contribution else 0.0,
+        "contribution_ratio": _money_ratio(contribution, revenue),
+        "price_change_pct": price_change_pct,
+        "volume_change_pct": volume_change_pct,
+        "mix_assumption": mix_assumption,
+        "source": "explicit_user_input" if any([revenue, contribution, liters, units, price_change_pct, volume_change_pct, mix_assumption]) else "not_provided",
+    }
+
+
 def _year_fixed_cost_total(year: int) -> float:
     grouped = fixed_costs_storage.load_grouped_by_year()
     rows = grouped.get(str(int(year or 0)), [])
@@ -195,16 +219,18 @@ def _active_planning_rows(year: int) -> list[dict[str, Any]]:
     return rows
 
 
-def build_plan_payload(*, year: int, scenario_name: str = "Basis") -> dict[str, Any]:
+def build_plan_payload(*, year: int, scenario_name: str = "Basis", targets: dict[str, Any] | None = None) -> dict[str, Any]:
     year_value = int(year or 0)
     rows = _active_planning_rows(year_value)
     fixed_total = _year_fixed_cost_total(year_value)
     missing = [row for row in rows if row.get("status") != "ok"]
+    target_payload = _plan_targets_payload(targets, fixed_cost_total=fixed_total)
     return {
         "kind": "break_even_plan",
         "year": year_value,
         "scenario_name": _text(scenario_name) or "Basis",
         "fixed_cost_total": fixed_total,
+        "targets": target_payload,
         "planning_rows": rows,
         "summary": {
             "sku_count": len(rows),
@@ -223,8 +249,9 @@ def create_plan_from_active_costs(
     year: int,
     scenario_name: str = "Basis",
     replace_active: bool = False,
+    targets: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload = build_plan_payload(year=int(year or 0), scenario_name=scenario_name)
+    payload = build_plan_payload(year=int(year or 0), scenario_name=scenario_name, targets=targets)
     return break_even_planning_storage.create_plan_snapshot(
         year=int(year or 0),
         scenario_name=scenario_name,
