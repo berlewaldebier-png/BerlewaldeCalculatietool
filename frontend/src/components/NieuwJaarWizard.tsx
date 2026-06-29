@@ -74,6 +74,14 @@ type GenericRecord = Record<string, unknown>;
 type ProductieMap = Record<string, GenericRecord>;
 type VasteKostenMap = Record<string, GenericRecord[]>;
 
+type YearCloseSnapshot = {
+  id: string;
+  jaar: number;
+  status: string;
+  closed_at: string;
+  payload?: Record<string, unknown>;
+};
+
 const calcSellInPrice = calcSellInPriceFromMargin;
 
 type VasteKostenUiRow = {
@@ -134,6 +142,8 @@ export type NieuwJaarWizardProps = {
   initialTargetYear?: number;
   /** Optional: force the initial source year in the wizard (rarely needed; draft load may override). */
   initialSourceYear?: number;
+  /** Optional: year-close snapshots so the wizard can show whether the source year is final reality. */
+  initialYearCloseSnapshots?: YearCloseSnapshot[];
 };
 
 type AdviesprijsRow = {
@@ -159,7 +169,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     initialVerkoopprijzen,
     initialAdviesprijzen,
     initialTargetYear,
-    initialSourceYear
+    initialSourceYear,
+    initialYearCloseSnapshots
   } = props;
 
   const [activeStep, setActiveStep] = useState(0);
@@ -275,6 +286,18 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
   const [draftStatus, setDraftStatus] = useState<"" | "idle" | "loading" | "saving" | "committing">("idle");
   const [commitConflict, setCommitConflict] = useState<string>("");
   const conceptStarted = completedStepIds.includes("init");
+  const yearCloseSnapshots = useMemo(
+    () => (Array.isArray(initialYearCloseSnapshots) ? initialYearCloseSnapshots : []),
+    [initialYearCloseSnapshots]
+  );
+  const sourceYearClose = useMemo(() => {
+    return yearCloseSnapshots.find((snapshot) => Number(snapshot.jaar ?? 0) === sourceYear) ?? null;
+  }, [sourceYear, yearCloseSnapshots]);
+  const sourceYearCloseTotals = useMemo(() => {
+    const payload = sourceYearClose?.payload ?? {};
+    const actuals = (payload.actuals ?? {}) as GenericRecord;
+    return ((actuals.totals ?? {}) as GenericRecord) ?? {};
+  }, [sourceYearClose]);
 
   const STRATEGY_RECORD_TYPES = useMemo(() => new Set(["jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"]), []);
 
@@ -1857,6 +1880,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 <NieuwJaarQuickCell label="Bronjaar" value={String(sourceYear)} />
                 <NieuwJaarQuickCell label="Doeljaar" value={String(targetYear)} />
                 <NieuwJaarQuickCell label="Concept" value={conceptStarted ? "Ja" : "Nee"} />
+                <NieuwJaarQuickCell label="Bronstatus" value={sourceYearClose ? "Afgesloten" : "Open"} />
                 <NieuwJaarQuickCell label="Actieve stap" value={`Stap ${activeStep + 1}`} />
               </div>
             </div>
@@ -1875,6 +1899,19 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
           </div>
 
           {status ? <div className="wizard-step-status">{status}</div> : null}
+
+          <div className={`editor-status ${sourceYearClose ? "success" : "warning"}`} style={{ marginBottom: 14 }}>
+            <strong>
+              {sourceYearClose
+                ? `Bronjaar ${sourceYear} is afgesloten`
+                : `Bronjaar ${sourceYear} is nog niet afgesloten`}
+            </strong>
+            <div className="muted" style={{ marginTop: 6 }}>
+              {sourceYearClose
+                ? `Deze jaarafsluiting is vastgelegd op ${sourceYearClose.closed_at || "-"}. Gebruik dit als referentie voor ${targetYear}: omzet ${formatEur(Number(sourceYearCloseTotals.revenue ?? 0))}, contributie ${formatEur(Number(sourceYearCloseTotals.contribution ?? 0))}.`
+                : `Je kunt ${targetYear} alvast voorbereiden, maar de referentie voor ${sourceYear} is nog een open jaarset. Sluit het jaar af in Jaarbeheer zodra Omzet & Marge compleet is.`}
+            </div>
+          </div>
 
             <div className="wizard-step-body">
               {activeStep === 0 ? (

@@ -1,6 +1,6 @@
 import { NieuwJaarWizard } from "@/components/NieuwJaarWizard";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/apiServer";
+import { apiGetServer, getBootstrap } from "@/lib/apiServer";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -29,6 +29,8 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
     true,
     "/nieuw-jaar-voorbereiden"
   );
+  const yearCloses = await apiGetServer<{ items?: any[] }>("/integrations/break-even/year-closes", "/nieuw-jaar-voorbereiden")
+    .then((payload) => (Array.isArray(payload.items) ? payload.items : []));
   const navigation = bootstrap.navigation ?? [];
   const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
@@ -87,6 +89,7 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
         initialAdviesprijzen={adviesprijzen}
         initialSourceYear={requestedSourceYear > 0 ? requestedSourceYear : undefined}
         initialTargetYear={requestedTargetYear > 0 ? requestedTargetYear : undefined}
+        initialYearCloseSnapshots={yearCloses}
       />
     </PageShell>
   );
