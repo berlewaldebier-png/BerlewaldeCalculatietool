@@ -834,6 +834,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     )
     dashboard_revenue = _num(revenue_reconciliation.get("dashboard_revenue"))
     actual_revenue = dashboard_revenue if dashboard_revenue > 0 else contribution_revenue
+    actual_total_cost = _num(totals.get("cost"))
     actual_variable = _num(totals.get("variable_cost"))
     actual_contribution = _num(totals.get("contribution"))
     contribution_ratio = _money_ratio(actual_contribution, actual_revenue)
@@ -894,6 +895,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "plan": {
                 "revenue": plan_revenue,
                 "variable_cost": plan_variable,
+                "total_cost": plan_variable + plan_fixed_costs if plan_variable or plan_fixed_costs else 0.0,
                 "contribution": plan_contribution,
                 "fixed_costs": plan_fixed_costs,
                 "result": plan_result,
@@ -901,6 +903,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "actual": {
                 "revenue": actual_revenue,
                 "variable_cost": actual_variable,
+                "total_cost": actual_total_cost,
                 "contribution": actual_contribution,
                 "fixed_costs": fixed_cost_total,
                 "result": actual_contribution - fixed_cost_total,
@@ -908,6 +911,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "reforecast": {
                 "revenue": reforecast_revenue,
                 "variable_cost": reforecast_variable,
+                "total_cost": reforecast_variable + reforecast_fixed_costs if reforecast_variable or reforecast_fixed_costs else 0.0,
                 "contribution": reforecast_contribution,
                 "fixed_costs": reforecast_fixed_costs,
                 "result": reforecast_result,

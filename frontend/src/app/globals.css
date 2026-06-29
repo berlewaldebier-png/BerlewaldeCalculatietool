@@ -3932,7 +3932,7 @@ a {
 .be-next-dashboard-column {
   display: grid;
   gap: 1rem;
-  grid-template-rows: minmax(56px, auto) repeat(5, minmax(118px, 1fr));
+  grid-template-rows: minmax(56px, auto) repeat(6, minmax(118px, 1fr));
 }
 
 .be-next-dashboard-column-title {

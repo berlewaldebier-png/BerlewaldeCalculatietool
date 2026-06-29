@@ -143,6 +143,7 @@ type ContributionDisplayRow = {
 type ReadModelFinancialSet = {
   revenue: number;
   variable_cost: number;
+  total_cost: number;
   contribution: number;
   fixed_costs: number;
   result: number;
@@ -340,6 +341,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
     return {
       revenue: asNumber(row.revenue),
       variable_cost: asNumber(row.variable_cost),
+      total_cost: asNumber(row.total_cost),
       contribution: asNumber(row.contribution),
       fixed_costs: asNumber(row.fixed_costs),
       result: asNumber(row.result),
@@ -717,18 +719,21 @@ export function BreakEvenNextMockup({
     ...emptyTotals,
     revenue: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.revenue ?? 0 : 0,
     variable: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.variable_cost ?? 0 : 0,
+    totalCost: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.total_cost ?? 0 : 0,
     contribution: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.contribution ?? 0 : 0,
   };
   const actual = {
     ...emptyTotals,
     revenue: parsedReadModel?.dashboard?.actual?.revenue ?? 0,
     variable: parsedReadModel?.dashboard?.actual?.variable_cost ?? 0,
+    totalCost: parsedReadModel?.dashboard?.actual?.total_cost ?? 0,
     contribution: parsedReadModel?.dashboard?.actual?.contribution ?? 0,
   };
   const reforecast = {
     ...emptyTotals,
     revenue: parsedReadModel?.dashboard?.reforecast?.revenue ?? 0,
     variable: parsedReadModel?.dashboard?.reforecast?.variable_cost ?? 0,
+    totalCost: parsedReadModel?.dashboard?.reforecast?.total_cost ?? 0,
     contribution: parsedReadModel?.dashboard?.reforecast?.contribution ?? 0,
   };
   const activePlanFixedCosts = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.fixed_costs ?? 0 : 0;
@@ -742,6 +747,11 @@ export function BreakEvenNextMockup({
   const planResult = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.result ?? (plan.contribution - activePlanFixedCosts) : 0;
   const actualResult = parsedReadModel?.dashboard?.actual?.result ?? (actual.contribution - activeReforecastFixedCosts);
   const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result ?? (reforecast.contribution - activeReforecastFixedCosts);
+  const planTotalCost = plan.totalCost || (plan.variable + activePlanFixedCosts);
+  const actualBreakEvenTotalCost = actual.variable + activeReforecastFixedCosts;
+  const actualSnapshotTotalCost = actual.totalCost || 0;
+  const reforecastTotalCost = reforecast.totalCost || (reforecast.variable + activeReforecastFixedCosts);
+  const actualCostReconciliationDifference = actualSnapshotTotalCost - actualBreakEvenTotalCost;
   const revenueTimeline = useMemo(
     () => buildRevenueTimelineFromReadModel(plan.revenue, plan.variable, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, readModelTimeline),
     [actual.revenue, actual.variable, plan.revenue, plan.variable, readModelTimeline, reforecast.revenue, reforecast.variable],
@@ -823,11 +833,11 @@ export function BreakEvenNextMockup({
           },
         },
         {
-          label: "Plan kostprijs",
+          label: "Plan variabele kostprijs",
           value: moneyOrMissing(plan.variable, hasPlanTargets),
           helper: "planmix x variabele kostprijs",
           formula: {
-            title: "Plan kostprijs",
+            title: "Plan variabele kostprijs",
             formula: "Som van geplande verkoopaantallen x variabele kostprijs per SKU.",
             source: "Bron: frozen plan snapshot.",
             rows: [
@@ -850,6 +860,21 @@ export function BreakEvenNextMockup({
           },
         },
         {
+          label: "Plan totale kostprijs",
+          value: moneyOrMissing(planTotalCost, hasPlanTargets),
+          helper: "variabel + vaste kosten",
+          formula: {
+            title: "Plan totale kostprijs",
+            formula: "Plan variabele kostprijs + plan vaste kosten.",
+            source: "Bron: break-even plan.",
+            rows: [
+              { label: "Plan variabele kostprijs", value: moneyOrMissing(plan.variable, hasPlanTargets) },
+              { label: "Plan vaste kosten", value: moneyOrMissing(activePlanFixedCosts, hasPlanTargets) },
+              { label: "Plan totale kostprijs", value: moneyOrMissing(planTotalCost, hasPlanTargets) },
+            ],
+          },
+        },
+        {
           label: "Plan resultaat",
           value: moneyOrMissing(planResult, hasPlanTargets),
           helper: "omzet - kostprijs - vaste kosten",
@@ -860,7 +885,7 @@ export function BreakEvenNextMockup({
             source: "Bron: break-even plan.",
             rows: [
               { label: "Plan omzet", value: moneyOrMissing(plan.revenue, hasPlanTargets) },
-              { label: "Plan kostprijs", value: moneyOrMissing(-plan.variable, hasPlanTargets) },
+              { label: "Plan variabele kostprijs", value: moneyOrMissing(-plan.variable, hasPlanTargets) },
               { label: "Plan vaste kosten", value: moneyOrMissing(-activePlanFixedCosts, hasPlanTargets) },
               { label: "Plan resultaat", value: moneyOrMissing(planResult, hasPlanTargets) },
             ],
@@ -901,15 +926,15 @@ export function BreakEvenNextMockup({
           },
         },
         {
-          label: "Real kostprijs",
+          label: "Real variabele kostprijs",
           value: moneyOrMissing(actual.variable, hasActuals),
           helper: "kostprijsbronnen per verkoopregel",
           formula: {
-            title: "Real kostprijs",
+            title: "Real variabele kostprijs",
             formula: "Som van variabele kostprijs uit de verkoopregels die verwerkt zijn.",
             source: "Bron: Omzet & Marge snapshots.",
             rows: [
-              { label: "Real kostprijs", value: moneyOrMissing(actual.variable, hasActuals) },
+              { label: "Real variabele kostprijs", value: moneyOrMissing(actual.variable, hasActuals) },
               { label: "Real contributie", value: moneyOrMissing(actual.contribution, hasActuals) },
             ],
           },
@@ -928,6 +953,21 @@ export function BreakEvenNextMockup({
           },
         },
         {
+          label: "Break-even totale kostprijs",
+          value: moneyOrMissing(actualBreakEvenTotalCost, hasActuals),
+          helper: "variabel + vaste kosten ABC",
+          formula: {
+            title: "Break-even totale kostprijs huidig",
+            formula: "Real variabele kostprijs + vaste kosten ABC.",
+            source: "Bron: Omzet & Marge snapshots plus vaste kosten ABC.",
+            rows: [
+              { label: "Real variabele kostprijs", value: moneyOrMissing(actual.variable, hasActuals) },
+              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasActuals) },
+              { label: "Break-even totale kostprijs", value: moneyOrMissing(actualBreakEvenTotalCost, hasActuals) },
+            ],
+          },
+        },
+        {
           label: "Real resultaat",
           value: moneyOrMissing(actualResult, hasActuals),
           helper: "real contributie - vaste kosten",
@@ -938,7 +978,7 @@ export function BreakEvenNextMockup({
             source: "Bron: Omzet & Marge plus vaste kosten ABC.",
             rows: [
               { label: "Real omzet", value: moneyOrMissing(actual.revenue, hasActuals) },
-              { label: "Real kostprijs", value: moneyOrMissing(-actual.variable, hasActuals) },
+              { label: "Real variabele kostprijs", value: moneyOrMissing(-actual.variable, hasActuals) },
               { label: "Vaste kosten ABC", value: moneyOrMissing(-activeReforecastFixedCosts, hasActuals) },
               { label: "Real resultaat", value: moneyOrMissing(actualResult, hasActuals) },
             ],
@@ -979,15 +1019,15 @@ export function BreakEvenNextMockup({
           },
         },
         {
-          label: "Forecast kostprijs",
+          label: "Forecast variabele kostprijs",
           value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast),
           helper: "verwachte variabele kosten",
           formula: {
-            title: "Forecast kostprijs",
+            title: "Forecast variabele kostprijs",
             formula: "Verwachte omzetmix x variabele kostprijs.",
             source: hasExplicitReforecast ? "Bron: reforecast snapshot." : "Bron: actuals als tijdelijke reforecast.",
             rows: [
-              { label: "Forecast kostprijs", value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast) },
+              { label: "Forecast variabele kostprijs", value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast) },
               { label: "Forecast contributie", value: moneyOrMissing(reforecast.contribution, hasTemporaryReforecast) },
             ],
           },
@@ -1006,6 +1046,21 @@ export function BreakEvenNextMockup({
           },
         },
         {
+          label: "Forecast totale kostprijs",
+          value: moneyOrMissing(reforecastTotalCost, hasTemporaryReforecast),
+          helper: "variabel + vaste kosten ABC",
+          formula: {
+            title: "Forecast totale kostprijs",
+            formula: "Forecast variabele kostprijs + vaste kosten ABC.",
+            source: "Bron: reforecast/actuals plus vaste kosten ABC.",
+            rows: [
+              { label: "Forecast variabele kostprijs", value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast) },
+              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
+              { label: "Forecast totale kostprijs", value: moneyOrMissing(reforecastTotalCost, hasTemporaryReforecast) },
+            ],
+          },
+        },
+        {
           label: "Verwacht resultaat",
           value: moneyOrMissing(reforecastResult, hasTemporaryReforecast),
           helper: `grootste driver: ${largestVariance?.label ?? "-"}`,
@@ -1016,7 +1071,7 @@ export function BreakEvenNextMockup({
             source: "Bron: reforecast/actuals plus vaste kosten ABC.",
             rows: [
               { label: "Forecast omzet", value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast) },
-              { label: "Forecast kostprijs", value: moneyOrMissing(-reforecast.variable, hasTemporaryReforecast) },
+              { label: "Forecast variabele kostprijs", value: moneyOrMissing(-reforecast.variable, hasTemporaryReforecast) },
               { label: "Vaste kosten ABC", value: moneyOrMissing(-activeReforecastFixedCosts, hasTemporaryReforecast) },
               { label: "Verwacht resultaat", value: moneyOrMissing(reforecastResult, hasTemporaryReforecast) },
             ],
@@ -1188,6 +1243,36 @@ export function BreakEvenNextMockup({
             </section>
           ) : null}
 
+          {hasActuals ? (
+            <section className="module-card">
+              <div className="module-card-header be-next-table-header">
+                <div>
+                  <div className="module-card-title">Kostprijsreconciliatie</div>
+                  <div className="module-card-text">
+                    Omzet &amp; Marge toont de all-in kostprijs uit verkoopregels. Break-even splitst deze analyse in variabele kostprijs en vaste kosten ABC.
+                  </div>
+                </div>
+                <span className={`status-pill ${Math.abs(actualCostReconciliationDifference) < 1 ? "status-ok" : "status-warning"}`}>
+                  {Math.abs(actualCostReconciliationDifference) < 1 ? "match" : "verschil"}
+                </span>
+              </div>
+              <div className="data-table">
+                <table>
+                  <tbody>
+                    <PnlRow label="Omzet & Marge kostprijs all-in" value={actualSnapshotTotalCost} strong />
+                    <PnlRow label="Break-even variabele kostprijs" value={actual.variable} />
+                    <PnlRow label="Break-even vaste kosten ABC" value={activeReforecastFixedCosts} />
+                    <PnlRow label="Break-even totale kostprijs" value={actualBreakEvenTotalCost} strong />
+                    <PnlRow label="Verschil te verklaren" value={actualCostReconciliationDifference} />
+                  </tbody>
+                </table>
+              </div>
+              <div className="module-card-text">
+                Een verschil is verwacht als Omzet &amp; Marge alleen vaste allocatie op verkochte regels bevat, terwijl break-even de jaarbasis van vaste kosten gebruikt.
+              </div>
+            </section>
+          ) : null}
+
           {!hasPlanTargets ? (
             <section className="module-card">
               <div className="module-card-header be-next-table-header">
@@ -1289,11 +1374,11 @@ export function BreakEvenNextMockup({
                   <Tooltip formatter={(value: number) => money(Number(value))} />
                   <Legend />
                   <Line type="monotone" dataKey="plan" name="Plan omzet" stroke="#2563eb" strokeWidth={3} dot={false} />
-                  <Line type="monotone" dataKey="planCost" name="Plan kostprijs" stroke="#f59e0b" strokeWidth={3} dot={false} />
+                  <Line type="monotone" dataKey="planCost" name="Plan variabele kostprijs" stroke="#f59e0b" strokeWidth={3} dot={false} />
                   <Line type="monotone" dataKey="actual" name="Actual YTD omzet" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} connectNulls={false} />
-                  <Line type="monotone" dataKey="actualCost" name="Actual YTD kostprijs" stroke="#dc2626" strokeWidth={3} connectNulls={false} />
+                  <Line type="monotone" dataKey="actualCost" name="Actual YTD variabele kostprijs" stroke="#dc2626" strokeWidth={3} connectNulls={false} />
                   <Line type="monotone" dataKey="reforecast" name="Reforecast omzet" stroke={revenueGap >= 0 ? "#16a34a" : "#dc2626"} strokeWidth={3} strokeDasharray="7 7" dot={false} />
-                  <Line type="monotone" dataKey="reforecastCost" name="Reforecast kostprijs" stroke="#dc2626" strokeWidth={3} strokeDasharray="7 7" dot={false} />
+                  <Line type="monotone" dataKey="reforecastCost" name="Reforecast variabele kostprijs" stroke="#dc2626" strokeWidth={3} strokeDasharray="7 7" dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1750,7 +1835,7 @@ function PnlCard({ title, revenue, variable, fixedCosts }: { title: string; reve
         <table>
           <tbody>
             <PnlRow label="Omzet" value={revenue} />
-            <PnlRow label="Kostprijs verkopen / variabel" value={-variable} />
+            <PnlRow label="Variabele kostprijs verkopen" value={-variable} />
             <PnlRow label="Brutomarge / contributie" value={contribution} strong />
             <PnlRow label="Vaste kosten" value={-fixedCosts} />
             <PnlRow label="Operationeel resultaat" value={result} strong />
