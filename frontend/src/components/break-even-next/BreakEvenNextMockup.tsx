@@ -138,6 +138,24 @@ type VarianceRow = {
   kind: string;
 };
 
+type ReadModelPlanActualRow = {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  category: ProductRow["category"];
+  planned_units: number;
+  planned_liters: number;
+  planned_variable_cost_unit: number;
+  planned_fixed_allocation_unit: number;
+  planned_cost_unit: number;
+  actual_units: number;
+  actual_revenue: number;
+  actual_contribution: number;
+  reforecast_units: number;
+  reforecast_contribution: number;
+  status: "ok" | "plan_only" | "actual_only";
+};
+
 type BreakEvenReadModel = {
   year?: number;
   basis?: string;
@@ -160,6 +178,10 @@ type BreakEvenReadModel = {
   break_even?: ReadModelBreakEven;
   timeline?: ReadModelTimelinePoint[];
   variance_bridge?: VarianceRow[];
+  plan_actual?: {
+    rows?: ReadModelPlanActualRow[];
+    model_note?: string;
+  };
   data_quality?: {
     warnings?: ReadModelWarning[];
     missing_cost_lines?: number;
@@ -256,8 +278,10 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   const dashboard = asRecord(value.dashboard);
   const pnl = asRecord(value.pnl);
   const breakEven = asRecord(value.break_even);
+  const planActual = asRecord(value.plan_actual);
   const rawTimeline = Array.isArray(value.timeline) ? value.timeline : [];
   const rawVarianceBridge = Array.isArray(value.variance_bridge) ? value.variance_bridge : [];
+  const rawPlanActualRows = Array.isArray(planActual.rows) ? planActual.rows : [];
   const rawCategories = Array.isArray(contribution.categories) ? contribution.categories : [];
   const rawContributionRows = Array.isArray(contribution.rows) ? contribution.rows : [];
   const warnings = Array.isArray(dataQuality.warnings) ? dataQuality.warnings : [];
@@ -355,6 +379,30 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
         kind: normalizeVarianceKind(row.kind, value),
       };
     }).filter((row) => row.key && row.label),
+    plan_actual: {
+      model_note: asText(planActual.model_note),
+      rows: rawPlanActualRows.map((item) => {
+        const row = asRecord(item);
+        const status = asText(row.status);
+        return {
+          sku_id: asText(row.sku_id),
+          sku_code: asText(row.sku_code),
+          sku_name: asText(row.sku_name),
+          category: normalizeCategory(row.category),
+          planned_units: asNumber(row.planned_units),
+          planned_liters: asNumber(row.planned_liters),
+          planned_variable_cost_unit: asNumber(row.planned_variable_cost_unit),
+          planned_fixed_allocation_unit: asNumber(row.planned_fixed_allocation_unit),
+          planned_cost_unit: asNumber(row.planned_cost_unit),
+          actual_units: asNumber(row.actual_units),
+          actual_revenue: asNumber(row.actual_revenue),
+          actual_contribution: asNumber(row.actual_contribution),
+          reforecast_units: asNumber(row.reforecast_units),
+          reforecast_contribution: asNumber(row.reforecast_contribution),
+          status: status === "plan_only" || status === "actual_only" ? status : "ok",
+        };
+      }),
+    },
     data_quality: {
       missing_cost_lines: asNumber(dataQuality.missing_cost_lines),
       unmapped_revenue: asNumber(dataQuality.unmapped_revenue),
@@ -534,6 +582,32 @@ function contributionRowsFromMock(rows: ProductRow[]): ContributionDisplayRow[] 
   });
 }
 
+function planActualRowsFromMock(rows: ProductRow[]): ReadModelPlanActualRow[] {
+  return rows.map((row) => ({
+    sku_id: row.id,
+    sku_code: "",
+    sku_name: row.sku,
+    category: row.category,
+    planned_units: row.plannedUnits,
+    planned_liters: row.plannedUnits * row.litersPerUnit,
+    planned_variable_cost_unit: variableCost(row),
+    planned_fixed_allocation_unit: row.abcAllocation,
+    planned_cost_unit: variableCost(row) + row.abcAllocation,
+    actual_units: row.actualUnitsYtd,
+    actual_revenue: row.actualUnitsYtd * row.actualPrice,
+    actual_contribution: row.actualUnitsYtd * contributionUnit(row, "actual"),
+    reforecast_units: row.reforecastUnits,
+    reforecast_contribution: row.reforecastUnits * contributionUnit(row, "reforecast"),
+    status: "ok",
+  }));
+}
+
+function planActualStatus(row: ReadModelPlanActualRow): ContributionDisplayRow["signal"] {
+  if (row.status === "actual_only") return { label: "alleen actual", tone: "warning" };
+  if (row.status === "plan_only") return { label: "alleen plan", tone: "neutral" };
+  return { label: "plan + actual", tone: "ok" };
+}
+
 function categoryLabel(category: ProductRow["category"]) {
   switch (category) {
     case "beer":
@@ -597,6 +671,8 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const readModelContributionRows = parsedReadModel?.contribution?.rows ?? [];
   const readModelTimeline = parsedReadModel?.timeline ?? [];
   const readModelVarianceBridge = parsedReadModel?.variance_bridge ?? [];
+  const readModelPlanActualRows = parsedReadModel?.plan_actual?.rows ?? [];
+  const planActualNote = parsedReadModel?.plan_actual?.model_note ?? "";
   const mockPlan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
   const mockActual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
   const mockReforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
@@ -686,6 +762,7 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const topContributor = contributionRows[0];
   const marginRiskCount = contributionRows.filter((row) => row.signal.tone === "error").length;
   const categoryRows = readModelCategories.length ? readModelCategories : summarizeByCategory(products);
+  const planActualRows = readModelPlanActualRows.length ? readModelPlanActualRows : planActualRowsFromMock(products);
 
   const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100));
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
@@ -996,30 +1073,50 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
 
       {activeTab === "plan_actual" ? (
         <section className="module-card">
-          <div className="module-card-title">Plan vs actual vs reforecast</div>
+          <div className="module-card-header be-next-table-header">
+            <div>
+              <div className="module-card-title">Plan vs actual vs reforecast</div>
+              <div className="module-card-text">
+                {planActualNote || "Planregels worden naast actuals gezet. Per-SKU planvolume komt later uit de frozen planmix."}
+              </div>
+            </div>
+            <span className="status-pill status-neutral">{planActualRows.length} SKU's</span>
+          </div>
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>Stijl/type</th>
+                  <th>SKU</th>
+                  <th>Categorie</th>
+                  <th>Status</th>
                   <th>Plan volume</th>
+                  <th>Plan kostprijs</th>
                   <th>Actual YTD</th>
+                  <th>Actual contributie</th>
                   <th>Reforecast</th>
-                  <th>Plan contributie</th>
                   <th>Reforecast contributie</th>
                 </tr>
               </thead>
               <tbody>
-                {products.map((row) => (
-                  <tr key={row.id}>
-                    <td><strong>{row.style}</strong><br /><small>{row.skuType}</small></td>
-                    <td>{number(row.plannedUnits)} st / {number(row.plannedUnits * row.litersPerUnit)} L</td>
-                    <td>{number(row.actualUnitsYtd)} st / {number(row.actualUnitsYtd * row.litersPerUnit)} L</td>
-                    <td>{number(row.reforecastUnits)} st / {number(row.reforecastUnits * row.litersPerUnit)} L</td>
-                    <td>{money(row.plannedUnits * contributionUnit(row))}</td>
-                    <td>{money(row.reforecastUnits * contributionUnit(row, "reforecast"))}</td>
-                  </tr>
-                ))}
+                {planActualRows.map((row) => {
+                  const status = planActualStatus(row);
+                  return (
+                    <tr key={row.sku_id || row.sku_name}>
+                      <td><strong>{row.sku_name}</strong><br /><small>{row.sku_code || row.sku_id}</small></td>
+                      <td><span className="status-pill status-neutral">{categoryLabel(row.category)}</span></td>
+                      <td><span className={`status-pill status-${status.tone}`}>{status.label}</span></td>
+                      <td>{row.planned_units > 0 ? `${number(row.planned_units)} st / ${number(row.planned_liters)} L` : "niet ingevuld"}</td>
+                      <td>
+                        <strong>{money2(row.planned_cost_unit)}</strong><br />
+                        <small>variabel {money2(row.planned_variable_cost_unit)} + vast {money2(row.planned_fixed_allocation_unit)}</small>
+                      </td>
+                      <td>{number(row.actual_units)} st<br /><small>{money(row.actual_revenue)} omzet</small></td>
+                      <td><strong>{money(row.actual_contribution)}</strong></td>
+                      <td>{number(row.reforecast_units)} st</td>
+                      <td><strong>{money(row.reforecast_contribution)}</strong></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

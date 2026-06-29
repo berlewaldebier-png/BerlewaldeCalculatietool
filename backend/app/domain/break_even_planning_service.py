@@ -210,6 +210,57 @@ def _variance_bridge_rows(
     ]
 
 
+def _plan_actual_rows(plan_payload: dict[str, Any], contribution_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    plan_rows = plan_payload.get("planning_rows") if isinstance(plan_payload.get("planning_rows"), list) else []
+    plan_by_sku: dict[str, dict[str, Any]] = {
+        _text(row.get("sku_id")): row
+        for row in plan_rows
+        if isinstance(row, dict) and _text(row.get("sku_id"))
+    }
+    actual_by_sku: dict[str, dict[str, Any]] = {
+        _text(row.get("sku_id")): row
+        for row in contribution_rows
+        if isinstance(row, dict) and _text(row.get("sku_id"))
+    }
+    sku_ids = sorted(set(plan_by_sku) | set(actual_by_sku))
+    rows: list[dict[str, Any]] = []
+    for sku_id in sku_ids:
+        plan = plan_by_sku.get(sku_id, {})
+        actual = actual_by_sku.get(sku_id, {})
+        sku_name = _text(actual.get("sku_name")) or _text(plan.get("sku_name")) or sku_id
+        sku_code = _text(actual.get("sku_code")) or _text(plan.get("sku_code"))
+        plan_variable_cost = _num(plan.get("inkoop")) + _num(plan.get("verpakkingskosten")) + _num(plan.get("accijns"))
+        has_plan = bool(plan)
+        has_actual = bool(actual)
+        if has_plan and has_actual:
+            status = "ok"
+        elif has_plan:
+            status = "plan_only"
+        else:
+            status = "actual_only"
+        rows.append(
+            {
+                "sku_id": sku_id,
+                "sku_code": sku_code,
+                "sku_name": sku_name,
+                "category": _text(actual.get("category")) or _sku_category({"sku_id": sku_id}, {sku_id: {"sku_name": sku_name, "sku_code": sku_code}}),
+                "planned_units": 0.0,
+                "planned_liters": 0.0,
+                "planned_variable_cost_unit": plan_variable_cost,
+                "planned_fixed_allocation_unit": _num(plan.get("abc_overhead")),
+                "planned_cost_unit": _num(plan.get("kostprijs")),
+                "actual_units": _num(actual.get("units")),
+                "actual_revenue": _num(actual.get("revenue")),
+                "actual_contribution": _num(actual.get("contribution")),
+                "reforecast_units": _num(actual.get("units")),
+                "reforecast_contribution": _num(actual.get("contribution")),
+                "status": status,
+            }
+        )
+    rows.sort(key=lambda row: (_text(row.get("sku_name")), _text(row.get("sku_code")), _text(row.get("sku_id"))))
+    return rows
+
+
 def _active_planning_rows(year: int) -> list[dict[str, Any]]:
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
     active = [
@@ -387,6 +438,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     contribution_rows.sort(key=lambda row: _num(row.get("contribution")), reverse=True)
     category_rows = _category_rows(contribution_rows)
     timeline = _period_timeline([row for row in sales.get("period_totals", []) if isinstance(row, dict)])
+    plan_actual_rows = _plan_actual_rows(plan_payload, contribution_rows)
 
     fixed_cost_total = _num(plan_payload.get("fixed_cost_total")) if plan_payload else 0.0
     if fixed_cost_total <= 0:
@@ -479,6 +531,10 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         },
         "timeline": timeline,
         "variance_bridge": variance_bridge,
+        "plan_actual": {
+            "rows": plan_actual_rows,
+            "model_note": "Per-SKU planvolume is nog niet beschikbaar. Deze regels tonen daarom plan-kostprijs per SKU naast actual/reforecast verkopen.",
+        },
         "data_quality": {
             "missing_cost_lines": missing_cost_lines,
             "unmapped_revenue": _num(totals.get("unmapped_revenue")),

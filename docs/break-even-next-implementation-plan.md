@@ -259,6 +259,13 @@ Avoid requiring manual plans for every SKU by default. Start with high-level ass
 
 Allow SKU/style exceptions only where needed. Closed 2025 actuals can become the starting point for 2026 planning after explicit confirmation.
 
+First real-data wiring:
+
+- show active plan cost components per SKU where a plan snapshot exists
+- show actual YTD units, revenue and contribution from the break-even read model
+- mark rows as `plan + actual`, `alleen plan` or `alleen actual`
+- keep per-SKU plan volume empty until a frozen planmix model exists; do not guess it from actuals
+
 #### 6. Variance Analysis
 
 Waterfall and table:
