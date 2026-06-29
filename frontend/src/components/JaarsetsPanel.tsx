@@ -42,6 +42,20 @@ type YearCloseSnapshot = {
   payload?: Record<string, unknown>;
 };
 
+type YearClosePreview = {
+  kind?: string;
+  year: number;
+  basis: string;
+  fixed_cost_total: number;
+  actuals?: {
+    totals?: Record<string, unknown>;
+  };
+  checks?: {
+    missing_cost_lines?: number;
+    unmapped_revenue?: number;
+  };
+};
+
 type YearOverviewRow = {
   year: number;
   draft?: DraftRow;
@@ -52,7 +66,7 @@ type YearOverviewRow = {
   yearClose?: YearCloseSnapshot;
 };
 
-type BusyState = null | "load" | "deleteDraft" | "rollback" | "backfill";
+type BusyState = null | "load" | "deleteDraft" | "rollback" | "backfill" | "previewClose" | "closeYear";
 
 async function readJson(response: Response) {
   const text = await response.text();
@@ -147,6 +161,36 @@ async function postFirstUseBackfill(params: { year: number; planRevenue: number;
   return payload;
 }
 
+async function getYearClosePreview(year: number): Promise<YearClosePreview> {
+  const response = await fetch(
+    `${API_BASE_URL}/integrations/break-even/year-close-preview?year=${encodeURIComponent(String(year))}&basis=invoice`,
+    {
+      credentials: "include",
+      cache: "no-store",
+    }
+  );
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw new Error(String(payload?.detail || payload?.error || `Jaarafsluiting controleren mislukt (${response.status}).`));
+  }
+  return payload.preview as YearClosePreview;
+}
+
+async function postCloseYear(year: number) {
+  const response = await fetch(`${API_BASE_URL}/integrations/break-even/close-year`, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ year, basis: "invoice", overwrite: false }),
+  });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw new Error(String(payload?.detail || payload?.error || `Jaarafsluiting opslaan mislukt (${response.status}).`));
+  }
+  return payload;
+}
+
 function formatIso(value: string) {
   if (!value) return "-";
   try {
@@ -181,6 +225,10 @@ function planMetric(plan: PlanSnapshot | undefined, key: "revenue" | "contributi
     return num(targets.fixed_cost_total ?? targets.fixed_costs ?? model.fixed_cost_total);
   }
   return num(targets[key] ?? model[key]);
+}
+
+function previewTotal(preview: YearClosePreview | null, key: string) {
+  return num(preview?.actuals?.totals?.[key]);
 }
 
 function planLabel(plan: PlanSnapshot | undefined) {
@@ -263,6 +311,8 @@ export function JaarsetsPanel() {
   const [backfillYear, setBackfillYear] = useState("2025");
   const [backfillRevenue, setBackfillRevenue] = useState("144000");
   const [backfillFixedCosts, setBackfillFixedCosts] = useState("56000");
+  const [closePreview, setClosePreview] = useState<YearClosePreview | null>(null);
+  const [closePreviewYear, setClosePreviewYear] = useState(0);
 
   const rows = useMemo(() => buildRows({ yearsets, plans, closes }), [yearsets, plans, closes]);
   const lastYear = Number(yearsets?.last_year ?? 0) || 0;
@@ -290,10 +340,38 @@ export function JaarsetsPanel() {
     void task()
       .then((res) => {
         setInfo(res);
+        if (action === "closeYear") {
+          setClosePreview(null);
+          setClosePreviewYear(0);
+        }
         return reload();
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Actie mislukt."))
       .finally(() => setBusy(null));
+  }
+
+  function previewYearClose(year: number) {
+    setBusy("previewClose");
+    setError("");
+    setInfo(null);
+    setClosePreview(null);
+    setClosePreviewYear(year);
+    void getYearClosePreview(year)
+      .then((preview) => setClosePreview(preview))
+      .catch((err) => setError(err instanceof Error ? err.message : "Jaarafsluiting controleren mislukt."))
+      .finally(() => setBusy(null));
+  }
+
+  function closeYearFromPreview() {
+    if (!closePreviewYear || !closePreview) return;
+    const missingCostLines = Number(closePreview.checks?.missing_cost_lines ?? 0);
+    const unmappedRevenue = Number(closePreview.checks?.unmapped_revenue ?? 0);
+    const warning = missingCostLines || unmappedRevenue
+      ? ` Er zijn nog aandachtspunten: ${missingCostLines} regels zonder kostprijs en ${money(unmappedRevenue)} ongekoppelde omzet.`
+      : "";
+    const ok = window.confirm(`Jaar ${closePreviewYear} definitief afsluiten?${warning}`);
+    if (!ok) return;
+    runAction("closeYear", () => postCloseYear(closePreviewYear));
   }
 
   return (
@@ -485,6 +563,17 @@ export function JaarsetsPanel() {
                           Rollback
                         </button>
                       ) : null}
+                      {!row.yearClose ? (
+                        <button
+                          type="button"
+                          className="editor-button editor-button-secondary"
+                          disabled={busy !== null}
+                          onClick={() => previewYearClose(row.year)}
+                          style={{ marginLeft: 8 }}
+                        >
+                          Controleer afsluiting
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -501,6 +590,68 @@ export function JaarsetsPanel() {
         </div>
       </section>
 
+      {closePreview ? (
+        <section className="placeholder-block" style={{ marginTop: 18 }}>
+          <strong>Jaarafsluiting {closePreviewYear}</strong>
+          <div className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
+            Facturenbasis. Controleer deze snapshot voordat je het jaar definitief vastlegt.
+          </div>
+          <div className="record-card-grid" style={{ marginBottom: 14 }}>
+            <div className="wizard-toggle-card">
+              <span><strong>Omzet</strong><small>{money(previewTotal(closePreview, "revenue"))}</small></span>
+            </div>
+            <div className="wizard-toggle-card">
+              <span><strong>Variabele kosten</strong><small>{money(previewTotal(closePreview, "variable_cost"))}</small></span>
+            </div>
+            <div className="wizard-toggle-card">
+              <span><strong>Contributie</strong><small>{money(previewTotal(closePreview, "contribution"))}</small></span>
+            </div>
+            <div className="wizard-toggle-card">
+              <span><strong>Vaste kosten</strong><small>{money(closePreview.fixed_cost_total)}</small></span>
+            </div>
+          </div>
+          <div className="dataset-editor-scroll">
+            <table className="dataset-editor-table">
+              <thead>
+                <tr>
+                  <th>Check</th>
+                  <th>Status</th>
+                  <th>Waarde</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Verkoopregels zonder kostprijsbron</td>
+                  <td>
+                    <span className={`status-pill ${Number(closePreview.checks?.missing_cost_lines ?? 0) === 0 ? "status-ok" : "status-warning"}`}>
+                      {Number(closePreview.checks?.missing_cost_lines ?? 0) === 0 ? "ok" : "aandacht nodig"}
+                    </span>
+                  </td>
+                  <td>{Number(closePreview.checks?.missing_cost_lines ?? 0)}</td>
+                </tr>
+                <tr>
+                  <td>Ongekoppelde omzet</td>
+                  <td>
+                    <span className={`status-pill ${Number(closePreview.checks?.unmapped_revenue ?? 0) === 0 ? "status-ok" : "status-warning"}`}>
+                      {Number(closePreview.checks?.unmapped_revenue ?? 0) === 0 ? "ok" : "aandacht nodig"}
+                    </span>
+                  </td>
+                  <td>{money(closePreview.checks?.unmapped_revenue)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="editor-actions" style={{ marginTop: 12 }}>
+            <button type="button" className="editor-button editor-button-secondary" onClick={() => setClosePreview(null)} disabled={busy !== null}>
+              Sluiten
+            </button>
+            <button type="button" className="editor-button" onClick={closeYearFromPreview} disabled={busy !== null}>
+              Jaar definitief afsluiten
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       {busy ? (
         <div className="placeholder-block" style={{ marginTop: 16 }}>
           <strong>Bezig...</strong>
@@ -508,6 +659,8 @@ export function JaarsetsPanel() {
           {busy === "deleteDraft" ? "Concept verwijderen." : null}
           {busy === "rollback" ? "Rollback uitvoeren." : null}
           {busy === "backfill" ? "Frozen plan opslaan." : null}
+          {busy === "previewClose" ? "Jaarafsluiting controleren." : null}
+          {busy === "closeYear" ? "Jaarafsluiting opslaan." : null}
         </div>
       ) : null}
 
