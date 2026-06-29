@@ -298,6 +298,17 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
     const actuals = (payload.actuals ?? {}) as GenericRecord;
     return ((actuals.totals ?? {}) as GenericRecord) ?? {};
   }, [sourceYearClose]);
+  const sourceYearCloseReference = useMemo(() => {
+    if (!sourceYearClose) return undefined;
+    const payload = sourceYearClose.payload ?? {};
+    return {
+      revenue: Number(sourceYearCloseTotals.revenue ?? 0),
+      variableCost: Number(sourceYearCloseTotals.variable_cost ?? 0),
+      contribution: Number(sourceYearCloseTotals.contribution ?? 0),
+      fixedAlloc: Number(sourceYearCloseTotals.fixed_alloc ?? 0),
+      fixedCost: Number((payload as any).fixed_cost_total ?? 0),
+    };
+  }, [sourceYearClose, sourceYearCloseTotals]);
 
   const STRATEGY_RECORD_TYPES = useMemo(() => new Set(["jaarstrategie", "verkoopstrategie_product", "verkoopstrategie_verpakking"]), []);
 
@@ -1956,6 +1967,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               sourceYear={sourceYear}
               targetYear={targetYear}
               sourceProductie={sourceProductie}
+              sourceYearCloseReference={sourceYearCloseReference}
               draftProductieTarget={draftProductieTarget}
               setDraftProductieTarget={setDraftProductieTarget}
               copyProductieFromSource={copyProductieFromSource}
@@ -1963,6 +1975,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               navigateToStep={navigateToStep}
               saveAndCloseButton={saveAndCloseButton}
               isRunning={isRunning}
+              formatEur={formatEur}
             />
           ) : null}
 
@@ -1990,6 +2003,7 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
               navigateToStep={navigateToStep}
               sourceVasteKostenRows={sourceVasteKostenRows}
               draftVasteKostenTarget={draftVasteKostenTarget}
+              sourceYearCloseReference={sourceYearCloseReference}
               vasteKostenKey={vasteKostenKey}
               updateVasteKostenRow={updateVasteKostenRow}
               addVasteKostenRow={addVasteKostenRow}
@@ -2090,6 +2104,8 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
                 currentBerekeningen={Array.isArray(currentBerekeningen) ? currentBerekeningen : []}
                 currentActivations={Array.isArray(currentActivations) ? currentActivations : []}
                 previewRows={previewRows}
+                sourceYearCloseReference={sourceYearCloseReference}
+                formatEur={formatEur}
                 verkoopstrategieSave={verkoopstrategieSave}
                 setVerkoopstrategieSave={setVerkoopstrategieSave}
                 setDraftVerkoopstrategieTarget={setDraftVerkoopstrategieTarget}

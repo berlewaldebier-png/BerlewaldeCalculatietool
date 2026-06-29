@@ -36,6 +36,7 @@ type VasteKostenTargetsStepProps = {
 
   sourceVasteKostenRows: SourceVasteKostenRow[];
   draftVasteKostenTarget: VasteKostenUiRow[];
+  sourceYearCloseReference?: Record<string, number>;
 
   vasteKostenKey: (row: VasteKostenUiRow) => string;
   updateVasteKostenRow: (uiId: string, patch: Partial<VasteKostenUiRow>) => void;
@@ -56,6 +57,7 @@ export function VasteKostenTargetsStep({
   navigateToStep,
   sourceVasteKostenRows,
   draftVasteKostenTarget,
+  sourceYearCloseReference,
   vasteKostenKey,
   updateVasteKostenRow,
   addVasteKostenRow,
@@ -70,6 +72,21 @@ export function VasteKostenTargetsStep({
         Links zie je de vaste kosten van bronjaar {sourceYear} (read-only). Rechts vul je de vaste kosten voor doeljaar{" "}
         {targetYear} in.
       </div>
+
+      {sourceYearCloseReference ? (
+        <div className="placeholder-block" style={{ marginBottom: 14 }}>
+          <strong>Afgesloten vaste-kosten referentie {sourceYear}</strong>
+          <div className="muted" style={{ marginTop: 8 }}>
+            De jaarafsluiting gebruikt vaste kosten als definitieve drempel voor het resultaat. Gebruik dit bedrag om te beoordelen
+            of de target vaste kosten voor {targetYear} nog realistisch zijn.
+          </div>
+          <div className="record-card-grid" style={{ marginTop: 12 }}>
+            <div className="wizard-toggle-card"><span><strong>Vaste kosten afsluiting</strong><small>{formatEur(sourceYearCloseReference.fixedCost ?? 0)}</small></span></div>
+            <div className="wizard-toggle-card"><span><strong>ABC in kostprijsregels</strong><small>{formatEur(sourceYearCloseReference.fixedAlloc ?? 0)}</small></span></div>
+            <div className="wizard-toggle-card"><span><strong>Operationeel resultaat</strong><small>{formatEur((sourceYearCloseReference.contribution ?? 0) - (sourceYearCloseReference.fixedCost ?? 0))}</small></span></div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="dataset-editor-scroll" style={{ marginBottom: 14 }}>
         <table className="dataset-editor-table">

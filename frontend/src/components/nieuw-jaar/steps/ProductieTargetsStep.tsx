@@ -12,6 +12,7 @@ type ProductieTargetsStepProps = {
   sourceYear: number;
   targetYear: number;
   sourceProductie: unknown;
+  sourceYearCloseReference?: Record<string, number>;
   draftProductieTarget: ProductieYear;
   setDraftProductieTarget: (setter: (current: ProductieYear) => ProductieYear) => void;
   copyProductieFromSource: () => void;
@@ -19,22 +20,40 @@ type ProductieTargetsStepProps = {
   navigateToStep: (nextStep: number) => Promise<void> | void;
   saveAndCloseButton: ReactNode;
   isRunning: boolean;
+  formatEur: (value: number) => string;
 };
 
 export function ProductieTargetsStep({
   sourceYear,
   targetYear,
   sourceProductie,
+  sourceYearCloseReference,
   draftProductieTarget,
   setDraftProductieTarget,
   copyProductieFromSource,
   saveProductieTarget,
   navigateToStep,
   saveAndCloseButton,
-  isRunning
+  isRunning,
+  formatEur
 }: ProductieTargetsStepProps) {
   return (
     <div>
+      {sourceYearCloseReference ? (
+        <div className="placeholder-block" style={{ marginBottom: 14 }}>
+          <strong>Afgesloten werkelijkheid {sourceYear}</strong>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Gebruik deze cijfers als reality check voor je volumeplanning. De velden hieronder blijven bewust handmatig:
+            volume is een stuurkeuze voor {targetYear}, geen automatische kopie van de gerealiseerde omzet.
+          </div>
+          <div className="record-card-grid" style={{ marginTop: 12 }}>
+            <div className="wizard-toggle-card"><span><strong>Omzet</strong><small>{formatEur(sourceYearCloseReference.revenue ?? 0)}</small></span></div>
+            <div className="wizard-toggle-card"><span><strong>Contributie</strong><small>{formatEur(sourceYearCloseReference.contribution ?? 0)}</small></span></div>
+            <div className="wizard-toggle-card"><span><strong>Variabele kosten</strong><small>{formatEur(sourceYearCloseReference.variableCost ?? 0)}</small></span></div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="dataset-editor-scroll">
         <table className="dataset-editor-table">
           <thead>
