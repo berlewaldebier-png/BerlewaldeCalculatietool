@@ -1062,10 +1062,10 @@ export function BreakEvenNextMockup({
               </div>
               <span className="status-pill status-neutral">{selectedYear}</span>
             </div>
-            <div className="be-next-grid be-next-grid-3">
+            <div className="be-next-grid be-next-grid-3 be-next-dashboard-columns">
               {dashboardColumns.map((column) => (
-                <div key={column.title} className="wizard-stack">
-                  <div>
+                <div key={column.title} className="be-next-dashboard-column">
+                  <div className="be-next-dashboard-column-title">
                     <strong>{column.title}</strong>
                     <div className="module-card-text">{column.subtitle}</div>
                   </div>

@@ -174,10 +174,18 @@ def _period_timeline(periods: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not period:
             continue
         bucket = buckets.setdefault(period, {"period": period, "revenue": 0.0, "variable_cost": 0.0, "contribution": 0.0, "fixed_allocation": 0.0})
-        bucket["revenue"] = _num(bucket.get("revenue")) + _num(row.get("net_revenue_ex"))
-        bucket["variable_cost"] = _num(bucket.get("variable_cost")) + _num(row.get("cost_total_ex")) - _num(row.get("fixed_total_ex"))
-        bucket["contribution"] = _num(bucket.get("contribution")) + _num(row.get("net_revenue_ex")) - (_num(row.get("cost_total_ex")) - _num(row.get("fixed_total_ex")))
-        bucket["fixed_allocation"] = _num(bucket.get("fixed_allocation")) + _num(row.get("fixed_total_ex"))
+        revenue = _num(row.get("revenue")) or _num(row.get("net_revenue_ex"))
+        fixed_allocation = _num(row.get("fixed_alloc")) or _num(row.get("fixed_total_ex"))
+        variable_cost = _num(row.get("variable_cost"))
+        if variable_cost == 0:
+            variable_cost = _num(row.get("cost_total_ex")) - fixed_allocation
+        contribution = _num(row.get("contribution"))
+        if contribution == 0:
+            contribution = revenue - variable_cost
+        bucket["revenue"] = _num(bucket.get("revenue")) + revenue
+        bucket["variable_cost"] = _num(bucket.get("variable_cost")) + variable_cost
+        bucket["contribution"] = _num(bucket.get("contribution")) + contribution
+        bucket["fixed_allocation"] = _num(bucket.get("fixed_allocation")) + fixed_allocation
     running_revenue = 0.0
     running_contribution = 0.0
     timeline: list[dict[str, Any]] = []
@@ -833,6 +841,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
 
     plan_targets = plan_payload.get("targets") if isinstance(plan_payload.get("targets"), dict) else {}
     plan_revenue = _num(plan_targets.get("revenue"))
+    plan_variable = _num(plan_targets.get("variable_cost"))
     plan_contribution = _num(plan_targets.get("contribution"))
     plan_fixed_costs = _num(plan_payload.get("fixed_cost_total"))
     plan_result = plan_contribution - plan_fixed_costs if plan_contribution else 0.0
@@ -882,6 +891,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         "dashboard": {
             "plan": {
                 "revenue": plan_revenue,
+                "variable_cost": plan_variable,
                 "contribution": plan_contribution,
                 "fixed_costs": plan_fixed_costs,
                 "result": plan_result,

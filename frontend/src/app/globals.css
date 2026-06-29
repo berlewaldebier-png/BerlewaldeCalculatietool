@@ -3925,9 +3925,26 @@ a {
   grid-column: 1 / -1;
 }
 
+.be-next-dashboard-columns {
+  align-items: stretch;
+}
+
+.be-next-dashboard-column {
+  display: grid;
+  gap: 1rem;
+  grid-template-rows: minmax(56px, auto) repeat(5, minmax(118px, 1fr));
+}
+
+.be-next-dashboard-column-title {
+  align-content: start;
+  display: grid;
+  gap: 0.25rem;
+}
+
 .be-next-metric {
   display: grid;
   gap: 0.35rem;
+  min-height: 118px;
 }
 
 .be-next-metric span {
