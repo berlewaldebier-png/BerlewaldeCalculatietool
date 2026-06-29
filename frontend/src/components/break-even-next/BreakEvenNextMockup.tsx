@@ -17,25 +17,7 @@ import {
 
 type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
 
-type ProductRow = {
-  id: string;
-  category: "beer" | "giftset" | "service" | "merchandise";
-  style: string;
-  skuType: string;
-  sku: string;
-  componentStyles?: string[];
-  reportingNote: string;
-  plannedUnits: number;
-  actualUnitsYtd: number;
-  reforecastUnits: number;
-  litersPerUnit: number;
-  plannedPrice: number;
-  actualPrice: number;
-  purchase: number;
-  excise: number;
-  packaging: number;
-  abcAllocation: number;
-};
+type RevenueCategory = "beer" | "giftset" | "service" | "merchandise";
 
 type ScenarioState = {
   pricePct: number;
@@ -49,7 +31,7 @@ type ReadModelWarning = {
 };
 
 type ReadModelCategory = {
-  category: ProductRow["category"];
+  category: RevenueCategory;
   rows: number;
   revenue: number;
   contribution: number;
@@ -61,7 +43,7 @@ type ReadModelContributionRow = {
   sku_id: string;
   sku_code: string;
   sku_name: string;
-  category: ProductRow["category"];
+  category: RevenueCategory;
   units: number;
   revenue: number;
   variable_cost: number;
@@ -79,7 +61,7 @@ type ContributionDisplayRow = {
   id: string;
   sku: string;
   subtitle: string;
-  category: ProductRow["category"];
+  category: RevenueCategory;
   price: number;
   purchase: number;
   excise: number;
@@ -142,7 +124,7 @@ type ReadModelPlanActualRow = {
   sku_id: string;
   sku_code: string;
   sku_name: string;
-  category: ProductRow["category"];
+  category: RevenueCategory;
   planned_units: number;
   planned_liters: number;
   planned_variable_cost_unit: number;
@@ -200,22 +182,17 @@ const tabs: Array<{ id: TabId; title: string; description: string }> = [
   { id: "year_close", title: "Jaarafsluiting", description: "Finale waarheid" },
 ];
 
-const products: ProductRow[] = [
-  { id: "blond-fust", category: "beer", style: "Blond", skuType: "Fust", sku: "Berlewalde Blond - Fust 20L", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 360, actualUnitsYtd: 170, reforecastUnits: 330, litersPerUnit: 20, plannedPrice: 89, actualPrice: 88.4, purchase: 60.5, excise: 9.7, packaging: 0, abcAllocation: 18.4 },
-  { id: "blond-doos", category: "beer", style: "Blond", skuType: "Doos", sku: "Berlewalde Blond - Doos 24 x 33cl", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 720, actualUnitsYtd: 420, reforecastUnits: 800, litersPerUnit: 7.92, plannedPrice: 44.2, actualPrice: 44.8, purchase: 22.9, excise: 3.9, packaging: 0.8, abcAllocation: 10.2 },
-  { id: "ipa-doos", category: "beer", style: "IPA", skuType: "Doos", sku: "Berlewalde IPA - Doos 24 x 33cl", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 540, actualUnitsYtd: 250, reforecastUnits: 500, litersPerUnit: 7.92, plannedPrice: 46.5, actualPrice: 45.6, purchase: 24.5, excise: 4.1, packaging: 0.8, abcAllocation: 10.7 },
-  { id: "triple-doos", category: "beer", style: "Triple", skuType: "Doos", sku: "Berlewalde Triple - Doos 24 x 33cl", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 610, actualUnitsYtd: 330, reforecastUnits: 640, litersPerUnit: 7.92, plannedPrice: 48.8, actualPrice: 49.1, purchase: 25.9, excise: 5.2, packaging: 0.8, abcAllocation: 11.4 },
-  { id: "weizen-fust", category: "beer", style: "Weizen", skuType: "Fust", sku: "Berlewalde Weizen - Fust 20L", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 260, actualUnitsYtd: 145, reforecastUnits: 290, litersPerUnit: 20, plannedPrice: 88.5, actualPrice: 88.5, purchase: 61.1, excise: 9.7, packaging: 0, abcAllocation: 18.1 },
-  { id: "dubbel-fust", category: "beer", style: "Dubbel", skuType: "Fust", sku: "Berlewalde Dubbel - Fust 20L", reportingNote: "bier telt mee in liters, mix en contributie", plannedUnits: 210, actualUnitsYtd: 80, reforecastUnits: 170, litersPerUnit: 20, plannedPrice: 91, actualPrice: 89.8, purchase: 58.9, excise: 10.2, packaging: 0, abcAllocation: 18.8 },
-  { id: "giftset", category: "giftset", style: "Geschenken", skuType: "Geschenk", sku: "Geschenkverpakking 4 x 33cl", componentStyles: ["Blond", "IPA", "Triple", "Weizen"], reportingNote: "omzet als giftset, liters en mix via onderliggende bieren", plannedUnits: 900, actualUnitsYtd: 260, reforecastUnits: 760, litersPerUnit: 1.32, plannedPrice: 16.49, actualPrice: 16.49, purchase: 7.9, excise: 0.8, packaging: 2.5, abcAllocation: 2.4 },
-  { id: "tasting", category: "service", style: "Diensten", skuType: "Proeverij", sku: "Rondleiding + proeverij 4 bieren", componentStyles: ["Blond", "IPA", "Triple", "Weizen"], reportingNote: "service-omzet, bierverbruik als variabele kost wanneer geconfigureerd", plannedUnits: 240, actualUnitsYtd: 110, reforecastUnits: 260, litersPerUnit: 1.32, plannedPrice: 22.5, actualPrice: 22.5, purchase: 4.8, excise: 0.8, packaging: 0, abcAllocation: 1.2 },
-  { id: "glas", category: "merchandise", style: "Merchandise", skuType: "Merchandise", sku: "Berlewalde Glas 33cl", reportingNote: "contributie telt mee, geen bierliters", plannedUnits: 800, actualUnitsYtd: 300, reforecastUnits: 690, litersPerUnit: 0, plannedPrice: 3.95, actualPrice: 3.95, purchase: 1.95, excise: 0, packaging: 0, abcAllocation: 0.4 },
-];
-
-const planFixedCosts = 80000;
-const reforecastFixedCosts = 83500;
 const plannedNormalLiters = 40000;
 const contributionPageSize = 5;
+const emptyTotals = {
+  revenue: 0,
+  variable: 0,
+  contribution: 0,
+  abc: 0,
+  allocatedMargin: 0,
+  liters: 0,
+  units: 0,
+};
 
 const revenuePhasing = [
   { month: "Jan", planPct: 0.05, actualPct: 0.052, reforecastPct: 0.052 },
@@ -240,6 +217,10 @@ function money2(value: number) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(Number.isFinite(value) ? value : 0);
 }
 
+function moneyOrMissing(value: number, available: boolean) {
+  return available ? money(value) : "Nog niet ingevuld";
+}
+
 function number(value: number, digits = 0) {
   return new Intl.NumberFormat("nl-NL", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(Number.isFinite(value) ? value : 0);
 }
@@ -257,7 +238,7 @@ function asText(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-function normalizeCategory(value: unknown): ProductRow["category"] {
+function normalizeCategory(value: unknown): RevenueCategory {
   const text = asText(value);
   if (text === "giftset" || text === "service" || text === "merchandise") return text;
   return "beer";
@@ -414,35 +395,6 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   };
 }
 
-function variableCost(row: ProductRow) {
-  return row.purchase + row.excise + row.packaging;
-}
-
-function contributionUnit(row: ProductRow, mode: "plan" | "actual" | "reforecast" = "plan") {
-  const price = mode === "actual" ? row.actualPrice : row.plannedPrice;
-  return price - variableCost(row);
-}
-
-function allocatedMarginUnit(row: ProductRow, mode: "plan" | "actual" | "reforecast" = "plan") {
-  return contributionUnit(row, mode) - row.abcAllocation;
-}
-
-function sumBy(rows: ProductRow[], unitsKey: "plannedUnits" | "actualUnitsYtd" | "reforecastUnits", mode: "plan" | "actual" | "reforecast") {
-  const revenue = rows.reduce((sum, row) => sum + row[unitsKey] * (mode === "actual" ? row.actualPrice : row.plannedPrice), 0);
-  const variable = rows.reduce((sum, row) => sum + row[unitsKey] * variableCost(row), 0);
-  const abc = rows.reduce((sum, row) => sum + row[unitsKey] * row.abcAllocation, 0);
-  const liters = rows.reduce((sum, row) => sum + row[unitsKey] * row.litersPerUnit, 0);
-  return {
-    revenue,
-    variable,
-    contribution: revenue - variable,
-    abc,
-    allocatedMargin: revenue - variable - abc,
-    liters,
-    units: rows.reduce((sum, row) => sum + row[unitsKey], 0),
-  };
-}
-
 function buildScenarioFromTotals(base: { revenue: number; variable: number }, scenario: ScenarioState, baseFixedCosts: number) {
   const priceFactor = 1 + scenario.pricePct / 100;
   const volumeFactor = 1 + scenario.volumePct / 100;
@@ -511,17 +463,6 @@ function buildRevenueTimelineFromReadModel(planRevenue: number, actualRevenue: n
   });
 }
 
-function contributionSignal(row: ProductRow): ContributionDisplayRow["signal"] {
-  const contribution = contributionUnit(row, "reforecast");
-  const contributionPct = row.plannedPrice > 0 ? contribution / row.plannedPrice : 0;
-  const totalContribution = row.reforecastUnits * contribution;
-  if (contributionPct < 0.25) return { label: "marge-risico", tone: "error" };
-  if (totalContribution > 9000) return { label: "mixdrager", tone: "ok" };
-  if (row.reforecastUnits > row.plannedUnits * 1.1) return { label: "volume boven plan", tone: "ok" };
-  if (row.reforecastUnits < row.plannedUnits * 0.9) return { label: "volume onder plan", tone: "warning" };
-  return { label: "stabiel", tone: "neutral" };
-}
-
 function contributionDisplaySignal(row: ReadModelContributionRow): ContributionDisplayRow["signal"] {
   if (row.missing_cost_lines > 0) return { label: "kostprijs ontbreekt", tone: "error" };
   if (row.contribution_ratio > 0 && row.contribution_ratio < 0.25) return { label: "marge-risico", tone: "error" };
@@ -559,56 +500,13 @@ function contributionRowsFromReadModel(rows: ReadModelContributionRow[] | undefi
   });
 }
 
-function contributionRowsFromMock(rows: ProductRow[]): ContributionDisplayRow[] {
-  return rows.map((row) => {
-    const signal = contributionSignal(row);
-    return {
-      id: row.id,
-      sku: row.sku,
-      subtitle: `${row.style} - ${row.skuType}${row.componentStyles?.length ? ` - componenten: ${row.componentStyles.join(", ")}` : ""}`,
-      category: row.category,
-      price: row.plannedPrice,
-      purchase: row.purchase,
-      excise: row.excise,
-      packaging: row.packaging,
-      contribution: contributionUnit(row),
-      fixedAllocation: row.abcAllocation,
-      allocatedMargin: allocatedMarginUnit(row),
-      units: row.reforecastUnits,
-      totalContribution: row.reforecastUnits * contributionUnit(row, "reforecast"),
-      missingCostLines: 0,
-      signal,
-    };
-  });
-}
-
-function planActualRowsFromMock(rows: ProductRow[]): ReadModelPlanActualRow[] {
-  return rows.map((row) => ({
-    sku_id: row.id,
-    sku_code: "",
-    sku_name: row.sku,
-    category: row.category,
-    planned_units: row.plannedUnits,
-    planned_liters: row.plannedUnits * row.litersPerUnit,
-    planned_variable_cost_unit: variableCost(row),
-    planned_fixed_allocation_unit: row.abcAllocation,
-    planned_cost_unit: variableCost(row) + row.abcAllocation,
-    actual_units: row.actualUnitsYtd,
-    actual_revenue: row.actualUnitsYtd * row.actualPrice,
-    actual_contribution: row.actualUnitsYtd * contributionUnit(row, "actual"),
-    reforecast_units: row.reforecastUnits,
-    reforecast_contribution: row.reforecastUnits * contributionUnit(row, "reforecast"),
-    status: "ok",
-  }));
-}
-
 function planActualStatus(row: ReadModelPlanActualRow): ContributionDisplayRow["signal"] {
   if (row.status === "actual_only") return { label: "alleen actual", tone: "warning" };
   if (row.status === "plan_only") return { label: "alleen plan", tone: "neutral" };
   return { label: "plan + actual", tone: "ok" };
 }
 
-function categoryLabel(category: ProductRow["category"]) {
+function categoryLabel(category: RevenueCategory) {
   switch (category) {
     case "beer":
       return "Bier";
@@ -621,7 +519,7 @@ function categoryLabel(category: ProductRow["category"]) {
   }
 }
 
-function categoryTreatment(category: ProductRow["category"]) {
+function categoryTreatment(category: RevenueCategory) {
   switch (category) {
     case "beer":
       return "Omzet, contributie, liters en mix";
@@ -632,26 +530,6 @@ function categoryTreatment(category: ProductRow["category"]) {
     case "merchandise":
       return "Contributie, geen bierliters";
   }
-}
-
-function summarizeByCategory(rows: ProductRow[]) {
-  const categories: ProductRow["category"][] = ["beer", "giftset", "service", "merchandise"];
-  return categories
-    .map((category) => {
-      const categoryRows = rows.filter((row) => row.category === category);
-      const revenue = categoryRows.reduce((sum, row) => sum + row.reforecastUnits * row.plannedPrice, 0);
-      const contribution = categoryRows.reduce((sum, row) => sum + row.reforecastUnits * contributionUnit(row, "reforecast"), 0);
-      const liters = categoryRows.reduce((sum, row) => sum + row.reforecastUnits * row.litersPerUnit, 0);
-      return {
-        category,
-        rows: categoryRows.length,
-        revenue,
-        contribution,
-        liters,
-        treatment: categoryTreatment(category),
-      };
-    })
-    .filter((row) => row.rows > 0);
 }
 
 function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: number }>, breakEvenRevenue: number) {
@@ -685,37 +563,42 @@ export function BreakEvenNextMockup({
     const values = new Set([2025, 2026, selectedYear, selectedYear + 1]);
     return [...values].filter((year) => year >= 2024 && year <= 2100).sort((a, b) => a - b);
   }, [selectedYear]);
-  const mockPlan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
-  const mockActual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
-  const mockReforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
+  const hasReadModel = Boolean(parsedReadModel);
+  const hasPlanTargets = Boolean(
+    parsedReadModel
+    && (parsedReadModel.dashboard?.plan?.revenue ?? 0) > 0
+    && (parsedReadModel.dashboard?.plan?.contribution ?? 0) > 0,
+  );
+  const hasActuals = Boolean(parsedReadModel && (parsedReadModel.dashboard?.actual?.revenue ?? 0) > 0);
+  const hasTemporaryReforecast = Boolean(parsedReadModel && (parsedReadModel.dashboard?.reforecast?.revenue ?? 0) > 0);
   const plan = {
-    ...mockPlan,
-    revenue: parsedReadModel?.dashboard?.plan?.revenue || mockPlan.revenue,
-    variable: parsedReadModel?.dashboard?.plan?.variable_cost || mockPlan.variable,
-    contribution: parsedReadModel?.dashboard?.plan?.contribution || mockPlan.contribution,
+    ...emptyTotals,
+    revenue: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.revenue ?? 0 : 0,
+    variable: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.variable_cost ?? 0 : 0,
+    contribution: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.contribution ?? 0 : 0,
   };
   const actual = {
-    ...mockActual,
-    revenue: parsedReadModel?.dashboard?.actual?.revenue || mockActual.revenue,
-    variable: parsedReadModel?.dashboard?.actual?.variable_cost || mockActual.variable,
-    contribution: parsedReadModel?.dashboard?.actual?.contribution || mockActual.contribution,
+    ...emptyTotals,
+    revenue: parsedReadModel?.dashboard?.actual?.revenue ?? 0,
+    variable: parsedReadModel?.dashboard?.actual?.variable_cost ?? 0,
+    contribution: parsedReadModel?.dashboard?.actual?.contribution ?? 0,
   };
   const reforecast = {
-    ...mockReforecast,
-    revenue: parsedReadModel?.dashboard?.reforecast?.revenue || mockReforecast.revenue,
-    variable: parsedReadModel?.dashboard?.reforecast?.variable_cost || mockReforecast.variable,
-    contribution: parsedReadModel?.dashboard?.reforecast?.contribution || mockReforecast.contribution,
+    ...emptyTotals,
+    revenue: parsedReadModel?.dashboard?.reforecast?.revenue ?? 0,
+    variable: parsedReadModel?.dashboard?.reforecast?.variable_cost ?? 0,
+    contribution: parsedReadModel?.dashboard?.reforecast?.contribution ?? 0,
   };
-  const activePlanFixedCosts = parsedReadModel?.dashboard?.plan?.fixed_costs || planFixedCosts;
-  const activeReforecastFixedCosts = parsedReadModel?.dashboard?.reforecast?.fixed_costs || reforecastFixedCosts;
+  const activePlanFixedCosts = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.fixed_costs ?? 0 : 0;
+  const activeReforecastFixedCosts = parsedReadModel?.dashboard?.reforecast?.fixed_costs ?? 0;
   const scenarioResult = useMemo(
     () => buildScenarioFromTotals({ revenue: reforecast.revenue, variable: reforecast.variable }, scenario, activeReforecastFixedCosts),
     [activeReforecastFixedCosts, reforecast.revenue, reforecast.variable, scenario],
   );
-  const fixedRate = activePlanFixedCosts / plannedNormalLiters;
+  const fixedRate = activePlanFixedCosts > 0 ? activePlanFixedCosts / plannedNormalLiters : 0;
   const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
-  const planResult = parsedReadModel?.dashboard?.plan?.result || (plan.contribution - activePlanFixedCosts);
-  const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result || (reforecast.contribution - activeReforecastFixedCosts);
+  const planResult = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.result ?? (plan.contribution - activePlanFixedCosts) : 0;
+  const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result ?? (reforecast.contribution - activeReforecastFixedCosts);
   const revenueTimeline = useMemo(
     () => buildRevenueTimelineFromReadModel(plan.revenue, actual.revenue, reforecast.revenue, readModelTimeline),
     [actual.revenue, plan.revenue, readModelTimeline, reforecast.revenue],
@@ -745,24 +628,11 @@ export function BreakEvenNextMockup({
   const expectedBreakEvenMonth = estimateBreakEvenMonth(revenueTimeline, breakEvenRevenue);
 
   const varianceRows = useMemo(() => {
-    if (readModelVarianceBridge.length) return readModelVarianceBridge;
-    const priceVariance = products.reduce((sum, row) => sum + (row.actualPrice - row.plannedPrice) * row.reforecastUnits, 0);
-    const volumeVariance = products.reduce((sum, row) => sum + (row.reforecastUnits - row.plannedUnits) * contributionUnit(row, "plan"), 0);
-    const variableCostVariance = products.reduce((sum, row) => sum + (row.purchase * 0.02) * row.reforecastUnits * -1, 0);
-    const mixVariance = reforecastResult - planResult - priceVariance - volumeVariance - variableCostVariance - occupancyResult;
-    return [
-      { key: "plan", label: "Gepland resultaat", value: planResult, kind: "result" },
-      { key: "price", label: "Prijsverschil", value: priceVariance, kind: priceVariance >= 0 ? "positive" : "negative" },
-      { key: "volume", label: "Volumeverschil", value: volumeVariance, kind: volumeVariance >= 0 ? "positive" : "negative" },
-      { key: "mix", label: "Mixverschil", value: mixVariance, kind: mixVariance >= 0 ? "positive" : "negative" },
-      { key: "cost", label: "Kostprijsverschil", value: variableCostVariance, kind: variableCostVariance >= 0 ? "positive" : "negative" },
-      { key: "occupancy", label: "Bezettingsresultaat", value: occupancyResult, kind: occupancyResult >= 0 ? "positive" : "negative" },
-      { key: "result", label: "Reforecast resultaat", value: reforecastResult, kind: "result" },
-    ];
-  }, [occupancyResult, planResult, readModelVarianceBridge, reforecastResult]);
+    return readModelVarianceBridge;
+  }, [readModelVarianceBridge]);
 
   const contributionRows = useMemo(() => {
-    const sourceRows = readModelContributionRows.length ? contributionRowsFromReadModel(readModelContributionRows) : contributionRowsFromMock(products);
+    const sourceRows = contributionRowsFromReadModel(readModelContributionRows);
     const normalized = query.trim().toLowerCase();
     return sourceRows
       .filter((row) => {
@@ -776,10 +646,10 @@ export function BreakEvenNextMockup({
   const pagedContributionRows = contributionRows.slice((safeContributionPage - 1) * contributionPageSize, safeContributionPage * contributionPageSize);
   const topContributor = contributionRows[0];
   const marginRiskCount = contributionRows.filter((row) => row.signal.tone === "error").length;
-  const categoryRows = readModelCategories.length ? readModelCategories : summarizeByCategory(products);
-  const planActualRows = readModelPlanActualRows.length ? readModelPlanActualRows : planActualRowsFromMock(products);
+  const categoryRows = readModelCategories;
+  const planActualRows = readModelPlanActualRows;
 
-  const progressPct = Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100));
+  const progressPct = activeReforecastFixedCosts > 0 ? Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100)) : 0;
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
 
   return (
@@ -787,9 +657,9 @@ export function BreakEvenNextMockup({
       <section className="module-card">
         <div className="module-card-header be-next-hero">
           <div>
-            <div className="module-card-title">Mock-up: break-even als stuurinstrument</div>
+            <div className="module-card-title">Break-even als stuurinstrument</div>
             <div className="module-card-text">
-              Tijdelijke frontend-prototype. De backend-readmodel data wordt geladen voor jaar {selectedYear}; voorbeelddata is alleen fallback als de backend niets levert.
+              Tijdelijke frontend-prototype. De backend-readmodel data wordt geladen voor jaar {selectedYear}; ontbrekende data wordt expliciet leeg of als waarschuwing getoond.
             </div>
           </div>
           <div className="be-next-year-switcher" aria-label="Rapportagejaar kiezen">
@@ -807,15 +677,15 @@ export function BreakEvenNextMockup({
           <div>
             <div className="module-card-title">Read-model koppeling</div>
             <div className="module-card-text">
-              Deze mock-up gebruikt voorbeelddata voor de berekeningen, maar leest alvast backend-waarschuwingen en categorieën uit het nieuwe read-only model.
+              Deze analyse gebruikt het backend read-model voor echte cijfers. Ontbrekende planwaarden worden leeg getoond en niet aangevuld.
             </div>
           </div>
           <span className={`status-pill ${readModelError ? "status-error" : parsedReadModel ? "status-ok" : "status-warning"}`}>
-            {readModelError ? "niet geladen" : parsedReadModel ? "backend gekoppeld" : "mock data"}
+            {readModelError ? "niet geladen" : parsedReadModel ? "backend gekoppeld" : "geen backenddata"}
           </span>
         </div>
         {readModelError ? (
-          <div className="editor-status error">Read-model kon niet worden geladen. De mock-up blijft werken met voorbeelddata.</div>
+          <div className="editor-status error">Read-model kon niet worden geladen. Hoofdkaarten tonen daarom geen echte break-even cijfers.</div>
         ) : readModelWarnings.length ? (
           <div className="be-next-warning-list">
             {readModelWarnings.map((warning) => (
@@ -848,12 +718,12 @@ export function BreakEvenNextMockup({
       {activeTab === "dashboard" ? (
         <div className="wizard-stack">
           <div className="be-next-grid be-next-grid-3">
-            <MetricCard label="Plan omzet" value={money(plan.revenue)} helper={`${number(plan.liters)} liter gepland`} />
-            <MetricCard label="Actual YTD omzet" value={money(actual.revenue)} helper={`${number(actual.liters)} liter tot nu`} />
-            <MetricCard label="Reforecast omzet" value={money(reforecast.revenue)} helper={`${number(reforecast.liters)} liter verwacht`} />
-            <MetricCard label="Plan break-even omzet" value={money(planBreakEvenRevenue)} helper="op basis van frozen plan" />
-            <MetricCard label="Huidige break-even omzet" value={money(breakEvenRevenue)} helper="op basis van reforecast" />
-            <MetricCard label="Verwacht resultaat" value={money(reforecastResult)} tone={reforecastResult >= 0 ? "positive" : "negative"} helper={`grootste driver: ${largestVariance?.label ?? "-"}`} />
+            <MetricCard label="Plan omzet" value={moneyOrMissing(plan.revenue, hasPlanTargets)} helper={hasPlanTargets ? "frozen plan" : "maak eerst een break-even plan"} />
+            <MetricCard label="Actual YTD omzet" value={moneyOrMissing(actual.revenue, hasActuals)} helper={hasActuals ? "SSOT: backend actuals op invoice-basis" : "geen actuals gevonden"} />
+            <MetricCard label="Reforecast omzet" value={moneyOrMissing(reforecast.revenue, hasTemporaryReforecast)} helper={hasTemporaryReforecast ? "tijdelijk gelijk aan actual YTD tot reforecastmodel bestaat" : "reforecast nog niet ingericht"} />
+            <MetricCard label="Plan break-even omzet" value={moneyOrMissing(planBreakEvenRevenue, hasPlanTargets)} helper="op basis van frozen plan" />
+            <MetricCard label="Huidige break-even omzet" value={moneyOrMissing(breakEvenRevenue, hasActuals)} helper="op basis van actual contributieratio" />
+            <MetricCard label="Verwacht resultaat" value={moneyOrMissing(reforecastResult, hasTemporaryReforecast)} tone={reforecastResult >= 0 ? "positive" : "negative"} helper={`grootste driver: ${largestVariance?.label ?? "-"}`} />
           </div>
 
           <section className="module-card">
@@ -868,7 +738,7 @@ export function BreakEvenNextMockup({
               <div className="be-next-explain">
                 <strong>Dit vertelt of de verwachte contributie genoeg is om vaste kosten te dragen.</strong>
                 <p>
-                  De mock-up houdt de geplande kostprijs vast en verklaart het verschil via prijs, volume, mix, kostprijs en bezettingsresultaat.
+                  De analyse houdt plan, actuals en reforecast gescheiden. Ontbrekende planwaarden worden niet automatisch aangevuld.
                 </p>
               </div>
             </div>
@@ -900,11 +770,13 @@ export function BreakEvenNextMockup({
             </div>
           </section>
 
-          <section className={`module-card be-next-advice ${revenueGap >= 0 ? "positive" : "negative"}`}>
+          <section className={`module-card be-next-advice ${hasPlanTargets && revenueGap >= 0 ? "positive" : hasPlanTargets ? "negative" : ""}`}>
             <div>
               <div className="module-card-title">Conclusie</div>
               <p>
-                {revenueGap >= 0
+                {!hasPlanTargets
+                  ? "Er is nog geen frozen plan voor dit jaar. Actuals kunnen al worden gecontroleerd, maar planverschil en stuuradvies zijn pas zinvol na het vastleggen van planomzet en plancontributie."
+                  : revenueGap >= 0
                   ? `De reforecast ligt ${money(Math.abs(revenueGap))} boven plan. Stuur vooral op behoud van mix en contributie, niet alleen op extra omzet.`
                   : `De reforecast ligt ${money(Math.abs(revenueGap))} onder plan. Om het plan te halen is indicatief ${number(neededPricePct, 1)}% prijsverhoging of ${number(neededVolumePct, 1)}% extra contributievolume nodig.`}
               </p>
@@ -1002,7 +874,7 @@ export function BreakEvenNextMockup({
                       <td><strong>{categoryLabel(row.category)}</strong><br /><small>{row.rows} verkoopbare regels</small></td>
                       <td>{money(row.revenue)}</td>
                       <td><strong>{money(row.contribution)}</strong></td>
-                      <td>{"liters" in row && row.liters > 0 ? `${number(row.liters)} L` : "units" in row && row.units > 0 ? `${number(row.units)} st` : "-"}</td>
+                      <td>{row.units > 0 ? `${number(row.units)} st` : "-"}</td>
                       <td>{row.treatment}</td>
                     </tr>
                   ))}
@@ -1370,3 +1242,4 @@ function ScenarioSlider({ label, value, min, max, onChange }: { label: string; v
     </label>
   );
 }
+

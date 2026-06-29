@@ -129,6 +129,11 @@ Rules:
 - No deletion of old break-even code.
 - Build the interaction in a way that can later be wired to real snapshot data.
 
+Current testing rule:
+
+- Once a section is wired to the backend read model, missing data must be shown as empty or as a warning.
+- Real analysis cards must not silently fall back to example plan, actual or SKU data.
+
 ### Mock-Up Screens
 
 #### 1. Dashboard
