@@ -59,6 +59,7 @@ type YearClosePreview = {
 type YearOverviewRow = {
   year: number;
   draft?: DraftRow;
+  nextDraft?: DraftRow;
   isProduction: boolean;
   isLastProductionYear: boolean;
   activePlan?: PlanSnapshot;
@@ -293,6 +294,7 @@ function buildRows(params: {
     .map((year) => ({
       year,
       draft: draftsByYear.get(year),
+      nextDraft: draftsByYear.get(year + 1),
       isProduction: productionYears.has(year),
       isLastProductionYear: year === Number(params.yearsets?.last_year ?? 0),
       activePlan: activePlansByYear.get(year),
@@ -480,6 +482,8 @@ export function JaarsetsPanel() {
             <tbody>
               {rows.map((row) => {
                 const plan = row.activePlan ?? row.latestPlan;
+                const canPrepareNextYear = row.isProduction || Boolean(row.yearClose) || Boolean(row.activePlan);
+                const draftAction = row.nextDraft ?? (!canPrepareNextYear ? row.draft : undefined);
                 return (
                   <tr key={row.year}>
                     <td>{row.year}</td>
@@ -506,13 +510,18 @@ export function JaarsetsPanel() {
                       )}
                     </td>
                     <td>
-                      {row.draft ? (
+                      {row.draft && !canPrepareNextYear ? (
                         <>
-                          <div>Concept uit {row.draft.source_year}</div>
-                          <small className="muted">{formatIso(row.draft.updated_at)}</small>
+                          <div>Concept voor {row.draft.target_year}</div>
+                          <small className="muted">uit {row.draft.source_year} · {formatIso(row.draft.updated_at)}</small>
+                        </>
+                      ) : row.nextDraft ? (
+                        <>
+                          <div>Concept {row.nextDraft.target_year}</div>
+                          <small className="muted">uit {row.nextDraft.source_year} · {formatIso(row.nextDraft.updated_at)}</small>
                         </>
                       ) : (
-                        <span className="muted">Geen concept</span>
+                        <span className="muted">Geen concept voor {row.year + 1}</span>
                       )}
                     </td>
                     <td style={{ textAlign: "right" }}>
@@ -523,24 +532,34 @@ export function JaarsetsPanel() {
                       >
                         Break-even
                       </Link>
-                      <Link
-                        href={`/nieuw-jaar-voorbereiden?target_year=${encodeURIComponent(String(row.year + 1))}`}
-                        className="editor-button editor-button-secondary"
-                        style={{ marginRight: 8, display: "inline-block", textDecoration: "none" }}
-                      >
-                        Nieuw jaar
-                      </Link>
-                      {row.draft ? (
+                      {canPrepareNextYear ? (
+                        <Link
+                          href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.year))}&target_year=${encodeURIComponent(String(row.year + 1))}`}
+                          className="editor-button editor-button-secondary"
+                          style={{ marginRight: 8, display: "inline-block", textDecoration: "none" }}
+                        >
+                          {row.nextDraft ? "Open nieuw jaar" : "Start nieuw jaar"}
+                        </Link>
+                      ) : row.draft ? (
+                        <Link
+                          href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.draft.source_year))}&target_year=${encodeURIComponent(String(row.draft.target_year))}`}
+                          className="editor-button editor-button-secondary"
+                          style={{ marginRight: 8, display: "inline-block", textDecoration: "none" }}
+                        >
+                          Open concept
+                        </Link>
+                      ) : null}
+                      {draftAction ? (
                         <button
                           type="button"
                           className="editor-button editor-button-secondary"
                           disabled={busy !== null}
                           onClick={() => {
                             const ok = window.confirm(
-                              `Weet je zeker dat je alle concepten voor ${row.year} wilt verwijderen?`
+                              `Weet je zeker dat je alle concepten voor ${draftAction.target_year} wilt verwijderen?`
                             );
                             if (!ok) return;
-                            runAction("deleteDraft", () => deleteDraftsForYear(row.year));
+                            runAction("deleteDraft", () => deleteDraftsForYear(draftAction.target_year));
                           }}
                         >
                           Verwijder concept
@@ -558,7 +577,7 @@ export function JaarsetsPanel() {
                             if (!ok) return;
                             runAction("rollback", () => postRollbackYearset(row.year));
                           }}
-                          style={{ marginLeft: row.draft ? 8 : 0 }}
+                          style={{ marginLeft: draftAction ? 8 : 0 }}
                         >
                           Rollback
                         </button>
