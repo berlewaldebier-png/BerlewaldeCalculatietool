@@ -133,6 +133,7 @@ Current testing rule:
 
 - Once a section is wired to the backend read model, missing data must be shown as empty or as a warning.
 - Real analysis cards must not silently fall back to example plan, actual or SKU data.
+- Actual revenue uses the same source as Dashboard > Omzet over tijd. The read model exposes a reconciliation between that dashboard revenue and the break-even contribution revenue, because contribution can only explain rows with a usable category/cost basis.
 
 ### Mock-Up Screens
 
@@ -159,6 +160,10 @@ Visuals:
   - dotted reforecast line to year-end
   - status conclusion above/below plan
 - short explanation of the largest variance driver
+- revenue reconciliation:
+  - dashboard revenue is the actual revenue SSOT
+  - contribution revenue explains the cost/contribution layer
+  - any difference remains visible until data quality/category mapping is complete
 - suggested steering action when reforecast is below plan:
   - required price increase
   - required contribution volume increase

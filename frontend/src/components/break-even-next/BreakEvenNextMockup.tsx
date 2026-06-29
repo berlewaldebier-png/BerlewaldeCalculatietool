@@ -30,6 +30,19 @@ type ReadModelWarning = {
   message: string;
 };
 
+type ReadModelRevenueReconciliation = {
+  source: string;
+  basis: string;
+  since: string;
+  until: string;
+  dashboard_revenue: number;
+  break_even_revenue: number;
+  contribution_revenue: number;
+  difference: number;
+  status: "match" | "difference";
+  policy: string;
+};
+
 type ReadModelCategory = {
   category: RevenueCategory;
   rows: number;
@@ -160,6 +173,7 @@ type BreakEvenReadModel = {
   break_even?: ReadModelBreakEven;
   timeline?: ReadModelTimelinePoint[];
   variance_bridge?: VarianceRow[];
+  revenue_reconciliation?: ReadModelRevenueReconciliation;
   plan_actual?: {
     rows?: ReadModelPlanActualRow[];
     model_note?: string;
@@ -260,6 +274,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   const pnl = asRecord(value.pnl);
   const breakEven = asRecord(value.break_even);
   const planActual = asRecord(value.plan_actual);
+  const revenueReconciliation = asRecord(value.revenue_reconciliation);
   const rawTimeline = Array.isArray(value.timeline) ? value.timeline : [];
   const rawVarianceBridge = Array.isArray(value.variance_bridge) ? value.variance_bridge : [];
   const rawPlanActualRows = Array.isArray(planActual.rows) ? planActual.rows : [];
@@ -360,6 +375,18 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
         kind: normalizeVarianceKind(row.kind, value),
       };
     }).filter((row) => row.key && row.label),
+    revenue_reconciliation: Object.keys(revenueReconciliation).length ? {
+      source: asText(revenueReconciliation.source),
+      basis: asText(revenueReconciliation.basis),
+      since: asText(revenueReconciliation.since),
+      until: asText(revenueReconciliation.until),
+      dashboard_revenue: asNumber(revenueReconciliation.dashboard_revenue),
+      break_even_revenue: asNumber(revenueReconciliation.break_even_revenue),
+      contribution_revenue: asNumber(revenueReconciliation.contribution_revenue ?? revenueReconciliation.break_even_revenue),
+      difference: asNumber(revenueReconciliation.difference),
+      status: asText(revenueReconciliation.status) === "match" ? "match" : "difference",
+      policy: asText(revenueReconciliation.policy),
+    } : undefined,
     plan_actual: {
       model_note: asText(planActual.model_note),
       rows: rawPlanActualRows.map((item) => {
@@ -558,6 +585,7 @@ export function BreakEvenNextMockup({
   const readModelTimeline = parsedReadModel?.timeline ?? [];
   const readModelVarianceBridge = parsedReadModel?.variance_bridge ?? [];
   const readModelPlanActualRows = parsedReadModel?.plan_actual?.rows ?? [];
+  const revenueReconciliation = parsedReadModel?.revenue_reconciliation ?? null;
   const planActualNote = parsedReadModel?.plan_actual?.model_note ?? "";
   const yearOptions = useMemo(() => {
     const values = new Set([2025, 2026, selectedYear, selectedYear + 1]);
@@ -725,6 +753,34 @@ export function BreakEvenNextMockup({
             <MetricCard label="Huidige break-even omzet" value={moneyOrMissing(breakEvenRevenue, hasActuals)} helper="op basis van actual contributieratio" />
             <MetricCard label="Verwacht resultaat" value={moneyOrMissing(reforecastResult, hasTemporaryReforecast)} tone={reforecastResult >= 0 ? "positive" : "negative"} helper={`grootste driver: ${largestVariance?.label ?? "-"}`} />
           </div>
+
+          {revenueReconciliation ? (
+            <section className="module-card">
+              <div className="module-card-header be-next-table-header">
+                <div>
+                  <div className="module-card-title">Omzetreconciliatie</div>
+                  <div className="module-card-text">
+                    Dashboard &gt; Omzet over tijd is leidend voor actual omzet. De contributielaag kan lager zijn zolang regels nog geen categorie of kostprijsbron hebben.
+                  </div>
+                </div>
+                <span className={`status-pill ${revenueReconciliation.status === "match" ? "status-ok" : "status-warning"}`}>
+                  {revenueReconciliation.status === "match" ? "match" : "verschil"}
+                </span>
+              </div>
+              <div className="data-table">
+                <table>
+                  <tbody>
+                    <PnlRow label="Dashboard omzet (SSOT)" value={revenueReconciliation.dashboard_revenue} strong />
+                    <PnlRow label="Break-even contributie-omzet" value={revenueReconciliation.contribution_revenue} />
+                    <PnlRow label="Verschil nog te verklaren" value={revenueReconciliation.difference} />
+                  </tbody>
+                </table>
+              </div>
+              <div className="module-card-text">
+                Basis {revenueReconciliation.basis || "-"}; periode {revenueReconciliation.since || "-"} t/m {revenueReconciliation.until || "-"}.
+              </div>
+            </section>
+          ) : null}
 
           <section className="module-card">
             <div className="module-card-title">Break-even voortgang</div>

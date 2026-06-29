@@ -8,6 +8,7 @@ from app.domain import (
     cost_versions_storage,
     dataset_store,
     douano_sales_mix_service,
+    erp_dashboard_service,
     fixed_costs_storage,
     postgres_storage,
 )
@@ -379,6 +380,24 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
     }
 
 
+def _dashboard_revenue_reconciliation(*, year: int, basis: str, break_even_revenue: float) -> dict[str, Any]:
+    dashboard = erp_dashboard_service.get_erp_dashboard(year=int(year or 0), basis=basis)
+    kpis = dashboard.get("kpis") if isinstance(dashboard, dict) else {}
+    dashboard_revenue = _num((kpis or {}).get("total_revenue_ex")) if isinstance(kpis, dict) else 0.0
+    return {
+        "source": "erp_dashboard",
+        "basis": _text((dashboard.get("range") or {}).get("basis")) if isinstance(dashboard, dict) else _text(basis),
+        "since": _text((dashboard.get("range") or {}).get("since")) if isinstance(dashboard, dict) else "",
+        "until": _text((dashboard.get("range") or {}).get("until")) if isinstance(dashboard, dict) else "",
+        "dashboard_revenue": dashboard_revenue,
+        "break_even_revenue": break_even_revenue,
+        "contribution_revenue": break_even_revenue,
+        "difference": dashboard_revenue - break_even_revenue,
+        "status": "match" if abs(dashboard_revenue - break_even_revenue) < 0.01 else "difference",
+        "policy": "Dashboard > Omzet over tijd is SSOT for actual revenue. Break-even contribution rows require SKU/cost mapping and may differ until all revenue categories are classified.",
+    }
+
+
 def create_reforecast(
     *,
     year: int,
@@ -445,7 +464,14 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         fixed_cost_total = _year_fixed_cost_total(year_value)
 
     totals = sales.get("totals") if isinstance(sales.get("totals"), dict) else {}
-    actual_revenue = _num(totals.get("revenue"))
+    contribution_revenue = _num(totals.get("revenue"))
+    revenue_reconciliation = _dashboard_revenue_reconciliation(
+        year=year_value,
+        basis=basis_value,
+        break_even_revenue=contribution_revenue,
+    )
+    dashboard_revenue = _num(revenue_reconciliation.get("dashboard_revenue"))
+    actual_revenue = dashboard_revenue if dashboard_revenue > 0 else contribution_revenue
     actual_variable = _num(totals.get("variable_cost"))
     actual_contribution = _num(totals.get("contribution"))
     contribution_ratio = _money_ratio(actual_contribution, actual_revenue)
@@ -475,6 +501,11 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     missing_cost_lines = int(totals.get("missing_cost_lines", 0) or 0)
     if missing_cost_lines:
         warnings.append({"code": "missing_cost_lines", "message": f"{missing_cost_lines} verkoopregels missen nog een kostprijsbron."})
+    if revenue_reconciliation.get("status") == "difference":
+        warnings.append({
+            "code": "revenue_reconciliation_difference",
+            "message": "Dashboard omzet wijkt af van break-even contributie-omzet. Dashboard omzet is leidend; controleer categorieen/mapping voor de contributielaag.",
+        })
 
     return {
         "kind": "break_even_analysis_read_model",
@@ -485,8 +516,10 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         "sources": {
             "plan_snapshot_id": _text((plan_snapshot or {}).get("id")),
             "plan_source": "active_plan_snapshot" if plan_snapshot else "missing",
-            "actual_source": "douano_sales_mix_service",
+            "actual_source": "erp_dashboard",
             "fixed_cost_source": "active_plan_snapshot" if _num(plan_payload.get("fixed_cost_total")) > 0 else "fixed_costs_by_year",
+            "actual_revenue_source": "erp_dashboard",
+            "contribution_source": "douano_sales_mix_service",
         },
         "dashboard": {
             "plan": {
@@ -531,6 +564,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         },
         "timeline": timeline,
         "variance_bridge": variance_bridge,
+        "revenue_reconciliation": revenue_reconciliation,
         "plan_actual": {
             "rows": plan_actual_rows,
             "model_note": "Per-SKU planvolume is nog niet beschikbaar. Deze regels tonen daarom plan-kostprijs per SKU naast actual/reforecast verkopen.",
