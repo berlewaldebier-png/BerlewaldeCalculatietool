@@ -316,6 +316,12 @@ Shows:
 - variance vs frozen plan
 - what will be handed to `Nieuw jaar voorbereiden`
 
+First real-data wiring:
+
+- show the same read-model P&L totals as the rest of the screen
+- show read-model warnings directly in the year-close tab
+- keep handoff to `Nieuw jaar voorbereiden` as explicit preview text until the real close workflow is implemented
+
 ### Category Handling
 
 Giftsets, tastings and merchandise must not disappear into a generic SKU bucket.

@@ -1220,7 +1220,15 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
       {activeTab === "year_close" ? (
         <div className="be-next-grid be-next-grid-2">
           <section className="module-card">
-            <div className="module-card-title">Jaarafsluiting preview</div>
+            <div className="module-card-header be-next-table-header">
+              <div>
+                <div className="module-card-title">Jaarafsluiting preview</div>
+                <div className="module-card-text">Preview op basis van hetzelfde read-model als dashboard, P&L en break-even.</div>
+              </div>
+              <span className={`status-pill ${readModelWarnings.length ? "status-warning" : "status-ok"}`}>
+                {readModelWarnings.length ? "controle nodig" : "klaar voor controle"}
+              </span>
+            </div>
             <div className="data-table">
               <table>
                 <tbody>
@@ -1235,6 +1243,20 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
             </div>
           </section>
           <section className="module-card">
+            <div className="module-card-title">Datakwaliteit voor afsluiten</div>
+            {readModelWarnings.length ? (
+              <div className="be-next-warning-list">
+                {readModelWarnings.map((warning) => (
+                  <div key={`year-close-${warning.code}-${warning.message}`} className="editor-status warning">
+                    <strong>{warning.code || "waarschuwing"}</strong>: {warning.message}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="editor-status success">Geen read-model waarschuwingen gevonden.</div>
+            )}
+          </section>
+          <section className="module-card be-next-wide">
             <div className="module-card-title">Handoff naar Nieuw jaar voorbereiden</div>
             <div className="placeholder-block">
               <strong>Expliciete keuze nodig</strong>
