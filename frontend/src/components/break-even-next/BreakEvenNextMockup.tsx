@@ -15,8 +15,6 @@ import {
   YAxis,
 } from "recharts";
 
-import { API_BASE_URL } from "@/lib/api";
-
 type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
 
 type RevenueCategory = "beer" | "giftset" | "service" | "merchandise";
@@ -25,11 +23,6 @@ type ScenarioState = {
   pricePct: number;
   volumePct: number;
   fixedCostPct: number;
-};
-
-type PlanSetupState = {
-  revenue: string;
-  fixedCosts: string;
 };
 
 type ReadModelWarning = {
@@ -288,15 +281,6 @@ function asNumber(value: unknown): number {
 
 function asText(value: unknown): string {
   return String(value ?? "").trim();
-}
-
-async function readJson(response: Response) {
-  const text = await response.text();
-  try {
-    return text ? JSON.parse(text) : {};
-  } catch {
-    return { detail: text };
-  }
 }
 
 function normalizeCategory(value: unknown): RevenueCategory {
@@ -653,9 +637,6 @@ export function BreakEvenNextMockup({
   const [query, setQuery] = useState("");
   const [contributionPage, setContributionPage] = useState(1);
   const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 5, volumePct: 8, fixedCostPct: 0 });
-  const [planSetup, setPlanSetup] = useState<PlanSetupState>({ revenue: selectedYear === 2025 ? "144000" : "", fixedCosts: selectedYear === 2025 ? "56000" : "" });
-  const [planSetupStatus, setPlanSetupStatus] = useState("");
-  const [planSetupBusy, setPlanSetupBusy] = useState(false);
 
   const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
   const readModelWarnings = parsedReadModel?.data_quality?.warnings ?? [];
@@ -760,41 +741,6 @@ export function BreakEvenNextMockup({
 
   const progressPct = activeReforecastFixedCosts > 0 ? Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100)) : 0;
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
-
-  async function createPlanSnapshotFromDashboard() {
-    if (!Number(planSetup.revenue || 0) || !Number(planSetup.fixedCosts || 0)) {
-      setPlanSetupStatus("Vul minimaal planomzet en plan vaste kosten in.");
-      return;
-    }
-    setPlanSetupBusy(true);
-    setPlanSetupStatus("");
-    try {
-      const response = await fetch(`${API_BASE_URL}/integrations/break-even/first-use-backfill`, {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          year: selectedYear,
-          scenario_name: `First-use backfill ${selectedYear}`,
-          replace_active: true,
-          plan_revenue: Number(planSetup.revenue || 0),
-          fixed_cost_total: Number(planSetup.fixedCosts || 0),
-          basis: "invoice",
-        }),
-      });
-      const payload = await readJson(response);
-      if (!response.ok) {
-        throw new Error(String(payload?.detail || response.statusText));
-      }
-      setPlanSetupStatus("First-use backfill opgeslagen. De analyse wordt opnieuw geladen.");
-      window.location.reload();
-    } catch (error) {
-      setPlanSetupStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPlanSetupBusy(false);
-    }
-  }
 
   return (
     <div className="be-next-page">
@@ -902,28 +848,17 @@ export function BreakEvenNextMockup({
             <section className="module-card">
               <div className="module-card-header be-next-table-header">
                 <div>
-                  <div className="module-card-title">Eerste plansnapshot vastleggen</div>
+                  <div className="module-card-title">Break-even plan ontbreekt</div>
                   <div className="module-card-text">
-                    Vul planomzet en plan vaste kosten in. De app reconstrueert variabele kosten, contributie en planmix uit de echte {selectedYear} snapshot.
+                    Leg het frozen plan vast in Jaarbeheer. Daarna gebruikt deze analyse de planomzet, contributie en vaste kosten als stuurinformatie voor {selectedYear}.
                   </div>
                 </div>
                 <span className="status-pill status-warning">plan ontbreekt</span>
               </div>
-              <div className="wizard-form-grid">
-                <label className="form-field">
-                  <span>Plan omzet</span>
-                  <input value={planSetup.revenue} onChange={(event) => setPlanSetup((current) => ({ ...current, revenue: event.target.value }))} inputMode="decimal" placeholder="bijv. 157000" />
-                </label>
-                <label className="form-field">
-                  <span>Plan vaste kosten</span>
-                  <input value={planSetup.fixedCosts} onChange={(event) => setPlanSetup((current) => ({ ...current, fixedCosts: event.target.value }))} inputMode="decimal" placeholder="bijv. 56000" />
-                </label>
-              </div>
               <div className="editor-actions" style={{ marginTop: 12 }}>
-                <button type="button" className="editor-button" onClick={createPlanSnapshotFromDashboard} disabled={planSetupBusy}>
-                  Frozen plan opslaan
-                </button>
-                {planSetupStatus ? <span className="module-card-text">{planSetupStatus}</span> : null}
+                <a className="editor-button" href="/beheer/jaarsets">
+                  Open Jaarbeheer
+                </a>
               </div>
             </section>
           ) : null}

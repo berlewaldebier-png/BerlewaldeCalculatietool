@@ -2097,6 +2097,18 @@ def get_break_even_year_close_preview(
         raise HTTPException(status_code=500, detail="Jaarafsluiting preview kon niet worden geladen.") from exc
 
 
+@router.get("/break-even/year-closes")
+def get_break_even_year_closes(
+    year: int = Query(0),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"items": break_even_planning_storage.list_year_close_snapshots(year=int(year))}
+    except Exception as exc:
+        logger.exception("Break-even year close listing failed")
+        raise HTTPException(status_code=500, detail="Jaarafsluitingen konden niet worden geladen.") from exc
+
+
 @router.get("/break-even/model-review")
 def get_break_even_model_review(_: dict = Depends(require_admin)) -> dict[str, Any]:
     try:

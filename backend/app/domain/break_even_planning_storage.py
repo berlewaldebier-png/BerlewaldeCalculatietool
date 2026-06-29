@@ -373,6 +373,39 @@ def get_year_close_snapshot(*, year: int) -> dict[str, Any] | None:
     }
 
 
+def list_year_close_snapshots(*, year: int = 0) -> list[dict[str, Any]]:
+    ensure_schema()
+    clauses: list[str] = []
+    params: list[Any] = []
+    if int(year or 0) > 0:
+        clauses.append("jaar = %s")
+        params.append(int(year))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, jaar, status, closed_at, created_at, payload
+                FROM year_close_snapshots
+                {where}
+                ORDER BY jaar DESC, closed_at DESC
+                """,
+                tuple(params),
+            )
+            rows = cur.fetchall() or []
+    return [
+        {
+            "id": _text(row[0]),
+            "jaar": int(row[1] or 0),
+            "status": _text(row[2]),
+            "closed_at": _text(row[3].isoformat() if hasattr(row[3], "isoformat") else row[3]),
+            "created_at": _text(row[4].isoformat() if hasattr(row[4], "isoformat") else row[4]),
+            "payload": row[5] if isinstance(row[5], dict) else {},
+        }
+        for row in rows
+    ]
+
+
 def audit_model() -> dict[str, Any]:
     ensure_schema()
     with postgres_storage.connect() as conn:

@@ -10,17 +10,16 @@ export default async function JaarsetsPage() {
 
   return (
     <PageShell
-      title="Jaarsets"
-      subtitle="Overzicht van concepten en definitieve productie-jaren. Rollback is alleen mogelijk voor het laatste jaar."
+      title="Jaarbeheer"
+      subtitle="Beheer jaarsets, frozen break-even plannen, nieuw-jaar-concepten en jaarafsluitingen."
       activePath="/beheer"
       navigation={navigation}
     >
       <div className="placeholder-block" style={{ marginBottom: 16 }}>
         <strong>Let op</strong>
-        Rollback verwijdert alleen de jaarset-data (productie, tarieven, vaste kosten, verpakkingsprijzen en verkoopstrategie)
-        van het doeljaar. Kostprijzen, activaties en prijsvoorstellen worden niet verwijderd.
+        Rollback verwijdert alleen de jaarset-data van het doeljaar. Kostprijzen, activaties en prijsvoorstellen worden niet verwijderd.
         <div className="muted" style={{ marginTop: 8 }}>
-          Concepten kun je altijd verwijderen. Een definitief jaar kun je alleen terugdraaien als het het hoogste jaar is.
+          Concepten kun je altijd verwijderen. Een definitief jaar kun je alleen terugdraaien als het het hoogste jaar is. First-use backfill legt een eerste break-even plan vast voor bestaande jaren.
         </div>
       </div>
 
