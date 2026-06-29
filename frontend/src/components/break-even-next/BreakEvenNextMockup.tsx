@@ -443,12 +443,12 @@ function sumBy(rows: ProductRow[], unitsKey: "plannedUnits" | "actualUnitsYtd" |
   };
 }
 
-function buildScenario(rows: ProductRow[], scenario: ScenarioState, baseFixedCosts: number) {
+function buildScenarioFromTotals(base: { revenue: number; variable: number }, scenario: ScenarioState, baseFixedCosts: number) {
   const priceFactor = 1 + scenario.pricePct / 100;
   const volumeFactor = 1 + scenario.volumePct / 100;
   const fixedFactor = 1 + scenario.fixedCostPct / 100;
-  const revenue = rows.reduce((sum, row) => sum + row.reforecastUnits * volumeFactor * row.plannedPrice * priceFactor, 0);
-  const variable = rows.reduce((sum, row) => sum + row.reforecastUnits * volumeFactor * variableCost(row), 0);
+  const revenue = base.revenue * volumeFactor * priceFactor;
+  const variable = base.variable * volumeFactor;
   const contribution = revenue - variable;
   const fixedCosts = baseFixedCosts * fixedFactor;
   return {
@@ -694,9 +694,12 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
     variable: parsedReadModel?.dashboard?.reforecast?.variable_cost || mockReforecast.variable,
     contribution: parsedReadModel?.dashboard?.reforecast?.contribution || mockReforecast.contribution,
   };
-  const scenarioResult = useMemo(() => buildScenario(products, scenario, parsedReadModel?.dashboard?.reforecast?.fixed_costs || reforecastFixedCosts), [parsedReadModel?.dashboard?.reforecast?.fixed_costs, scenario]);
   const activePlanFixedCosts = parsedReadModel?.dashboard?.plan?.fixed_costs || planFixedCosts;
   const activeReforecastFixedCosts = parsedReadModel?.dashboard?.reforecast?.fixed_costs || reforecastFixedCosts;
+  const scenarioResult = useMemo(
+    () => buildScenarioFromTotals({ revenue: reforecast.revenue, variable: reforecast.variable }, scenario, activeReforecastFixedCosts),
+    [activeReforecastFixedCosts, reforecast.revenue, reforecast.variable, scenario],
+  );
   const fixedRate = activePlanFixedCosts / plannedNormalLiters;
   const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
   const planResult = parsedReadModel?.dashboard?.plan?.result || (plan.contribution - activePlanFixedCosts);

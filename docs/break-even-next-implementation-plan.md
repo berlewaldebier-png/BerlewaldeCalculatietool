@@ -298,6 +298,14 @@ When reforecast is below plan, show suggested scenarios:
 
 The first mock-up version should show these as read-only advice cards. Later they can become one-click scenario presets, but they must still remain analysis-only until explicitly promoted into planning.
 
+First real-data wiring:
+
+- calculate scenario outcome from read-model reforecast revenue, variable costs and fixed costs
+- apply price changes to revenue
+- apply volume changes to revenue and variable costs
+- apply fixed-cost changes only to fixed costs
+- do not mutate plan, actuals or reforecast snapshots
+
 #### 8. Year Close Preview
 
 Shows:
