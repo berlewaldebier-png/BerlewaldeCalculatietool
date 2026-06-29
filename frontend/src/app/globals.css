@@ -3883,6 +3883,23 @@ a {
   gap: 1rem;
 }
 
+.be-next-year-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.be-next-year-switcher .secondary-button {
+  text-decoration: none;
+}
+
+.be-next-year-switcher .secondary-button.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .be-next-table-header .editor-input {
   max-width: 360px;
 }
@@ -4093,6 +4110,10 @@ a {
 
   .be-next-table-header .editor-input {
     max-width: none;
+  }
+
+  .be-next-year-switcher {
+    justify-content: flex-start;
   }
 
   .be-next-advice {

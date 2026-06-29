@@ -31,7 +31,7 @@ export default async function BreakEvenNextPage({ searchParams }: BreakEvenNextP
       activePath="/break-even"
       navigation={bootstrap.navigation ?? []}
     >
-      <BreakEvenNextMockup readModel={readModel} readModelError={readModelError} />
+      <BreakEvenNextMockup selectedYear={year} readModel={readModel} readModelError={readModelError} />
     </PageShell>
   );
 }

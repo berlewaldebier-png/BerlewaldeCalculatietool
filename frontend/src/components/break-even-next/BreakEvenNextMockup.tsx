@@ -659,7 +659,15 @@ function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: num
   return hit?.month ?? "niet binnen dit jaar";
 }
 
-export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readModel?: Record<string, unknown> | null; readModelError?: string }) {
+export function BreakEvenNextMockup({
+  selectedYear,
+  readModel,
+  readModelError = "",
+}: {
+  selectedYear: number;
+  readModel?: Record<string, unknown> | null;
+  readModelError?: string;
+}) {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
   const [contributionPage, setContributionPage] = useState(1);
@@ -673,6 +681,10 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
   const readModelVarianceBridge = parsedReadModel?.variance_bridge ?? [];
   const readModelPlanActualRows = parsedReadModel?.plan_actual?.rows ?? [];
   const planActualNote = parsedReadModel?.plan_actual?.model_note ?? "";
+  const yearOptions = useMemo(() => {
+    const values = new Set([2025, 2026, selectedYear, selectedYear + 1]);
+    return [...values].filter((year) => year >= 2024 && year <= 2100).sort((a, b) => a - b);
+  }, [selectedYear]);
   const mockPlan = useMemo(() => sumBy(products, "plannedUnits", "plan"), []);
   const mockActual = useMemo(() => sumBy(products, "actualUnitsYtd", "actual"), []);
   const mockReforecast = useMemo(() => sumBy(products, "reforecastUnits", "reforecast"), []);
@@ -777,10 +789,16 @@ export function BreakEvenNextMockup({ readModel, readModelError = "" }: { readMo
           <div>
             <div className="module-card-title">Mock-up: break-even als stuurinstrument</div>
             <div className="module-card-text">
-              Tijdelijke frontend-prototype met voorbeelddata. Dit scherm schrijft niets weg en verandert de bestaande break-even analyse niet.
+              Tijdelijke frontend-prototype. De backend-readmodel data wordt geladen voor jaar {selectedYear}; voorbeelddata is alleen fallback als de backend niets levert.
             </div>
           </div>
-          <span className="status-pill status-warning">mock-up</span>
+          <div className="be-next-year-switcher" aria-label="Rapportagejaar kiezen">
+            {yearOptions.map((year) => (
+              <a key={year} className={`secondary-button${year === selectedYear ? " active" : ""}`} href={`/break-even-next?year=${year}`}>
+                {year}
+              </a>
+            ))}
+          </div>
         </div>
       </section>
 
