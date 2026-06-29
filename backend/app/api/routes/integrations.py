@@ -2012,6 +2012,35 @@ def post_break_even_plan(
         raise HTTPException(status_code=500, detail="Break-even plan kon niet worden opgeslagen.") from exc
 
 
+@router.post("/break-even/first-use-backfill")
+def post_break_even_first_use_backfill(
+    payload: dict[str, Any] = Body(default={}),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        year = int(payload.get("year", payload.get("jaar", 0)) or 0)
+        plan_revenue = float(payload.get("plan_revenue", payload.get("plan_omzet", 0)) or 0)
+        fixed_cost_total = float(payload.get("fixed_cost_total", payload.get("vaste_kosten", 0)) or 0)
+        scenario_name = str(payload.get("scenario_name", payload.get("naam", "First-use backfill")) or "First-use backfill")
+        basis = str(payload.get("basis", "invoice") or "invoice")
+        replace_active = bool(payload.get("replace_active", False))
+        return {
+            "item": break_even_planning_service.create_first_use_backfill_plan(
+                year=year,
+                plan_revenue=plan_revenue,
+                fixed_cost_total=fixed_cost_total,
+                scenario_name=scenario_name,
+                basis=basis,
+                replace_active=replace_active,
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even first-use backfill failed")
+        raise HTTPException(status_code=500, detail="Break-even first-use backfill kon niet worden opgeslagen.") from exc
+
+
 @router.post("/break-even/reforecast")
 def post_break_even_reforecast(
     payload: dict[str, Any] = Body(default={}),

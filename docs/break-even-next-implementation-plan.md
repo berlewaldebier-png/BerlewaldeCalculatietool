@@ -135,6 +135,7 @@ Current testing rule:
 - Real analysis cards must not silently fall back to example plan, actual or SKU data.
 - Actual revenue and contribution use the processed `douano_sales_line_cost_snapshots` from Omzet & Marge. The read model exposes a reconciliation against Dashboard > Omzet over tijd, but the expected status is a match once snapshots are current.
 - If no frozen plan exists, the break-even dashboard offers an explicit first-time plan action. It stores user-entered plan revenue, contribution, liters and units as an active plan snapshot; it does not infer plan from actuals.
+- First-use backfill is allowed only as an explicit action: the user enters historical plan revenue and fixed costs, while variable-cost ratio, contribution and SKU mix are reconstructed from processed actual snapshots.
 - Reforecast values use the latest explicit reforecast snapshot when one exists. Until then, the screen clearly labels reforecast as temporarily equal to actual YTD.
 
 ### Mock-Up Screens
@@ -173,9 +174,9 @@ Visuals:
   - cause breakdown for remaining rows, such as product mapping, LOT alias or missing cost source
 - first-time plan setup when no active plan exists:
   - explicit plan revenue
-  - explicit plan contribution
-  - optional plan liters and units
-  - optional plan assumption text
+  - explicit plan fixed costs
+  - derived variable-cost ratio from actuals
+  - derived contribution and SKU plan mix from actuals scaled to plan revenue
 - suggested steering action when reforecast is below plan:
   - required price increase
   - required contribution volume increase

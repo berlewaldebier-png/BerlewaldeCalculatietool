@@ -237,7 +237,9 @@ def _plan_actual_rows(plan_payload: dict[str, Any], contribution_rows: list[dict
         actual = actual_by_sku.get(sku_id, {})
         sku_name = _text(actual.get("sku_name")) or _text(plan.get("sku_name")) or sku_id
         sku_code = _text(actual.get("sku_code")) or _text(plan.get("sku_code"))
-        plan_variable_cost = _num(plan.get("inkoop")) + _num(plan.get("verpakkingskosten")) + _num(plan.get("accijns"))
+        plan_variable_cost = _num(plan.get("planned_variable_cost_unit"))
+        if plan_variable_cost <= 0:
+            plan_variable_cost = _num(plan.get("inkoop")) + _num(plan.get("verpakkingskosten")) + _num(plan.get("accijns"))
         has_plan = bool(plan)
         has_actual = bool(actual)
         if has_plan and has_actual:
@@ -251,12 +253,12 @@ def _plan_actual_rows(plan_payload: dict[str, Any], contribution_rows: list[dict
                 "sku_id": sku_id,
                 "sku_code": sku_code,
                 "sku_name": sku_name,
-                "category": _text(actual.get("category")) or _sku_category({"sku_id": sku_id}, {sku_id: {"sku_name": sku_name, "sku_code": sku_code}}),
-                "planned_units": 0.0,
-                "planned_liters": 0.0,
+                "category": _text(actual.get("category")) or _text(plan.get("category")) or _sku_category({"sku_id": sku_id}, {sku_id: {"sku_name": sku_name, "sku_code": sku_code}}),
+                "planned_units": _num(plan.get("planned_units")),
+                "planned_liters": _num(plan.get("planned_liters")),
                 "planned_variable_cost_unit": plan_variable_cost,
                 "planned_fixed_allocation_unit": _num(plan.get("abc_overhead")),
-                "planned_cost_unit": _num(plan.get("kostprijs")),
+                "planned_cost_unit": _num(plan.get("kostprijs")) or plan_variable_cost + _num(plan.get("abc_overhead")),
                 "actual_units": _num(actual.get("units")),
                 "actual_revenue": _num(actual.get("revenue")),
                 "actual_contribution": _num(actual.get("contribution")),
@@ -330,6 +332,132 @@ def build_plan_payload(*, year: int, scenario_name: str = "Basis", targets: dict
             "actual_scope": "Actual LOT purchase costs stay in lot_cost_records and sales_lot_allocations for Omzet en Marge.",
         },
     }
+
+
+def build_first_use_backfill_plan_payload(
+    *,
+    year: int,
+    scenario_name: str = "First-use backfill",
+    plan_revenue: float,
+    fixed_cost_total: float,
+    basis: str = "invoice",
+) -> dict[str, Any]:
+    year_value = int(year or 0)
+    if year_value <= 0:
+        raise ValueError("Jaar is verplicht.")
+    plan_revenue_value = _num(plan_revenue)
+    fixed_cost_value = _num(fixed_cost_total)
+    if plan_revenue_value <= 0:
+        raise ValueError("Planomzet is verplicht.")
+    if fixed_cost_value < 0:
+        raise ValueError("Vaste kosten mogen niet negatief zijn.")
+
+    sales = _sales_totals(year_value, basis)
+    labels = _sku_labels()
+    actual_rows = [_contribution_row(row, labels) for row in sales.get("rows", []) if isinstance(row, dict)]
+    actual_totals = sales.get("totals") if isinstance(sales.get("totals"), dict) else {}
+    actual_revenue = _num(actual_totals.get("revenue"))
+    actual_variable = _num(actual_totals.get("variable_cost"))
+    actual_contribution = _num(actual_totals.get("contribution"))
+    if actual_revenue <= 0:
+        raise ValueError("Geen werkelijke omzet gevonden om first-use backfill op te baseren.")
+
+    revenue_scale = plan_revenue_value / actual_revenue
+    variable_ratio = _money_ratio(actual_variable, actual_revenue)
+    contribution_ratio = _money_ratio(actual_contribution, actual_revenue)
+    plan_variable = plan_revenue_value * variable_ratio
+    plan_contribution = plan_revenue_value - plan_variable
+
+    planning_rows: list[dict[str, Any]] = []
+    for row in actual_rows:
+        actual_units = _num(row.get("units"))
+        planned_units = actual_units * revenue_scale
+        planned_revenue = _num(row.get("revenue")) * revenue_scale
+        planned_variable = _num(row.get("variable_cost")) * revenue_scale
+        planned_contribution = planned_revenue - planned_variable
+        planning_rows.append(
+            {
+                "sku_id": _text(row.get("sku_id")),
+                "sku_code": _text(row.get("sku_code")),
+                "sku_name": _text(row.get("sku_name")),
+                "category": _text(row.get("category")),
+                "source": "actual_mix_scaled_to_plan_revenue",
+                "actual_units": actual_units,
+                "actual_revenue": _num(row.get("revenue")),
+                "actual_variable_cost": _num(row.get("variable_cost")),
+                "actual_contribution": _num(row.get("contribution")),
+                "planned_units": planned_units,
+                "planned_revenue": planned_revenue,
+                "planned_variable_cost": planned_variable,
+                "planned_contribution": planned_contribution,
+                "planned_variable_cost_unit": _money_ratio(planned_variable, planned_units),
+                "planned_revenue_unit": _money_ratio(planned_revenue, planned_units),
+                "planned_contribution_unit": _money_ratio(planned_contribution, planned_units),
+            }
+        )
+
+    targets = _plan_targets_payload(
+        {
+            "revenue": plan_revenue_value,
+            "contribution": plan_contribution,
+            "units": sum(_num(row.get("planned_units")) for row in planning_rows),
+            "mix_assumption": f"{year_value} first-use backfill: actual mix scaled to planned revenue.",
+        },
+        fixed_cost_total=fixed_cost_value,
+    )
+    targets["variable_cost"] = plan_variable
+    targets["variable_cost_ratio"] = variable_ratio
+
+    return {
+        "kind": "break_even_plan",
+        "year": year_value,
+        "scenario_name": _text(scenario_name) or "First-use backfill",
+        "fixed_cost_total": fixed_cost_value,
+        "targets": targets,
+        "planning_rows": planning_rows,
+        "summary": {
+            "sku_count": len(planning_rows),
+            "missing_cost_line_count": int((actual_totals or {}).get("missing_cost_lines", 0) or 0),
+            "actual_revenue": actual_revenue,
+            "actual_variable_cost": actual_variable,
+            "actual_contribution": actual_contribution,
+            "actual_variable_cost_ratio": variable_ratio,
+            "actual_contribution_ratio": contribution_ratio,
+            "plan_variable_cost": plan_variable,
+            "plan_contribution": plan_contribution,
+            "revenue_scale": revenue_scale,
+        },
+        "model": {
+            "planning_scope": "First-use backfill reconstructs the historical plan from explicit plan revenue/fixed costs and actual mix.",
+            "actual_scope": "Actuals remain immutable Omzet en Marge snapshots.",
+            "backfill_policy": "Only explicit plan revenue and fixed costs are user input. Variable cost ratio and mix are derived from actual processed snapshots.",
+        },
+    }
+
+
+def create_first_use_backfill_plan(
+    *,
+    year: int,
+    plan_revenue: float,
+    fixed_cost_total: float,
+    scenario_name: str = "First-use backfill",
+    basis: str = "invoice",
+    replace_active: bool = False,
+) -> dict[str, Any]:
+    payload = build_first_use_backfill_plan_payload(
+        year=int(year or 0),
+        scenario_name=scenario_name,
+        plan_revenue=plan_revenue,
+        fixed_cost_total=fixed_cost_total,
+        basis=basis,
+    )
+    return break_even_planning_storage.create_plan_snapshot(
+        year=int(year or 0),
+        scenario_name=scenario_name,
+        source="first_use_backfill",
+        payload=payload,
+        replace_active=replace_active,
+    )
 
 
 def create_plan_from_active_costs(
