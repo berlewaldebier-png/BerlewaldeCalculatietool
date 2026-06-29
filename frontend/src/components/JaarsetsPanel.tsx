@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
+import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 
 import { API_BASE_URL } from "@/lib/apiShared";
 
@@ -42,32 +44,13 @@ type YearCloseSnapshot = {
   payload?: Record<string, unknown>;
 };
 
-type YearClosePreview = {
-  kind?: string;
-  year: number;
-  basis: string;
-  fixed_cost_total: number;
-  actuals?: {
-    totals?: Record<string, unknown>;
-  };
-  checks?: {
-    missing_cost_lines?: number;
-    unmapped_revenue?: number;
-  };
-};
+type ManagementRow =
+  | { id: string; year: number; status: "concept"; kind: "Nieuw jaar voorbereiden"; date: string; draft: DraftRow }
+  | { id: string; year: number; status: "definitief"; kind: "First-use backfill"; date: string; plan: PlanSnapshot }
+  | { id: string; year: number; status: "definitief"; kind: "Jaar afsluiten"; date: string; close: YearCloseSnapshot }
+  | { id: string; year: number; status: "definitief"; kind: "Jaarset"; date: string; isLastYear: boolean };
 
-type YearOverviewRow = {
-  year: number;
-  draft?: DraftRow;
-  nextDraft?: DraftRow;
-  isProduction: boolean;
-  isLastProductionYear: boolean;
-  activePlan?: PlanSnapshot;
-  latestPlan?: PlanSnapshot;
-  yearClose?: YearCloseSnapshot;
-};
-
-type BusyState = null | "load" | "deleteDraft" | "rollback" | "backfill" | "previewClose" | "closeYear";
+type BusyState = null | "load" | "deleteDraft" | "deletePlan" | "deleteClose" | "rollback" | "backfill";
 
 async function readJson(response: Response) {
   const text = await response.text();
@@ -162,32 +145,26 @@ async function postFirstUseBackfill(params: { year: number; planRevenue: number;
   return payload;
 }
 
-async function getYearClosePreview(year: number): Promise<YearClosePreview> {
-  const response = await fetch(
-    `${API_BASE_URL}/integrations/break-even/year-close-preview?year=${encodeURIComponent(String(year))}&basis=invoice`,
-    {
-      credentials: "include",
-      cache: "no-store",
-    }
-  );
-  const payload = await readJson(response);
-  if (!response.ok) {
-    throw new Error(String(payload?.detail || payload?.error || `Jaarafsluiting controleren mislukt (${response.status}).`));
-  }
-  return payload.preview as YearClosePreview;
-}
-
-async function postCloseYear(year: number) {
-  const response = await fetch(`${API_BASE_URL}/integrations/break-even/close-year`, {
-    method: "POST",
+async function deletePlan(snapshotId: string) {
+  const response = await fetch(`${API_BASE_URL}/integrations/break-even/plans/${encodeURIComponent(snapshotId)}`, {
+    method: "DELETE",
     credentials: "include",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ year, basis: "invoice", overwrite: false }),
   });
   const payload = await readJson(response);
   if (!response.ok) {
-    throw new Error(String(payload?.detail || payload?.error || `Jaarafsluiting opslaan mislukt (${response.status}).`));
+    throw new Error(String(payload?.detail || payload?.error || `Plan verwijderen mislukt (${response.status}).`));
+  }
+  return payload;
+}
+
+async function deleteYearClose(year: number) {
+  const response = await fetch(`${API_BASE_URL}/integrations/break-even/year-closes/${encodeURIComponent(String(year))}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw new Error(String(payload?.detail || payload?.error || `Jaarafsluiting verwijderen mislukt (${response.status}).`));
   }
   return payload;
 }
@@ -197,7 +174,7 @@ function formatIso(value: string) {
   try {
     const dt = new Date(value);
     if (Number.isNaN(dt.getTime())) return value;
-    return dt.toLocaleString();
+    return dt.toLocaleDateString();
   } catch {
     return value;
   }
@@ -208,17 +185,7 @@ function num(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function money(value: unknown) {
-  const amount = num(value);
-  if (!amount) return "-";
-  return new Intl.NumberFormat("nl-NL", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function planMetric(plan: PlanSnapshot | undefined, key: "revenue" | "contribution" | "fixed_costs") {
+function planMetric(plan: PlanSnapshot | undefined, key: "revenue" | "fixed_costs") {
   const payload = (plan?.payload ?? {}) as Record<string, unknown>;
   const targets = (payload.targets ?? {}) as Record<string, unknown>;
   const model = (payload.model ?? {}) as Record<string, unknown>;
@@ -228,79 +195,110 @@ function planMetric(plan: PlanSnapshot | undefined, key: "revenue" | "contributi
   return num(targets[key] ?? model[key]);
 }
 
-function previewTotal(preview: YearClosePreview | null, key: string) {
-  return num(preview?.actuals?.totals?.[key]);
-}
-
-function planLabel(plan: PlanSnapshot | undefined) {
-  if (!plan) return "Geen plan";
-  if (plan.status === "active" && plan.source === "first_use_backfill") return "First-use backfill";
-  if (plan.status === "active") return "Plan actief";
-  return `Plan ${plan.status || "onbekend"}`;
-}
-
-function rowStatus(row: YearOverviewRow) {
-  if (row.yearClose) return "Afgesloten";
-  if (row.draft) return "Concept nieuw jaar";
-  if (row.activePlan?.source === "first_use_backfill") return "First-use backfill";
-  if (row.activePlan) return "Plan actief";
-  if (row.isProduction) return "Productiejaar";
-  return "Nog niet ingericht";
-}
-
 function buildRows(params: {
   yearsets: YearsetsResponse | null;
   plans: PlanSnapshot[];
   closes: YearCloseSnapshot[];
-}): YearOverviewRow[] {
-  const years = new Set<number>();
-  const productionYears = new Set<number>();
-  const draftsByYear = new Map<number, DraftRow>();
-  const activePlansByYear = new Map<number, PlanSnapshot>();
-  const latestPlansByYear = new Map<number, PlanSnapshot>();
-  const closesByYear = new Map<number, YearCloseSnapshot>();
+}): ManagementRow[] {
+  const rows: ManagementRow[] = [];
+  const lastYear = Number(params.yearsets?.last_year ?? 0) || 0;
+
+  for (const draft of params.yearsets?.drafts ?? []) {
+    rows.push({
+      id: `draft:${draft.target_year}:${draft.id || draft.owner}`,
+      year: Number(draft.target_year),
+      status: "concept",
+      kind: "Nieuw jaar voorbereiden",
+      date: draft.updated_at || draft.created_at,
+      draft,
+    });
+  }
+
+  for (const plan of params.plans) {
+    if (plan.status !== "active" || plan.source !== "first_use_backfill") continue;
+    rows.push({
+      id: `plan:${plan.id}`,
+      year: Number(plan.jaar),
+      status: "definitief",
+      kind: "First-use backfill",
+      date: plan.updated_at || plan.frozen_at || plan.created_at,
+      plan,
+    });
+  }
+
+  for (const close of params.closes) {
+    rows.push({
+      id: `close:${close.jaar}`,
+      year: Number(close.jaar),
+      status: "definitief",
+      kind: "Jaar afsluiten",
+      date: close.closed_at || close.created_at,
+      close,
+    });
+  }
 
   for (const year of params.yearsets?.production_years ?? []) {
-    const value = Number(year);
-    if (value > 0) {
-      years.add(value);
-      productionYears.add(value);
-    }
-  }
-  for (const draft of params.yearsets?.drafts ?? []) {
-    const value = Number(draft.target_year);
-    if (value > 0) {
-      years.add(value);
-      draftsByYear.set(value, draft);
-    }
-  }
-  for (const plan of params.plans) {
-    const value = Number(plan.jaar);
-    if (value <= 0) continue;
-    years.add(value);
-    if (!latestPlansByYear.has(value)) latestPlansByYear.set(value, plan);
-    if (plan.status === "active" && !activePlansByYear.has(value)) activePlansByYear.set(value, plan);
-  }
-  for (const close of params.closes) {
-    const value = Number(close.jaar);
-    if (value > 0) {
-      years.add(value);
-      closesByYear.set(value, close);
-    }
+    const parsedYear = Number(year);
+    if (!parsedYear) continue;
+    rows.push({
+      id: `yearset:${parsedYear}`,
+      year: parsedYear,
+      status: "definitief",
+      kind: "Jaarset",
+      date: "",
+      isLastYear: parsedYear === lastYear,
+    });
   }
 
-  return [...years]
-    .sort((a, b) => b - a)
-    .map((year) => ({
-      year,
-      draft: draftsByYear.get(year),
-      nextDraft: draftsByYear.get(year + 1),
-      isProduction: productionYears.has(year),
-      isLastProductionYear: year === Number(params.yearsets?.last_year ?? 0),
-      activePlan: activePlansByYear.get(year),
-      latestPlan: latestPlansByYear.get(year),
-      yearClose: closesByYear.get(year),
-    }));
+  return rows.sort((a, b) => {
+    if (b.year !== a.year) return b.year - a.year;
+    return kindOrder(a.kind) - kindOrder(b.kind);
+  });
+}
+
+function kindOrder(kind: ManagementRow["kind"]) {
+  if (kind === "Jaarset") return 0;
+  if (kind === "Jaar afsluiten") return 1;
+  if (kind === "First-use backfill") return 2;
+  return 3;
+}
+
+function IconButton({
+  title,
+  children,
+  onClick,
+  disabled,
+}: {
+  title: string;
+  children: ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="editor-button editor-button-secondary editor-button-icon"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {children}
+    </button>
+  );
+}
+
+function LinkIconButton({ title, href, children }: { title: string; href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href as any}
+      className="editor-button editor-button-secondary editor-button-icon"
+      title={title}
+      aria-label={title}
+    >
+      {children}
+    </Link>
+  );
 }
 
 export function JaarsetsPanel() {
@@ -309,16 +307,13 @@ export function JaarsetsPanel() {
   const [yearsets, setYearsets] = useState<YearsetsResponse | null>(null);
   const [plans, setPlans] = useState<PlanSnapshot[]>([]);
   const [closes, setCloses] = useState<YearCloseSnapshot[]>([]);
-  const [info, setInfo] = useState<Record<string, unknown> | null>(null);
+  const [info, setInfo] = useState("");
+  const [editingPlan, setEditingPlan] = useState<PlanSnapshot | null>(null);
   const [backfillYear, setBackfillYear] = useState("2025");
   const [backfillRevenue, setBackfillRevenue] = useState("144000");
   const [backfillFixedCosts, setBackfillFixedCosts] = useState("56000");
-  const [closePreview, setClosePreview] = useState<YearClosePreview | null>(null);
-  const [closePreviewYear, setClosePreviewYear] = useState(0);
 
   const rows = useMemo(() => buildRows({ yearsets, plans, closes }), [yearsets, plans, closes]);
-  const lastYear = Number(yearsets?.last_year ?? 0) || 0;
-  const activePlanCount = plans.filter((plan) => plan.status === "active").length;
 
   async function reload() {
     const [nextYearsets, nextPlans, nextCloses] = await Promise.all([getYearsets(), getPlans(), getYearCloses()]);
@@ -335,45 +330,40 @@ export function JaarsetsPanel() {
       .finally(() => setBusy(null));
   }, []);
 
-  function runAction(action: BusyState, task: () => Promise<Record<string, unknown>>) {
+  function runAction(action: BusyState, task: () => Promise<unknown>, successMessage: string) {
     setBusy(action);
     setError("");
-    setInfo(null);
+    setInfo("");
     void task()
-      .then((res) => {
-        setInfo(res);
-        if (action === "closeYear") {
-          setClosePreview(null);
-          setClosePreviewYear(0);
-        }
+      .then(() => {
+        setInfo(successMessage);
+        setEditingPlan(null);
         return reload();
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Actie mislukt."))
       .finally(() => setBusy(null));
   }
 
-  function previewYearClose(year: number) {
-    setBusy("previewClose");
+  function startPlanEdit(plan: PlanSnapshot) {
+    setEditingPlan(plan);
+    setBackfillYear(String(plan.jaar || ""));
+    setBackfillRevenue(String(planMetric(plan, "revenue") || ""));
+    setBackfillFixedCosts(String(planMetric(plan, "fixed_costs") || ""));
+    setInfo("");
     setError("");
-    setInfo(null);
-    setClosePreview(null);
-    setClosePreviewYear(year);
-    void getYearClosePreview(year)
-      .then((preview) => setClosePreview(preview))
-      .catch((err) => setError(err instanceof Error ? err.message : "Jaarafsluiting controleren mislukt."))
-      .finally(() => setBusy(null));
   }
 
-  function closeYearFromPreview() {
-    if (!closePreviewYear || !closePreview) return;
-    const missingCostLines = Number(closePreview.checks?.missing_cost_lines ?? 0);
-    const unmappedRevenue = Number(closePreview.checks?.unmapped_revenue ?? 0);
-    const warning = missingCostLines || unmappedRevenue
-      ? ` Er zijn nog aandachtspunten: ${missingCostLines} regels zonder kostprijs en ${money(unmappedRevenue)} ongekoppelde omzet.`
-      : "";
-    const ok = window.confirm(`Jaar ${closePreviewYear} definitief afsluiten?${warning}`);
+  function saveBackfill() {
+    const year = Number(backfillYear);
+    const planRevenue = Number(backfillRevenue);
+    const fixedCosts = Number(backfillFixedCosts);
+    if (!year || !planRevenue || !fixedCosts) {
+      setError("Vul jaar, plan omzet en plan vaste kosten in.");
+      return;
+    }
+    const ok = window.confirm(`First-use backfill voor ${year} opslaan? Het actieve break-even plan voor dit jaar wordt vervangen.`);
     if (!ok) return;
-    runAction("closeYear", () => postCloseYear(closePreviewYear));
+    runAction("backfill", () => postFirstUseBackfill({ year, planRevenue, fixedCosts }), "First-use backfill opgeslagen.");
   }
 
   return (
@@ -381,7 +371,7 @@ export function JaarsetsPanel() {
       <div className="module-card-header">
         <div className="module-card-title">Jaarbeheer</div>
         <div className="module-card-text">
-          Beheer per jaar de jaarset, het frozen break-even plan, nieuw-jaar-concepten en de jaarafsluiting. Break-even gebruikt het actieve plan als stuurinformatie; jaarafsluiting legt de werkelijkheid vast.
+          Compact beheer van jaarsets, first-use backfill, jaarafsluiting en nieuw-jaar-concepten.
         </div>
       </div>
 
@@ -392,280 +382,165 @@ export function JaarsetsPanel() {
         </div>
       ) : null}
 
-      <div className="data-quality-score-grid" style={{ marginBottom: 18 }}>
-        <div className="data-quality-card">
-          <div className="data-quality-card-title">Productiejaren</div>
-          <div className="data-quality-card-count">{yearsets?.production_years?.length ?? 0}</div>
-          <div className="data-quality-card-text">Laatste jaar: {lastYear || "-"}</div>
+      {info ? (
+        <div className="placeholder-block" style={{ marginBottom: 16 }}>
+          <strong>Resultaat</strong>
+          {info}
         </div>
-        <div className="data-quality-card">
-          <div className="data-quality-card-title">Actieve plannen</div>
-          <div className="data-quality-card-count">{activePlanCount}</div>
-          <div className="data-quality-card-text">Frozen plan of first-use backfill.</div>
-        </div>
-        <div className="data-quality-card">
-          <div className="data-quality-card-title">Concepten nieuw jaar</div>
-          <div className="data-quality-card-count">{yearsets?.drafts?.length ?? 0}</div>
-          <div className="data-quality-card-text">Concepten blijven bewerkbaar tot commit.</div>
-        </div>
-        <div className="data-quality-card">
-          <div className="data-quality-card-title">Afgesloten jaren</div>
-          <div className="data-quality-card-count">{closes.length}</div>
-          <div className="data-quality-card-text">Definitieve resultaat-snapshots.</div>
-        </div>
+      ) : null}
+
+      <div className="dataset-editor-scroll">
+        <table className="dataset-editor-table">
+          <thead>
+            <tr>
+              <th style={{ width: 100 }}>Jaar</th>
+              <th style={{ width: 140 }}>Status</th>
+              <th>Soort</th>
+              <th style={{ width: 150 }}>Datum</th>
+              <th style={{ width: 170, textAlign: "right" }}>Acties</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>{row.year}</td>
+                <td>
+                  <span className={`status-pill ${row.status === "definitief" ? "status-ok" : "status-warning"}`}>
+                    {row.status}
+                  </span>
+                </td>
+                <td>{row.kind}</td>
+                <td>{formatIso(row.date)}</td>
+                <td>
+                  <div className="editor-actions" style={{ justifyContent: "flex-end", marginTop: 0, gap: 8 }}>
+                    {row.kind === "Nieuw jaar voorbereiden" ? (
+                      <>
+                        <LinkIconButton
+                          title="Open concept"
+                          href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.draft.source_year))}&target_year=${encodeURIComponent(String(row.draft.target_year))}`}
+                        >
+                          <ExternalLink size={16} aria-hidden="true" />
+                        </LinkIconButton>
+                        <LinkIconButton
+                          title="Bewerk concept"
+                          href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.draft.source_year))}&target_year=${encodeURIComponent(String(row.draft.target_year))}`}
+                        >
+                          <Pencil size={16} aria-hidden="true" />
+                        </LinkIconButton>
+                        <IconButton
+                          title="Verwijder concept"
+                          disabled={busy !== null}
+                          onClick={() => {
+                            const ok = window.confirm(`Concept voor ${row.draft.target_year} verwijderen?`);
+                            if (!ok) return;
+                            runAction("deleteDraft", () => deleteDraftsForYear(row.draft.target_year), "Concept verwijderd.");
+                          }}
+                        >
+                          <Trash2 size={16} aria-hidden="true" />
+                        </IconButton>
+                      </>
+                    ) : null}
+
+                    {row.kind === "First-use backfill" ? (
+                      <>
+                        <IconButton title="Bewerk first-use backfill" disabled={busy !== null} onClick={() => startPlanEdit(row.plan)}>
+                          <Pencil size={16} aria-hidden="true" />
+                        </IconButton>
+                        <IconButton
+                          title="Archiveer first-use backfill"
+                          disabled={busy !== null}
+                          onClick={() => {
+                            const ok = window.confirm(`First-use backfill voor ${row.year} archiveren?`);
+                            if (!ok) return;
+                            runAction("deletePlan", () => deletePlan(row.plan.id), "First-use backfill gearchiveerd.");
+                          }}
+                        >
+                          <Trash2 size={16} aria-hidden="true" />
+                        </IconButton>
+                      </>
+                    ) : null}
+
+                    {row.kind === "Jaar afsluiten" ? (
+                      <>
+                        <LinkIconButton title="Open jaarafsluiting" href={`/jaar-afsluiten?year=${encodeURIComponent(String(row.year))}`}>
+                          <ExternalLink size={16} aria-hidden="true" />
+                        </LinkIconButton>
+                        <LinkIconButton title="Bewerk jaarafsluiting" href={`/jaar-afsluiten?year=${encodeURIComponent(String(row.year))}`}>
+                          <Pencil size={16} aria-hidden="true" />
+                        </LinkIconButton>
+                        <IconButton
+                          title="Verwijder jaarafsluiting"
+                          disabled={busy !== null}
+                          onClick={() => {
+                            const ok = window.confirm(`Jaarafsluiting ${row.year} verwijderen?`);
+                            if (!ok) return;
+                            runAction("deleteClose", () => deleteYearClose(row.year), "Jaarafsluiting verwijderd.");
+                          }}
+                        >
+                          <Trash2 size={16} aria-hidden="true" />
+                        </IconButton>
+                      </>
+                    ) : null}
+
+                    {row.kind === "Jaarset" ? (
+                      <>
+                        <LinkIconButton title="Open nieuw jaar voorbereiden" href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.year))}&target_year=${encodeURIComponent(String(row.year + 1))}`}>
+                          <ExternalLink size={16} aria-hidden="true" />
+                        </LinkIconButton>
+                        <IconButton
+                          title="Rollback jaarset"
+                          disabled={busy !== null || !row.isLastYear}
+                          onClick={() => {
+                            const ok = window.confirm(`Jaarset ${row.year} terugdraaien? Kostprijzen en offertes blijven staan.`);
+                            if (!ok) return;
+                            runAction("rollback", () => postRollbackYearset(row.year), "Jaarset rollback uitgevoerd.");
+                          }}
+                        >
+                          <Trash2 size={16} aria-hidden="true" />
+                        </IconButton>
+                      </>
+                    ) : null}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="muted">
+                  Geen jaarbeheerregels gevonden.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
 
-      <section className="placeholder-block" style={{ marginBottom: 18 }}>
-        <strong>First-use backfill</strong>
-        <div className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-          Gebruik dit alleen om een bestaand jaar een eerste plan te geven. De app reconstrueert variabele kosten en contributie uit de echte Omzet & Marge snapshot.
-        </div>
-        <div className="wizard-form-grid">
-          <label className="form-field">
-            <span>Jaar</span>
-            <input value={backfillYear} onChange={(event) => setBackfillYear(event.target.value)} inputMode="numeric" />
-          </label>
-          <label className="form-field">
-            <span>Plan omzet</span>
-            <input value={backfillRevenue} onChange={(event) => setBackfillRevenue(event.target.value)} inputMode="decimal" />
-          </label>
-          <label className="form-field">
-            <span>Plan vaste kosten</span>
-            <input value={backfillFixedCosts} onChange={(event) => setBackfillFixedCosts(event.target.value)} inputMode="decimal" />
-          </label>
-        </div>
-        <div className="editor-actions" style={{ marginTop: 12 }}>
-          <button
-            type="button"
-            className="editor-button"
-            disabled={busy !== null}
-            onClick={() => {
-              const year = Number(backfillYear);
-              const planRevenue = Number(backfillRevenue);
-              const fixedCosts = Number(backfillFixedCosts);
-              if (!year || !planRevenue || !fixedCosts) {
-                setError("Vul jaar, plan omzet en plan vaste kosten in.");
-                return;
-              }
-              const ok = window.confirm(
-                `First-use backfill voor ${year} opslaan? Het actieve break-even plan voor dit jaar wordt vervangen.`
-              );
-              if (!ok) return;
-              runAction("backfill", () => postFirstUseBackfill({ year, planRevenue, fixedCosts }));
-            }}
-          >
-            Frozen plan opslaan
-          </button>
-        </div>
-      </section>
-
-      <section className="placeholder-block">
-        <strong>Jaren</strong>
-        <div className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-          Dit is het centrale overzicht. Gebruik Break-even voor analyse, Nieuw jaar voorbereiden voor concepten en Jaarafsluiting voor definitieve werkelijkheid.
-        </div>
-        <div className="dataset-editor-scroll">
-          <table className="dataset-editor-table">
-            <thead>
-              <tr>
-                <th style={{ width: 90 }}>Jaar</th>
-                <th style={{ width: 180 }}>Status</th>
-                <th style={{ width: 170 }}>Plan</th>
-                <th style={{ width: 130 }}>Plan omzet</th>
-                <th style={{ width: 150 }}>Plan contributie</th>
-                <th style={{ width: 140 }}>Vaste kosten</th>
-                <th style={{ width: 190 }}>Jaarafsluiting</th>
-                <th style={{ width: 190 }}>Nieuw jaar</th>
-                <th style={{ width: 300 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const plan = row.activePlan ?? row.latestPlan;
-                const canPrepareNextYear = row.isProduction || Boolean(row.yearClose) || Boolean(row.activePlan);
-                const draftAction = row.nextDraft ?? (!canPrepareNextYear ? row.draft : undefined);
-                return (
-                  <tr key={row.year}>
-                    <td>{row.year}</td>
-                    <td>
-                      <span className={`status-pill ${row.yearClose ? "status-ok" : row.activePlan ? "status-warning" : "status-neutral"}`}>
-                        {rowStatus(row)}
-                      </span>
-                    </td>
-                    <td>
-                      <div>{planLabel(row.activePlan)}</div>
-                      {plan ? <small className="muted">{plan.scenario_name}</small> : null}
-                    </td>
-                    <td>{money(planMetric(plan, "revenue"))}</td>
-                    <td>{money(planMetric(plan, "contribution"))}</td>
-                    <td>{money(planMetric(plan, "fixed_costs"))}</td>
-                    <td>
-                      {row.yearClose ? (
-                        <>
-                          <div>Afgesloten</div>
-                          <small className="muted">{formatIso(row.yearClose.closed_at)}</small>
-                        </>
-                      ) : (
-                        <span className="muted">Nog open</span>
-                      )}
-                    </td>
-                    <td>
-                      {row.draft && !canPrepareNextYear ? (
-                        <>
-                          <div>Concept voor {row.draft.target_year}</div>
-                          <small className="muted">uit {row.draft.source_year} · {formatIso(row.draft.updated_at)}</small>
-                        </>
-                      ) : row.nextDraft ? (
-                        <>
-                          <div>Concept {row.nextDraft.target_year}</div>
-                          <small className="muted">uit {row.nextDraft.source_year} · {formatIso(row.nextDraft.updated_at)}</small>
-                        </>
-                      ) : (
-                        <span className="muted">Geen concept voor {row.year + 1}</span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <Link
-                        href={`/break-even-next?year=${encodeURIComponent(String(row.year))}`}
-                        className="editor-button editor-button-secondary"
-                        style={{ marginRight: 8, display: "inline-block", textDecoration: "none" }}
-                      >
-                        Break-even
-                      </Link>
-                      {canPrepareNextYear ? (
-                        <Link
-                          href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.year))}&target_year=${encodeURIComponent(String(row.year + 1))}`}
-                          className="editor-button editor-button-secondary"
-                          style={{ marginRight: 8, display: "inline-block", textDecoration: "none" }}
-                        >
-                          {row.nextDraft ? "Open nieuw jaar" : "Start nieuw jaar"}
-                        </Link>
-                      ) : row.draft ? (
-                        <Link
-                          href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.draft.source_year))}&target_year=${encodeURIComponent(String(row.draft.target_year))}`}
-                          className="editor-button editor-button-secondary"
-                          style={{ marginRight: 8, display: "inline-block", textDecoration: "none" }}
-                        >
-                          Open concept
-                        </Link>
-                      ) : null}
-                      {draftAction ? (
-                        <button
-                          type="button"
-                          className="editor-button editor-button-secondary"
-                          disabled={busy !== null}
-                          onClick={() => {
-                            const ok = window.confirm(
-                              `Weet je zeker dat je alle concepten voor ${draftAction.target_year} wilt verwijderen?`
-                            );
-                            if (!ok) return;
-                            runAction("deleteDraft", () => deleteDraftsForYear(draftAction.target_year));
-                          }}
-                        >
-                          Verwijder concept
-                        </button>
-                      ) : null}
-                      {row.isLastProductionYear ? (
-                        <button
-                          type="button"
-                          className="editor-button editor-button-secondary"
-                          disabled={busy !== null}
-                          onClick={() => {
-                            const ok = window.confirm(
-                              `Rollback verwijdert de jaarset-data voor ${row.year}. Kostprijzen en offertes blijven staan. Doorgaan?`
-                            );
-                            if (!ok) return;
-                            runAction("rollback", () => postRollbackYearset(row.year));
-                          }}
-                          style={{ marginLeft: draftAction ? 8 : 0 }}
-                        >
-                          Rollback
-                        </button>
-                      ) : null}
-                      {!row.yearClose ? (
-                        <button
-                          type="button"
-                          className="editor-button editor-button-secondary"
-                          disabled={busy !== null}
-                          onClick={() => previewYearClose(row.year)}
-                          style={{ marginLeft: 8 }}
-                        >
-                          Controleer afsluiting
-                        </button>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="muted">
-                    Geen jaren gevonden.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {closePreview ? (
+      {editingPlan ? (
         <section className="placeholder-block" style={{ marginTop: 18 }}>
-          <strong>Jaarafsluiting {closePreviewYear}</strong>
+          <strong>First-use backfill bewerken</strong>
           <div className="muted" style={{ marginTop: 8, marginBottom: 12 }}>
-            Facturenbasis. Controleer deze snapshot voordat je het jaar definitief vastlegt.
+            Pas alleen de eerste planbasis aan. Opslaan archiveert het huidige actieve plan voor dit jaar en maakt een nieuwe actieve snapshot.
           </div>
-          <div className="record-card-grid" style={{ marginBottom: 14 }}>
-            <div className="wizard-toggle-card">
-              <span><strong>Omzet</strong><small>{money(previewTotal(closePreview, "revenue"))}</small></span>
-            </div>
-            <div className="wizard-toggle-card">
-              <span><strong>Variabele kosten</strong><small>{money(previewTotal(closePreview, "variable_cost"))}</small></span>
-            </div>
-            <div className="wizard-toggle-card">
-              <span><strong>Contributie</strong><small>{money(previewTotal(closePreview, "contribution"))}</small></span>
-            </div>
-            <div className="wizard-toggle-card">
-              <span><strong>Vaste kosten</strong><small>{money(closePreview.fixed_cost_total)}</small></span>
-            </div>
-          </div>
-          <div className="dataset-editor-scroll">
-            <table className="dataset-editor-table">
-              <thead>
-                <tr>
-                  <th>Check</th>
-                  <th>Status</th>
-                  <th>Waarde</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Verkoopregels zonder kostprijsbron</td>
-                  <td>
-                    <span className={`status-pill ${Number(closePreview.checks?.missing_cost_lines ?? 0) === 0 ? "status-ok" : "status-warning"}`}>
-                      {Number(closePreview.checks?.missing_cost_lines ?? 0) === 0 ? "ok" : "aandacht nodig"}
-                    </span>
-                  </td>
-                  <td>{Number(closePreview.checks?.missing_cost_lines ?? 0)}</td>
-                </tr>
-                <tr>
-                  <td>Ongekoppelde omzet</td>
-                  <td>
-                    <span className={`status-pill ${Number(closePreview.checks?.unmapped_revenue ?? 0) === 0 ? "status-ok" : "status-warning"}`}>
-                      {Number(closePreview.checks?.unmapped_revenue ?? 0) === 0 ? "ok" : "aandacht nodig"}
-                    </span>
-                  </td>
-                  <td>{money(closePreview.checks?.unmapped_revenue)}</td>
-                </tr>
-              </tbody>
-            </table>
+          <div className="wizard-form-grid">
+            <label className="form-field">
+              <span>Jaar</span>
+              <input value={backfillYear} onChange={(event) => setBackfillYear(event.target.value)} inputMode="numeric" />
+            </label>
+            <label className="form-field">
+              <span>Plan omzet</span>
+              <input value={backfillRevenue} onChange={(event) => setBackfillRevenue(event.target.value)} inputMode="decimal" />
+            </label>
+            <label className="form-field">
+              <span>Plan vaste kosten</span>
+              <input value={backfillFixedCosts} onChange={(event) => setBackfillFixedCosts(event.target.value)} inputMode="decimal" />
+            </label>
           </div>
           <div className="editor-actions" style={{ marginTop: 12 }}>
-            <button type="button" className="editor-button editor-button-secondary" onClick={() => setClosePreview(null)} disabled={busy !== null}>
-              Sluiten
+            <button type="button" className="editor-button editor-button-secondary" onClick={() => setEditingPlan(null)} disabled={busy !== null}>
+              Annuleren
             </button>
-            <button type="button" className="editor-button" onClick={closeYearFromPreview} disabled={busy !== null}>
-              Jaar definitief afsluiten
+            <button type="button" className="editor-button" onClick={saveBackfill} disabled={busy !== null}>
+              Opslaan
             </button>
           </div>
         </section>
@@ -676,17 +551,10 @@ export function JaarsetsPanel() {
           <strong>Bezig...</strong>
           {busy === "load" ? "Overzicht laden." : null}
           {busy === "deleteDraft" ? "Concept verwijderen." : null}
+          {busy === "deletePlan" ? "First-use backfill archiveren." : null}
+          {busy === "deleteClose" ? "Jaarafsluiting verwijderen." : null}
           {busy === "rollback" ? "Rollback uitvoeren." : null}
-          {busy === "backfill" ? "Frozen plan opslaan." : null}
-          {busy === "previewClose" ? "Jaarafsluiting controleren." : null}
-          {busy === "closeYear" ? "Jaarafsluiting opslaan." : null}
-        </div>
-      ) : null}
-
-      {info ? (
-        <div className="placeholder-block" style={{ marginTop: 16 }}>
-          <strong>Resultaat</strong>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{JSON.stringify(info, null, 2)}</pre>
+          {busy === "backfill" ? "First-use backfill opslaan." : null}
         </div>
       ) : null}
     </div>

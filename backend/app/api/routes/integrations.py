@@ -2012,6 +2012,20 @@ def post_break_even_plan(
         raise HTTPException(status_code=500, detail="Break-even plan kon niet worden opgeslagen.") from exc
 
 
+@router.delete("/break-even/plans/{snapshot_id}")
+def delete_break_even_plan(
+    snapshot_id: str,
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"item": break_even_planning_storage.archive_plan_snapshot(snapshot_id=str(snapshot_id or ""))}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even plan archive failed")
+        raise HTTPException(status_code=500, detail="Break-even plan kon niet worden gearchiveerd.") from exc
+
+
 @router.post("/break-even/first-use-backfill")
 def post_break_even_first_use_backfill(
     payload: dict[str, Any] = Body(default={}),
@@ -2107,6 +2121,20 @@ def get_break_even_year_closes(
     except Exception as exc:
         logger.exception("Break-even year close listing failed")
         raise HTTPException(status_code=500, detail="Jaarafsluitingen konden niet worden geladen.") from exc
+
+
+@router.delete("/break-even/year-closes/{year}")
+def delete_break_even_year_close(
+    year: int,
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"item": break_even_planning_storage.delete_year_close_snapshot(year=int(year))}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even year close delete failed")
+        raise HTTPException(status_code=500, detail="Jaarafsluiting kon niet worden verwijderd.") from exc
 
 
 @router.get("/break-even/model-review")

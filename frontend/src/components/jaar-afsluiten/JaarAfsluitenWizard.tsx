@@ -22,8 +22,8 @@ function money(value: unknown) {
   return Number.isFinite(num) ? formatMoneyEUR(num) : "-";
 }
 
-export function JaarAfsluitenWizard() {
-  const [year, setYear] = useState(String(new Date().getFullYear() - 1));
+export function JaarAfsluitenWizard({ initialYear = "" }: { initialYear?: string | number }) {
+  const [year, setYear] = useState(String(initialYear || new Date().getFullYear() - 1));
   const [basis, setBasis] = useState<"invoice" | "order">("invoice");
   const [step, setStep] = useState<"checks" | "review" | "done">("checks");
   const [preview, setPreview] = useState<GenericRecord | null>(null);
