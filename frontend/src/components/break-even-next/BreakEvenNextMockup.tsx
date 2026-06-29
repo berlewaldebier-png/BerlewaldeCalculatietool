@@ -53,6 +53,34 @@ type ReadModelRevenueReconciliation = {
   policy: string;
 };
 
+type ReadModelCauseRow = {
+  cause: string;
+  rows: number;
+};
+
+type ReadModelProcessingExample = {
+  transaction_number: string;
+  product_name: string;
+  sku_code: string;
+  lot_number: string;
+  cost_status: string;
+  cause: string;
+};
+
+type ReadModelSalesProcessing = {
+  year: number;
+  total: number;
+  processed: number;
+  missing: number;
+  sku_total: number;
+  sku_with_cost_source: number;
+  non_sku_total: number;
+  non_sku_categorized: number;
+  causes: ReadModelCauseRow[];
+  examples: ReadModelProcessingExample[];
+  policy: string;
+};
+
 type ReadModelCategory = {
   category: RevenueCategory;
   rows: number;
@@ -192,6 +220,7 @@ type BreakEvenReadModel = {
     warnings?: ReadModelWarning[];
     missing_cost_lines?: number;
     unmapped_revenue?: number;
+    sales_processing?: ReadModelSalesProcessing;
   };
 };
 
@@ -300,6 +329,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   const rawCategories = Array.isArray(contribution.categories) ? contribution.categories : [];
   const rawContributionRows = Array.isArray(contribution.rows) ? contribution.rows : [];
   const warnings = Array.isArray(dataQuality.warnings) ? dataQuality.warnings : [];
+  const salesProcessing = asRecord(dataQuality.sales_processing);
   const financialSet = (raw: unknown): ReadModelFinancialSet => {
     const row = asRecord(raw);
     return {
@@ -433,6 +463,32 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
     data_quality: {
       missing_cost_lines: asNumber(dataQuality.missing_cost_lines),
       unmapped_revenue: asNumber(dataQuality.unmapped_revenue),
+      sales_processing: Object.keys(salesProcessing).length ? {
+        year: asNumber(salesProcessing.year),
+        total: asNumber(salesProcessing.total),
+        processed: asNumber(salesProcessing.processed),
+        missing: asNumber(salesProcessing.missing),
+        sku_total: asNumber(salesProcessing.sku_total),
+        sku_with_cost_source: asNumber(salesProcessing.sku_with_cost_source),
+        non_sku_total: asNumber(salesProcessing.non_sku_total),
+        non_sku_categorized: asNumber(salesProcessing.non_sku_categorized),
+        causes: (Array.isArray(salesProcessing.causes) ? salesProcessing.causes : []).map((item) => {
+          const row = asRecord(item);
+          return { cause: asText(row.cause), rows: asNumber(row.rows) };
+        }).filter((row) => row.cause),
+        examples: (Array.isArray(salesProcessing.examples) ? salesProcessing.examples : []).map((item) => {
+          const row = asRecord(item);
+          return {
+            transaction_number: asText(row.transaction_number),
+            product_name: asText(row.product_name),
+            sku_code: asText(row.sku_code),
+            lot_number: asText(row.lot_number),
+            cost_status: asText(row.cost_status),
+            cause: asText(row.cause),
+          };
+        }).filter((row) => row.product_name || row.transaction_number),
+        policy: asText(salesProcessing.policy),
+      } : undefined,
       warnings: warnings.map((item) => {
         const row = asRecord(item);
         return { code: asText(row.code), message: asText(row.message) };
@@ -608,6 +664,7 @@ export function BreakEvenNextMockup({
   const readModelVarianceBridge = parsedReadModel?.variance_bridge ?? [];
   const readModelPlanActualRows = parsedReadModel?.plan_actual?.rows ?? [];
   const revenueReconciliation = parsedReadModel?.revenue_reconciliation ?? null;
+  const salesProcessing = parsedReadModel?.data_quality?.sales_processing ?? null;
   const planActualNote = parsedReadModel?.plan_actual?.model_note ?? "";
   const yearOptions = useMemo(() => {
     const values = new Set([2025, 2026, selectedYear, selectedYear + 1]);
@@ -882,6 +939,51 @@ export function BreakEvenNextMockup({
                 </button>
                 {planSetupStatus ? <span className="module-card-text">{planSetupStatus}</span> : null}
               </div>
+            </section>
+          ) : null}
+
+          {salesProcessing ? (
+            <section className="module-card">
+              <div className="module-card-header be-next-table-header">
+                <div>
+                  <div className="module-card-title">Datakwaliteit voor contributie</div>
+                  <div className="module-card-text">
+                    Deze controle verklaart waarom omzet wel in de SSOT kan zitten, maar nog niet volledig in contributie en break-even.
+                  </div>
+                </div>
+                <span className={`status-pill ${salesProcessing.missing > 0 ? "status-warning" : "status-ok"}`}>
+                  {salesProcessing.processed}/{salesProcessing.total} verwerkt
+                </span>
+              </div>
+              <div className="be-next-grid be-next-grid-3">
+                <MetricCard label="Verkoopregels verwerkt" value={`${number(salesProcessing.processed)}/${number(salesProcessing.total)}`} helper="alle verklaarbare omzetregels" />
+                <MetricCard label="SKU-regels met kostprijsbron" value={`${number(salesProcessing.sku_with_cost_source)}/${number(salesProcessing.sku_total)}`} helper="bier, giftsets, merchandise" />
+                <MetricCard label="Niet-SKU gecategoriseerd" value={`${number(salesProcessing.non_sku_categorized)}/${number(salesProcessing.non_sku_total)}`} helper="bijv. afronding of service" />
+              </div>
+              {salesProcessing.causes.length ? (
+                <div className="data-table" style={{ marginTop: 12 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Oorzaak</th>
+                        <th>Regels</th>
+                        <th>Actie</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salesProcessing.causes.map((row) => (
+                        <tr key={row.cause}>
+                          <td>{row.cause}</td>
+                          <td>{number(row.rows)}</td>
+                          <td>{row.cause === "LOT alias nodig" ? "Los op in Datakwaliteit > LOT-dekking" : row.cause === "Productkoppeling ontbreekt" ? "Koppel product aan interne SKU" : "Voeg kostprijsbron toe of categoriseer expliciet"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="editor-status success">Alle verkoopregels zijn verklaarbaar voor de contributielaag.</div>
+              )}
             </section>
           ) : null}
 

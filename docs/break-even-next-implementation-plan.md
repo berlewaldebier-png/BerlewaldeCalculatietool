@@ -165,6 +165,11 @@ Visuals:
   - dashboard revenue is the actual revenue SSOT
   - contribution revenue explains the cost/contribution layer
   - any difference remains visible until data quality/category mapping is complete
+- contribution data quality:
+  - processed sales rows versus total sales rows
+  - SKU rows with a usable cost source
+  - non-SKU rows explicitly categorized as no-cost/revenue-only
+  - cause breakdown for remaining rows, such as product mapping, LOT alias or missing cost source
 - first-time plan setup when no active plan exists:
   - explicit plan revenue
   - explicit plan contribution

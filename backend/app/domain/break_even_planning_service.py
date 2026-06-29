@@ -7,6 +7,7 @@ from app.domain import (
     break_even_planning_storage,
     cost_versions_storage,
     dataset_store,
+    douano_margin_snapshot_storage,
     douano_sales_mix_service,
     erp_dashboard_service,
     fixed_costs_storage,
@@ -27,6 +28,13 @@ def _text(value: Any) -> str:
 
 def _money_ratio(numerator: float, denominator: float) -> float:
     return numerator / denominator if denominator else 0.0
+
+
+def _year_bounds(year: int) -> tuple[str, str] | tuple[None, None]:
+    y = int(year or 0)
+    if y <= 0:
+        return None, None
+    return f"{y:04d}-01-01", f"{(y + 1):04d}-01-01"
 
 
 def _plan_targets_payload(raw: dict[str, Any] | None, *, fixed_cost_total: float) -> dict[str, Any]:
@@ -398,6 +406,121 @@ def _dashboard_revenue_reconciliation(*, year: int, basis: str, break_even_reven
     }
 
 
+def _sales_processing_diagnostics(*, year: int) -> dict[str, Any]:
+    start_date, end_date = _year_bounds(year)
+    if not start_date or not end_date:
+        return {}
+
+    douano_margin_snapshot_storage.ensure_schema()
+    bad_statuses = (
+        "unmapped_sku",
+        "missing_cost",
+        "missing_lot_cost",
+        "lot_near_match_fallback",
+        "lot_unmatched_fallback",
+    )
+    cause_sql = """
+        CASE
+            WHEN NOT mapped OR cost_status = 'unmapped_sku' THEN 'Productkoppeling ontbreekt'
+            WHEN cost_status IN ('lot_near_match_fallback', 'lot_unmatched_fallback') THEN 'LOT alias nodig'
+            WHEN missing_cost OR cost_price_ex IS NULL OR cost_status IN ('missing_cost', 'missing_lot_cost') THEN 'Kostprijsbron ontbreekt'
+            ELSE 'Controle nodig'
+        END
+    """
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    COUNT(*)::int AS total,
+                    COALESCE(SUM(CASE WHEN COALESCE(NULLIF(sku_id, ''), '') <> '' THEN 1 ELSE 0 END), 0)::int AS sku_total,
+                    COALESCE(SUM(CASE WHEN COALESCE(NULLIF(sku_id, ''), '') <> '' AND NOT (
+                        missing_cost OR cost_price_ex IS NULL OR cost_status = ANY(%s::text[])
+                    ) THEN 1 ELSE 0 END), 0)::int AS sku_with_cost_source,
+                    COALESCE(SUM(CASE WHEN COALESCE(NULLIF(sku_id, ''), '') = '' THEN 1 ELSE 0 END), 0)::int AS non_sku_total,
+                    COALESCE(SUM(CASE WHEN COALESCE(NULLIF(sku_id, ''), '') = '' AND cost_status = 'no_cost_required' THEN 1 ELSE 0 END), 0)::int AS non_sku_categorized,
+                    COALESCE(SUM(CASE WHEN (
+                        NOT mapped OR missing_cost OR cost_price_ex IS NULL OR cost_status = ANY(%s::text[])
+                    ) THEN 1 ELSE 0 END), 0)::int AS missing
+                FROM douano_sales_line_cost_snapshots
+                WHERE line_date >= %s::date
+                  AND line_date < %s::date
+                  AND NOT ignored
+                """,
+                (list(bad_statuses), list(bad_statuses), start_date, end_date),
+            )
+            total, sku_total, sku_with_cost, non_sku_total, non_sku_categorized, missing = cur.fetchone() or (0, 0, 0, 0, 0, 0)
+            cur.execute(
+                f"""
+                SELECT {cause_sql} AS cause, COUNT(*)::int AS rows
+                FROM douano_sales_line_cost_snapshots
+                WHERE line_date >= %s::date
+                  AND line_date < %s::date
+                  AND NOT ignored
+                  AND (
+                      NOT mapped
+                      OR missing_cost
+                      OR cost_price_ex IS NULL
+                      OR cost_status = ANY(%s::text[])
+                  )
+                GROUP BY {cause_sql}
+                ORDER BY rows DESC, cause
+                """,
+                (start_date, end_date, list(bad_statuses)),
+            )
+            causes = [{"cause": _text(row[0]), "rows": int(row[1] or 0)} for row in (cur.fetchall() or [])]
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(payload->>'transaction_number', '') AS transaction_number,
+                    COALESCE(payload->>'douano_product_name', '') AS product_name,
+                    douano_sku,
+                    lot_number,
+                    cost_status,
+                    {cause_sql} AS cause
+                FROM douano_sales_line_cost_snapshots
+                WHERE line_date >= %s::date
+                  AND line_date < %s::date
+                  AND NOT ignored
+                  AND (
+                      NOT mapped
+                      OR missing_cost
+                      OR cost_price_ex IS NULL
+                      OR cost_status = ANY(%s::text[])
+                  )
+                ORDER BY line_date DESC NULLS LAST, source_type, source_line_id
+                LIMIT 8
+                """,
+                (start_date, end_date, list(bad_statuses)),
+            )
+            rows = [
+                {
+                    "transaction_number": _text(row[0]),
+                    "product_name": _text(row[1]),
+                    "sku_code": _text(row[2]),
+                    "lot_number": _text(row[3]),
+                    "cost_status": _text(row[4]),
+                    "cause": _text(row[5]),
+                }
+                for row in (cur.fetchall() or [])
+            ]
+
+    processed = max(0, int(total or 0) - int(missing or 0))
+    return {
+        "year": int(year or 0),
+        "total": int(total or 0),
+        "processed": processed,
+        "missing": int(missing or 0),
+        "sku_total": int(sku_total or 0),
+        "sku_with_cost_source": int(sku_with_cost or 0),
+        "non_sku_total": int(non_sku_total or 0),
+        "non_sku_categorized": int(non_sku_categorized or 0),
+        "causes": causes,
+        "examples": rows,
+        "policy": "Break-even uses processed rows for contribution. Unprocessed rows stay visible until product mapping, LOT alias, cost source or explicit no-cost categorization is fixed.",
+    }
+
+
 def create_reforecast(
     *,
     year: int,
@@ -458,6 +581,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     category_rows = _category_rows(contribution_rows)
     timeline = _period_timeline([row for row in sales.get("period_totals", []) if isinstance(row, dict)])
     plan_actual_rows = _plan_actual_rows(plan_payload, contribution_rows)
+    sales_processing = _sales_processing_diagnostics(year=year_value)
 
     fixed_cost_total = _num(plan_payload.get("fixed_cost_total")) if plan_payload else 0.0
     if fixed_cost_total <= 0:
@@ -572,6 +696,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         "data_quality": {
             "missing_cost_lines": missing_cost_lines,
             "unmapped_revenue": _num(totals.get("unmapped_revenue")),
+            "sales_processing": sales_processing,
             "warnings": warnings,
         },
         "model_notes": {
