@@ -924,7 +924,7 @@ export function BreakEvenNextMockup({
     },
     {
       title: "Einde jaar",
-      subtitle: hasExplicitReforecast ? "Vastgelegde reforecast" : "Tijdelijk gelijk aan actuals",
+      subtitle: `Voorspelde eindstand ${selectedYear}`,
       metrics: [
         {
           label: "Forecast omzet",
@@ -963,6 +963,21 @@ export function BreakEvenNextMockup({
             source: fixedCostSource,
             rows: [
               { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
+            ],
+          },
+        },
+        {
+          label: "Forecast break-even omzet",
+          value: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast),
+          helper: "vaste kosten / forecast contributieratio",
+          formula: {
+            title: "Forecast break-even omzet",
+            formula: "Vaste kosten ABC / (forecast contributie / forecast omzet).",
+            source: hasExplicitReforecast ? "Bron: reforecast snapshot plus vaste kosten ABC." : "Bron: actuals als tijdelijke reforecast plus vaste kosten ABC.",
+            rows: [
+              { label: "Forecast contributieratio", value: reforecastContributionRatio > 0 ? `${number(reforecastContributionRatio * 100, 1)}%` : "-" },
+              { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
+              { label: "Forecast break-even omzet", value: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast) },
             ],
           },
         },
