@@ -1,12 +1,14 @@
 import { NieuwJaarWizard } from "@/components/NieuwJaarWizard";
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/apiServer";
+import { apiGetServer, getBootstrap } from "@/lib/apiServer";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
 export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: Promise<SearchParams> }) {
   const searchParams = (await props.searchParams) ?? {};
+  const sourceYearParam = Array.isArray(searchParams.source_year) ? searchParams.source_year[0] : searchParams.source_year;
   const targetYearParam = Array.isArray(searchParams.target_year) ? searchParams.target_year[0] : searchParams.target_year;
+  const requestedSourceYear = Number(sourceYearParam ?? 0) || 0;
   const requestedTargetYear = Number(targetYearParam ?? 0) || 0;
 
   const bootstrap = await getBootstrap(
@@ -27,6 +29,8 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
     true,
     "/nieuw-jaar-voorbereiden"
   );
+  const yearCloses = await apiGetServer<{ items?: any[] }>("/integrations/break-even/year-closes", "/nieuw-jaar-voorbereiden")
+    .then((payload) => (Array.isArray(payload.items) ? payload.items : []));
   const navigation = bootstrap.navigation ?? [];
   const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
   const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
@@ -60,7 +64,8 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
   const years = Array.from(yearSet).filter((year) => year > 0).sort((a, b) => a - b);
   const defaultSourceYear = years[years.length - 1] ?? new Date().getFullYear();
   const defaultTargetYear = defaultSourceYear + 1;
-  const effectiveTargetYear = requestedTargetYear > 0 ? requestedTargetYear : defaultTargetYear;
+  const effectiveSourceYear = requestedSourceYear > 0 ? requestedSourceYear : defaultSourceYear;
+  const effectiveTargetYear = requestedTargetYear > 0 ? requestedTargetYear : effectiveSourceYear + 1;
 
   return (
     <PageShell
@@ -82,7 +87,9 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
         initialPackagingComponentPrices={packagingComponentPrices}
         initialVerkoopprijzen={verkoopprijzen}
         initialAdviesprijzen={adviesprijzen}
+        initialSourceYear={requestedSourceYear > 0 ? requestedSourceYear : undefined}
         initialTargetYear={requestedTargetYear > 0 ? requestedTargetYear : undefined}
+        initialYearCloseSnapshots={yearCloses}
       />
     </PageShell>
   );

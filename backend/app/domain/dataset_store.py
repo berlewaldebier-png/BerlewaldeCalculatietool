@@ -57,6 +57,7 @@ from uuid import uuid4
 DATASET_DEFAULTS: dict[str, Any] = {
     "productie": {},
     "vaste-kosten": {},
+    "incidentele-kosten": [],
     "tarieven-heffingen": [],
     "channels": [
         {"id": "horeca", "code": "horeca", "naam": "Horeca", "actief": True, "volgorde": 10, "default_marge_pct": 50, "default_factor": 3.5},
@@ -474,6 +475,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "trace-lots",
         "trace-batches",
         "trace-batch-consumptions",
+        "incidentele-kosten",
         "kostprijs-scenario-inkoop",
         "kostprijs-activatie-drafts",
         "berekeningen",

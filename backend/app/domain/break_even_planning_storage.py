@@ -234,6 +234,41 @@ def create_plan_snapshot(
     }
 
 
+def archive_plan_snapshot(*, snapshot_id: str) -> dict[str, Any]:
+    ensure_schema()
+    clean_id = _text(snapshot_id)
+    if not clean_id:
+        raise ValueError("Plan snapshot id is verplicht.")
+    now = _now()
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE break_even_plan_snapshots
+                SET status = 'archived', updated_at = %s
+                WHERE id = %s
+                RETURNING id, jaar, scenario_name, status, source, created_at, updated_at, frozen_at, payload
+                """,
+                (now, clean_id),
+            )
+            row = cur.fetchone()
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    if not row:
+        raise ValueError("Plan snapshot niet gevonden.")
+    return {
+        "id": _text(row[0]),
+        "jaar": int(row[1] or 0),
+        "scenario_name": _text(row[2]),
+        "status": _text(row[3]),
+        "source": _text(row[4]),
+        "created_at": _text(row[5].isoformat() if hasattr(row[5], "isoformat") else row[5]),
+        "updated_at": _text(row[6].isoformat() if hasattr(row[6], "isoformat") else row[6]),
+        "frozen_at": _text(row[7].isoformat() if hasattr(row[7], "isoformat") else row[7]),
+        "payload": row[8] if isinstance(row[8], dict) else {},
+    }
+
+
 def create_reforecast_snapshot(
     *,
     year: int,
@@ -281,6 +316,40 @@ def create_reforecast_snapshot(
         "basis": _text(basis) or "invoice",
         "created_at": now,
         "payload": body,
+    }
+
+
+def latest_reforecast_snapshot(*, year: int, basis: str = "") -> dict[str, Any] | None:
+    ensure_schema()
+    clauses = ["jaar = %s"]
+    params: list[Any] = [int(year or 0)]
+    basis_value = _text(basis)
+    if basis_value:
+        clauses.append("basis = %s")
+        params.append(basis_value)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, jaar, plan_snapshot_id, as_of_date, basis, created_at, payload
+                FROM break_even_reforecast_snapshots
+                WHERE {' AND '.join(clauses)}
+                ORDER BY as_of_date DESC NULLS LAST, created_at DESC
+                LIMIT 1
+                """,
+                tuple(params),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": _text(row[0]),
+        "jaar": int(row[1] or 0),
+        "plan_snapshot_id": _text(row[2]),
+        "as_of_date": _text(row[3].isoformat() if hasattr(row[3], "isoformat") else row[3]),
+        "basis": _text(row[4]),
+        "created_at": _text(row[5].isoformat() if hasattr(row[5], "isoformat") else row[5]),
+        "payload": row[6] if isinstance(row[6], dict) else {},
     }
 
 
@@ -337,6 +406,70 @@ def get_year_close_snapshot(*, year: int) -> dict[str, Any] | None:
         "created_at": _text(row[4].isoformat() if hasattr(row[4], "isoformat") else row[4]),
         "payload": row[5] if isinstance(row[5], dict) else {},
     }
+
+
+def delete_year_close_snapshot(*, year: int) -> dict[str, Any]:
+    ensure_schema()
+    year_value = int(year or 0)
+    if year_value <= 0:
+        raise ValueError("Jaar is verplicht.")
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM year_close_snapshots
+                WHERE jaar = %s
+                RETURNING id, jaar, status, closed_at, created_at, payload
+                """,
+                (year_value,),
+            )
+            row = cur.fetchone()
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    if not row:
+        raise ValueError("Jaarafsluiting niet gevonden.")
+    return {
+        "id": _text(row[0]),
+        "jaar": int(row[1] or 0),
+        "status": _text(row[2]),
+        "closed_at": _text(row[3].isoformat() if hasattr(row[3], "isoformat") else row[3]),
+        "created_at": _text(row[4].isoformat() if hasattr(row[4], "isoformat") else row[4]),
+        "payload": row[5] if isinstance(row[5], dict) else {},
+        "deleted": True,
+    }
+
+
+def list_year_close_snapshots(*, year: int = 0) -> list[dict[str, Any]]:
+    ensure_schema()
+    clauses: list[str] = []
+    params: list[Any] = []
+    if int(year or 0) > 0:
+        clauses.append("jaar = %s")
+        params.append(int(year))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, jaar, status, closed_at, created_at, payload
+                FROM year_close_snapshots
+                {where}
+                ORDER BY jaar DESC, closed_at DESC
+                """,
+                tuple(params),
+            )
+            rows = cur.fetchall() or []
+    return [
+        {
+            "id": _text(row[0]),
+            "jaar": int(row[1] or 0),
+            "status": _text(row[2]),
+            "closed_at": _text(row[3].isoformat() if hasattr(row[3], "isoformat") else row[3]),
+            "created_at": _text(row[4].isoformat() if hasattr(row[4], "isoformat") else row[4]),
+            "payload": row[5] if isinstance(row[5], dict) else {},
+        }
+        for row in rows
+    ]
 
 
 def audit_model() -> dict[str, Any]:

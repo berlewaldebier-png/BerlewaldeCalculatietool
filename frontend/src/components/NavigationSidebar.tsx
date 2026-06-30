@@ -28,6 +28,7 @@ import {
   Percent,
   Settings,
   ListChecks,
+  AlertTriangle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -67,6 +68,7 @@ function buildNavGroups(navigation: NavigationItem[], activePath: string): Dashb
     { label: "Diensten", href: "/diensten" },
     { label: "Kostprijs beheer", href: "/nieuwe-kostprijsberekening" },
     { label: "Vaste kosten (ABC)", href: "/vaste-kosten" },
+    { label: "Incidentele kosten", href: "/incidentele-kosten" },
     { label: "Productie en drivers", href: "/productie" },
     { label: "Tarieven en heffingen", href: "/tarieven-heffingen" },
     { label: "Brouwmoment", href: "/recept-hercalculatie" },
@@ -121,6 +123,7 @@ function buildNavGroups(navigation: NavigationItem[], activePath: string): Dashb
       items: [
         { href: "/nieuwe-kostprijsberekening", label: "Kostprijs beheer" },
         { href: "/vaste-kosten", label: "Vaste kosten (ABC)" },
+        { href: "/incidentele-kosten", label: "Incidenteel" },
         { href: "/productie", label: "Productie en drivers" },
         { href: "/tarieven-heffingen", label: "Tarieven en heffingen" },
         { href: "/recept-hercalculatie", label: "Brouwmoment" },
@@ -190,6 +193,7 @@ function getNavIcon(href: string) {
 
   // Existing costing/admin routes can still arrive from backend navigation.
   if (key === "/vaste-kosten") return Layers3;
+  if (key === "/incidentele-kosten") return AlertTriangle;
   if (key === "/productie") return Factory;
   if (key === "/tarieven-heffingen") return Percent;
   if (key === "/instellingen") return Settings;

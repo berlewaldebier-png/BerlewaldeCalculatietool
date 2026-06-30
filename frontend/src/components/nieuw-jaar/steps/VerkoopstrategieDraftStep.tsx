@@ -38,6 +38,8 @@ type VerkoopstrategieDraftStepProps = {
   currentBerekeningen: GenericRecord[];
   currentActivations: GenericRecord[];
   previewRows: PreviewRow[];
+  sourceYearCloseReference?: Record<string, number>;
+  formatEur: (value: number) => string;
 
   verkoopstrategieSave: null | (() => Promise<void>);
   setVerkoopstrategieSave: Dispatch<SetStateAction<null | (() => Promise<void>)>>;
@@ -64,12 +66,18 @@ export function VerkoopstrategieDraftStep({
   currentBerekeningen,
   currentActivations,
   previewRows,
+  sourceYearCloseReference,
+  formatEur,
   verkoopstrategieSave,
   setVerkoopstrategieSave,
   setDraftVerkoopstrategieTarget,
   setCompletedStepIds,
   saveDraftToServer,
 }: VerkoopstrategieDraftStepProps) {
+  const contributionRatio = Number(sourceYearCloseReference?.revenue ?? 0) > 0
+    ? (Number(sourceYearCloseReference?.contribution ?? 0) / Number(sourceYearCloseReference?.revenue ?? 0)) * 100
+    : 0;
+
   return (
     <div>
       <div className="placeholder-block" style={{ marginBottom: 14 }}>
@@ -140,6 +148,21 @@ export function VerkoopstrategieDraftStep({
           </div>
         ) : null}
       </div>
+
+      {sourceYearCloseReference ? (
+        <div className="placeholder-block" style={{ marginBottom: 14 }}>
+          <strong>Afgesloten verkoopreferentie {sourceYear}</strong>
+          <div className="muted" style={{ marginTop: 8 }}>
+            Deze cijfers helpen bepalen of {targetYear} vooral via prijs, volume of mix moet sturen. De wizard past prijzen pas aan
+            wanneer je hierboven bewust een scenario toepast.
+          </div>
+          <div className="record-card-grid" style={{ marginTop: 12 }}>
+            <div className="wizard-toggle-card"><span><strong>Omzet</strong><small>{formatEur(sourceYearCloseReference.revenue ?? 0)}</small></span></div>
+            <div className="wizard-toggle-card"><span><strong>Contributie</strong><small>{formatEur(sourceYearCloseReference.contribution ?? 0)}</small></span></div>
+            <div className="wizard-toggle-card"><span><strong>Contributieratio</strong><small>{contributionRatio.toFixed(1)}%</small></span></div>
+          </div>
+        </div>
+      ) : null}
 
       <VerkoopstrategieWorkspace
         endpoint="/data/verkoopprijzen"

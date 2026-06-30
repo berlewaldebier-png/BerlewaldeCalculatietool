@@ -2,7 +2,11 @@ import { JaarAfsluitenWizard } from "@/components/jaar-afsluiten/JaarAfsluitenWi
 import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 
-export default async function JaarAfsluitenPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+export default async function JaarAfsluitenPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = (await props.searchParams) ?? {};
+  const yearParam = Array.isArray(searchParams.year) ? searchParams.year[0] : searchParams.year;
   const bootstrap = await getBootstrap(["auth-status"], true, "/jaar-afsluiten");
   const navigation = bootstrap.navigation ?? [];
 
@@ -13,7 +17,7 @@ export default async function JaarAfsluitenPage() {
       activePath="/jaar-afsluiten"
       navigation={navigation}
     >
-      <JaarAfsluitenWizard />
+      <JaarAfsluitenWizard initialYear={yearParam ?? ""} />
     </PageShell>
   );
 }

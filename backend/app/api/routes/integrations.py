@@ -2002,6 +2002,7 @@ def post_break_even_plan(
                 year=year,
                 scenario_name=scenario_name,
                 replace_active=replace_active,
+                targets=payload.get("targets") if isinstance(payload.get("targets"), dict) else None,
             )
         }
     except ValueError as exc:
@@ -2009,6 +2010,49 @@ def post_break_even_plan(
     except Exception as exc:
         logger.exception("Break-even plan creation failed")
         raise HTTPException(status_code=500, detail="Break-even plan kon niet worden opgeslagen.") from exc
+
+
+@router.delete("/break-even/plans/{snapshot_id}")
+def delete_break_even_plan(
+    snapshot_id: str,
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"item": break_even_planning_storage.archive_plan_snapshot(snapshot_id=str(snapshot_id or ""))}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even plan archive failed")
+        raise HTTPException(status_code=500, detail="Break-even plan kon niet worden gearchiveerd.") from exc
+
+
+@router.post("/break-even/first-use-backfill")
+def post_break_even_first_use_backfill(
+    payload: dict[str, Any] = Body(default={}),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        year = int(payload.get("year", payload.get("jaar", 0)) or 0)
+        plan_revenue = float(payload.get("plan_revenue", payload.get("plan_omzet", 0)) or 0)
+        fixed_cost_total = float(payload.get("fixed_cost_total", payload.get("vaste_kosten", 0)) or 0)
+        scenario_name = str(payload.get("scenario_name", payload.get("naam", "First-use backfill")) or "First-use backfill")
+        basis = str(payload.get("basis", "invoice") or "invoice")
+        replace_active = bool(payload.get("replace_active", False))
+        return {
+            "item": break_even_planning_service.create_first_use_backfill_plan(
+                year=year,
+                plan_revenue=plan_revenue,
+                fixed_cost_total=fixed_cost_total,
+                scenario_name=scenario_name,
+                basis=basis,
+                replace_active=replace_active,
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even first-use backfill failed")
+        raise HTTPException(status_code=500, detail="Break-even first-use backfill kon niet worden opgeslagen.") from exc
 
 
 @router.post("/break-even/reforecast")
@@ -2067,6 +2111,32 @@ def get_break_even_year_close_preview(
         raise HTTPException(status_code=500, detail="Jaarafsluiting preview kon niet worden geladen.") from exc
 
 
+@router.get("/break-even/year-closes")
+def get_break_even_year_closes(
+    year: int = Query(0),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"items": break_even_planning_storage.list_year_close_snapshots(year=int(year))}
+    except Exception as exc:
+        logger.exception("Break-even year close listing failed")
+        raise HTTPException(status_code=500, detail="Jaarafsluitingen konden niet worden geladen.") from exc
+
+
+@router.delete("/break-even/year-closes/{year}")
+def delete_break_even_year_close(
+    year: int,
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"item": break_even_planning_storage.delete_year_close_snapshot(year=int(year))}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even year close delete failed")
+        raise HTTPException(status_code=500, detail="Jaarafsluiting kon niet worden verwijderd.") from exc
+
+
 @router.get("/break-even/model-review")
 def get_break_even_model_review(_: dict = Depends(require_admin)) -> dict[str, Any]:
     try:
@@ -2074,6 +2144,21 @@ def get_break_even_model_review(_: dict = Depends(require_admin)) -> dict[str, A
     except Exception as exc:
         logger.exception("Break-even model review failed")
         raise HTTPException(status_code=500, detail="Datamodel review kon niet worden geladen.") from exc
+
+
+@router.get("/break-even/analysis-read-model")
+def get_break_even_analysis_read_model(
+    year: int = Query(...),
+    basis: str = Query("invoice"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {"item": break_even_planning_service.build_analysis_read_model(year=int(year), basis=str(basis or "invoice"))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even analysis read model failed")
+        raise HTTPException(status_code=500, detail="Break-even analyse read-model kon niet worden geladen.") from exc
 
 
 @router.get("/lot-costs")

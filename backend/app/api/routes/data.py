@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _STANDARD_DATASETS = [
     "productie",
     "vaste-kosten",
+    "incidentele-kosten",
     "tarieven-heffingen",
     "verpakkingsonderdelen",
     "basisproducten",
