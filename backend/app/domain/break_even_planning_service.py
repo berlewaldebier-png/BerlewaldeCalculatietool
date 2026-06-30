@@ -66,6 +66,23 @@ def _year_fixed_cost_total(year: int) -> float:
     return sum(_num(row.get("bedrag_per_jaar")) for row in rows if isinstance(row, dict))
 
 
+def _year_incidental_cost_total(year: int) -> float:
+    rows = postgres_storage.load_dataset("incidentele-kosten", [])
+    if not isinstance(rows, list):
+        return 0.0
+    year_value = int(year or 0)
+    total = 0.0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if bool(row.get("ignore", row.get("negeren", False))):
+            continue
+        if int(row.get("jaar", row.get("year", 0)) or 0) != year_value:
+            continue
+        total += _num(row.get("bedrag", row.get("amount", 0)))
+    return total
+
+
 def _sku_labels() -> dict[str, dict[str, str]]:
     postgres_storage.ensure_schema()
     labels: dict[str, dict[str, str]] = {}
@@ -821,9 +838,9 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     reforecast_payload = reforecast_payload if isinstance(reforecast_payload, dict) else {}
     explicit_reforecast = reforecast_payload.get("reforecast") if isinstance(reforecast_payload.get("reforecast"), dict) else {}
 
-    fixed_cost_total = _num(plan_payload.get("fixed_cost_total")) if plan_payload else 0.0
-    if fixed_cost_total <= 0:
-        fixed_cost_total = _year_fixed_cost_total(year_value)
+    fixed_cost_total = _year_fixed_cost_total(year_value)
+    incidental_cost_total = _year_incidental_cost_total(year_value)
+    controllable_cost_total = fixed_cost_total + incidental_cost_total
 
     totals = sales.get("totals") if isinstance(sales.get("totals"), dict) else {}
     contribution_revenue = _num(totals.get("revenue"))
@@ -836,11 +853,12 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     actual_revenue = dashboard_revenue if dashboard_revenue > 0 else contribution_revenue
     actual_total_cost = _num(totals.get("cost"))
     actual_variable = _num(totals.get("variable_cost"))
+    actual_absorbed_fixed_costs = _num(totals.get("fixed_alloc"))
     actual_contribution = _num(totals.get("contribution"))
     contribution_ratio = _money_ratio(actual_contribution, actual_revenue)
-    break_even_revenue = fixed_cost_total / contribution_ratio if contribution_ratio > 0 else 0.0
+    break_even_revenue = controllable_cost_total / contribution_ratio if contribution_ratio > 0 else 0.0
     break_even_variable = break_even_revenue * _money_ratio(actual_variable, actual_revenue)
-    break_even_result = break_even_revenue - break_even_variable - fixed_cost_total
+    break_even_result = break_even_revenue - break_even_variable - controllable_cost_total
 
     plan_targets = plan_payload.get("targets") if isinstance(plan_payload.get("targets"), dict) else {}
     plan_revenue = _num(plan_targets.get("revenue"))
@@ -851,13 +869,17 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     reforecast_revenue = _num(explicit_reforecast.get("revenue")) or actual_revenue
     reforecast_variable = _num(explicit_reforecast.get("variable_cost")) or actual_variable
     reforecast_contribution = _num(explicit_reforecast.get("contribution")) or actual_contribution
-    reforecast_fixed_costs = _num(explicit_reforecast.get("fixed_costs")) or fixed_cost_total
-    reforecast_result = _num(explicit_reforecast.get("result")) if explicit_reforecast else reforecast_contribution - reforecast_fixed_costs
+    reforecast_fixed_costs = fixed_cost_total
+    reforecast_absorbed_fixed_costs = _num(explicit_reforecast.get("absorbed_fixed_costs")) if explicit_reforecast else actual_absorbed_fixed_costs
+    reforecast_total_cost = _num(explicit_reforecast.get("total_cost")) if explicit_reforecast else actual_total_cost
+    if explicit_reforecast and reforecast_total_cost <= 0:
+        reforecast_total_cost = reforecast_variable + reforecast_absorbed_fixed_costs
+    reforecast_result = reforecast_contribution - reforecast_fixed_costs - incidental_cost_total
     variance_bridge = _variance_bridge_rows(
         plan_contribution=plan_contribution,
         plan_fixed_costs=plan_fixed_costs,
         reforecast_contribution=reforecast_contribution,
-        reforecast_fixed_costs=reforecast_fixed_costs,
+        reforecast_fixed_costs=reforecast_fixed_costs + incidental_cost_total,
     )
     warnings: list[dict[str, str]] = []
     if not plan_snapshot:
@@ -887,7 +909,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "actual_source": "douano_sales_line_cost_snapshots",
             "reforecast_snapshot_id": _text((reforecast_snapshot or {}).get("id")),
             "reforecast_source": "reforecast_snapshot" if reforecast_snapshot else "actual_ytd_temporary",
-            "fixed_cost_source": "active_plan_snapshot" if _num(plan_payload.get("fixed_cost_total")) > 0 else "fixed_costs_by_year",
+            "fixed_cost_source": "fixed_costs_by_year",
             "actual_revenue_source": "douano_sales_line_cost_snapshots",
             "contribution_source": "douano_sales_line_cost_snapshots",
         },
@@ -896,24 +918,30 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
                 "revenue": plan_revenue,
                 "variable_cost": plan_variable,
                 "total_cost": plan_variable + plan_fixed_costs if plan_variable or plan_fixed_costs else 0.0,
+                "absorbed_fixed_costs": plan_fixed_costs,
                 "contribution": plan_contribution,
                 "fixed_costs": plan_fixed_costs,
+                "incidental_costs": 0.0,
                 "result": plan_result,
             },
             "actual": {
                 "revenue": actual_revenue,
                 "variable_cost": actual_variable,
                 "total_cost": actual_total_cost,
+                "absorbed_fixed_costs": actual_absorbed_fixed_costs,
                 "contribution": actual_contribution,
                 "fixed_costs": fixed_cost_total,
-                "result": actual_contribution - fixed_cost_total,
+                "incidental_costs": incidental_cost_total,
+                "result": actual_contribution - fixed_cost_total - incidental_cost_total,
             },
             "reforecast": {
                 "revenue": reforecast_revenue,
                 "variable_cost": reforecast_variable,
-                "total_cost": reforecast_variable + reforecast_fixed_costs if reforecast_variable or reforecast_fixed_costs else 0.0,
+                "total_cost": reforecast_total_cost,
+                "absorbed_fixed_costs": reforecast_absorbed_fixed_costs,
                 "contribution": reforecast_contribution,
                 "fixed_costs": reforecast_fixed_costs,
+                "incidental_costs": incidental_cost_total,
                 "result": reforecast_result,
             },
         },
@@ -922,13 +950,16 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
             "variable_cost": actual_variable,
             "contribution": actual_contribution,
             "fixed_costs": fixed_cost_total,
-            "operating_result": actual_contribution - fixed_cost_total,
+            "incidental_costs": incidental_cost_total,
+            "operating_result": actual_contribution - fixed_cost_total - incidental_cost_total,
         },
         "break_even": {
             "revenue": break_even_revenue,
             "variable_cost": break_even_variable,
             "contribution": break_even_revenue - break_even_variable,
-            "fixed_costs": fixed_cost_total,
+            "fixed_costs": controllable_cost_total,
+            "abc_fixed_costs": fixed_cost_total,
+            "incidental_costs": incidental_cost_total,
             "result_check": break_even_result,
             "contribution_ratio": contribution_ratio,
         },

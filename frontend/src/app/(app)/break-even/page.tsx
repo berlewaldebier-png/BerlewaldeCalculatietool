@@ -1,107 +1,56 @@
+import { BreakEvenNextMockup } from "@/components/break-even-next/BreakEvenNextMockup";
 import { PageShell } from "@/components/PageShell";
 import { apiGetServer, getBootstrap } from "@/lib/apiServer";
-import {
-  normalizeConfigList,
-  type BreakEvenConfig,
-} from "@/components/break-even/breakEvenUtils";
-import { BreakEvenV2Workspace } from "@/components/break-even-v2/BreakEvenV2Workspace";
-import type { RealizedSalesBySkuPayload } from "@/components/break-even-v2/breakEvenV2Utils";
 
-type GenericRecord = Record<string, unknown>;
+type BreakEvenPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
-function computeBreakEvenYearsServer(args: {
-  vasteKosten: Record<string, unknown> | null | undefined;
-  kostprijsproductactiveringen: GenericRecord[];
-}) {
-  const set = new Set<number>();
-  Object.keys(args.vasteKosten ?? {}).forEach((key) => {
-    const year = Number(key);
-    if (Number.isFinite(year) && year > 0) set.add(year);
-  });
-  (Array.isArray(args.kostprijsproductactiveringen) ? args.kostprijsproductactiveringen : []).forEach((row) => {
-    const year = Number(row.jaar ?? 0);
-    if (Number.isFinite(year) && year > 0) set.add(year);
-  });
-  return Array.from(set).sort((a, b) => b - a);
+function deriveYearOptions(productie: Record<string, unknown>) {
+  return Object.keys(productie ?? {})
+    .map((key) => Number(key))
+    .filter((year) => Number.isFinite(year) && year > 0)
+    .sort((a, b) => a - b);
 }
 
-async function loadInitialSales(
-  year: number,
-  basis: BreakEvenConfig["basis"]
-): Promise<{ sales: RealizedSalesBySkuPayload | null; error: string }> {
+function chooseDefaultYear(yearOptions: number[]) {
+  const currentYear = new Date().getFullYear();
+  if (yearOptions.includes(currentYear)) return currentYear;
+  return yearOptions[yearOptions.length - 1] ?? currentYear;
+}
+
+export default async function BreakEvenPage({ searchParams }: BreakEvenPageProps) {
+  const bootstrap = await getBootstrap(["auth-status", "productie"], true, "/break-even");
+  const params = await searchParams;
+  const productie = (bootstrap.datasets["productie"] as Record<string, unknown>) ?? {};
+  const yearOptions = deriveYearOptions(productie);
+  const rawYear = Array.isArray(params?.year) ? params?.year[0] : params?.year;
+  const requestedYear = Number.parseInt(String(rawYear || ""), 10);
+  const defaultYear = chooseDefaultYear(yearOptions);
+  const year = yearOptions.length > 0
+    ? yearOptions.includes(requestedYear) ? requestedYear : defaultYear
+    : requestedYear || defaultYear;
+  let readModel: Record<string, unknown> | null = null;
+  let readModelError = "";
+
   try {
-    const payload = await apiGetServer<{ result?: RealizedSalesBySkuPayload }>(
-      `/integrations/douano/sales-by-sku?year=${encodeURIComponent(String(year))}&basis=${encodeURIComponent(
-        String(basis ?? "invoice")
-      )}`,
+    const response = await apiGetServer<{ item?: Record<string, unknown> }>(
+      `/integrations/break-even/analysis-read-model?year=${encodeURIComponent(String(year))}&basis=invoice`,
       "/break-even"
     );
-    return { sales: payload?.result ?? null, error: "" };
-  } catch (error) {
-    return {
-      sales: null,
-      error: error instanceof Error ? error.message : String(error),
-    };
+    readModel = response.item ?? null;
+  } catch (err) {
+    readModelError = err instanceof Error ? err.message : String(err);
   }
-}
-
-export default async function BreakEvenPage() {
-  const bootstrap = await getBootstrap(
-    [
-      "auth-status",
-      "break-even-configuraties",
-      "vaste-kosten",
-      "channels",
-      "bieren",
-      "skus",
-      "articles",
-      "kostprijsversies",
-      "kostprijsproductactiveringen",
-      "verkoopprijzen",
-      "basisproducten",
-      "samengestelde-producten",
-    ],
-    true,
-    "/break-even"
-  );
-
-  const datasets = bootstrap.datasets ?? {};
-  const years = computeBreakEvenYearsServer({
-    vasteKosten: (datasets["vaste-kosten"] as any) ?? {},
-    kostprijsproductactiveringen: (datasets.kostprijsproductactiveringen as any) ?? [],
-  });
-  const fallbackYear = years[0] ?? new Date().getFullYear();
-  const configs = normalizeConfigList(datasets["break-even-configuraties"] ?? [], fallbackYear);
-  const initialConfig =
-    configs.find((config) => config.is_active_for_quotes) ?? configs[0] ?? null;
-  const initialYear = initialConfig?.jaar ?? fallbackYear;
-  const initialBasis = initialConfig?.basis ?? "invoice";
-  const initialSales = await loadInitialSales(initialYear, initialBasis);
 
   return (
     <PageShell
-      title="Break-even analyseren"
-      subtitle="Van kostprijs naar break-even in een overzicht"
+      title="Break-even analyse"
+      subtitle={`Stuurinformatie voor plan, actuals, reforecast, variantie en jaarafsluiting. Jaar ${year}.`}
       activePath="/break-even"
       navigation={bootstrap.navigation ?? []}
     >
-      <BreakEvenV2Workspace
-        initialConfigs={datasets["break-even-configuraties"] ?? []}
-        vasteKosten={(datasets["vaste-kosten"] as any) ?? {}}
-        channels={(datasets.channels as any) ?? []}
-        bieren={(datasets.bieren as any) ?? []}
-        skus={(datasets.skus as any) ?? []}
-        articles={(datasets.articles as any) ?? []}
-        kostprijsversies={(datasets.kostprijsversies as any) ?? []}
-        kostprijsproductactiveringen={(datasets.kostprijsproductactiveringen as any) ?? []}
-        verkoopprijzen={(datasets.verkoopprijzen as any) ?? []}
-        basisproducten={(datasets.basisproducten as any) ?? []}
-        samengesteldeProducten={(datasets["samengestelde-producten"] as any) ?? []}
-        initialSales={initialSales.sales}
-        initialSalesError={initialSales.error}
-        initialSalesYear={initialYear}
-        initialSalesBasis={initialBasis}
-      />
+      <BreakEvenNextMockup selectedYear={year} availableYears={yearOptions} readModel={readModel} readModelError={readModelError} />
     </PageShell>
   );
 }

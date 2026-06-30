@@ -3745,6 +3745,15 @@ a {
   flex-wrap: wrap;
 }
 
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
 .editor-status {
   color: var(--muted);
   font-size: 0.9rem;
@@ -3891,7 +3900,17 @@ a {
 }
 
 .be-next-year-switcher .secondary-button {
+  display: grid;
+  gap: 0.1rem;
+  line-height: 1.1;
+  min-width: 96px;
   text-decoration: none;
+}
+
+.be-next-year-switcher .secondary-button small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
 .be-next-year-switcher .secondary-button.active {
@@ -3972,6 +3991,79 @@ a {
 .be-next-metric.negative strong,
 .be-next-negative {
   color: var(--status-error-text);
+}
+
+.be-next-statement-table {
+  margin-top: 1rem;
+}
+
+.be-next-statement-table th:not(:first-child),
+.be-next-statement-table td:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.be-next-statement-table td:first-child {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 260px;
+}
+
+.be-next-statement-table td:first-child span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.be-next-statement-strong td {
+  background: #f8fafc;
+}
+
+.be-next-table-button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0.15rem 0;
+  text-align: right;
+}
+
+.be-next-table-button:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.be-next-table-button.positive {
+  color: var(--status-success-text);
+}
+
+.be-next-table-button.negative {
+  color: var(--status-error-text);
+}
+
+.be-next-control-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+}
+
+.be-next-control-row summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 900;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.be-next-control-row[open] summary {
+  padding-bottom: 0.25rem;
 }
 
 .be-next-progress-row {

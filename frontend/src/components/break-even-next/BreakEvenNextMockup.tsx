@@ -46,6 +46,17 @@ type DashboardColumn = {
   metrics: DashboardMetric[];
 };
 
+type DashboardStatementRow = {
+  label: string;
+  helper: string;
+  plan: string;
+  actual: string;
+  reforecast: string;
+  tone?: "positive" | "negative";
+  strong?: boolean;
+  formula: FormulaInfo;
+};
+
 type ReadModelWarning = {
   code: string;
   message: string;
@@ -144,8 +155,10 @@ type ReadModelFinancialSet = {
   revenue: number;
   variable_cost: number;
   total_cost: number;
+  absorbed_fixed_costs: number;
   contribution: number;
   fixed_costs: number;
+  incidental_costs: number;
   result: number;
 };
 
@@ -154,6 +167,7 @@ type ReadModelPnl = {
   variable_cost: number;
   contribution: number;
   fixed_costs: number;
+  incidental_costs: number;
   operating_result: number;
 };
 
@@ -162,6 +176,8 @@ type ReadModelBreakEven = {
   variable_cost: number;
   contribution: number;
   fixed_costs: number;
+  abc_fixed_costs: number;
+  incidental_costs: number;
   result_check: number;
   contribution_ratio: number;
 };
@@ -289,6 +305,14 @@ function moneyOrMissing(value: number, available: boolean) {
   return available ? money(value) : "Nog niet ingevuld";
 }
 
+function controlStatusClass(difference: number) {
+  return Math.abs(difference) < 1 ? "status-ok" : "status-error";
+}
+
+function controlStatusLabel(difference: number) {
+  return Math.abs(difference) < 1 ? "match" : `verschil ${money(difference)}`;
+}
+
 function number(value: number, digits = 0) {
   return new Intl.NumberFormat("nl-NL", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(Number.isFinite(value) ? value : 0);
 }
@@ -342,8 +366,10 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       revenue: asNumber(row.revenue),
       variable_cost: asNumber(row.variable_cost),
       total_cost: asNumber(row.total_cost),
+      absorbed_fixed_costs: asNumber(row.absorbed_fixed_costs),
       contribution: asNumber(row.contribution),
       fixed_costs: asNumber(row.fixed_costs),
+      incidental_costs: asNumber(row.incidental_costs),
       result: asNumber(row.result),
     };
   };
@@ -401,6 +427,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       variable_cost: asNumber(pnl.variable_cost),
       contribution: asNumber(pnl.contribution),
       fixed_costs: asNumber(pnl.fixed_costs),
+      incidental_costs: asNumber(pnl.incidental_costs),
       operating_result: asNumber(pnl.operating_result),
     },
     break_even: {
@@ -408,6 +435,8 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       variable_cost: asNumber(breakEven.variable_cost),
       contribution: asNumber(breakEven.contribution),
       fixed_costs: asNumber(breakEven.fixed_costs),
+      abc_fixed_costs: asNumber(breakEven.abc_fixed_costs),
+      incidental_costs: asNumber(breakEven.incidental_costs),
       result_check: asNumber(breakEven.result_check),
       contribution_ratio: asNumber(breakEven.contribution_ratio),
     },
@@ -507,12 +536,21 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
   };
 }
 
-function buildScenarioFromTotals(base: { revenue: number; variable: number }, scenario: ScenarioState, baseFixedCosts: number) {
+function buildScenarioFromRemaining(
+  actual: { revenue: number; variable: number },
+  reforecast: { revenue: number; variable: number },
+  scenario: ScenarioState,
+  baseFixedCosts: number,
+) {
   const priceFactor = 1 + scenario.pricePct / 100;
   const volumeFactor = 1 + scenario.volumePct / 100;
   const fixedFactor = 1 + scenario.fixedCostPct / 100;
-  const revenue = base.revenue * volumeFactor * priceFactor;
-  const variable = base.variable * volumeFactor;
+  const remainingRevenue = Math.max(0, reforecast.revenue - actual.revenue);
+  const remainingVariable = Math.max(0, reforecast.variable - actual.variable);
+  const adjustedRemainingRevenue = remainingRevenue * volumeFactor * priceFactor;
+  const adjustedRemainingVariable = remainingVariable * volumeFactor;
+  const revenue = actual.revenue + adjustedRemainingRevenue;
+  const variable = actual.variable + adjustedRemainingVariable;
   const contribution = revenue - variable;
   const fixedCosts = baseFixedCosts * fixedFactor;
   return {
@@ -520,6 +558,12 @@ function buildScenarioFromTotals(base: { revenue: number; variable: number }, sc
     variable,
     contribution,
     fixedCosts,
+    actualRevenue: actual.revenue,
+    actualVariable: actual.variable,
+    remainingRevenue,
+    remainingVariable,
+    adjustedRemainingRevenue,
+    adjustedRemainingVariable,
     result: contribution - fixedCosts,
     breakEvenRevenue: contribution > 0 && revenue > 0 ? fixedCosts / (contribution / revenue) : 0,
   };
@@ -677,12 +721,21 @@ function estimateBreakEvenMonth(timeline: Array<{ month: string; reforecast: num
   return hit?.month ?? "niet binnen dit jaar";
 }
 
+function yearStatusLabel(year: number) {
+  const currentYear = new Date().getFullYear();
+  if (year < currentYear) return "Afgesloten/actual";
+  if (year === currentYear) return "Lopend";
+  return "Concept";
+}
+
 export function BreakEvenNextMockup({
   selectedYear,
+  availableYears = [],
   readModel,
   readModelError = "",
 }: {
   selectedYear: number;
+  availableYears?: number[];
   readModel?: Record<string, unknown> | null;
   readModelError?: string;
 }) {
@@ -703,9 +756,9 @@ export function BreakEvenNextMockup({
   const salesProcessing = parsedReadModel?.data_quality?.sales_processing ?? null;
   const planActualNote = parsedReadModel?.plan_actual?.model_note ?? "";
   const yearOptions = useMemo(() => {
-    const values = new Set([2025, 2026, selectedYear, selectedYear + 1]);
+    const values = new Set([...(availableYears ?? []), selectedYear]);
     return [...values].filter((year) => year >= 2024 && year <= 2100).sort((a, b) => a - b);
-  }, [selectedYear]);
+  }, [availableYears, selectedYear]);
   const hasReadModel = Boolean(parsedReadModel);
   const hasPlanTargets = Boolean(
     parsedReadModel
@@ -720,27 +773,39 @@ export function BreakEvenNextMockup({
     revenue: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.revenue ?? 0 : 0,
     variable: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.variable_cost ?? 0 : 0,
     totalCost: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.total_cost ?? 0 : 0,
+    absorbedFixed: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.absorbed_fixed_costs ?? 0 : 0,
     contribution: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.contribution ?? 0 : 0,
+    incidental: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.incidental_costs ?? 0 : 0,
   };
   const actual = {
     ...emptyTotals,
     revenue: parsedReadModel?.dashboard?.actual?.revenue ?? 0,
     variable: parsedReadModel?.dashboard?.actual?.variable_cost ?? 0,
     totalCost: parsedReadModel?.dashboard?.actual?.total_cost ?? 0,
+    absorbedFixed: parsedReadModel?.dashboard?.actual?.absorbed_fixed_costs ?? 0,
     contribution: parsedReadModel?.dashboard?.actual?.contribution ?? 0,
+    incidental: parsedReadModel?.dashboard?.actual?.incidental_costs ?? 0,
   };
   const reforecast = {
     ...emptyTotals,
     revenue: parsedReadModel?.dashboard?.reforecast?.revenue ?? 0,
     variable: parsedReadModel?.dashboard?.reforecast?.variable_cost ?? 0,
     totalCost: parsedReadModel?.dashboard?.reforecast?.total_cost ?? 0,
+    absorbedFixed: parsedReadModel?.dashboard?.reforecast?.absorbed_fixed_costs ?? 0,
     contribution: parsedReadModel?.dashboard?.reforecast?.contribution ?? 0,
+    incidental: parsedReadModel?.dashboard?.reforecast?.incidental_costs ?? 0,
   };
   const activePlanFixedCosts = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.fixed_costs ?? 0 : 0;
   const activeReforecastFixedCosts = parsedReadModel?.dashboard?.reforecast?.fixed_costs ?? 0;
+  const activeRequiredCosts = activeReforecastFixedCosts + reforecast.incidental;
   const scenarioResult = useMemo(
-    () => buildScenarioFromTotals({ revenue: reforecast.revenue, variable: reforecast.variable }, scenario, activeReforecastFixedCosts),
-    [activeReforecastFixedCosts, reforecast.revenue, reforecast.variable, scenario],
+    () => buildScenarioFromRemaining(
+      { revenue: actual.revenue, variable: actual.variable },
+      { revenue: reforecast.revenue, variable: reforecast.variable },
+      scenario,
+      activeRequiredCosts,
+    ),
+    [activeRequiredCosts, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, scenario],
   );
   const fixedRate = activePlanFixedCosts > 0 ? activePlanFixedCosts / plannedNormalLiters : 0;
   const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
@@ -751,7 +816,6 @@ export function BreakEvenNextMockup({
   const actualBreakEvenTotalCost = actual.variable + activeReforecastFixedCosts;
   const actualSnapshotTotalCost = actual.totalCost || 0;
   const reforecastTotalCost = reforecast.totalCost || (reforecast.variable + activeReforecastFixedCosts);
-  const actualCostReconciliationDifference = actualSnapshotTotalCost - actualBreakEvenTotalCost;
   const revenueTimeline = useMemo(
     () => buildRevenueTimelineFromReadModel(plan.revenue, plan.variable, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, readModelTimeline),
     [actual.revenue, actual.variable, plan.revenue, plan.variable, readModelTimeline, reforecast.revenue, reforecast.variable],
@@ -759,25 +823,40 @@ export function BreakEvenNextMockup({
   const revenueGap = reforecast.revenue - plan.revenue;
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
   const planBreakEvenRevenue = plan.contribution > 0 && plan.revenue > 0 ? activePlanFixedCosts / (plan.contribution / plan.revenue) : 0;
+  const planAbsorbedFixedCosts = plan.absorbedFixed || Math.max(0, planTotalCost - plan.variable);
+  const actualAbsorbedFixedCosts = actual.absorbedFixed || Math.max(0, actualSnapshotTotalCost - actual.variable);
+  const reforecastAbsorbedFixedCosts = reforecast.absorbedFixed || Math.max(0, (reforecast.totalCost || actualSnapshotTotalCost) - reforecast.variable);
+  const planOccupancyVariance = planAbsorbedFixedCosts - activePlanFixedCosts;
+  const actualOccupancyVariance = actualAbsorbedFixedCosts - activeReforecastFixedCosts;
+  const reforecastOccupancyVariance = reforecastAbsorbedFixedCosts - activeReforecastFixedCosts;
+  const actualCostReconciliationDifference = actualSnapshotTotalCost - (actual.variable + actualAbsorbedFixedCosts);
+  const planExplainedResult = planResult;
+  const actualExplainedResult = actualResult;
+  const reforecastExplainedResult = reforecastResult;
+  const actualGrossMargin = actual.revenue - actualSnapshotTotalCost;
+  const actualResultReconciliation = actualGrossMargin + actualOccupancyVariance - actual.incidental;
+  const actualResultReconciliationDifference = actualResultReconciliation - actualResult;
   const contributionGap = plan.contribution - reforecast.contribution;
   const resultGap = planResult - reforecastResult;
-  const neededPricePct = reforecast.revenue > 0 ? Math.max(0, (plan.revenue / reforecast.revenue - 1) * 100) : 0;
-  const neededVolumePct = reforecast.contribution > 0 ? Math.max(0, ((plan.contribution / reforecast.contribution) - 1) * 100) : 0;
-  const neededResultPricePct = reforecast.revenue > 0 ? Math.max(0, resultGap / reforecast.revenue * 100) : 0;
-  const neededResultVolumePct = reforecast.contribution > 0 ? Math.max(0, resultGap / reforecast.contribution * 100) : 0;
+  const remainingForecastRevenue = Math.max(0, reforecast.revenue - actual.revenue);
+  const remainingForecastContribution = Math.max(0, reforecast.contribution - actual.contribution);
+  const neededPricePct = remainingForecastRevenue > 0 ? Math.max(0, (plan.revenue - reforecast.revenue) / remainingForecastRevenue * 100) : 0;
+  const neededVolumePct = remainingForecastContribution > 0 ? Math.max(0, contributionGap / remainingForecastContribution * 100) : 0;
+  const neededResultPricePct = remainingForecastRevenue > 0 ? Math.max(0, resultGap / remainingForecastRevenue * 100) : 0;
+  const neededResultVolumePct = remainingForecastContribution > 0 ? Math.max(0, resultGap / remainingForecastContribution * 100) : 0;
   const balancedPricePct = neededResultPricePct / 2;
   const balancedVolumePct = neededResultVolumePct / 2;
   const reforecastContributionRatio = reforecast.revenue > 0 ? reforecast.contribution / reforecast.revenue : 0;
   const reforecastVariableRatio = reforecast.revenue > 0 ? reforecast.variable / reforecast.revenue : 0;
   const contributionPerLiter = reforecast.liters > 0 ? reforecast.contribution / reforecast.liters : 0;
   const contributionPerUnit = reforecast.units > 0 ? reforecast.contribution / reforecast.units : 0;
-  const breakEvenRevenue = parsedReadModel?.break_even?.revenue || (reforecastContributionRatio > 0 ? activeReforecastFixedCosts / reforecastContributionRatio : 0);
+  const breakEvenRevenue = parsedReadModel?.break_even?.revenue || (reforecastContributionRatio > 0 ? activeRequiredCosts / reforecastContributionRatio : 0);
   const breakEvenVariableCost = parsedReadModel?.break_even?.variable_cost || (breakEvenRevenue * reforecastVariableRatio);
   const breakEvenContribution = breakEvenRevenue - breakEvenVariableCost;
-  const breakEvenLiters = contributionPerLiter > 0 ? activeReforecastFixedCosts / contributionPerLiter : 0;
-  const breakEvenUnits = contributionPerUnit > 0 ? activeReforecastFixedCosts / contributionPerUnit : 0;
-  const breakEvenResultCheck = parsedReadModel?.break_even?.result_check ?? (breakEvenRevenue - breakEvenVariableCost - activeReforecastFixedCosts);
-  const remainingContributionYtd = Math.max(0, activeReforecastFixedCosts - actual.contribution);
+  const breakEvenLiters = contributionPerLiter > 0 ? activeRequiredCosts / contributionPerLiter : 0;
+  const breakEvenUnits = contributionPerUnit > 0 ? activeRequiredCosts / contributionPerUnit : 0;
+  const breakEvenResultCheck = parsedReadModel?.break_even?.result_check ?? (breakEvenRevenue - breakEvenVariableCost - activeRequiredCosts);
+  const remainingContributionYtd = Math.max(0, activeRequiredCosts - actual.contribution);
   const expectedBreakEvenMonth = estimateBreakEvenMonth(revenueTimeline, breakEvenRevenue);
 
   const varianceRows = useMemo(() => {
@@ -802,8 +881,34 @@ export function BreakEvenNextMockup({
   const categoryRows = readModelCategories;
   const planActualRows = readModelPlanActualRows;
 
-  const progressPct = activeReforecastFixedCosts > 0 ? Math.max(0, Math.min(130, (reforecast.contribution / activeReforecastFixedCosts) * 100)) : 0;
+  const progressPct = activeRequiredCosts > 0 ? Math.max(0, Math.min(130, (reforecast.contribution / activeRequiredCosts) * 100)) : 0;
   const largestVariance = [...varianceRows.filter((row) => row.key !== "plan" && row.key !== "result")].sort((a, b) => Math.abs(b.value) - Math.abs(a.value))[0];
+  const varianceExplanationRows = [
+    {
+      label: "Contributieverschil",
+      value: reforecast.contribution - plan.contribution,
+      explanation: "Verschil tussen geplande contributie en verwachte contributie. Dit is de som van prijs, volume, mix en kostprijs samen zolang die nog niet apart zijn uitgesplitst.",
+      source: "Plan snapshot versus Omzet & Marge reforecast.",
+    },
+    {
+      label: "Vastekostenverschil",
+      value: activePlanFixedCosts - activeRequiredCosts,
+      explanation: "Positief als de totale te dekken kosten lager zijn dan plan; negatief als ABC plus incidenteel hoger is dan plan.",
+      source: "Vaste kosten ABC + Incidentele kosten.",
+    },
+    {
+      label: "Bezettingsresultaat ABC",
+      value: occupancyResult,
+      explanation: "Laat zien of vaste ABC-kosten over meer of minder volume worden terugverdiend dan de normale bezetting.",
+      source: "Reforecast liters versus normale productie/sales basis.",
+    },
+    {
+      label: "Incidentele kosten",
+      value: -reforecast.incidental,
+      explanation: "Eenmalige kosten of afboekingen die niet in de normale SKU-kostprijs thuishoren.",
+      source: "Kostenstructuur > Incidenteel.",
+    },
+  ];
   const revenueChartMax = Math.max(20000, Math.ceil(Math.max(
     plan.revenue,
     plan.variable,
@@ -814,6 +919,186 @@ export function BreakEvenNextMockup({
   ) / 20000) * 20000);
   const revenueChartTicks = Array.from({ length: Math.floor(revenueChartMax / 20000) + 1 }, (_, index) => index * 20000);
   const fixedCostSource = selectedYear <= 2025 ? "Vaste kosten ABC van afgesloten/actueel jaar" : "Vaste kosten ABC uit plan of aangepaste jaarbasis";
+  const dashboardStatementRows: DashboardStatementRow[] = [
+    {
+      label: "Omzet",
+      helper: "Verkoopomzet exclusief btw",
+      plan: moneyOrMissing(plan.revenue, hasPlanTargets),
+      actual: moneyOrMissing(actual.revenue, hasActuals),
+      reforecast: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast),
+      formula: {
+        title: "Omzet",
+        formula: "Plan gebruikt het frozen jaarplan; huidig en einde jaar gebruiken Omzet & Marge als SSOT voor actuals/reforecast.",
+        source: "Bron: break-even plan en douano_sales_line_cost_snapshots.",
+        rows: [
+          { label: "Plan omzet", value: moneyOrMissing(plan.revenue, hasPlanTargets) },
+          { label: "Huidige omzet", value: moneyOrMissing(actual.revenue, hasActuals) },
+          { label: "Einde jaar omzet", value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Variabele kosten",
+      helper: "Alle verkoopkosten behalve ABC-overhead",
+      plan: moneyOrMissing(-plan.variable, hasPlanTargets),
+      actual: moneyOrMissing(-actual.variable, hasActuals),
+      reforecast: moneyOrMissing(-reforecast.variable, hasTemporaryReforecast),
+      formula: {
+        title: "Variabele kosten",
+        formula: "Kostprijs uit verkoopregels min de vaste ABC-allocatie. Dit bevat o.a. inkoop, verpakking en accijns.",
+        source: "Bron: Omzet & Marge snapshots en kostprijscomponenten.",
+        rows: [
+          { label: "Plan variabele kosten", value: moneyOrMissing(plan.variable, hasPlanTargets) },
+          { label: "Huidige variabele kosten", value: moneyOrMissing(actual.variable, hasActuals) },
+          { label: "Einde jaar variabele kosten", value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Contributie",
+      helper: "Omzet minus variabele kosten",
+      plan: moneyOrMissing(plan.contribution, hasPlanTargets),
+      actual: moneyOrMissing(actual.contribution, hasActuals),
+      reforecast: moneyOrMissing(reforecast.contribution, hasTemporaryReforecast),
+      strong: true,
+      formula: {
+        title: "Contributie",
+        formula: "Omzet - variabele kosten.",
+        source: "Bron: berekend uit bovenstaande regels.",
+        rows: [
+          { label: "Plan contributie", value: moneyOrMissing(plan.contribution, hasPlanTargets) },
+          { label: "Huidige contributie", value: moneyOrMissing(actual.contribution, hasActuals) },
+          { label: "Einde jaar contributie", value: moneyOrMissing(reforecast.contribution, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Vaste kosten ABC",
+      helper: "Jaarbasis voor vaste kosten",
+      plan: moneyOrMissing(-activePlanFixedCosts, hasPlanTargets),
+      actual: moneyOrMissing(-activeReforecastFixedCosts, hasActuals),
+      reforecast: moneyOrMissing(-activeReforecastFixedCosts, hasTemporaryReforecast),
+      formula: {
+        title: "Vaste kosten ABC",
+        formula: "Vaste kosten die in de break-even analyse als jaarkosten worden afgetrokken.",
+        source: fixedCostSource,
+        rows: [
+          { label: "Plan vaste kosten", value: moneyOrMissing(activePlanFixedCosts, hasPlanTargets) },
+          { label: "Huidige vaste kosten", value: moneyOrMissing(activeReforecastFixedCosts, hasActuals) },
+          { label: "Einde jaar vaste kosten", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Operationeel resultaat",
+      helper: "Contributie minus vaste kosten ABC",
+      plan: moneyOrMissing(planResult, hasPlanTargets),
+      actual: moneyOrMissing(actualResult, hasActuals),
+      reforecast: moneyOrMissing(reforecastResult, hasTemporaryReforecast),
+      tone: reforecastResult >= 0 ? "positive" : "negative",
+      strong: true,
+      formula: {
+        title: "Operationeel resultaat",
+        formula: "Contributie - vaste kosten ABC.",
+        source: "Bron: berekend uit contributie en vaste-kostenbron.",
+        rows: [
+          { label: "Plan resultaat", value: moneyOrMissing(planResult, hasPlanTargets) },
+          { label: "Huidig resultaat", value: moneyOrMissing(actualResult, hasActuals) },
+          { label: "Einde jaar resultaat", value: moneyOrMissing(reforecastResult, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Geabsorbeerde ABC in verkopen",
+      helper: "ABC-deel dat via verkochte SKU's in kostprijs zit",
+      plan: moneyOrMissing(planAbsorbedFixedCosts, hasPlanTargets),
+      actual: moneyOrMissing(actualAbsorbedFixedCosts, hasActuals),
+      reforecast: moneyOrMissing(reforecastAbsorbedFixedCosts, hasTemporaryReforecast),
+      formula: {
+        title: "Geabsorbeerde ABC in verkopen",
+        formula: "All-in kostprijs uit verkochte regels - variabele kosten. Dit is niet de vaste-kosten-SSOT, maar de dekking via verkochte producten.",
+        source: "Bron: Omzet & Marge snapshots.",
+        rows: [
+          { label: "Plan geabsorbeerde ABC", value: moneyOrMissing(planAbsorbedFixedCosts, hasPlanTargets) },
+          { label: "Huidige geabsorbeerde ABC", value: moneyOrMissing(actualAbsorbedFixedCosts, hasActuals) },
+          { label: "Einde jaar geabsorbeerde ABC", value: moneyOrMissing(reforecastAbsorbedFixedCosts, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Bezettingsverschil ABC",
+      helper: "Geabsorbeerde ABC minus vaste kosten ABC",
+      plan: moneyOrMissing(planOccupancyVariance, hasPlanTargets),
+      actual: moneyOrMissing(actualOccupancyVariance, hasActuals),
+      reforecast: moneyOrMissing(reforecastOccupancyVariance, hasTemporaryReforecast),
+      tone: reforecastOccupancyVariance >= 0 ? "positive" : "negative",
+      formula: {
+        title: "Bezettingsverschil ABC",
+        formula: "Geabsorbeerde ABC in verkochte SKU's - vaste kosten ABC. Negatief betekent onderdekking.",
+        source: "Bron: verkoopregels plus vaste-kostenbron.",
+        rows: [
+          { label: "Plan bezettingsverschil", value: moneyOrMissing(planOccupancyVariance, hasPlanTargets) },
+          { label: "Huidig bezettingsverschil", value: moneyOrMissing(actualOccupancyVariance, hasActuals) },
+          { label: "Einde jaar bezettingsverschil", value: moneyOrMissing(reforecastOccupancyVariance, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Incidentele kosten",
+      helper: "Afboekingen en eenmalige kosten buiten normale kostprijs",
+      plan: moneyOrMissing(-plan.incidental, hasPlanTargets),
+      actual: moneyOrMissing(-actual.incidental, hasActuals),
+      reforecast: moneyOrMissing(-reforecast.incidental, hasTemporaryReforecast),
+      tone: reforecast.incidental > 0 ? "negative" : "positive",
+      formula: {
+        title: "Incidentele kosten",
+        formula: "Som van niet-genegeerde incidentele kosten voor het jaar. Deze raken resultaat en break-even, maar niet de normale SKU-kostprijs.",
+        source: "Bron: Kostenstructuur > Incidenteel.",
+        rows: [
+          { label: "Plan incidentele kosten", value: moneyOrMissing(plan.incidental, hasPlanTargets) },
+          { label: "Huidige incidentele kosten", value: moneyOrMissing(actual.incidental, hasActuals) },
+          { label: "Einde jaar incidentele kosten", value: moneyOrMissing(reforecast.incidental, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Verklaard resultaat",
+      helper: "Contributie minus ABC en incidentele kosten",
+      plan: moneyOrMissing(planExplainedResult, hasPlanTargets),
+      actual: moneyOrMissing(actualExplainedResult, hasActuals),
+      reforecast: moneyOrMissing(reforecastExplainedResult, hasTemporaryReforecast),
+      tone: reforecastExplainedResult >= 0 ? "positive" : "negative",
+      strong: true,
+      formula: {
+        title: "Verklaard resultaat",
+        formula: "Contributie - vaste kosten ABC - incidentele kosten. De resultaatreconciliatie controleert dit tegen Omzet & Marge brutomarge plus bezettingsverschil min incidentele kosten.",
+        source: "Bron: dashboardtabel en controlekaart.",
+        rows: [
+          { label: "Plan verklaard resultaat", value: moneyOrMissing(planExplainedResult, hasPlanTargets) },
+          { label: "Huidig verklaard resultaat", value: moneyOrMissing(actualExplainedResult, hasActuals) },
+          { label: "Einde jaar verklaard resultaat", value: moneyOrMissing(reforecastExplainedResult, hasTemporaryReforecast) },
+        ],
+      },
+    },
+    {
+      label: "Break-even omzet",
+      helper: "Vaste kosten gedeeld door contributieratio",
+      plan: moneyOrMissing(planBreakEvenRevenue, hasPlanTargets),
+      actual: moneyOrMissing(breakEvenRevenue, hasActuals),
+      reforecast: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast),
+      strong: true,
+      formula: {
+        title: "Break-even omzet",
+        formula: "Vaste kosten ABC / contributieratio.",
+        source: "Bron: backend break-even read-model.",
+        rows: [
+          { label: "Plan break-even omzet", value: moneyOrMissing(planBreakEvenRevenue, hasPlanTargets) },
+          { label: "Huidige break-even omzet", value: moneyOrMissing(breakEvenRevenue, hasActuals) },
+          { label: "Forecast break-even omzet", value: moneyOrMissing(breakEvenRevenue, hasTemporaryReforecast) },
+        ],
+      },
+    },
+  ];
   const dashboardColumns: DashboardColumn[] = [
     {
       title: "Plan",
@@ -1103,13 +1388,14 @@ export function BreakEvenNextMockup({
           <div>
             <div className="module-card-title">Break-even als stuurinstrument</div>
             <div className="module-card-text">
-              Tijdelijke frontend-prototype. De backend-readmodel data wordt geladen voor jaar {selectedYear}; ontbrekende data wordt expliciet leeg of als waarschuwing getoond.
+              De backend-readmodel data wordt geladen voor jaar {selectedYear}; ontbrekende data wordt expliciet leeg of als waarschuwing getoond.
             </div>
           </div>
           <div className="be-next-year-switcher" aria-label="Rapportagejaar kiezen">
             {yearOptions.map((year) => (
-              <a key={year} className={`secondary-button${year === selectedYear ? " active" : ""}`} href={`/break-even-next?year=${year}`}>
-                {year}
+              <a key={year} className={`secondary-button${year === selectedYear ? " active" : ""}`} href={`/break-even?year=${year}`}>
+                <span>{year}</span>
+                <small>{yearStatusLabel(year)}</small>
               </a>
             ))}
           </div>
@@ -1143,7 +1429,7 @@ export function BreakEvenNextMockup({
         )}
       </section>
 
-      <div className="data-quality-tabs" role="tablist" aria-label="Break-even next onderdelen">
+      <div className="data-quality-tabs" role="tablist" aria-label="Break-even analyse onderdelen">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -1166,30 +1452,47 @@ export function BreakEvenNextMockup({
               <div>
                 <div className="module-card-title">Dashboard per stuurlaag</div>
                 <div className="module-card-text">
-                  Plan, huidige stand en einde jaar blijven gescheiden. Klik op een kaart om formule en bron te controleren.
+                  Plan, huidige stand en einde jaar blijven gescheiden. Klik op een bedrag om formule en bron te controleren.
                 </div>
               </div>
               <span className="status-pill status-neutral">{selectedYear}</span>
             </div>
-            <div className="be-next-grid be-next-grid-3 be-next-dashboard-columns">
-              {dashboardColumns.map((column) => (
-                <div key={column.title} className="be-next-dashboard-column">
-                  <div className="be-next-dashboard-column-title">
-                    <strong>{column.title}</strong>
-                    <div className="module-card-text">{column.subtitle}</div>
-                  </div>
-                  {column.metrics.map((metric) => (
-                    <FormulaMetricCard
-                      key={metric.label}
-                      label={metric.label}
-                      value={metric.value}
-                      helper={metric.helper}
-                      tone={metric.tone}
-                      onClick={() => setSelectedFormula(metric.formula)}
-                    />
+            <div className="data-table be-next-statement-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Regel</th>
+                    <th>Plan</th>
+                    <th>Huidig</th>
+                    <th>Einde jaar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dashboardStatementRows.map((row) => (
+                    <tr key={row.label} className={row.strong ? "be-next-statement-strong" : ""}>
+                      <td>
+                        <strong>{row.label}</strong>
+                        <span>{row.helper}</span>
+                      </td>
+                      <td>
+                        <button type="button" className="be-next-table-button" onClick={() => setSelectedFormula(row.formula)}>
+                          {row.strong ? <strong>{row.plan}</strong> : row.plan}
+                        </button>
+                      </td>
+                      <td>
+                        <button type="button" className="be-next-table-button" onClick={() => setSelectedFormula(row.formula)}>
+                          {row.strong ? <strong>{row.actual}</strong> : row.actual}
+                        </button>
+                      </td>
+                      <td>
+                        <button type="button" className={`be-next-table-button ${row.tone ?? ""}`} onClick={() => setSelectedFormula(row.formula)}>
+                          {row.strong ? <strong>{row.reforecast}</strong> : row.reforecast}
+                        </button>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              ))}
+                </tbody>
+              </table>
             </div>
             {selectedFormula ? (
               <div className="data-table" style={{ marginTop: 16 }}>
@@ -1215,63 +1518,144 @@ export function BreakEvenNextMockup({
             ) : null}
           </section>
 
-          {revenueReconciliation ? (
-            <section className="module-card">
-              <div className="module-card-header be-next-table-header">
-                <div>
-                  <div className="module-card-title">Omzetreconciliatie</div>
-                  <div className="module-card-text">
-                    Dashboard &gt; Omzet over tijd is leidend voor actual omzet. De contributielaag kan lager zijn zolang regels nog geen categorie of kostprijsbron hebben.
-                  </div>
+          <section className="module-card">
+            <div className="module-card-header be-next-table-header">
+              <div>
+                <div className="module-card-title">Controle</div>
+                <div className="module-card-text">
+                  Deze controles sluiten de dashboardregels aan op Omzet &amp; Marge, kostprijscomponenten en datakwaliteit.
                 </div>
-                <span className={`status-pill ${revenueReconciliation.status === "match" ? "status-ok" : "status-warning"}`}>
-                  {revenueReconciliation.status === "match" ? "match" : "verschil"}
-                </span>
               </div>
-              <div className="data-table">
-                <table>
-                  <tbody>
-                    <PnlRow label="Dashboard omzet (SSOT)" value={revenueReconciliation.dashboard_revenue} strong />
-                    <PnlRow label="Break-even contributie-omzet" value={revenueReconciliation.contribution_revenue} />
-                    <PnlRow label="Verschil nog te verklaren" value={revenueReconciliation.difference} />
-                  </tbody>
-                </table>
-              </div>
-              <div className="module-card-text">
-                Basis {revenueReconciliation.basis || "-"}; periode {revenueReconciliation.since || "-"} t/m {revenueReconciliation.until || "-"}.
-              </div>
-            </section>
-          ) : null}
+              <span className={`status-pill ${[
+                revenueReconciliation ? revenueReconciliation.difference : 0,
+                actualCostReconciliationDifference,
+                actualResultReconciliationDifference,
+                salesProcessing ? salesProcessing.missing : 0,
+              ].some((value) => Math.abs(value) >= 1) ? "status-warning" : "status-ok"}`}>
+                controle
+              </span>
+            </div>
 
-          {hasActuals ? (
-            <section className="module-card">
-              <div className="module-card-header be-next-table-header">
-                <div>
-                  <div className="module-card-title">Kostprijsreconciliatie</div>
-                  <div className="module-card-text">
-                    Omzet &amp; Marge toont de all-in kostprijs uit verkoopregels. Break-even splitst deze analyse in variabele kostprijs en vaste kosten ABC.
-                  </div>
+            {revenueReconciliation ? (
+              <details className="be-next-control-row">
+                <summary>
+                  <span>Omzetreconciliatie</span>
+                  <span className={`status-pill ${controlStatusClass(revenueReconciliation.difference)}`}>
+                    {controlStatusLabel(revenueReconciliation.difference)}
+                  </span>
+                </summary>
+                <div className="module-card-text">
+                  Dashboard &gt; Omzet over tijd is leidend voor actual omzet. De contributielaag kan lager zijn zolang regels nog geen categorie of kostprijsbron hebben.
                 </div>
-                <span className={`status-pill ${Math.abs(actualCostReconciliationDifference) < 1 ? "status-ok" : "status-warning"}`}>
-                  {Math.abs(actualCostReconciliationDifference) < 1 ? "match" : "verschil"}
-                </span>
-              </div>
-              <div className="data-table">
-                <table>
-                  <tbody>
-                    <PnlRow label="Omzet & Marge kostprijs all-in" value={actualSnapshotTotalCost} strong />
-                    <PnlRow label="Break-even variabele kostprijs" value={actual.variable} />
-                    <PnlRow label="Break-even vaste kosten ABC" value={activeReforecastFixedCosts} />
-                    <PnlRow label="Break-even totale kostprijs" value={actualBreakEvenTotalCost} strong />
-                    <PnlRow label="Verschil te verklaren" value={actualCostReconciliationDifference} />
-                  </tbody>
-                </table>
-              </div>
-              <div className="module-card-text">
-                Een verschil is verwacht als Omzet &amp; Marge alleen vaste allocatie op verkochte regels bevat, terwijl break-even de jaarbasis van vaste kosten gebruikt.
-              </div>
-            </section>
-          ) : null}
+                <div className="data-table">
+                  <table>
+                    <tbody>
+                      <PnlRow label="Dashboard omzet (SSOT)" value={revenueReconciliation.dashboard_revenue} strong />
+                      <PnlRow label="Break-even contributie-omzet" value={revenueReconciliation.contribution_revenue} />
+                      <PnlRow label="Verschil nog te verklaren" value={revenueReconciliation.difference} />
+                    </tbody>
+                  </table>
+                </div>
+                <div className="module-card-text">
+                  Basis {revenueReconciliation.basis || "-"}; periode {revenueReconciliation.since || "-"} t/m {revenueReconciliation.until || "-"}.
+                </div>
+              </details>
+            ) : null}
+
+            {hasActuals ? (
+              <details className="be-next-control-row">
+                <summary>
+                  <span>Kostprijsreconciliatie</span>
+                  <span className={`status-pill ${controlStatusClass(actualCostReconciliationDifference)}`}>
+                    {controlStatusLabel(actualCostReconciliationDifference)}
+                  </span>
+                </summary>
+                <div className="module-card-text">
+                  Omzet &amp; Marge toont de all-in kostprijs uit verkoopregels. Break-even splitst deze in variabele kosten en geabsorbeerde ABC.
+                </div>
+                <div className="data-table">
+                  <table>
+                    <tbody>
+                      <PnlRow label="Omzet & Marge kostprijs all-in" value={actualSnapshotTotalCost} strong />
+                      <PnlRow label="Break-even variabele kosten" value={actual.variable} />
+                      <PnlRow label="Geabsorbeerde ABC in verkopen" value={actualAbsorbedFixedCosts} />
+                      <PnlRow label="Variabel + geabsorbeerde ABC" value={actual.variable + actualAbsorbedFixedCosts} strong />
+                      <PnlRow label="Verschil" value={actualCostReconciliationDifference} />
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ) : null}
+
+            {hasActuals ? (
+              <details className="be-next-control-row">
+                <summary>
+                  <span>Resultaatreconciliatie</span>
+                  <span className={`status-pill ${controlStatusClass(actualResultReconciliationDifference)}`}>
+                    {controlStatusLabel(actualResultReconciliationDifference)}
+                  </span>
+                </summary>
+                <div className="module-card-text">
+                  Controleert of de brutomarge uit Omzet &amp; Marge aansluit op het dashboardresultaat na correctie voor bezettingsverschil.
+                </div>
+                <div className="data-table">
+                  <table>
+                    <tbody>
+                      <PnlRow label="Brutomarge Omzet & Marge" value={actualGrossMargin} strong />
+                      <PnlRow label="Bezettingsverschil ABC" value={actualOccupancyVariance} />
+                      <PnlRow label="Incidentele kosten" value={-actual.incidental} />
+                      <PnlRow label="Brutomarge + bezettingsverschil - incidenteel" value={actualResultReconciliation} strong />
+                      <PnlRow label="Operationeel resultaat dashboard" value={actualResult} strong />
+                      <PnlRow label="Verschil" value={actualResultReconciliationDifference} />
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ) : null}
+
+            {salesProcessing ? (
+              <details className="be-next-control-row">
+                <summary>
+                  <span>Datakwaliteit voor contributie</span>
+                  <span className={`status-pill ${salesProcessing.missing > 0 ? "status-warning" : "status-ok"}`}>
+                    {salesProcessing.processed}/{salesProcessing.total} verwerkt
+                  </span>
+                </summary>
+                <div className="module-card-text">
+                  Deze controle verklaart waarom omzet wel in de SSOT kan zitten, maar nog niet volledig in contributie en break-even.
+                </div>
+                <div className="be-next-grid be-next-grid-3">
+                  <MetricCard label="Verkoopregels verwerkt" value={`${number(salesProcessing.processed)}/${number(salesProcessing.total)}`} helper="alle verklaarbare omzetregels" />
+                  <MetricCard label="SKU-regels met kostprijsbron" value={`${number(salesProcessing.sku_with_cost_source)}/${number(salesProcessing.sku_total)}`} helper="bier, giftsets, merchandise" />
+                  <MetricCard label="Niet-SKU gecategoriseerd" value={`${number(salesProcessing.non_sku_categorized)}/${number(salesProcessing.non_sku_total)}`} helper="bijv. afronding of service" />
+                </div>
+                {salesProcessing.causes.length ? (
+                  <div className="data-table" style={{ marginTop: 12 }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Oorzaak</th>
+                          <th>Regels</th>
+                          <th>Actie</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {salesProcessing.causes.map((row) => (
+                          <tr key={row.cause}>
+                            <td>{row.cause}</td>
+                            <td>{number(row.rows)}</td>
+                            <td>{row.cause === "LOT alias nodig" ? "Los op in Datakwaliteit > LOT-dekking" : row.cause === "Productkoppeling ontbreekt" ? "Koppel product aan interne SKU" : "Voeg kostprijsbron toe of categoriseer expliciet"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="editor-status success">Alle verkoopregels zijn verklaarbaar voor de contributielaag.</div>
+                )}
+              </details>
+            ) : null}
+          </section>
 
           {!hasPlanTargets ? (
             <section className="module-card">
@@ -1289,51 +1673,6 @@ export function BreakEvenNextMockup({
                   Open Jaarbeheer
                 </a>
               </div>
-            </section>
-          ) : null}
-
-          {salesProcessing ? (
-            <section className="module-card">
-              <div className="module-card-header be-next-table-header">
-                <div>
-                  <div className="module-card-title">Datakwaliteit voor contributie</div>
-                  <div className="module-card-text">
-                    Deze controle verklaart waarom omzet wel in de SSOT kan zitten, maar nog niet volledig in contributie en break-even.
-                  </div>
-                </div>
-                <span className={`status-pill ${salesProcessing.missing > 0 ? "status-warning" : "status-ok"}`}>
-                  {salesProcessing.processed}/{salesProcessing.total} verwerkt
-                </span>
-              </div>
-              <div className="be-next-grid be-next-grid-3">
-                <MetricCard label="Verkoopregels verwerkt" value={`${number(salesProcessing.processed)}/${number(salesProcessing.total)}`} helper="alle verklaarbare omzetregels" />
-                <MetricCard label="SKU-regels met kostprijsbron" value={`${number(salesProcessing.sku_with_cost_source)}/${number(salesProcessing.sku_total)}`} helper="bier, giftsets, merchandise" />
-                <MetricCard label="Niet-SKU gecategoriseerd" value={`${number(salesProcessing.non_sku_categorized)}/${number(salesProcessing.non_sku_total)}`} helper="bijv. afronding of service" />
-              </div>
-              {salesProcessing.causes.length ? (
-                <div className="data-table" style={{ marginTop: 12 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Oorzaak</th>
-                        <th>Regels</th>
-                        <th>Actie</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {salesProcessing.causes.map((row) => (
-                        <tr key={row.cause}>
-                          <td>{row.cause}</td>
-                          <td>{number(row.rows)}</td>
-                          <td>{row.cause === "LOT alias nodig" ? "Los op in Datakwaliteit > LOT-dekking" : row.cause === "Productkoppeling ontbreekt" ? "Koppel product aan interne SKU" : "Voeg kostprijsbron toe of categoriseer expliciet"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="editor-status success">Alle verkoopregels zijn verklaarbaar voor de contributielaag.</div>
-              )}
             </section>
           ) : null}
 
@@ -1406,9 +1745,9 @@ export function BreakEvenNextMockup({
 
       {activeTab === "pnl" ? (
         <div className="be-next-grid be-next-grid-3">
-          <PnlCard title="Plan" revenue={plan.revenue} variable={plan.variable} fixedCosts={activePlanFixedCosts} />
-          <PnlCard title="Huidig" revenue={actual.revenue} variable={actual.variable} fixedCosts={activeReforecastFixedCosts} />
-          <PnlCard title="Einde jaar" revenue={reforecast.revenue} variable={reforecast.variable} fixedCosts={activeReforecastFixedCosts} />
+          <PnlCard title="Plan" revenue={plan.revenue} variable={plan.variable} fixedCosts={activePlanFixedCosts} incidentalCosts={plan.incidental} />
+          <PnlCard title="Huidig" revenue={actual.revenue} variable={actual.variable} fixedCosts={activeReforecastFixedCosts} incidentalCosts={actual.incidental} />
+          <PnlCard title="Einde jaar" revenue={reforecast.revenue} variable={reforecast.variable} fixedCosts={activeReforecastFixedCosts} incidentalCosts={reforecast.incidental} />
           <section className="module-card be-next-wide">
             <div className="module-card-title">Van resultaatrekening naar verklaard resultaat</div>
             <VarianceBridge rows={varianceRows} />
@@ -1419,10 +1758,10 @@ export function BreakEvenNextMockup({
       {activeTab === "break_even" ? (
         <div className="wizard-stack">
           <div className="be-next-grid be-next-grid-3">
-            <MetricCard label="Break-even omzet" value={money(breakEvenRevenue)} helper="om vaste kosten te dekken" />
+            <MetricCard label="Break-even omzet" value={money(breakEvenRevenue)} helper="om ABC en incidenteel te dekken" />
             <MetricCard label="Break-even liters" value={`${number(breakEvenLiters)} L`} helper="op huidige reforecast mix" />
             <MetricCard label="Break-even units" value={number(breakEvenUnits)} helper="gewogen gemiddelde units" />
-            <MetricCard label="Nog contributie nodig" value={money(remainingContributionYtd)} helper="vanaf actual YTD tot vaste kosten" />
+            <MetricCard label="Nog contributie nodig" value={money(remainingContributionYtd)} helper="vanaf actual YTD tot totale kosten" />
             <MetricCard label="Verwachte break-even maand" value={expectedBreakEvenMonth} helper="op basis van reforecast omzetlijn" />
             <MetricCard label="Controle resultaat" value={money(breakEvenResultCheck)} tone={Math.abs(breakEvenResultCheck) < 1 ? "positive" : "negative"} helper="moet rond nul zijn" />
           </div>
@@ -1431,7 +1770,7 @@ export function BreakEvenNextMockup({
             <div className="module-card-header be-next-table-header">
               <div>
                 <div className="module-card-title">Controleberekening bij break-even</div>
-                <div className="module-card-text">Deze berekening bewijst dat de break-even omzet precies genoeg contributie oplevert om de vaste kosten te dragen.</div>
+                <div className="module-card-text">Deze berekening bewijst dat de break-even omzet precies genoeg contributie oplevert om ABC en incidentele kosten te dragen.</div>
               </div>
               <span className="status-pill status-ok">resultaat = 0</span>
             </div>
@@ -1441,7 +1780,8 @@ export function BreakEvenNextMockup({
                   <PnlRow label="Omzet op break-even" value={breakEvenRevenue} />
                   <PnlRow label="Variabele kosten bij huidige mix" value={-breakEvenVariableCost} />
                   <PnlRow label="Contributie" value={breakEvenContribution} strong />
-                  <PnlRow label="Vaste kosten" value={-activeReforecastFixedCosts} />
+                  <PnlRow label="Vaste kosten ABC" value={-activeReforecastFixedCosts} />
+                  <PnlRow label="Incidentele kosten" value={-reforecast.incidental} />
                   <PnlRow label="Resultaat" value={breakEvenResultCheck} strong />
                 </tbody>
               </table>
@@ -1453,7 +1793,7 @@ export function BreakEvenNextMockup({
               <div className="module-card-title">Interpretatie</div>
               <p>
                 Bij de huidige mix levert elke euro omzet gemiddeld {number(reforecastContributionRatio * 100, 1)}% contributie op.
-                Daardoor is {money(breakEvenRevenue)} omzet nodig om {money(activeReforecastFixedCosts)} vaste kosten te dekken.
+                Daardoor is {money(breakEvenRevenue)} omzet nodig om {money(activeRequiredCosts)} vaste en incidentele kosten te dekken.
               </p>
             </div>
             <div className="be-next-advice-actions">
@@ -1632,7 +1972,43 @@ export function BreakEvenNextMockup({
       ) : null}
 
       {activeTab === "variance" ? (
-        <div className="be-next-grid be-next-grid-2">
+        <div className="wizard-stack">
+          <section className="module-card">
+            <div className="module-card-header">
+              <div>
+                <div className="module-card-title">Varianties lezen</div>
+                <div className="module-card-text">
+                  Deze tab verklaart waarom het verwachte resultaat afwijkt van het plan. Plan blijft de norm; actuals en reforecast komen uit Omzet & Marge en kostenstructuur.
+                </div>
+              </div>
+            </div>
+            <div className="data-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Variantielaag</th>
+                    <th>Bedrag</th>
+                    <th>Wat zegt dit?</th>
+                    <th>Bron</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {varianceExplanationRows.map((row) => (
+                    <tr key={row.label}>
+                      <td><strong>{row.label}</strong></td>
+                      <td style={{ textAlign: "right" }}>
+                        <strong className={row.value >= 0 ? "be-next-positive" : "be-next-negative"}>{money(row.value)}</strong>
+                      </td>
+                      <td>{row.explanation}</td>
+                      <td><span className="muted">{row.source}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <div className="be-next-grid be-next-grid-2">
           <section className="module-card">
             <div className="module-card-title">Variance bridge</div>
             <div className="be-next-chart">
@@ -1663,6 +2039,7 @@ export function BreakEvenNextMockup({
               Dit resultaat verklaart dat vaste kosten over minder of meer volume worden terugverdiend dan gepland. De geplande kostprijs blijft dus intact.
             </div>
           </section>
+          </div>
         </div>
       ) : null}
 
@@ -1671,6 +2048,9 @@ export function BreakEvenNextMockup({
           <div className="be-next-grid be-next-grid-2">
             <section className="module-card">
               <div className="module-card-title">Scenario lab</div>
+              <div className="module-card-text">
+                Actual YTD blijft vast. De sliders veranderen alleen het resterende deel van de reforecast.
+              </div>
               <ScenarioSlider label="Prijs" value={scenario.pricePct} min={-10} max={15} onChange={(pricePct) => setScenario((current) => ({ ...current, pricePct }))} />
               <ScenarioSlider label="Volume" value={scenario.volumePct} min={-25} max={30} onChange={(volumePct) => setScenario((current) => ({ ...current, volumePct }))} />
               <ScenarioSlider label="Vaste kosten" value={scenario.fixedCostPct} min={-20} max={20} onChange={(fixedCostPct) => setScenario((current) => ({ ...current, fixedCostPct }))} />
@@ -1689,8 +2069,51 @@ export function BreakEvenNextMockup({
 
           <section className="module-card">
             <div className="module-card-header">
+              <div>
+                <div className="module-card-title">Wat wordt geraakt?</div>
+                <div className="module-card-text">
+                  Scenario's schrijven niets weg. Ze laten zien hoe het eindejaar verandert als alleen de resterende forecast anders uitpakt.
+                </div>
+              </div>
+            </div>
+            <div className="data-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Laag</th>
+                    <th>Omzet</th>
+                    <th>Variabele kosten</th>
+                    <th>Toelichting</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Actual YTD</strong></td>
+                    <td>{money(scenarioResult.actualRevenue)}</td>
+                    <td>{money(scenarioResult.actualVariable)}</td>
+                    <td>Gerealiseerd; dit blijft vast.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Resterende forecast</strong></td>
+                    <td>{money(scenarioResult.remainingRevenue)}</td>
+                    <td>{money(scenarioResult.remainingVariable)}</td>
+                    <td>Dit is het deel dat de sliders aanpassen.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Aangepaste rest</strong></td>
+                    <td>{money(scenarioResult.adjustedRemainingRevenue)}</td>
+                    <td>{money(scenarioResult.adjustedRemainingVariable)}</td>
+                    <td>Prijs raakt omzet; volume raakt omzet en variabele kosten.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="module-card">
+            <div className="module-card-header">
               <div className="module-card-title">Advieskaarten om het gat te sluiten</div>
-              <div className="module-card-text">Indicatief op basis van huidige reforecast. Deze kaarten schrijven niets weg en zijn bedoeld als stuurinformatie.</div>
+              <div className="module-card-text">Indicatief op basis van het resterende beinvloedbare deel van de reforecast. Deze kaarten schrijven niets weg.</div>
             </div>
             <div className="be-next-grid be-next-grid-4">
               <AdviceCard
@@ -1825,9 +2248,9 @@ function AdviceCard({ title, value, helper, mutedValue }: { title: string; value
   );
 }
 
-function PnlCard({ title, revenue, variable, fixedCosts }: { title: string; revenue: number; variable: number; fixedCosts: number }) {
+function PnlCard({ title, revenue, variable, fixedCosts, incidentalCosts = 0 }: { title: string; revenue: number; variable: number; fixedCosts: number; incidentalCosts?: number }) {
   const contribution = revenue - variable;
-  const result = contribution - fixedCosts;
+  const result = contribution - fixedCosts - incidentalCosts;
   return (
     <section className="module-card">
       <div className="module-card-title">{title}</div>
@@ -1838,6 +2261,7 @@ function PnlCard({ title, revenue, variable, fixedCosts }: { title: string; reve
             <PnlRow label="Variabele kostprijs verkopen" value={-variable} />
             <PnlRow label="Brutomarge / contributie" value={contribution} strong />
             <PnlRow label="Vaste kosten" value={-fixedCosts} />
+            <PnlRow label="Incidentele kosten" value={-incidentalCosts} />
             <PnlRow label="Operationeel resultaat" value={result} strong />
           </tbody>
         </table>
