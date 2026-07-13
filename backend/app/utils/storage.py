@@ -1307,7 +1307,9 @@ def _resolve_kostprijsproduct_refs(
             product_id = str(row.get("product_id", "") or "").strip()
             sku_id = str(row.get("sku_id", "") or "").strip()
             product_type = str(row.get("product_type", "") or "").strip().lower()
-            if product_type == "article" and product_id:
+            if product_type == "sku" and sku_id:
+                _append(sku_id, "sku")
+            elif product_type == "article" and product_id:
                 _append(product_id, "article")
             elif sku_id and not product_id:
                 _append(sku_id, "sku")
