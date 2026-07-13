@@ -378,7 +378,7 @@ export function buildActiveRows(args: {
 
       const rowKeyBase = skuId || `${bierId}|${productId}`;
       const componentGroupLabels =
-        skuKind === "article" && !bierId && skuArticleId
+        skuKind === "article" && skuArticleId
           ? Array.from(componentGroupLabelsByArticleId.get(skuArticleId) ?? [])
           : [];
       const groupLabels =
