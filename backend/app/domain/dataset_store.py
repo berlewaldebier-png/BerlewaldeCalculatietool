@@ -44,6 +44,7 @@ from app.utils.storage import (
     save_berekeningen,
     save_basisproducten,
     save_kostprijsproductactiveringen,
+    upsert_kostprijsproductactiveringen,
     save_packaging_component_masters,
     save_packaging_component_prices,
     save_packaging_component_price_versions,
@@ -52,7 +53,7 @@ from app.utils.storage import (
 )
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 
 DATASET_DEFAULTS: dict[str, Any] = {
@@ -1887,6 +1888,76 @@ def _create_new_year_break_even_plan_snapshot(
     )
 
 
+def _replace_year_activation_cost_lines(version_id: str, rows: list[dict[str, Any]]) -> int:
+    """Persist the target-year engine output as the canonical per-SKU cost rows.
+
+    Year activation is already based on the costprice SSOT engine. Re-deriving these rows
+    from product/BOM metadata can drop valid target rows, so activation writes the exact
+    engine result here and lets the normal activation flow read it back.
+    """
+    version_key = str(version_id or "").strip()
+    if not version_key:
+        raise ValueError("Kostprijsversie ontbreekt voor target cost lines.")
+
+    params: list[tuple[Any, ...]] = []
+    seen: set[str] = set()
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        sku_id = str(row.get("sku_id", "") or "").strip()
+        if not sku_id:
+            raise ValueError(
+                "Kostprijs-engine regel mist sku_id voor "
+                f"{str(row.get('biernaam', '') or '').strip()} / {str(row.get('product_label', '') or '').strip()}."
+            )
+        if sku_id in seen:
+            continue
+        seen.add(sku_id)
+        label = str(row.get("product_label", "") or row.get("verpakking", "") or sku_id).strip()
+        params.append(
+            (
+                str(uuid5(NAMESPACE_URL, f"cost_version_sku_row:{version_key}:{sku_id}")),
+                version_key,
+                sku_id,
+                label,
+                float(row.get("scenario_primary", row.get("target_primary", row.get("target_inkoop", 0.0))) or 0.0),
+                float(row.get("target_packaging", 0.0) or 0.0),
+                float(row.get("target_overhead", 0.0) or 0.0),
+                float(row.get("target_excise", 0.0) or 0.0),
+                float(row.get("target_cost", 0.0) or 0.0),
+                int(index),
+            )
+        )
+
+    if not params:
+        raise ValueError("Geen target cost lines gevonden om te activeren.")
+
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM cost_version_sku_rows WHERE version_id = %s", (version_key,))
+            cur.executemany(
+                """
+                INSERT INTO cost_version_sku_rows (
+                    id, version_id, sku_id, verpakking_label,
+                    inkoop, verpakkingskosten, indirecte_kosten, accijns, kostprijs, sort_index
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    version_id = EXCLUDED.version_id,
+                    sku_id = EXCLUDED.sku_id,
+                    verpakking_label = EXCLUDED.verpakking_label,
+                    inkoop = EXCLUDED.inkoop,
+                    verpakkingskosten = EXCLUDED.verpakkingskosten,
+                    indirecte_kosten = EXCLUDED.indirecte_kosten,
+                    accijns = EXCLUDED.accijns,
+                    kostprijs = EXCLUDED.kostprijs,
+                    sort_index = EXCLUDED.sort_index
+                """,
+                params,
+            )
+    return len(params)
+
+
 def activate_kostprijzen_for_year(
     *,
     owner: str,
@@ -1916,7 +1987,9 @@ def activate_kostprijzen_for_year(
     else:
         selected_keys = {f"{str(r.get('bier_id','') or '')}::{str(r.get('product_id','') or '')}" for r in plan_rows if isinstance(r, dict)}
 
-    # Group by beer.
+    # Group by source beer, except standalone article/service/merchandise rows without a
+    # source version. Those are already canonical SKU engine rows and should be activated
+    # once per SKU, not once for every style where they are displayed.
     rows_by_beer: dict[str, list[dict[str, Any]]] = {}
     for row in plan_rows:
         if not isinstance(row, dict):
@@ -1927,7 +2000,10 @@ def activate_kostprijzen_for_year(
             continue
         if f"{bier_id}::{product_id}" not in selected_keys:
             continue
-        rows_by_beer.setdefault(bier_id, []).append(row)
+        source_version_id = str(row.get("source_version_id", "") or "").strip()
+        sku_id = str(row.get("sku_id", "") or "").strip()
+        group_key = f"__article__::{sku_id or product_id}" if not source_version_id else bier_id
+        rows_by_beer.setdefault(group_key, []).append(row)
 
     if not rows_by_beer:
         return {"created_versions": 0, "activated": 0, "detail": "Geen geselecteerde rijen."}
@@ -1947,12 +2023,46 @@ def activate_kostprijzen_for_year(
     created_versions = 0
     activated_scopes = 0
     created_version_ids: list[str] = []
+    pending_activations: list[tuple[str, list[dict[str, Any]]]] = []
     for bier_id, beer_rows in rows_by_beer.items():
+        is_synthetic_article_group = str(bier_id).startswith("__article__::")
+        if is_synthetic_article_group:
+            preferred_rows = sorted(
+                beer_rows,
+                key=lambda row: (
+                    0
+                    if str(row.get("bier_id", "") or "").strip() in {"Dienstverlening", "Merchandise"}
+                    else 1,
+                    str(row.get("biernaam", "") or row.get("bier_id", "") or ""),
+                ),
+            )
+            beer_rows = preferred_rows[:1]
         # pick a source version for metadata
         source_version_id = str(beer_rows[0].get("source_version_id", "") or "").strip()
-        source_version = version_by_id.get(source_version_id)
+        source_version = version_by_id.get(source_version_id) if source_version_id else None
+        if not isinstance(source_version, dict) and is_synthetic_article_group:
+            first_row = beer_rows[0]
+            source_version = {
+                "id": "",
+                "bier_id": str(first_row.get("bier_id", "") or first_row.get("biernaam", "") or ""),
+                "type": "article",
+                "basisgegevens": {
+                    "jaar": int(source_year),
+                    "biernaam": str(first_row.get("product_label", "") or first_row.get("biernaam", "") or ""),
+                    "stijl": str(first_row.get("biernaam", "") or first_row.get("bier_id", "") or ""),
+                    "sku_type": "dienst" if str(first_row.get("bier_id", "") or "") == "Dienstverlening" else "artikel",
+                    "alcoholpercentage": 0.0,
+                    "belastingsoort": "Geen",
+                    "tarief_accijns": "Geen",
+                    "sku_id": str(first_row.get("sku_id", "") or ""),
+                    "article_id": str(first_row.get("product_id", "") or ""),
+                },
+                "bier_snapshot": {},
+                "invoer": {},
+            }
         if not isinstance(source_version, dict):
             raise ValueError(f"Bron kostprijsversie niet gevonden voor bier_id={bier_id}.")
+        record_bier_id = str(source_version.get("bier_id", "") or bier_id)
         basis = source_version.get("basisgegevens", {}) if isinstance(source_version.get("basisgegevens", {}), dict) else {}
         bier_snapshot = source_version.get("bier_snapshot", {}) if isinstance(source_version.get("bier_snapshot", {}), dict) else {}
         # Determine next versie_nummer for this beer+target_year.
@@ -1960,7 +2070,7 @@ def activate_kostprijzen_for_year(
             int(row.get("versie_nummer", 0) or 0)
             for row in versions
             if isinstance(row, dict)
-            and str(row.get("bier_id", "") or "").strip() == bier_id
+            and str(row.get("bier_id", "") or "").strip() == record_bier_id
             and int(row.get("jaar", 0) or 0) == int(target_year)
         ]
         next_num = (max(existing_nums) if existing_nums else 0) + 1
@@ -1969,7 +2079,7 @@ def activate_kostprijzen_for_year(
         basis_target = {**basis, "jaar": int(target_year)}
         soort = str(source_version.get("type", "") or "").strip().lower()
         calc_type = "Inkoop" if soort == "inkoop" else "Productie"
-        eigen_override = eigen_overrides.get(bier_id) if soort != "inkoop" else None
+        eigen_override = eigen_overrides.get(record_bier_id) if soort != "inkoop" else None
         if isinstance(eigen_override, dict):
             try:
                 basis_target["alcoholpercentage"] = float(eigen_override.get("alcoholpercentage", basis_target.get("alcoholpercentage", 0.0)) or 0.0)
@@ -2052,25 +2162,19 @@ def activate_kostprijzen_for_year(
             label = str(r.get("product_label", "") or "")
             source_primary = float(r.get("source_primary", 0.0) or 0.0)
             scenario_primary = float(r.get("scenario_primary", source_primary) or source_primary)
-            try:
-                liters, _legacy_packaging = _compute_target_product_components(
-                    product_type=product_type, product_id=product_id, target_year=target_year
-                )
-            except ValueError:
-                liters = 0.0
+            # The target-year engine row is the SSOT for activation. Avoid resolving product
+            # metadata here; that is expensive and can introduce accidental fallback behavior.
+            liters = 0.0
             packaging_cost = float(r.get("target_packaging", 0.0) or 0.0)
             vaste_kosten = float(r.get("target_overhead", 0.0) or 0.0)
             accijns = float(r.get("target_excise", 0.0) or 0.0)
             kostprijs = float(r.get("target_cost", 0.0) or 0.0)
-            if float(liters) > 0 and float(scenario_primary) > 0:
-                try:
-                    per_liter_candidates.append(float(scenario_primary) / float(liters))
-                    overhead_per_liter_candidates.append(float(vaste_kosten) / float(liters))
-                    excise_per_liter_candidates.append(float(accijns) / float(liters))
-                    total_per_liter_candidates.append(float(kostprijs) / float(liters))
-                except ZeroDivisionError:
-                    pass
+            per_liter_candidates.append(float(scenario_primary))
+            overhead_per_liter_candidates.append(float(vaste_kosten))
+            excise_per_liter_candidates.append(float(accijns))
+            total_per_liter_candidates.append(float(kostprijs))
             row_payload = {
+                "sku_id": str(r.get("sku_id", "") or "").strip(),
                 "product_id": product_id,
                 "product_type": product_type,
                 "verpakking": label,
@@ -2093,40 +2197,40 @@ def activate_kostprijzen_for_year(
         accijns_per_liter_summary = float(sum(excise_per_liter_candidates) / len(excise_per_liter_candidates)) if excise_per_liter_candidates else 0.0
         integrale_kostprijs_per_liter_summary = float(sum(total_per_liter_candidates) / len(total_per_liter_candidates)) if total_per_liter_candidates else 0.0
 
-        record = normalize_berekening_record(
-            {
-                "id": new_id,
-                "bier_id": bier_id,
-                "basisgegevens": basis_target,
-                "bier_snapshot": bier_snapshot_target,
-                "status": "definitief",
-                "calculation_type": calc_type,
-                "soort_berekening": {"type": "Inkoop" if soort == "inkoop" else "Eigen productie"},
-                "invoer": invoer_payload,
-                "versie_nummer": int(next_num),
-                "kostprijs": float(integrale_kostprijs_per_liter_summary),
-                "calculation_variant": "jaarovergang",
-                "jaarovergang": {
-                    "bron_berekening_id": str(source_version_id),
-                    "bron_jaar": int(source_year),
-                    "doel_jaar": int(target_year),
-                    "aangemaakt_via": "kostprijs_activatie",
-                    "created_at": now,
-                },
+        record = {
+            "id": new_id,
+            "bier_id": record_bier_id,
+            "jaar": int(target_year),
+            "type": soort or ("inkoop" if calc_type == "Inkoop" else "productie"),
+            "basisgegevens": basis_target,
+            "bier_snapshot": bier_snapshot_target,
+            "status": "definitief",
+            "calculation_type": calc_type,
+            "soort_berekening": {"type": "Inkoop" if soort == "inkoop" else "Eigen productie"},
+            "invoer": invoer_payload,
+            "versie_nummer": int(next_num),
+            "kostprijs": float(integrale_kostprijs_per_liter_summary),
+            "calculation_variant": "jaarovergang",
+            "jaarovergang": {
+                "bron_berekening_id": str(source_version_id),
+                "bron_jaar": int(source_year),
+                "doel_jaar": int(target_year),
+                "aangemaakt_via": "kostprijs_activatie",
                 "created_at": now,
-                "updated_at": now,
-                "finalized_at": now,
-                "resultaat_snapshot": {
-                    "integrale_kostprijs_per_liter": float(integrale_kostprijs_per_liter_summary),
-                    "variabele_kosten_per_liter": float(variabele_kosten_per_liter_summary),
-                    "directe_vaste_kosten_per_liter": float(vaste_kosten_per_liter_summary),
-                    "producten": {
-                        "basisproducten": basisproducten_snapshot,
-                        "samengestelde_producten": samengestelde_snapshot,
-                    },
+            },
+            "created_at": now,
+            "updated_at": now,
+            "finalized_at": now,
+            "resultaat_snapshot": {
+                "integrale_kostprijs_per_liter": float(integrale_kostprijs_per_liter_summary),
+                "variabele_kosten_per_liter": float(variabele_kosten_per_liter_summary),
+                "directe_vaste_kosten_per_liter": float(vaste_kosten_per_liter_summary),
+                "producten": {
+                    "basisproducten": basisproducten_snapshot,
+                    "samengestelde_producten": samengestelde_snapshot,
                 },
-            }
-        )
+            },
+        }
 
         if dry_run:
             created_versions += 1
@@ -2134,16 +2238,48 @@ def activate_kostprijzen_for_year(
             continue
 
         versions.append(record)
-        if not save_berekeningen(versions):
-            raise ValueError("Kon kostprijsversies niet opslaan.")
         created_versions += 1
         created_version_ids.append(new_id)
 
-        product_ids = [str(r.get("product_id", "") or "").strip() for r in beer_rows if str(r.get("product_id", "") or "").strip()]
-        activated = activate_kostprijsversie_products(new_id, product_ids, context={"action": "year_activation", "owner": owner})
-        if not activated:
-            raise ValueError("Kon kostprijsproducten niet activeren.")
-        activated_scopes += len(product_ids)
+        pending_activations.append((new_id, beer_rows))
+
+    if pending_activations:
+        if not save_berekeningen(versions):
+            raise ValueError("Kon kostprijsversies niet opslaan.")
+
+    activation_rows: list[dict[str, Any]] = []
+    activated_sku_ids: set[str] = set()
+    for new_id, beer_rows in pending_activations:
+        _replace_year_activation_cost_lines(new_id, beer_rows)
+        for row in beer_rows:
+            sku_id = str(row.get("sku_id", "") or "").strip()
+            if not sku_id:
+                raise ValueError(
+                    "Kostprijs-engine regel mist sku_id voor activatie: "
+                    f"{str(row.get('biernaam', '') or '').strip()} / {str(row.get('product_label', '') or '').strip()}."
+                )
+            if sku_id in activated_sku_ids:
+                continue
+            activated_sku_ids.add(sku_id)
+            activation_rows.append(
+                {
+                    "sku_id": sku_id,
+                    "jaar": int(target_year),
+                    "kostprijsversie_id": str(new_id),
+                    "effectief_vanaf": now,
+                    "created_at": now,
+                    "updated_at": now,
+                    "bier_id": str(row.get("bier_id", "") or ""),
+                    "product_id": str(row.get("product_id", "") or ""),
+                    "product_type": str(row.get("product_type", "") or ""),
+                }
+            )
+    activated_scopes = len(activation_rows)
+    if activation_rows and not upsert_kostprijsproductactiveringen(
+        activation_rows,
+        context={"action": "year_activation", "owner": owner},
+    ):
+        raise ValueError("Kon kostprijsproducten niet activeren.")
 
     result = {
         "created_versions": int(created_versions),

@@ -1120,6 +1120,34 @@ def _kostprijsversie_basis_sku_by_id() -> dict[str, str]:
     return mapping
 
 
+def _kostprijsversie_allowed_sku_ids_by_id() -> dict[str, set[str]]:
+    """Map cost version id -> SKU ids explicitly present in canonical cost lines."""
+    mapping: dict[str, set[str]] = {}
+    for record in load_kostprijsversies():
+        if not isinstance(record, dict):
+            continue
+        version_id = str(record.get("id", "") or "")
+        if not version_id:
+            continue
+        allowed: set[str] = set()
+        cost_lines = record.get("cost_lines", [])
+        if isinstance(cost_lines, list):
+            for line in cost_lines:
+                if not isinstance(line, dict):
+                    continue
+                sku_id = str(line.get("sku_id", "") or "").strip()
+                if sku_id:
+                    allowed.add(sku_id)
+        basis = record.get("basisgegevens")
+        if isinstance(basis, dict):
+            basis_sku = str(basis.get("sku_id", "") or "").strip()
+            if basis_sku:
+                allowed.add(basis_sku)
+        if allowed:
+            mapping[version_id] = allowed
+    return mapping
+
+
 def _validate_kostprijsproductactiveringen(
     rows: list[dict[str, Any]],
     *,
@@ -1129,6 +1157,7 @@ def _validate_kostprijsproductactiveringen(
     known_skus = known_skus if known_skus is not None else _known_sku_ids()
     known_versions = known_versions if known_versions is not None else _known_kostprijsversie_ids()
     version_basis_sku_by_id = _kostprijsversie_basis_sku_by_id()
+    version_allowed_skus_by_id = _kostprijsversie_allowed_sku_ids_by_id()
     validated: list[dict[str, Any]] = []
     seen_keys: set[tuple[str, int]] = set()
     invalid: list[dict[str, Any]] = []
@@ -1148,8 +1177,12 @@ def _validate_kostprijsproductactiveringen(
         if not version_id or version_id not in known_versions:
             invalid.append({"reason": "unknown_kostprijsversie", "row": normalized})
             continue
+        allowed_skus = version_allowed_skus_by_id.get(version_id, set())
         basis_sku = str(version_basis_sku_by_id.get(version_id, "") or "")
-        if basis_sku and basis_sku != sku_id:
+        if allowed_skus and sku_id not in allowed_skus:
+            invalid.append({"reason": "kostprijsversie_sku_mismatch", "row": normalized})
+            continue
+        if not allowed_skus and basis_sku and basis_sku != sku_id:
             invalid.append({"reason": "kostprijsversie_sku_mismatch", "row": normalized})
             continue
         if unique_key in seen_keys:

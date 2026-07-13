@@ -980,7 +980,15 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         if not sku_id:
                             continue
                         sku_kind = str((sku_meta_by_id.get(sku_id, {}) or {}).get("kind", "") or "").strip().lower()
-                        if sku_kind == "article" and str(version.get("type", "") or "").strip().lower() == "inkoop":
+                        is_year_transition = (
+                            str(version.get("calculation_variant", "") or "").strip().lower() == "jaarovergang"
+                            or isinstance(version.get("jaarovergang"), dict)
+                        )
+                        if (
+                            sku_kind == "article"
+                            and str(version.get("type", "") or "").strip().lower() == "inkoop"
+                            and not is_year_transition
+                        ):
                             # Sellable beer variants are derived from their BOM below. Older snapshots may contain
                             # stale copied rows, e.g. a 12-pack with the cost of a single bottle.
                             continue
