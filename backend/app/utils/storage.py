@@ -6079,20 +6079,23 @@ def normalize_verkoopstrategie_product_record(record: dict[str, Any]) -> dict[st
 
     created_at = str(record.get("created_at", "") or "") or _now_iso()
     updated_at = str(record.get("updated_at", "") or "") or created_at
+    sku_id = str(record.get("sku_id", "") or "").strip()
+    product_id = sku_id or str(record.get("product_id", "") or "").strip()
+    product_type = "sku" if sku_id else str(record.get("product_type", "samengesteld") or "samengesteld")
 
     return {
         "id": str(record.get("id", "") or uuid4()),
         "record_type": VERKOOPSTRATEGIE_RECORD_TYPE_PRODUCT,
         "jaar": jaar,
         "bron_jaar": bron_jaar,
-        "sku_id": str(record.get("sku_id", "") or ""),
+        "sku_id": sku_id,
         "douano_product_id": record.get("douano_product_id", ""),
         "douano_sku": str(record.get("douano_sku", "") or ""),
         "bier_id": str(record.get("bier_id", "") or ""),
         "biernaam": str(record.get("biernaam", "") or ""),
         "stijl": str(record.get("stijl", "") or ""),
-        "product_id": str(record.get("product_id", "") or ""),
-        "product_type": str(record.get("product_type", "samengesteld") or "samengesteld"),
+        "product_id": product_id,
+        "product_type": product_type,
         "verpakking": str(record.get("verpakking", "") or ""),
         "bron_berekening_id": str(record.get("bron_berekening_id", "") or ""),
         "bron_verkoopstrategie_id": str(record.get("bron_verkoopstrategie_id", "") or ""),

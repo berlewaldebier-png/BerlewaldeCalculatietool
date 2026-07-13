@@ -17,7 +17,7 @@ export type StrategyRow = {
   bier_id: string;
   biernaam: string;
   product_id: string;
-  product_type: "basis" | "samengesteld" | "";
+  product_type: "basis" | "samengesteld" | "sku" | "";
   verpakking: string;
   strategie_type: string;
   kostprijs: number;
@@ -156,17 +156,16 @@ export function normalizeStrategyRow(row: GenericRecord, channelCodes: string[])
     typeof pricesSrcRaw === "object" && pricesSrcRaw !== null
       ? (pricesSrcRaw as Record<string, unknown>)
       : {};
+  const productType = String((row as any).product_type ?? "").trim().toLowerCase();
   return {
     id: String(row.id ?? ""),
     record_type: String(row.record_type ?? "verkoopstrategie_verpakking"),
     jaar: Number(row.jaar ?? new Date().getFullYear()),
+    sku_id: String((row as any).sku_id ?? ""),
     bier_id: String((row as any).bier_id ?? ""),
     biernaam: String((row as any).biernaam ?? ""),
     product_id: String((row as any).product_id ?? ""),
-    product_type:
-      String((row as any).product_type ?? "") === "basis" || String((row as any).product_type ?? "") === "samengesteld"
-        ? (String((row as any).product_type ?? "") as "basis" | "samengesteld")
-        : "",
+    product_type: productType === "basis" || productType === "samengesteld" || productType === "sku" ? productType : "",
     verpakking: String((row as any).verpakking ?? ""),
     strategie_type: String((row as any).strategie_type ?? "default"),
     kostprijs: Number((row as any).kostprijs ?? 0),
