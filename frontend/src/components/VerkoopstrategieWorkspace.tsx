@@ -12,6 +12,7 @@ import {
 import { VerkoopstrategiePrijsinstellingenAccordion } from "@/components/verkoopstrategie/VerkoopstrategiePrijsinstellingenAccordion";
 import { inputClass, money, num } from "@/components/verkoopstrategie/verkoopstrategieUi";
 import type { BeerViewRow, ProductViewRow } from "@/components/verkoopstrategie/verkoopstrategieTypes";
+import { buildActiveRows } from "@/components/kostprijsbeheer/kostprijsBeheerDerivations";
 import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
 import { normalizeSkuLabel } from "@/lib/skuLabels";
 import {
@@ -81,7 +82,7 @@ export function VerkoopstrategieWorkspace({
 }: Props) {
   const normalizedChannels = useMemo(() => normalizeChannels(channels), [channels]);
   const activeChannels = useMemo(() => normalizedChannels.filter((channel) => channel.actief), [normalizedChannels]);
-  const channelCodes = useMemo(() => normalizedChannels.map((channel) => channel.code), [normalizedChannels]);
+  const channelCodes = useMemo(() => Array.from(new Set(["list", ...normalizedChannels.map((channel) => channel.code)])), [normalizedChannels]);
   const channelMasterDefaults = useMemo(
     () =>
       Object.fromEntries(
@@ -189,6 +190,7 @@ export function VerkoopstrategieWorkspace({
     verkoopprijzen,
     skus,
     articles,
+    bomLines,
     berekeningen,
     kostprijsproductactiveringen,
     centralSkuIndex.rows,
@@ -261,6 +263,7 @@ export function VerkoopstrategieWorkspace({
     const first = activeChannels[0]?.code ?? "";
     return first ? [first] : [];
   });
+  const [openPriceGroups, setOpenPriceGroups] = useState<Record<string, boolean>>({});
   const [sellFilter, setSellFilter] = useState<string>("");
 
   useEffect(() => {
@@ -331,6 +334,46 @@ export function VerkoopstrategieWorkspace({
 
   const basisById = useMemo(() => new Map(basisproducten.map((row) => [String(row.id ?? ""), row])), [basisproducten]);
   const samengesteldById = useMemo(() => new Map(samengesteldeProducten.map((row) => [String(row.id ?? ""), row])), [samengesteldeProducten]);
+  const basisLabelById = useMemo(
+    () => new Map(basisproducten.map((row) => [String(row.id ?? ""), String((row as any).verpakkingseenheid ?? (row as any).omschrijving ?? (row as any).naam ?? row.id ?? "")])),
+    [basisproducten]
+  );
+  const samengesteldLabelById = useMemo(
+    () => new Map(samengesteldeProducten.map((row) => [String(row.id ?? ""), String((row as any).verpakkingseenheid ?? (row as any).omschrijving ?? (row as any).naam ?? row.id ?? "")])),
+    [samengesteldeProducten]
+  );
+  const articleById = useMemo(() => new Map((Array.isArray(articles) ? articles : []).map((row) => [String((row as any).id ?? ""), row])), [articles]);
+  const berekeningenById = useMemo(
+    () => new Map((Array.isArray(berekeningen) ? berekeningen : []).map((row) => [String((row as any).id ?? ""), row])),
+    [berekeningen]
+  );
+  const activeCostRows = useMemo(() => {
+    return buildActiveRows({
+      kostprijsproductactiveringen: Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : [],
+      selectedYear: effectiveSelectedYear,
+      search: "",
+      activeSort: { key: "artikel", direction: "asc" },
+      bierenById: beerNameById,
+      basisById: basisLabelById,
+      skuById,
+      articleById,
+      bomLines: Array.isArray(bomLines) ? bomLines : [],
+      samengesteldById: samengesteldLabelById,
+      berekeningenById,
+      currentBerekeningen: Array.isArray(berekeningen) ? berekeningen : [],
+    });
+  }, [
+    articleById,
+    basisLabelById,
+    beerNameById,
+    berekeningen,
+    berekeningenById,
+    bomLines,
+    effectiveSelectedYear,
+    kostprijsproductactiveringen,
+    samengesteldLabelById,
+    skuById,
+  ]);
   const actieveProductActiveringen = useMemo(
     () =>
       (Array.isArray(kostprijsproductactiveringen) ? kostprijsproductactiveringen : []).filter(
@@ -378,27 +421,82 @@ export function VerkoopstrategieWorkspace({
   }, [channelCodes, channelYearDefaults, productSources, rows, effectiveSelectedYear]);
 
   const sellRows = useMemo<BeerViewRow[]>(() => {
+    function applyDerivedListPrices(out: BeerViewRow[]) {
+      const linesByParent = new Map<string, GenericRecord[]>();
+      (Array.isArray(bomLines) ? bomLines : []).forEach((line) => {
+        const parentArticleId = String((line as any)?.parent_article_id ?? "").trim();
+        if (!parentArticleId) return;
+        linesByParent.set(parentArticleId, [...(linesByParent.get(parentArticleId) ?? []), line]);
+      });
+      const rowBySku = new Map(out.map((row) => [row.skuId, row]));
+      const skuByArticleId = new Map<string, string>();
+      (Array.isArray(skus) ? skus : []).forEach((sku) => {
+        const skuId = String((sku as any)?.id ?? "").trim();
+        const articleId = String((sku as any)?.article_id ?? "").trim();
+        if (skuId && articleId && !skuByArticleId.has(articleId)) skuByArticleId.set(articleId, skuId);
+      });
+
+      const derive = (row: BeerViewRow, seen: Set<string>): number | null => {
+        const explicit = row.sellInPriceOverrides?.list;
+        if (explicit !== "" && explicit !== undefined && explicit !== null) return Number(explicit);
+        if (!row.skuId || seen.has(row.skuId)) return null;
+        const componentLines = linesByParent.get(row.productId) ?? [];
+        if (componentLines.length === 0) return null;
+        seen.add(row.skuId);
+        let total = 0;
+        for (const line of componentLines) {
+          const quantity = Number((line as any)?.quantity ?? (line as any)?.aantal ?? 0);
+          if (!Number.isFinite(quantity) || quantity <= 0) return null;
+          const componentSkuId =
+            String((line as any)?.component_sku_id ?? "").trim() ||
+            skuByArticleId.get(String((line as any)?.component_article_id ?? "").trim()) ||
+            "";
+          const componentRow = componentSkuId ? rowBySku.get(componentSkuId) : undefined;
+          if (!componentRow) return null;
+          const componentPrice = derive(componentRow, seen);
+          if (componentPrice === null || !Number.isFinite(componentPrice)) return null;
+          total += componentPrice * quantity;
+        }
+        seen.delete(row.skuId);
+        return round2(total);
+      };
+
+      return out.map((row) => {
+        if (row.sellInPriceOverrides?.list !== "" || row.productType !== "samengesteld") return row;
+        const derived = derive(row, new Set<string>());
+        if (derived === null || derived <= 0) return row;
+        return {
+          ...row,
+          sellInPrices: { ...row.sellInPrices, list: derived },
+          sellInPriceSources: { ...(row.sellInPriceSources ?? {}), list: "derived" as const },
+        };
+      });
+    }
+
     if (mode === "draft" && Array.isArray(draftKostprijsPreviewRows) && draftKostprijsPreviewRows.length > 0) {
       const productById = new Map(productOverrideRows.map((row) => [row.productId, row]));
-      const beerOverrides = new Map(
+      const beerOverridesBySku = new Map(
         rows
           .filter((row) => row.jaar === effectiveSelectedYear && row.record_type === "verkoopstrategie_product")
-          .map((row) => [`${row.bier_id}::${row.product_id}`, row])
+          .flatMap((row) => {
+            const skuId = String((row as any).sku_id ?? "").trim();
+            return skuId ? [[skuId, row] as const] : [];
+          })
       );
 
       const unique = new Map<string, (typeof draftKostprijsPreviewRows)[number]>();
       draftKostprijsPreviewRows.forEach((row) => {
         if (!row) return;
-        const bierId = String(row.bierId ?? "").trim();
-        const productId = String(row.productId ?? "").trim();
-        if (!bierId || !productId) return;
-        unique.set(`${bierId}::${productId}`, row);
+        const skuId = String((row as any).skuId ?? (row as any).sku_id ?? "").trim();
+        if (!skuId) return;
+        unique.set(skuId, row);
       });
 
       const out: BeerViewRow[] = [];
       unique.forEach((row) => {
         const bierId = String(row.bierId ?? "");
         const productId = String(row.productId ?? "");
+        const skuId = String((row as any).skuId ?? (row as any).sku_id ?? "").trim();
         const biernaam = String(row.biernaam ?? bierId).trim();
         const productLabel = String(row.productLabel ?? "").trim() || productId;
         const productDefaults = productById.get(productId);
@@ -411,7 +509,7 @@ export function VerkoopstrategieWorkspace({
             number
           >);
 
-        const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
+        const override = skuId ? beerOverridesBySku.get(skuId) ?? null : null;
         const opslagOverrides = Object.fromEntries(
           channelCodes.map((code) => {
             const value = override?.sell_in_margins?.[code];
@@ -439,9 +537,13 @@ export function VerkoopstrategieWorkspace({
             return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
           })
         ) as Record<string, number>;
+        const sellInPriceSources = Object.fromEntries(
+          channelCodes.map((code) => [code, sellInPriceOverrides[code] !== "" ? "explicit" : "opslag"])
+        ) as BeerViewRow["sellInPriceSources"];
 
         out.push({
           id: override?.id || `${bierId}:${productId}`,
+          skuId,
           bierId,
           biernaam,
           productId,
@@ -453,43 +555,37 @@ export function VerkoopstrategieWorkspace({
           sellInPriceOverrides,
           activeOpslags,
           sellInPrices,
+          sellInPriceSources,
           isReadOnly: Boolean(productDefaults?.isReadOnly),
           followsProductId: followProductId,
           followsProductLabel: productDefaults?.followsProductLabel ?? ""
         });
       });
 
-      return out.sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
+      return applyDerivedListPrices(out).sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
     }
 
     // SKU-aanpak: in runtime mode, use the canonical CentralSkuIndex for active beer-format SKUs.
     // This avoids legacy activation/snapshot matching quirks and ensures selectors match offerte/adviesprijzen.
     const productById = new Map(productOverrideRows.map((row) => [row.productId, row]));
-    const beerOverrides = new Map(
+    const beerOverridesBySku = new Map(
       rows
         .filter((row) => row.jaar === effectiveSelectedYear && row.record_type === "verkoopstrategie_product")
-        .map((row) => [`${row.bier_id}::${row.product_id}`, row])
+        .flatMap((row) => {
+          const skuId = String((row as any).sku_id ?? "").trim();
+          return skuId ? [[skuId, row] as const] : [];
+        })
     );
-
     const out: BeerViewRow[] = [];
-    centralSkuIndex.rows
-      .filter((row) => row.subtype === "bier" || row.subtype === "product")
-      .filter((row) => row.pricingMethod === "cost_plus")
-      .filter((row) => row.isActive)
-      .filter((row) => row.kostprijsEx > 0)
-      .forEach((centralRow) => {
-        const sku = skuById.get(centralRow.skuId) ?? null;
-        const skuKind = String((sku as any)?.kind ?? "").trim().toLowerCase();
-        const bierIdRaw = String((sku as any)?.beer_id ?? "").trim();
-        const articleId = String((sku as any)?.article_id ?? "").trim();
-        const formatId = String((sku as any)?.format_article_id ?? "").trim();
-        const productId = skuKind === "article" ? articleId : formatId;
-        const componentBeerId = skuKind === "article" ? componentBeerIdByArticleId.get(articleId) ?? "" : "";
-        const bierId = bierIdRaw || componentBeerId || (skuKind === "article" ? `sku:${centralRow.skuId}` : "");
-        if (!bierId || !productId) return;
-        const rawSkuName = normalizeSkuLabel((sku as any)?.name ?? centralRow.label ?? "");
-        const fallbackBeerName = rawSkuName.split(" - ")[0]?.trim() || bierId;
-        const biernaam = beerNameById.get(bierId) || fallbackBeerName;
+    activeCostRows
+      .filter((row) => Number(row.currentCost ?? 0) > 0)
+      .forEach((activeRow) => {
+        const skuId = String(activeRow.skuId ?? "").trim();
+        const productId = String(activeRow.productId ?? "").trim();
+        const bierId = String(activeRow.groupLabel || activeRow.bierNaam || activeRow.categorie || "").trim();
+        if (!skuId || !bierId || !productId) return;
+        const biernaam = String(activeRow.groupLabel || activeRow.bierNaam || activeRow.categorie || "Zonder stijl");
+        const productType = String(activeRow.productType ?? "").trim() || "basis";
         const productDefaults = productById.get(productId);
         const followProductId = productDefaults?.followsProductId ?? "";
         const productOpslags =
@@ -499,7 +595,7 @@ export function VerkoopstrategieWorkspace({
             number
           >);
 
-        const override = beerOverrides.get(`${bierId}::${followProductId || productId}`) ?? null;
+        const override = beerOverridesBySku.get(skuId) ?? null;
         const opslagOverrides = Object.fromEntries(
           channelCodes.map((code) => {
             const value = override?.sell_in_margins?.[code];
@@ -519,7 +615,7 @@ export function VerkoopstrategieWorkspace({
           channelCodes.map((code) => [code, opslagOverrides[code] === "" ? productOpslags[code] : Number(opslagOverrides[code])])
         ) as Record<string, number>;
 
-        const kostprijs = Number(centralRow.kostprijsEx ?? 0);
+        const kostprijs = Number(activeRow.currentCost ?? 0);
         const sellInPrices = Object.fromEntries(
           channelCodes.map((code) => {
             const explicit = sellInPriceOverrides[code];
@@ -527,18 +623,18 @@ export function VerkoopstrategieWorkspace({
             return [code, calcSellPriceFromOpslagPct(kostprijs, activeOpslags[code])];
           })
         ) as Record<string, number>;
+        const sellInPriceSources = Object.fromEntries(
+          channelCodes.map((code) => [code, sellInPriceOverrides[code] !== "" ? "explicit" : "opslag"])
+        ) as BeerViewRow["sellInPriceSources"];
 
-        const productLabel =
-          normalizeSkuLabel(centralRow.label) ||
-          (skuKind === "article"
-            ? normalizeSkuLabel(bundleArticleById.get(productId)?.label ?? productId)
-            : normalizeSkuLabel(formatArticleById.get(productId)?.label ?? productId));
+        const productLabel = normalizeSkuLabel(activeRow.artikelNaam || activeRow.productNaam || productId);
         out.push({
           id: override?.id || `${bierId}:${productId}`,
+          skuId,
           bierId,
           biernaam,
           productId,
-          productType: (productDefaults?.productType ?? (skuKind === "article" ? "samengesteld" : "basis")) as any,
+          productType: (productDefaults?.productType ?? productType) as any,
           product: productLabel,
           kostprijs,
           productOpslags,
@@ -546,14 +642,16 @@ export function VerkoopstrategieWorkspace({
           sellInPriceOverrides,
           activeOpslags,
           sellInPrices,
+          sellInPriceSources,
           isReadOnly: Boolean(productDefaults?.isReadOnly),
           followsProductId: followProductId,
           followsProductLabel: productDefaults?.followsProductLabel ?? ""
         });
       });
 
-    return out.sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
+    return applyDerivedListPrices(out).sort((a, b) => (a.biernaam === b.biernaam ? a.product.localeCompare(b.product, "nl-NL") : a.biernaam.localeCompare(b.biernaam, "nl-NL")));
   }, [
+    activeCostRows,
     effectiveSelectedYear,
     mode,
     channels,
@@ -622,6 +720,22 @@ export function VerkoopstrategieWorkspace({
         rows: rows.slice().sort((a, b) => a.product.localeCompare(b.product, "nl-NL"))
       }));
   }, [filteredSellRows]);
+
+  const allPriceGroupsOpen = useMemo(
+    () => Object.fromEntries(groupedBeerRows.map((group) => [group.biernaam, true])),
+    [groupedBeerRows]
+  );
+
+  function listPrice(row: BeerViewRow) {
+    return Number(row.sellInPriceOverrides?.list || row.sellInPrices?.list || 0) || 0;
+  }
+
+  function listOpslag(row: BeerViewRow) {
+    const price = listPrice(row);
+    const cost = Number(row.kostprijs || 0);
+    if (price <= 0 || cost <= 0) return 0;
+    return ((price / cost) - 1) * 100;
+  }
 
   const beerFormatSkuIdByScope = useMemo(() => {
     const map = new Map<string, string>();
@@ -947,7 +1061,7 @@ export function VerkoopstrategieWorkspace({
     <section className="module-card">
       <div className="module-card-header">
         <div className="module-card-title">Verkoopstrategie</div>
-        <div className="module-card-text">Kanaaldefaults vormen de basis. Daar bovenop kun je per product of per bier/product afwijken.</div>
+        <div className="module-card-text">Beheer de actieve prijslijst per jaar en SKU. De lijstprijs is de SSOT; varianten kunnen later daarvan worden afgeleid.</div>
       </div>
 
       {productieYears.length === 0 ? (
@@ -961,11 +1075,11 @@ export function VerkoopstrategieWorkspace({
       <>
           <div className="editor-toolbar">
             <div className="editor-toolbar-meta">
-              <span className="editor-pill">{productSources.length} producten</span>
+              <span className="editor-pill">{sellRows.length} SKU&apos;s</span>
               {serviceRows.length > 0 ? (
                 <span className="editor-pill">{serviceRows.length} diensten</span>
               ) : null}
-              <span className="muted">Actieve kanalen: {activeChannels.map((channel) => channel.naam).join(", ") || "geen"}</span>
+              <span className="muted">Een actieve prijslijst per jaar.</span>
             </div>
             <div className="editor-actions-group">
               <label className="nested-field">
@@ -999,26 +1113,114 @@ export function VerkoopstrategieWorkspace({
             </div>
           </div>
 
-          <VerkoopstrategiePrijsinstellingenAccordion
-            activeChannels={activeChannels}
-            openChannelCodes={openChannelCodes}
-            setOpenChannelCodes={setOpenChannelCodes}
-            effectiveSelectedYear={effectiveSelectedYear}
-            channelMasterDefaults={channelMasterDefaults}
-            channelYearDefaults={channelYearDefaults}
-            groupedProductOverrideRows={groupedProductOverrideRows}
-            groupedBeerRows={groupedBeerRows}
-            getDraft={getDraft}
-            setDraft={setDraft}
-            clearDraft={clearDraft}
-            updateYearSellInPrice={updateYearSellInPrice}
-            updateYearMargin={updateYearMargin}
-            updateProductSellInPrice={updateProductSellInPrice}
-            updateProductMargin={updateProductMargin}
-            updateBeerSellInPrice={updateBeerSellInPrice}
-            updateBeerMargin={updateBeerMargin}
-            resetChannelOverrides={resetChannelOverrides}
-          />
+          <div className="editor-actions" style={{ marginTop: 12, marginBottom: 12 }}>
+            <div className="editor-actions-group">
+              <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenPriceGroups(allPriceGroupsOpen)}>
+                Alles openen
+              </button>
+              <button type="button" className="editor-button editor-button-secondary" onClick={() => setOpenPriceGroups({})}>
+                Alles sluiten
+              </button>
+            </div>
+          </div>
+
+          {groupedBeerRows.length === 0 ? (
+            <div className="dataset-empty" style={{ padding: "1rem" }}>
+              Geen verkoopbare SKU&apos;s gevonden voor {effectiveSelectedYear}.
+            </div>
+          ) : (
+            <div className="wizard-stack">
+              {groupedBeerRows.map((group) => {
+                const isOpen = openPriceGroups[group.biernaam] ?? false;
+                return (
+                  <section key={group.biernaam} className="module-card compact-card">
+                    <button
+                      type="button"
+                      className="module-card-title"
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        cursor: "pointer",
+                        background: "transparent",
+                        border: 0,
+                        padding: 0,
+                        textAlign: "left",
+                      }}
+                      onClick={() => setOpenPriceGroups((current) => ({ ...current, [group.biernaam]: !isOpen }))}
+                    >
+                      <span>{isOpen ? "v" : ">"} {group.biernaam}</span>
+                      <span className="editor-pill">{group.rows.length} SKU&apos;s</span>
+                    </button>
+
+                    {isOpen ? (
+                      <div className="dataset-editor-scroll" style={{ marginTop: 12 }}>
+                        <table className="dataset-editor-table">
+                          <thead>
+                            <tr>
+                              <th>Artikel</th>
+                              <th>Kostprijs</th>
+                              <th>Lijstprijs {effectiveSelectedYear}</th>
+                              <th>Opslag</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.rows.map((row) => {
+                              const price = listPrice(row);
+                              const opslag = listOpslag(row);
+                              const statusOk = price > row.kostprijs && price > 0;
+                              const priceSource = row.sellInPriceSources?.list ?? "opslag";
+                              const statusLabel =
+                                priceSource === "derived"
+                                  ? "afgeleid"
+                                  : priceSource === "explicit"
+                                    ? "prijs gezet"
+                                    : statusOk
+                                      ? "opslag"
+                                      : "prijs ontbreekt";
+                              return (
+                                <tr key={`${row.bierId}::${row.productId}`}>
+                                  <td>
+                                    <strong>{row.product}</strong>
+                                    <div className="muted">{row.productId}</div>
+                                  </td>
+                                  <td>{money(row.kostprijs)}</td>
+                                  <td>
+                                    <input
+                                      className={inputClass(false)}
+                                      type="number"
+                                      step="0.01"
+                                      value={price || ""}
+                                      onChange={(event) =>
+                                        updateBeerSellInPrice(
+                                          row,
+                                          "list",
+                                          event.target.value === "" ? "" : parseNumberLoose(event.target.value)
+                                        )
+                                      }
+                                      style={{ maxWidth: 140 }}
+                                    />
+                                  </td>
+                                  <td>{opslag.toLocaleString("nl-NL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td>
+                                  <td>
+                                    <span className={`status-pill ${statusOk ? "status-ok" : "status-warning"}`}>
+                                      {statusLabel}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })}
+            </div>
+          )}
 
           {serviceRows.length > 0 ? (
             <div className="module-card compact-card" style={{ marginTop: "1rem" }}>

@@ -429,6 +429,35 @@ def upsert_purchase_lot_cost(raw: dict[str, Any]) -> dict[str, Any]:
     return {"purchase_lot_id": lot_id, "purchase_lot_sku_cost_id": cost_id}
 
 
+def delete_purchase_lot_cost(raw: dict[str, Any]) -> dict[str, Any]:
+    """Delete one canonical purchase LOT cost row projected from a LOT-cost record."""
+    ensure_schema()
+    supplier_name = _text(raw.get("supplier"))
+    supplier_id = _text(raw.get("supplier_id"))
+    if supplier_name and not supplier_id:
+        supplier_id = _id_for("supplier", supplier_name)
+    lot_number = _text(raw.get("lot_number"))
+    source_ref = _text(raw.get("source_ref"))
+    sku_id = _text(raw.get("sku_id"))
+    sku_code = _text(raw.get("sku_code"))
+    if not lot_number or not (sku_id or sku_code):
+        return {"purchase_lot_sku_costs": 0, "purchase_lots": 0}
+
+    lot_id = _text(raw.get("purchase_lot_id")) or _id_for("purchase-lot", lot_number, supplier_id, source_ref)
+    cost_id = _text(raw.get("purchase_lot_sku_cost_id")) or _id_for("purchase-lot-cost", lot_id, sku_id, sku_code)
+    deleted_costs = 0
+    deleted_lots = 0
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM purchase_lot_sku_costs WHERE id = %s", (cost_id,))
+            deleted_costs = int(cur.rowcount or 0)
+            cur.execute("DELETE FROM purchase_lots WHERE id = %s AND NOT EXISTS (SELECT 1 FROM purchase_lot_sku_costs WHERE purchase_lot_id = %s)", (lot_id, lot_id))
+            deleted_lots = int(cur.rowcount or 0)
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    return {"purchase_lot_sku_costs": deleted_costs, "purchase_lots": deleted_lots}
+
+
 def replace_sku_composition_lines(*, parent_sku_id: str, lines: list[dict[str, Any]], source: str = "wizard") -> int:
     ensure_schema()
     parent = _text(parent_sku_id)

@@ -48,6 +48,10 @@ import { TypeStep } from "@/components/berekeningen/steps/TypeStep";
 import { ClassificatieStep } from "@/components/berekeningen/steps/ClassificatieStep";
 import { SummaryStep } from "@/components/berekeningen/steps/SummaryStep";
 import { makeBeerSkuLabel, normalizeUnitLabel } from "@/lib/skuLabels";
+import {
+  calculateComponentCostprice,
+  costpriceOverheadValue,
+} from "@/lib/costpriceCalculationEngine";
 import { InkoopInputStep } from "@/components/berekeningen/steps/InkoopInputStep";
 import { FacturenStep } from "@/components/berekeningen/steps/FacturenStep";
 import { EigenProductieInputStep } from "@/components/berekeningen/steps/EigenProductieInputStep";
@@ -891,6 +895,14 @@ export function BerekeningenWizard({
       const alcoholpercentage = parseOptionalNumber(basis.alcoholpercentage);
       if (biernaam && alcoholpercentage === null) {
         setStatus("Alcoholpercentage is verplicht en moet een geldig getal zijn voordat je kunt afronden.");
+        setStatusTone("error");
+        return false;
+      }
+      const invalidVariantRows = buildVariantCostRows().filter((row: any) => String(row.status ?? "") === "blocking");
+      if (invalidVariantRows.length > 0) {
+        setStatus(
+          `Afronden geblokkeerd: ${invalidVariantRows.length} verkoopbare variant(en) hebben geen volledige kostprijscomponenten. Controleer stap Samenvatting.`
+        );
         setStatusTone("error");
         return false;
       }
@@ -1934,12 +1946,6 @@ export function BerekeningenWizard({
       .trim() || raw;
   }
 
-  function summaryOverheadValue(row: any) {
-    const explicit = row?.vaste_kosten;
-    if (explicit !== undefined && explicit !== null && explicit !== "") return asNumber(explicit, 0);
-    return asNumber(row?.manufacturing_overhead, 0) + asNumber(row?.business_overhead, 0);
-  }
-
   function buildFormatVisibilityLinks() {
     const snapshot = buildResultaatSnapshot(current);
     const basisRows = ((snapshot as any)?.producten?.basisproducten as any[]) ?? [];
@@ -2014,32 +2020,16 @@ export function BerekeningenWizard({
     if (!beerId) return [];
 
     const snapshot = buildResultaatSnapshot(current);
-    const summaryByProductId = new Map<string, SummaryProductRow>();
-    ([...((snapshot as any)?.producten?.basisproducten ?? []), ...((snapshot as any)?.producten?.samengestelde_producten ?? [])] as SummaryProductRow[])
-      .forEach((row) => {
-        const productId = String((row as any)?.product_id ?? "").trim();
-        if (productId) summaryByProductId.set(productId, row);
-      });
-
     const articleById = new Map<string, any>();
     (Array.isArray(localArticles) ? localArticles : []).forEach((row: any) => {
       const id = String(row?.id ?? "").trim();
       if (id) articleById.set(id, row);
     });
 
-    const skuById = new Map<string, any>();
-    (Array.isArray(localSkus) ? localSkus : []).forEach((row: any) => {
-      const id = String(row?.id ?? "").trim();
-      if (id) skuById.set(id, row);
-    });
-
-    const packagingPriceByComponent = new Map<string, number>();
-    (Array.isArray(packagingComponentPrices) ? packagingComponentPrices : []).forEach((row: any) => {
-      const componentId = String(row?.verpakkingsonderdeel_id ?? row?.packaging_component_id ?? "").trim();
-      const rowYear = asNumber(row?.jaar, 0);
-      if (!componentId || rowYear !== year) return;
-      packagingPriceByComponent.set(componentId, asNumber(row?.prijs_per_stuk, 0));
-    });
+    const summaryRows = [
+      ...(((snapshot as any)?.producten?.basisproducten ?? []) as SummaryProductRow[]),
+      ...(((snapshot as any)?.producten?.samengestelde_producten ?? []) as SummaryProductRow[]),
+    ];
 
     const rows = (Array.isArray(localSkus) ? localSkus : [])
       .filter((sku: any) => {
@@ -2053,41 +2043,29 @@ export function BerekeningenWizard({
         const lines = (Array.isArray(localBomLines) ? localBomLines : []).filter(
           (line: any) => String(line?.parent_article_id ?? "").trim() === articleId
         );
-        const componentLines = lines.filter((line: any) => String(line?.component_sku_id ?? "").trim());
-        const packagingLines = lines.filter((line: any) => {
-          return String(line?.component_article_id ?? "").trim() && !String(line?.component_sku_id ?? "").trim();
-        });
-
-        let primary = 0;
-        let overhead = 0;
-        let excise = 0;
         let liters = asNumber(article?.content_liter ?? sku?.content_liter, 0);
         const linkedFormatIds = new Set<string>();
-
-        componentLines.forEach((line: any) => {
-          const qty = asNumber(line?.qty ?? line?.quantity, 1);
-          const componentSku = skuById.get(String(line?.component_sku_id ?? "").trim());
-          const productId = String(componentSku?.format_article_id ?? componentSku?.article_id ?? "").trim();
+        lines.forEach((line: any) => {
+          const componentSkuId = String(line?.component_sku_id ?? "").trim();
+          const componentSku = componentSkuId ? localSkus.find((candidate: any) => String(candidate?.id ?? "").trim() === componentSkuId) : null;
+          const productId = String(componentSku?.format_article_id ?? componentSku?.article_id ?? line?.component_article_id ?? "").trim();
           if (productId) linkedFormatIds.add(productId);
-          const summary = productId ? summaryByProductId.get(productId) : null;
-          primary += asNumber((summary as any)?.primaire_kosten, 0) * qty;
-          overhead += summaryOverheadValue(summary) * qty;
-          excise += asNumber((summary as any)?.accijns, 0) * qty;
-          if (!liters) {
+          if (!liters && componentSku) {
+            const qty = asNumber(line?.qty ?? line?.quantity, 1);
             const componentArticle = articleById.get(productId);
             liters += asNumber(componentArticle?.content_liter ?? componentSku?.content_liter, 0) * qty;
           }
         });
 
-        const packaging = packagingLines.reduce((sum, line: any) => {
-          const componentId = String(line?.component_article_id ?? "").trim();
-          const qty = asNumber(line?.qty ?? line?.quantity, 1);
-          const componentArticle = articleById.get(componentId);
-          const unitPrice =
-            packagingPriceByComponent.get(componentId) ??
-            asNumber(componentArticle?.prijs_per_stuk ?? componentArticle?.manual_rate_ex ?? componentArticle?.kostprijs ?? 0, 0);
-          return sum + unitPrice * qty;
-        }, 0);
+        const componentCost = calculateComponentCostprice({
+          parentArticleId: articleId,
+          bomLines: localBomLines,
+          skus: localSkus,
+          articles: localArticles,
+          summaryRows,
+          packagingComponentPrices,
+          year,
+        });
 
         const label =
           String(sku?.name ?? "").trim() ||
@@ -2102,13 +2080,17 @@ export function BerekeningenWizard({
           biernaam: beerName,
           soort,
           verpakkingseenheid: unit,
-          primaire_kosten: primary,
-          verpakkingskosten: packaging,
-          vaste_kosten: overhead,
-          accijns: excise,
-          kostprijs: primary + packaging + overhead + excise,
+          primaire_kosten: componentCost.primaire_kosten,
+          verpakkingskosten: componentCost.verpakkingskosten,
+          vaste_kosten: componentCost.vaste_kosten,
+          accijns: componentCost.accijns,
+          kostprijs: componentCost.kostprijs,
           liters,
           visibilityIds: [articleId, ...Array.from(linkedFormatIds)].filter(Boolean),
+          status: componentCost.valid ? "ok" : "blocking",
+          status_text: componentCost.valid
+            ? "Doorgerekend uit componenten"
+            : componentCost.issues.map((issue) => issue.message).join(" "),
         };
       })
       .filter((row) => row.id);
@@ -2260,6 +2242,7 @@ export function BerekeningenWizard({
                     <th>Overhead (ABC)</th>
                     <th>Accijns</th>
                     <th>Kostprijs</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2297,6 +2280,15 @@ export function BerekeningenWizard({
                         <td>{formatCurrencyDisplay(row.vaste_kosten)}</td>
                         <td>{formatCurrencyDisplay(row.accijns)}</td>
                         <td>{formatCurrencyDisplay(row.kostprijs)}</td>
+                        <td>
+                          {String((row as any).status ?? "") === "blocking" ? (
+                            <span className="status-pill status-warning" title={String((row as any).status_text ?? "")}>
+                              blokkeert
+                            </span>
+                          ) : (
+                            <span className="status-pill status-ok">ok</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}

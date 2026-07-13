@@ -46,4 +46,4 @@ class ActivateKostprijzenRequest(BaseModel):
     target_year: int = Field(..., ge=0)
     selections: list[KostprijsActivatieSelection] = Field(default_factory=list)
     dry_run: bool = False
-
+    create_break_even_plan: bool = True

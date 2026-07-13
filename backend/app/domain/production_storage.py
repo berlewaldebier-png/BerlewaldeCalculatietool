@@ -35,6 +35,9 @@ def ensure_schema() -> None:
                         sales_l NUMERIC NOT NULL DEFAULT 0,
                         hoeveelheid_inkoop_l NUMERIC NOT NULL DEFAULT 0,
                         hoeveelheid_productie_l NUMERIC NOT NULL DEFAULT 0,
+                        realised_inkoop_l NUMERIC NOT NULL DEFAULT 0,
+                        realised_productie_l NUMERIC NOT NULL DEFAULT 0,
+                        realised_sales_l NUMERIC NOT NULL DEFAULT 0,
                         batchgrootte_eigen_productie_l NUMERIC NOT NULL DEFAULT 0,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -61,6 +64,15 @@ def ensure_schema() -> None:
                 )
                 cur.execute(
                     "ALTER TABLE production_years ADD COLUMN IF NOT EXISTS sales_l NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE production_years ADD COLUMN IF NOT EXISTS realised_inkoop_l NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE production_years ADD COLUMN IF NOT EXISTS realised_productie_l NUMERIC NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "ALTER TABLE production_years ADD COLUMN IF NOT EXISTS realised_sales_l NUMERIC NOT NULL DEFAULT 0"
                 )
 
                 # Legacy dev DBs may have these columns as DOUBLE PRECISION; make them NUMERIC to
@@ -139,6 +151,9 @@ def load_productie() -> dict[str, dict[str, Any]]:
                     sales_l,
                     hoeveelheid_inkoop_l,
                     hoeveelheid_productie_l,
+                    realised_inkoop_l,
+                    realised_productie_l,
+                    realised_sales_l,
                     batchgrootte_eigen_productie_l
                 FROM production_years
                 ORDER BY jaar
@@ -147,7 +162,7 @@ def load_productie() -> dict[str, dict[str, Any]]:
             rows = cur.fetchall()
 
     result: dict[str, dict[str, Any]] = {}
-    for jaar, n_inkoop, n_productie, n_contract, n_shipments, n_orderlines, n_sales, sales, inkoop, productie, batch in rows:
+    for jaar, n_inkoop, n_productie, n_contract, n_shipments, n_orderlines, n_sales, sales, inkoop, productie, realised_inkoop, realised_productie, realised_sales, batch in rows:
         result[str(int(jaar))] = {
             "normal_inkoop_l": float(n_inkoop or 0),
             "normal_productie_l": float(n_productie or 0),
@@ -158,6 +173,9 @@ def load_productie() -> dict[str, dict[str, Any]]:
             "sales_l": float(sales or 0),
             "hoeveelheid_inkoop_l": float(inkoop or 0),
             "hoeveelheid_productie_l": float(productie or 0),
+            "realised_inkoop_l": float(realised_inkoop or 0),
+            "realised_productie_l": float(realised_productie or 0),
+            "realised_sales_l": float(realised_sales or 0),
             "batchgrootte_eigen_productie_l": float(batch or 0),
         }
     return result
@@ -177,7 +195,8 @@ def save_productie(payload: dict[str, Any]) -> bool:
     now = datetime.now(UTC)
 
     # We treat this as overwrite, because this is dev-first and avoids drift.
-    rows: list[tuple[int, float, float, float, float, float, float, float, float, float, float]] = []
+    existing = load_productie()
+    rows: list[tuple[int, float, float, float, float, float, float, float, float, float, float, float, float, float]] = []
     for year_key, raw in (payload or {}).items():
         try:
             jaar = int(year_key)
@@ -188,6 +207,10 @@ def save_productie(payload: dict[str, Any]) -> bool:
         inkoop = float(raw.get("hoeveelheid_inkoop_l", 0) or 0)
         productie = float(raw.get("hoeveelheid_productie_l", 0) or 0)
         sales_l = float(raw.get("sales_l", 0) or 0)
+        current = existing.get(str(jaar), {}) if isinstance(existing, dict) else {}
+        realised_inkoop = float(raw.get("realised_inkoop_l", current.get("realised_inkoop_l", 0)) or 0)
+        realised_productie = float(raw.get("realised_productie_l", current.get("realised_productie_l", 0)) or 0)
+        realised_sales = float(raw.get("realised_sales_l", current.get("realised_sales_l", 0)) or 0)
         rows.append(
             (
                 jaar,
@@ -200,13 +223,16 @@ def save_productie(payload: dict[str, Any]) -> bool:
                 sales_l,
                 inkoop,
                 productie,
+                realised_inkoop,
+                realised_productie,
+                realised_sales,
                 float(raw.get("batchgrootte_eigen_productie_l", 0) or 0),
             )
         )
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
-            for jaar, n_inkoop, n_productie, n_contract, n_shipments, n_orderlines, n_sales, sales, inkoop, productie, batch in rows:
+            for jaar, n_inkoop, n_productie, n_contract, n_shipments, n_orderlines, n_sales, sales, inkoop, productie, realised_inkoop, realised_productie, realised_sales, batch in rows:
                 cur.execute(
                     """
                     INSERT INTO production_years (
@@ -220,11 +246,14 @@ def save_productie(payload: dict[str, Any]) -> bool:
                         sales_l,
                         hoeveelheid_inkoop_l,
                         hoeveelheid_productie_l,
+                        realised_inkoop_l,
+                        realised_productie_l,
+                        realised_sales_l,
                         batchgrootte_eigen_productie_l,
                         created_at,
                         updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (jaar) DO UPDATE SET
                         normal_inkoop_l = EXCLUDED.normal_inkoop_l,
                         normal_productie_l = EXCLUDED.normal_productie_l,
@@ -235,10 +264,13 @@ def save_productie(payload: dict[str, Any]) -> bool:
                         sales_l = EXCLUDED.sales_l,
                         hoeveelheid_inkoop_l = EXCLUDED.hoeveelheid_inkoop_l,
                         hoeveelheid_productie_l = EXCLUDED.hoeveelheid_productie_l,
+                        realised_inkoop_l = EXCLUDED.realised_inkoop_l,
+                        realised_productie_l = EXCLUDED.realised_productie_l,
+                        realised_sales_l = EXCLUDED.realised_sales_l,
                         batchgrootte_eigen_productie_l = EXCLUDED.batchgrootte_eigen_productie_l,
                         updated_at = EXCLUDED.updated_at
                     """,
-                    (jaar, n_inkoop, n_productie, n_contract, n_shipments, n_orderlines, n_sales, sales, inkoop, productie, batch, now, now),
+                    (jaar, n_inkoop, n_productie, n_contract, n_shipments, n_orderlines, n_sales, sales, inkoop, productie, realised_inkoop, realised_productie, realised_sales, batch, now, now),
                 )
         if not postgres_storage.in_transaction():
             conn.commit()
@@ -369,6 +401,59 @@ def update_sales_liters_for_year(
         "normal_sales_l": float(next_normal or 0),
         "sales_l": float(next_sales or 0),
         "overwrote": bool(overwrite),
+    }
+
+
+def update_realised_liters_for_year(
+    *,
+    jaar: int,
+    realised_inkoop_l: float,
+    realised_productie_l: float,
+    realised_sales_l: float,
+) -> dict[str, Any]:
+    """Persist closed-year realised liters without touching plan/normal drivers."""
+    ensure_schema()
+    yr = int(jaar or 0)
+    if yr <= 0:
+        raise ValueError("jaar is verplicht.")
+
+    now = datetime.now(UTC)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO production_years (
+                    jaar,
+                    realised_inkoop_l,
+                    realised_productie_l,
+                    realised_sales_l,
+                    created_at,
+                    updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (jaar) DO UPDATE SET
+                    realised_inkoop_l = EXCLUDED.realised_inkoop_l,
+                    realised_productie_l = EXCLUDED.realised_productie_l,
+                    realised_sales_l = EXCLUDED.realised_sales_l,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    yr,
+                    float(realised_inkoop_l or 0),
+                    float(realised_productie_l or 0),
+                    float(realised_sales_l or 0),
+                    now,
+                    now,
+                ),
+            )
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    return {
+        "jaar": yr,
+        "realised_inkoop_l": float(realised_inkoop_l or 0),
+        "realised_productie_l": float(realised_productie_l or 0),
+        "realised_sales_l": float(realised_sales_l or 0),
     }
 
 

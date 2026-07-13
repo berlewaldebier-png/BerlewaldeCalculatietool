@@ -27,7 +27,9 @@
     "./quoteOptionBuilding.contracttest.ts",
     "./activationUniqueness.contracttest.ts",
     "./quoteOptionOrdering.contracttest.ts",
+    "./costpriceCalculationEngine.contracttest.ts",
     "../src/lib/pricingEngine.ts",
+    "../src/lib/costpriceCalculationEngine.ts",
     "../src/lib/quoteBuilderGuards.ts",
     "../src/lib/quoteScenarioPricing.ts"
     ,

@@ -199,6 +199,13 @@ export function DouanoSyncPanel() {
           >
             Sync stock-history LOTs
           </button>
+          <button
+            type="button"
+            className="editor-button"
+            onClick={() => run("Sync stock movements", () => requestJson("/api/integrations/douano/sync/stock-movements", "POST"))}
+          >
+            Sync stock movements
+          </button>
         </div>
         <div className="editor-actions-group">
           <button type="button" className="editor-button editor-button-secondary" onClick={() => run("Sync status", () => requestJson("/api/integrations/douano/sync-status", "GET"))}>

@@ -16,6 +16,7 @@ export type ProductViewRow = {
 
 export type BeerViewRow = {
   id: string;
+  skuId: string;
   bierId: string;
   biernaam: string;
   productId: string;
@@ -27,6 +28,7 @@ export type BeerViewRow = {
   sellInPriceOverrides: Record<string, number | "">;
   activeOpslags: Record<string, number>;
   sellInPrices: Record<string, number>;
+  sellInPriceSources?: Record<string, "explicit" | "derived" | "opslag">;
   isReadOnly: boolean;
   followsProductId: string;
   followsProductLabel: string;

@@ -18,6 +18,9 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
       "basisproducten",
       "samengestelde-producten",
       "bieren",
+      "skus",
+      "articles",
+      "bom-lines",
       "productie",
       "vaste-kosten",
       "tarieven-heffingen",
@@ -37,6 +40,9 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
   const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
   const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
   const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
+  const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
+  const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
+  const bomLines = (bootstrap.datasets["bom-lines"] as any[]) ?? [];
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
   const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any>) ?? {};
   const tarieven = (bootstrap.datasets["tarieven-heffingen"] as any[]) ?? [];
@@ -80,6 +86,9 @@ export default async function NieuwJaarVoorbereidenPage(props: { searchParams?: 
         initialBasisproducten={basisproducten}
         initialSamengesteldeProducten={samengesteldeProducten}
         initialBieren={bieren}
+        initialSkus={skus}
+        initialArticles={articles}
+        initialBomLines={bomLines}
         initialProductie={productie}
         initialVasteKosten={vasteKosten}
         initialTarieven={tarieven}

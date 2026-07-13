@@ -20,6 +20,7 @@ from app.domain import production_storage
 from app.domain import company_distance_storage
 from app.domain import setup_service
 from app.domain import product_model_storage
+from app.domain import douano_margin_service
 from app.domain.ors_client import OrsClient, Coordinate
 from app.domain.auth_dependencies import require_admin, require_user
 from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
@@ -446,13 +447,21 @@ def post_activate_kostprijzen(
 ) -> dict[str, Any]:
     # Admin-only: this writes new definitive kostprijsversies + activations for the target year.
     try:
-        return dataset_store.activate_kostprijzen_for_year(
+        result = dataset_store.activate_kostprijzen_for_year(
             owner=str(user.get("username", "") or ""),
             source_year=int(payload.source_year),
             target_year=int(payload.target_year),
             selections=[{"bier_id": s.bier_id, "product_id": s.product_id} for s in payload.selections],
             dry_run=bool(payload.dry_run),
+            create_break_even_plan=bool(payload.create_break_even_plan),
         )
+        if not bool(payload.dry_run):
+            result["snapshot_refresh"] = douano_margin_service.backfill_line_snapshots_for_year(
+                year=int(payload.target_year),
+                basis="both",
+                limit=50000,
+            )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -2059,6 +2068,14 @@ def post_dev_delete_cost_version(
                 cur.execute("SELECT COUNT(*)::int FROM kostprijs_sku_activations WHERE kostprijsversie_id = %s", (target_version_id,))
                 total_refs = int((cur.fetchone() or [0])[0] or 0)
 
+                cur.execute("DELETE FROM kostprijs_sku_activation_events WHERE kostprijsversie_id = %s", (target_version_id,))
+                deleted_activation_events = int(cur.rowcount or 0)
+                cur.execute("DELETE FROM kostprijs_sku_activations WHERE kostprijsversie_id = %s", (target_version_id,))
+                deleted_activations = int(cur.rowcount or 0)
+                cur.execute("DELETE FROM cost_version_lots WHERE version_id = %s", (target_version_id,))
+                deleted_lots = int(cur.rowcount or 0)
+                cur.execute("DELETE FROM cost_version_sku_rows WHERE version_id = %s", (target_version_id,))
+                deleted_sku_rows = int(cur.rowcount or 0)
                 cur.execute("DELETE FROM cost_versions WHERE id = %s", (target_version_id,))
                 deleted_versions = int(cur.rowcount or 0)
 
@@ -2067,7 +2084,13 @@ def post_dev_delete_cost_version(
 
         return {
             "version_id": target_version_id,
-            "deleted": {"cost_versions": deleted_versions},
+            "deleted": {
+                "cost_versions": deleted_versions,
+                "cost_version_lots": deleted_lots,
+                "cost_version_sku_rows": deleted_sku_rows,
+                "kostprijs_sku_activations": deleted_activations,
+                "kostprijs_sku_activation_events": deleted_activation_events,
+            },
             "references": {"activations_total": total_refs, "activations_active": active_refs},
         }
     except HTTPException:

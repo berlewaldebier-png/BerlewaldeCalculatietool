@@ -22,8 +22,14 @@ export function sanitizeVasteKostenTarget(rows: Array<Record<string, unknown>>):
       id: "",
       omschrijving: String((row as any).omschrijving ?? ""),
       kostensoort: String((row as any).kostensoort ?? ""),
+      exact_rekening: String((row as any).exact_rekening ?? ""),
+      cost_pool: String((row as any).cost_pool ?? ""),
+      domain: String((row as any).domain ?? (row as any).domein ?? "production") || "production",
+      allocation_driver: String((row as any).allocation_driver ?? ""),
+      allocation_scope: String((row as any).allocation_scope ?? "all") || "all",
       bedrag_per_jaar: Number((row as any).bedrag_per_jaar ?? 0),
-      herverdeel_pct: Number((row as any).herverdeel_pct ?? 0)
+      herverdeel_pct: Number((row as any).herverdeel_pct ?? 0),
+      ignored: Boolean((row as any).ignored ?? false)
     }));
 }
 

@@ -139,20 +139,24 @@ export function ArticleKostprijsWizard(props: Props) {
 
   const bomCostLines = useMemo<BomCostLine[]>(() => {
     return buildBomCostLines({
+      selectedYear,
       selectedArticleId,
       bomLines,
+      skus,
+      articles,
       skuById,
-      articleById,
       activeVersionIdBySku,
       versionById,
       packagingPriceById,
     });
   }, [
     activeVersionIdBySku,
-    articleById,
+    articles,
     bomLines,
     packagingPriceById,
     selectedArticleId,
+    selectedYear,
+    skus,
     skuById,
     versionById,
   ]);

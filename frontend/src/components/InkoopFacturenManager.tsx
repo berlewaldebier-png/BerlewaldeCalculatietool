@@ -56,6 +56,10 @@ import {
   setInkoopFacturen,
   type PendingAction,
 } from "@/components/inkoopfacturen/inkoopFacturenManagerDerivations";
+import {
+  calculateComponentCostprice,
+  costpriceOverheadValue,
+} from "@/lib/costpriceCalculationEngine";
 
 type InkoopFacturenManagerProps = {
   initialRows: GenericRecord[];
@@ -98,14 +102,6 @@ function toDateInputValue(value: unknown) {
 function asNumber(value: unknown, fallback = 0) {
   const parsed = Number(String(value ?? "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function summaryOverheadValue(row: any) {
-  if (!row) return 0;
-  const manufacturing = asNumber(row.manufacturing_overhead ?? row.productie_overhead, 0);
-  const business = asNumber(row.business_overhead ?? row.vaste_kosten, 0);
-  const total = asNumber(row.vaste_kosten, manufacturing + business);
-  return total;
 }
 
 function cleanFinalUnitLabel(label: unknown, beerName: unknown) {
@@ -825,7 +821,7 @@ export function InkoopFacturenManager({
       const packaging = supplierPackagingAppliesForProduct(record, item.productId)
         ? productPackagingCost(item.product)
         : 0;
-      const overhead = activeCost ? summaryOverheadValue(activeCost) : vasteKostenPerLiter * liters;
+      const overhead = activeCost ? costpriceOverheadValue(activeCost) : vasteKostenPerLiter * liters;
       const excise = activeCost ? asNumber((activeCost as any)?.accijns, 0) : computeExcise(liters);
       return {
         id: item.productId,
@@ -939,6 +935,13 @@ export function InkoopFacturenManager({
     }
     if (!isDraftValid(draftFactuur)) {
       setStatus("Vul eerst alle verplichte velden in voordat je afrondt.");
+      return;
+    }
+    const invalidVariantRows = buildDraftVariantCostRows().filter((row) => String((row as any).status ?? "") === "blocking");
+    if (invalidVariantRows.length > 0) {
+      setStatus(
+        `Afronden geblokkeerd: ${invalidVariantRows.length} verkoopbare variant(en) hebben geen volledige kostprijscomponenten. Controleer de samenvatting.`
+      );
       return;
     }
 
@@ -1385,31 +1388,15 @@ export function InkoopFacturenManager({
     const year = asNumber((basis as any)?.jaar, new Date().getFullYear());
     if (!beerId) return [];
 
-    const summaryByProductId = new Map<string, GenericRecord>();
-    ([...(((snapshot as any)?.producten?.basisproducten ?? []) as GenericRecord[]), ...(((snapshot as any)?.producten?.samengestelde_producten ?? []) as GenericRecord[])])
-      .forEach((row) => {
-        const productId = String((row as any)?.product_id ?? "").trim();
-        if (productId) summaryByProductId.set(productId, row);
-      });
+    const summaryRows = [
+      ...(((snapshot as any)?.producten?.basisproducten ?? []) as GenericRecord[]),
+      ...(((snapshot as any)?.producten?.samengestelde_producten ?? []) as GenericRecord[]),
+    ];
 
     const articleById = new Map<string, GenericRecord>();
     (Array.isArray(localArticles) ? localArticles : []).forEach((row) => {
       const id = String((row as any)?.id ?? "").trim();
       if (id) articleById.set(id, row);
-    });
-
-    const skuById = new Map<string, GenericRecord>();
-    (Array.isArray(localSkus) ? localSkus : []).forEach((row) => {
-      const id = String((row as any)?.id ?? "").trim();
-      if (id) skuById.set(id, row);
-    });
-
-    const packagingPriceByComponent = new Map<string, number>();
-    (Array.isArray(packagingComponentPrices) ? packagingComponentPrices : []).forEach((row) => {
-      const componentId = String((row as any)?.verpakkingsonderdeel_id ?? (row as any)?.packaging_component_id ?? "").trim();
-      const rowYear = asNumber((row as any)?.jaar, 0);
-      if (!componentId || rowYear !== year) return;
-      packagingPriceByComponent.set(componentId, asNumber((row as any)?.prijs_per_stuk, 0));
     });
 
     return (Array.isArray(localSkus) ? localSkus : [])
@@ -1424,41 +1411,16 @@ export function InkoopFacturenManager({
         const lines = (Array.isArray(localBomLines) ? localBomLines : []).filter(
           (line) => String((line as any)?.parent_article_id ?? "").trim() === articleId
         );
-        const componentLines = lines.filter((line) => String((line as any)?.component_sku_id ?? "").trim());
-        const packagingLines = lines.filter(
-          (line) =>
-            String((line as any)?.component_article_id ?? "").trim() &&
-            !String((line as any)?.component_sku_id ?? "").trim()
-        );
-
-        let primary = 0;
-        let overhead = 0;
-        let excise = 0;
         let liters = asNumber((article as any)?.content_liter ?? (sku as any)?.content_liter, 0);
-
-        componentLines.forEach((line) => {
-          const qty = asNumber((line as any)?.qty ?? (line as any)?.quantity, 1);
-          const componentSku = skuById.get(String((line as any)?.component_sku_id ?? "").trim());
-          const productId = String((componentSku as any)?.format_article_id ?? (componentSku as any)?.article_id ?? "").trim();
-          const summary = productId ? summaryByProductId.get(productId) : null;
-          primary += asNumber((summary as any)?.primaire_kosten, 0) * qty;
-          overhead += summaryOverheadValue(summary) * qty;
-          excise += asNumber((summary as any)?.accijns, 0) * qty;
-          if (!liters) {
-            const componentArticle = productId ? articleById.get(productId) : null;
-            liters += asNumber((componentArticle as any)?.content_liter ?? (componentSku as any)?.content_liter, 0) * qty;
-          }
+        const componentCost = calculateComponentCostprice({
+          parentArticleId: articleId,
+          bomLines: localBomLines,
+          skus: localSkus,
+          articles: localArticles,
+          summaryRows,
+          packagingComponentPrices,
+          year,
         });
-
-        const packaging = packagingLines.reduce((sum, line) => {
-          const componentId = String((line as any)?.component_article_id ?? "").trim();
-          const qty = asNumber((line as any)?.qty ?? (line as any)?.quantity, 1);
-          const componentArticle = articleById.get(componentId);
-          const unitPrice =
-            packagingPriceByComponent.get(componentId) ??
-            asNumber((componentArticle as any)?.prijs_per_stuk ?? (componentArticle as any)?.manual_rate_ex ?? (componentArticle as any)?.kostprijs, 0);
-          return sum + unitPrice * qty;
-        }, 0);
 
         const label =
           String((sku as any)?.name ?? "").trim() ||
@@ -1473,12 +1435,16 @@ export function InkoopFacturenManager({
           biernaam: beerName,
           soort: "Inkoop",
           verpakkingseenheid: unit,
-          primaire_kosten: primary,
-          verpakkingskosten: packaging,
-          vaste_kosten: overhead,
-          accijns: excise,
-          kostprijs: primary + packaging + overhead + excise,
+          primaire_kosten: componentCost.primaire_kosten,
+          verpakkingskosten: componentCost.verpakkingskosten,
+          vaste_kosten: componentCost.vaste_kosten,
+          accijns: componentCost.accijns,
+          kostprijs: componentCost.kostprijs,
           liters,
+          status: componentCost.valid ? "ok" : "blocking",
+          status_text: componentCost.valid
+            ? "Doorgerekend uit componenten"
+            : componentCost.issues.map((issue) => issue.message).join(" "),
         };
       })
       .filter((row) => row.id)
@@ -1517,7 +1483,7 @@ export function InkoopFacturenManager({
                   <td>{cleanFinalUnitLabel((row as any)?.verpakkingseenheid, draftBeerName) || "-"}</td>
                   <td>{formatCurrencyDisplay((row as any)?.primaire_kosten)}</td>
                   <td>{formatCurrencyDisplay((row as any)?.verpakkingskosten)}</td>
-                  <td>{formatCurrencyDisplay(summaryOverheadValue(row))}</td>
+                  <td>{formatCurrencyDisplay(costpriceOverheadValue(row))}</td>
                   <td>{formatCurrencyDisplay((row as any)?.accijns)}</td>
                   <td>{formatCurrencyDisplay((row as any)?.kostprijs)}</td>
                   {(() => {
@@ -1578,7 +1544,11 @@ export function InkoopFacturenManager({
 
         {renderCostBuildTable("Basisproducten", basisRows, "Nog geen basisproducten in deze factuur.", statusForProduct)}
         {renderCostBuildTable("Samengestelde producten", composedRows, "Nog geen samengestelde producten in deze factuur.", statusForProduct)}
-        {renderCostBuildTable("Kostprijs verkoopbare varianten", variantRows, "Nog geen verkoopbare varianten aangemaakt.", () => "nieuwe verkoopbare variant")}
+        {renderCostBuildTable("Kostprijs verkoopbare varianten", variantRows, "Nog geen verkoopbare varianten aangemaakt.", (row) =>
+          String((row as any).status ?? "") === "blocking"
+            ? String((row as any).status_text ?? "componenten ontbreken")
+            : "nieuwe verkoopbare variant"
+        )}
         <div className="module-card compact-card">
           <div className="module-card-title">Geraakte geschenkverpakkingen</div>
           <div className="module-card-text">

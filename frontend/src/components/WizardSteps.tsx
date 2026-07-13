@@ -7,6 +7,7 @@ export type WizardStep = {
   title: string;
   description?: string;
   disabled?: boolean;
+  stepNumber?: ReactNode;
 };
 
 export function WizardSteps({
@@ -29,7 +30,7 @@ export function WizardSteps({
         {steps.map((step, idx) => {
           const active = idx === activeIndex;
           const done = idx < activeIndex;
-          const dot: ReactNode = done ? "\u2713" : idx + 1;
+          const dot: ReactNode = done ? "\u2713" : step.stepNumber ?? idx + 1;
 
           return (
             <button

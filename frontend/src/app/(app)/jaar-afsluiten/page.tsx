@@ -2,13 +2,12 @@ import { JaarAfsluitenWizard } from "@/components/jaar-afsluiten/JaarAfsluitenWi
 import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-export default async function JaarAfsluitenPage(props: { searchParams?: Promise<SearchParams> }) {
-  const searchParams = (await props.searchParams) ?? {};
-  const yearParam = Array.isArray(searchParams.year) ? searchParams.year[0] : searchParams.year;
-  const bootstrap = await getBootstrap(["auth-status"], true, "/jaar-afsluiten");
+export default async function JaarAfsluitenPage() {
+  const bootstrap = await getBootstrap(["auth-status", "vaste-kosten", "incidentele-kosten", "productie"], true, "/jaar-afsluiten");
   const navigation = bootstrap.navigation ?? [];
+  const vasteKosten = (bootstrap.datasets["vaste-kosten"] as Record<string, any[]>) ?? {};
+  const incidenteleKosten = (bootstrap.datasets["incidentele-kosten"] as any[]) ?? [];
+  const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
 
   return (
     <PageShell
@@ -17,7 +16,11 @@ export default async function JaarAfsluitenPage(props: { searchParams?: Promise<
       activePath="/jaar-afsluiten"
       navigation={navigation}
     >
-      <JaarAfsluitenWizard initialYear={yearParam ?? ""} />
+      <JaarAfsluitenWizard
+        vasteKosten={vasteKosten}
+        incidenteleKosten={incidenteleKosten}
+        productie={productie}
+      />
     </PageShell>
   );
 }

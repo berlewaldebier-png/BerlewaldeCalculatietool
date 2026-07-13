@@ -198,6 +198,40 @@ def ensure_schema() -> None:
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_sales_lot_import_batch ON sales_lot_allocations(import_batch_id)")
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS stock_movements (
+                        id TEXT PRIMARY KEY,
+                        import_batch_id TEXT NOT NULL DEFAULT '',
+                        source_ref TEXT NOT NULL DEFAULT '',
+                        movement_date DATE,
+                        stock_location TEXT NOT NULL DEFAULT '',
+                        sku_code TEXT NOT NULL DEFAULT '',
+                        product_name TEXT NOT NULL DEFAULT '',
+                        lot_number TEXT NOT NULL DEFAULT '',
+                        expiration_date TEXT NOT NULL DEFAULT '',
+                        stock_document_type TEXT NOT NULL DEFAULT '',
+                        cause TEXT NOT NULL DEFAULT '',
+                        transaction_type TEXT NOT NULL DEFAULT '',
+                        transaction_number TEXT NOT NULL DEFAULT '',
+                        company_name TEXT NOT NULL DEFAULT '',
+                        quantity NUMERIC NOT NULL DEFAULT 0,
+                        unit TEXT NOT NULL DEFAULT '',
+                        packaging_type TEXT NOT NULL DEFAULT '',
+                        note TEXT NOT NULL DEFAULT '',
+                        value_per_unit NUMERIC NOT NULL DEFAULT 0,
+                        refund_per_unit NUMERIC NOT NULL DEFAULT 0,
+                        excise_per_unit NUMERIC NOT NULL DEFAULT 0,
+                        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_movements_date ON stock_movements(movement_date)")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_movements_sku ON stock_movements(sku_code)")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_movements_lot ON stock_movements(lot_number)")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_movements_tx ON stock_movements(transaction_number)")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_stock_movements_type ON stock_movements(transaction_type)")
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS lot_alias_mappings (
                         id TEXT PRIMARY KEY,
                         sku_id TEXT NOT NULL DEFAULT '',
@@ -388,6 +422,48 @@ def upsert_lot_cost_record(raw: dict[str, Any]) -> dict[str, Any]:
         # Keep the legacy LOT-cost path available; the datamodel audit will surface sync gaps.
         pass
     return normalized
+
+
+def delete_lot_cost_record(record_id: str) -> dict[str, Any]:
+    ensure_schema()
+    target_id = _text(record_id)
+    if not target_id:
+        raise ValueError("LOT-kostprijs id ontbreekt.")
+
+    deleted: dict[str, Any] = {"lot_cost_records": 0, "purchase_lot_sku_costs": 0, "purchase_lots": 0}
+    projected_record: dict[str, Any] | None = None
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT source_type, source_ref, supplier, lot_number, sku_id, sku_code
+                FROM lot_cost_records
+                WHERE id = %s
+                """,
+                (target_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                projected_record = {
+                    "source_type": row[0],
+                    "source_ref": row[1],
+                    "supplier": row[2],
+                    "lot_number": row[3],
+                    "sku_id": row[4],
+                    "sku_code": row[5],
+                }
+                cur.execute("DELETE FROM lot_cost_records WHERE id = %s", (target_id,))
+                deleted["lot_cost_records"] = int(cur.rowcount or 0)
+        if not postgres_storage.in_transaction():
+            conn.commit()
+
+    if projected_record and deleted["lot_cost_records"]:
+        try:
+            deleted.update(product_model_storage.delete_purchase_lot_cost(projected_record))
+        except Exception:
+            # The canonical LOT-price row is the source of truth for this screen; model sync gaps are audited separately.
+            pass
+    return deleted
 
 
 def find_lot_cost(*, lot_number: str, sku_code: str = "", sku_id: str = "") -> dict[str, Any] | None:
@@ -1602,6 +1678,32 @@ def _sales_lot_row_id(*, source: str, transaction_number: Any, sku_code: Any, lo
     return _id_for(source, transaction_number, sku_code, lot_number, movement_date, quantity, stock_location)
 
 
+def _stock_movement_row_id(*, source_ref: Any, transaction_number: Any, sku_code: Any, lot_number: Any, movement_date: Any, quantity: Any, stock_location: Any, transaction_type: Any, stock_document_type: Any, cause: Any) -> str:
+    return _id_for(
+        "douano_stock_movement",
+        source_ref,
+        transaction_number,
+        sku_code,
+        lot_number,
+        movement_date,
+        quantity,
+        stock_location,
+        transaction_type,
+        stock_document_type,
+        cause,
+    )
+
+
+def _signed_stock_quantity(raw_quantity: Any, *, stock_document_type: str) -> float:
+    quantity = _num(raw_quantity)
+    document = _text(stock_document_type).lower()
+    if document in {"verwijdering", "verzending"} and quantity > 0:
+        return -quantity
+    if document in {"toevoeging", "ontvangst"} and quantity < 0:
+        return abs(quantity)
+    return quantity
+
+
 def upsert_douano_sales_lot_rows(rows: list[dict[str, Any]], *, source_ref: str = "douano_stock_history") -> dict[str, Any]:
     ensure_schema()
     now = _now()
@@ -1716,6 +1818,246 @@ def upsert_douano_sales_lot_rows(rows: list[dict[str, Any]], *, source_ref: str 
         if not postgres_storage.in_transaction():
             conn.commit()
     return {"fetched": len(rows), "filtered": len(filtered), "saved": saved, "skipped": skipped, "missing_lot": missing_lot}
+
+
+def upsert_douano_stock_movement_rows(rows: list[dict[str, Any]], *, source_ref: str = "stock_history_data") -> dict[str, Any]:
+    """Persist full Douano stock history without sales-only LOT filtering."""
+    ensure_schema()
+    now = _now()
+    batch_id = _id_for("stock_movements", source_ref, now.isoformat())
+    saved = 0
+    skipped = 0
+    transaction_types: dict[str, int] = {}
+    document_types: dict[str, int] = {}
+    items: list[dict[str, Any]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            skipped += 1
+            continue
+        movement_date = _parse_date(raw.get("date"))
+        sku_code = _text(raw.get("sku") or raw.get("sku_code") or raw.get("Artikelnummer"))
+        product_name = _text(raw.get("product") or raw.get("product_name") or raw.get("Product"))
+        transaction_type = _text(raw.get("transaction_type") or raw.get("movement_type"))
+        stock_document_type = _text(raw.get("stock_document_type"))
+        transaction_number = _text(raw.get("transaction_number"))
+        lot_number = _text(raw.get("lot_number") or raw.get("batch_number"))
+        stock_location = _text(raw.get("stock_location"))
+        quantity = _signed_stock_quantity(raw.get("quantity"), stock_document_type=stock_document_type)
+        if not movement_date or not sku_code:
+            skipped += 1
+            continue
+        transaction_types[transaction_type or "(leeg)"] = transaction_types.get(transaction_type or "(leeg)", 0) + 1
+        document_types[stock_document_type or "(leeg)"] = document_types.get(stock_document_type or "(leeg)", 0) + 1
+        items.append(
+            {
+                "id": _stock_movement_row_id(
+                    source_ref=source_ref,
+                    transaction_number=transaction_number,
+                    sku_code=sku_code,
+                    lot_number=lot_number,
+                    movement_date=movement_date,
+                    quantity=quantity,
+                    stock_location=stock_location,
+                    transaction_type=transaction_type,
+                    stock_document_type=stock_document_type,
+                    cause=_text(raw.get("cause")),
+                ),
+                "import_batch_id": batch_id,
+                "source_ref": source_ref,
+                "movement_date": movement_date,
+                "stock_location": stock_location,
+                "sku_code": sku_code,
+                "product_name": product_name,
+                "lot_number": lot_number,
+                "expiration_date": _text(raw.get("expiration_date")),
+                "stock_document_type": stock_document_type,
+                "cause": _text(raw.get("cause")),
+                "transaction_type": transaction_type,
+                "transaction_number": transaction_number,
+                "company_name": _text(raw.get("company") or raw.get("company_name")),
+                "quantity": quantity,
+                "unit": _text(raw.get("unit")),
+                "packaging_type": _text(raw.get("packaging_type")),
+                "note": _text(raw.get("note")),
+                "value_per_unit": _num(raw.get("value_per_unit")),
+                "refund_per_unit": _num(raw.get("refund_per_unit")),
+                "excise_per_unit": _num(raw.get("excise_per_unit")),
+                "payload": {"source": "douano", "source_ref": source_ref, "raw": raw},
+            }
+        )
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            for item in items:
+                cur.execute(
+                    """
+                    INSERT INTO stock_movements (
+                        id, import_batch_id, source_ref, movement_date, stock_location, sku_code, product_name,
+                        lot_number, expiration_date, stock_document_type, cause, transaction_type, transaction_number,
+                        company_name, quantity, unit, packaging_type, note, value_per_unit, refund_per_unit,
+                        excise_per_unit, payload, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        import_batch_id = EXCLUDED.import_batch_id,
+                        source_ref = EXCLUDED.source_ref,
+                        movement_date = EXCLUDED.movement_date,
+                        stock_location = EXCLUDED.stock_location,
+                        sku_code = EXCLUDED.sku_code,
+                        product_name = EXCLUDED.product_name,
+                        lot_number = EXCLUDED.lot_number,
+                        expiration_date = EXCLUDED.expiration_date,
+                        stock_document_type = EXCLUDED.stock_document_type,
+                        cause = EXCLUDED.cause,
+                        transaction_type = EXCLUDED.transaction_type,
+                        transaction_number = EXCLUDED.transaction_number,
+                        company_name = EXCLUDED.company_name,
+                        quantity = EXCLUDED.quantity,
+                        unit = EXCLUDED.unit,
+                        packaging_type = EXCLUDED.packaging_type,
+                        note = EXCLUDED.note,
+                        value_per_unit = EXCLUDED.value_per_unit,
+                        refund_per_unit = EXCLUDED.refund_per_unit,
+                        excise_per_unit = EXCLUDED.excise_per_unit,
+                        payload = EXCLUDED.payload,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (
+                        item["id"],
+                        item["import_batch_id"],
+                        item["source_ref"],
+                        item["movement_date"],
+                        item["stock_location"],
+                        item["sku_code"],
+                        item["product_name"],
+                        item["lot_number"],
+                        item["expiration_date"],
+                        item["stock_document_type"],
+                        item["cause"],
+                        item["transaction_type"],
+                        item["transaction_number"],
+                        item["company_name"],
+                        item["quantity"],
+                        item["unit"],
+                        item["packaging_type"],
+                        item["note"],
+                        item["value_per_unit"],
+                        item["refund_per_unit"],
+                        item["excise_per_unit"],
+                        json.dumps(item["payload"], default=str),
+                        now,
+                    ),
+                )
+                saved += 1
+        if not postgres_storage.in_transaction():
+            conn.commit()
+    return {
+        "fetched": len(rows),
+        "saved": saved,
+        "skipped": skipped,
+        "transaction_types": transaction_types,
+        "stock_document_types": document_types,
+        "import_batch_id": batch_id,
+    }
+
+
+def list_stock_movements_for_year(year: int) -> list[dict[str, Any]]:
+    ensure_schema()
+    year_value = int(year or 0)
+    if year_value <= 0:
+        return []
+    start = date(year_value, 1, 1)
+    end = date(year_value + 1, 1, 1)
+    with postgres_storage.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    m.id,
+                    m.movement_date,
+                    m.stock_location,
+                    m.sku_code,
+                    m.product_name,
+                    m.lot_number,
+                    m.stock_document_type,
+                    m.cause,
+                    m.transaction_type,
+                    m.transaction_number,
+                    m.company_name,
+                    COALESCE(m.quantity, 0),
+                    m.unit,
+                    m.packaging_type,
+                    m.note,
+                    COALESCE(m.value_per_unit, 0),
+                    COALESCE(m.refund_per_unit, 0),
+                    COALESCE(m.excise_per_unit, 0),
+                    COALESCE(mapped_s.id, coded_s.id, '') AS sku_id,
+                    COALESCE(mapped_s.name, coded_s.name, '') AS sku_name,
+                    COALESCE(a_mapped.content_liter, a_coded.content_liter, 0) AS content_liter
+                FROM stock_movements m
+                LEFT JOIN douano_products dp ON LOWER(dp.sku) = LOWER(m.sku_code)
+                LEFT JOIN douano_product_mapping dpm ON dpm.douano_product_id = dp.product_id
+                LEFT JOIN skus mapped_s ON mapped_s.id = dpm.sku_id
+                LEFT JOIN skus coded_s ON LOWER(coded_s.code) = LOWER(m.sku_code)
+                LEFT JOIN articles a_mapped ON a_mapped.id = COALESCE(NULLIF(mapped_s.format_article_id, ''), NULLIF(mapped_s.article_id, ''))
+                LEFT JOIN articles a_coded ON a_coded.id = COALESCE(NULLIF(coded_s.format_article_id, ''), NULLIF(coded_s.article_id, ''))
+                WHERE m.movement_date >= %s::date
+                  AND m.movement_date < %s::date
+                ORDER BY m.movement_date, m.sku_code, m.product_name, m.id
+                """,
+                (start, end),
+            )
+            rows = cur.fetchall() or []
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        (
+            rid,
+            movement_date,
+            stock_location,
+            sku_code,
+            product_name,
+            lot_number,
+            stock_document_type,
+            cause,
+            transaction_type,
+            transaction_number,
+            company_name,
+            quantity,
+            unit,
+            packaging_type,
+            note,
+            value_per_unit,
+            refund_per_unit,
+            excise_per_unit,
+            sku_id,
+            sku_name,
+            content_liter,
+        ) = row
+        out.append(
+            {
+                "id": _text(rid),
+                "movement_date": movement_date.isoformat() if movement_date else "",
+                "stock_location": _text(stock_location),
+                "sku_code": _text(sku_code),
+                "product_name": _text(product_name) or _text(sku_name),
+                "lot_number": _text(lot_number),
+                "stock_document_type": _text(stock_document_type),
+                "cause": _text(cause),
+                "transaction_type": _text(transaction_type),
+                "transaction_number": _text(transaction_number),
+                "company_name": _text(company_name),
+                "quantity": float(quantity or 0),
+                "unit": _text(unit),
+                "packaging_type": _text(packaging_type),
+                "note": _text(note),
+                "value_per_unit": float(value_per_unit or 0),
+                "refund_per_unit": float(refund_per_unit or 0),
+                "excise_per_unit": float(excise_per_unit or 0),
+                "sku_id": _text(sku_id),
+                "sku_name": _text(sku_name),
+                "content_liter": float(content_liter or 0),
+            }
+        )
+    return out
 
 
 def enrich_missing_sales_lots_from_excel(content: bytes, filename: str) -> dict[str, Any]:

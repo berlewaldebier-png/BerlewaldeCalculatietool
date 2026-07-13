@@ -27,6 +27,14 @@ export default async function HandleidingPage() {
           <span>De opslag loopt nu PostgreSQL-first, met kostprijsversies als centrale bron voor nieuwe offertes.</span>
         </div>
       </SectionCard>
+      <SectionCard title="SKU-types en kostprijslogica">
+        <div className="stack">
+          <span>Afvuleenheden uit Producten en verpakkingen zijn de bron voor parent/child-relaties. Een doos die uit 24 flessen bestaat is dus moeder; de fles en kleinere verkoopbare varianten worden daarvan afgeleid.</span>
+          <span>Verpakkingskosten bepalen nooit of een SKU moeder of child is. Inkoop, eigen productie en brouwmomenten gebruiken dezelfde afvuleenheid-relatie.</span>
+          <span>Samengestelde artikelen zoals geschenkverpakkingen, Licht/Zwaar onder de boom en Alles onder de boom worden niet van een moeder gedeeld, maar opgebouwd door alle component-SKU's en verpakkingscomponenten op te tellen.</span>
+          <span>Historische of handmatige kostprijzen hebben een expliciete status. Als een parent of component ontbreekt, moet de berekening blokkeren in plaats van stil een fallback-bedrag te tonen.</span>
+        </div>
+      </SectionCard>
       <SectionCard title="Datamodel kostprijsversies">
         <div className="stack">
           <span>Download hier het actuele datamodel voor kostprijsversies en offertekoppelingen.</span>

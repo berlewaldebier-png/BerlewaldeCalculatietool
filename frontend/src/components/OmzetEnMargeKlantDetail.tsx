@@ -18,6 +18,8 @@ type OrderRow = {
   charges_ex: number;
   netto_omzet_ex: number;
   kostprijs_ex: number;
+  variabel_ex?: number;
+  variabel_accijns_ex?: number;
   brutomarge_ex: number;
   ignored_lines: number;
   unmapped_lines: number;
@@ -36,6 +38,8 @@ type InvoiceRow = {
   charges_ex: number;
   netto_omzet_ex: number;
   kostprijs_ex: number;
+  variabel_ex?: number;
+  variabel_accijns_ex?: number;
   brutomarge_ex: number;
   ignored_lines: number;
   unmapped_lines: number;
@@ -61,6 +65,8 @@ type OrderLineRow = {
   missing_cost: boolean;
   cost_price_ex: number | null;
   cost_total_ex: number;
+  variabel_ex?: number;
+  variabel_accijns_ex?: number;
   margin_ex: number;
   cost_source?: string;
   cost_status?: string;
@@ -96,6 +102,8 @@ type InvoiceLineRow = {
   missing_cost: boolean;
   cost_price_ex: number | null;
   cost_total_ex: number;
+  variabel_ex?: number;
+  variabel_accijns_ex?: number;
   margin_ex: number;
   cost_source?: string;
   cost_status?: string;
@@ -367,11 +375,13 @@ export function OmzetEnMargeKlantDetail({
         acc.netto += Number(row.netto_omzet_ex ?? 0) || 0;
         acc.omzet += Number(row.omzet_ex ?? 0) || 0;
         acc.kostprijs += Number(row.kostprijs_ex ?? 0) || 0;
+        acc.variabel += Number(row.variabel_ex ?? 0) || 0;
+        acc.variabel_accijns += Number(row.variabel_accijns_ex ?? 0) || 0;
         acc.marge += Number(row.brutomarge_ex ?? 0) || 0;
         acc.unmapped += Number(row.unmapped_lines ?? 0) || 0;
         return acc;
       },
-      { omzet: 0, netto: 0, kostprijs: 0, marge: 0, unmapped: 0 }
+      { omzet: 0, netto: 0, kostprijs: 0, variabel: 0, variabel_accijns: 0, marge: 0, unmapped: 0 }
     );
   }, [basis, invoices, orders]);
 
@@ -444,6 +454,8 @@ export function OmzetEnMargeKlantDetail({
           <span className="pill">Omzet {euro(totals.omzet)}</span>
           <span className="pill">Netto {euro(totals.netto)}</span>
           <span className="pill">Kostprijs {euro(totals.kostprijs)}</span>
+          <span className="pill">Variabel {euro(totals.variabel)}</span>
+          <span className="pill">Variabel accijns {euro(totals.variabel_accijns)}</span>
           <span className="pill">Marge {euro(totals.marge)}</span>
           <span className="pill">Unmapped {totals.unmapped}</span>
         </div>
@@ -523,6 +535,8 @@ export function OmzetEnMargeKlantDetail({
                 <th style={{ width: 160 }}>Omzet</th>
                 <th style={{ width: 160 }}>Netto</th>
                 <th style={{ width: 160 }}>Kostprijs</th>
+                <th style={{ width: 150 }}>Variabel</th>
+                <th style={{ width: 160 }}>Variabel accijns</th>
                 <th style={{ width: 160 }}>Marge</th>
                 <th style={{ width: 120 }}>Regels</th>
                 <th style={{ width: 120 }}>Unmapped</th>
@@ -551,6 +565,8 @@ export function OmzetEnMargeKlantDetail({
                       <td>{euro(Number(row.omzet_ex ?? 0) || 0)}</td>
                       <td>{euro(Number(row.netto_omzet_ex ?? 0) || 0)}</td>
                       <td>{euro(Number(row.kostprijs_ex ?? 0) || 0)}</td>
+                      <td>{euro(Number(row.variabel_ex ?? 0) || 0)}</td>
+                      <td>{euro(Number(row.variabel_accijns_ex ?? 0) || 0)}</td>
                       <td>{euro(Number(row.brutomarge_ex ?? 0) || 0)}</td>
                       <td>{Number(row.lines ?? 0) || 0}</td>
                       <td>{Number(row.unmapped_lines ?? 0) || 0}</td>
@@ -568,7 +584,7 @@ export function OmzetEnMargeKlantDetail({
 
                     {isExpanded ? (
                       <tr>
-                        <td colSpan={11} style={{ background: "rgba(255,255,255,0.02)" }}>
+                        <td colSpan={12} style={{ background: "rgba(255,255,255,0.02)" }}>
                           <div style={{ padding: "10px 6px" }}>
                             {details && details.length ? (
                               <div className="data-table" style={{ marginTop: 6 }}>
@@ -584,6 +600,8 @@ export function OmzetEnMargeKlantDetail({
                                       <th style={{ width: 130, textAlign: "right" }}>Charges</th>
                                       <th style={{ width: 140, textAlign: "right" }}>Netto</th>
                                       <th style={{ width: 140, textAlign: "right" }}>Kostprijs</th>
+                                      <th style={{ width: 130, textAlign: "right" }}>Variabel</th>
+                                      <th style={{ width: 150, textAlign: "right" }}>Variabel accijns</th>
                                       <th style={{ width: 140, textAlign: "right" }}>Marge</th>
                                       <th style={{ width: 110 }}>Status</th>
                                     </tr>
@@ -623,6 +641,8 @@ export function OmzetEnMargeKlantDetail({
                                         <td style={{ textAlign: "right" }}>{euro(line.charges_ex)}</td>
                                         <td style={{ textAlign: "right" }}>{euro(line.net_revenue_ex)}</td>
                                         <td style={{ textAlign: "right" }}>{line.cost_total_ex != null ? euro(line.cost_total_ex) : "-"}</td>
+                                        <td style={{ textAlign: "right" }}>{line.variabel_ex != null ? euro(line.variabel_ex) : "-"}</td>
+                                        <td style={{ textAlign: "right" }}>{line.variabel_accijns_ex != null ? euro(line.variabel_accijns_ex) : "-"}</td>
                                         <td style={{ textAlign: "right" }}>{line.margin_ex != null ? euro(line.margin_ex) : "-"}</td>
                                         <td>
                                           {line.ignored ? (

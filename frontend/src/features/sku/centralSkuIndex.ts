@@ -12,6 +12,7 @@ import {
   type NormalizedKostprijsVersie,
   type NormalizedSku,
 } from "@/features/sku/normalizers";
+import { classifySkuCost, type SkuCostOrigin } from "@/features/sku/skuCostOrigin";
 
 export type SellableSubtype = "bier" | "product" | "dienst";
 export type PricingMethod = "cost_plus" | "manual_rate";
@@ -20,6 +21,9 @@ export type Uom = "stuk" | "pakket" | "uur" | "liter";
 export type CentralSkuRow = {
   skuId: string;
   label: string;
+  costOrigin: SkuCostOrigin;
+  sourceKind: string;
+  costParentSkuId: string;
   subtype: SellableSubtype;
   productGroup: string;
   pricingMethod: PricingMethod;
@@ -195,6 +199,15 @@ export function buildCentralSkuIndex(params: {
     const subtype = inferSubtypeFromSku(sku, article);
     const productGroup = text(sku.productGroupRaw) || text(article?.productGroupRaw);
     const pricingMethod = inferPricingMethod(subtype, sku, article);
+    const versionRaw = (version?.raw ?? {}) as GenericRecord;
+    const versionSoort = (versionRaw.soort_berekening ?? {}) as GenericRecord;
+    const costClassification = classifySkuCost({
+      sku,
+      article,
+      productType: sku.kind === "article" ? "article" : "",
+      calcType: text(versionRaw.type ?? versionSoort.type),
+      productLabel: text(sku.name) || text(article?.name),
+    });
     const uom = normalizeUom(text(article?.uom) || text(sku.uom));
     const contentLiter = toNumber(article?.contentLiter, 0);
     const manualRateEx = readManualRateEx(sku, article);
@@ -224,6 +237,7 @@ export function buildCentralSkuIndex(params: {
     if (pricingMethod === "cost_plus") {
       for (const channelCode of channelCodes) {
         const resolved = resolveSellInPriceEx({
+          skuId,
           bierId: text(activation?.bierId) || text(sku.beerId),
           productId,
           costPriceEx: kostprijsEx,
@@ -241,6 +255,9 @@ export function buildCentralSkuIndex(params: {
     rows.push({
       skuId,
       label,
+      costOrigin: costClassification.costOrigin,
+      sourceKind: costClassification.sourceKind,
+      costParentSkuId: costClassification.parentSkuId,
       subtype,
       productGroup,
       pricingMethod,

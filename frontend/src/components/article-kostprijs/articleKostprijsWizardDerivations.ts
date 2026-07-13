@@ -4,6 +4,7 @@ import {
   toNumber,
   type GenericRecord,
 } from "@/components/article-kostprijs/articleKostprijsWizardUtils";
+import { calculateComponentCostprice } from "@/lib/costpriceCalculationEngine";
 
 export type BomCostLine = {
   id: string;
@@ -170,29 +171,27 @@ export function findSnapshotRowForSku(args: {
     return (list as any[]).find((row) => text(row?.product_id) === formatArticleId) ?? null;
   }
 
-  // 3) Fallback: some older snapshots may key on product_id = article_id.
-  const articleId = text((sku as any)?.article_id);
-  if (articleId) {
-    return (list as any[]).find((row) => text(row?.product_id) === articleId) ?? null;
-  }
-
   return null;
 }
 
 export function buildBomCostLines(args: {
+  selectedYear: number;
   selectedArticleId: string;
   bomLines: GenericRecord[];
+  skus: GenericRecord[];
+  articles: GenericRecord[];
   skuById: Map<string, GenericRecord>;
-  articleById: Map<string, GenericRecord>;
   activeVersionIdBySku: Map<string, string>;
   versionById: Map<string, GenericRecord>;
   packagingPriceById: Map<string, number>;
 }) {
   const {
+    selectedYear,
     selectedArticleId,
     bomLines,
+    skus,
+    articles,
     skuById,
-    articleById,
     activeVersionIdBySku,
     versionById,
     packagingPriceById,
@@ -200,94 +199,49 @@ export function buildBomCostLines(args: {
 
   if (!selectedArticleId) return [];
 
-  const relevant = bomLines.filter((row) => text((row as any).parent_article_id) === selectedArticleId);
-  const out: BomCostLine[] = [];
-
-  relevant.forEach((line) => {
-    const qty = Math.max(0, toNumber((line as any).quantity, 0));
-    const componentSkuId = text((line as any).component_sku_id);
-    const componentArticleId = text((line as any).component_article_id);
-    const warnings: string[] = [];
-
-    if (componentSkuId) {
-      const componentSku = skuById.get(componentSkuId) ?? null;
-      const label = text((componentSku as any)?.name) || componentSkuId;
-      const activeVid = activeVersionIdBySku.get(componentSkuId) ?? "";
-      const version = activeVid ? versionById.get(activeVid) ?? null : null;
-      const skuArticleId = text((componentSku as any)?.article_id);
-      const componentPrice = skuArticleId ? packagingPriceById.get(skuArticleId) : undefined;
-      if ((!activeVid || !version) && componentPrice === undefined) warnings.push("Geen actieve kostprijs gevonden voor component.");
-      const snap = findSnapshotRowForSku({ version, skuId: componentSkuId, skuById }) ?? {};
-
-      const productkosten = componentPrice !== undefined ? componentPrice : toNumber(
-        (snap as any).inkoop ?? (snap as any).primaire_kosten ?? (snap as any).variabele_kosten,
-        0
-      );
-      const verpakkingskosten = componentPrice !== undefined ? 0 : toNumber((snap as any).verpakkingskosten, 0);
-      const opslag = componentPrice !== undefined ? 0 : toNumber(
-        (snap as any).vaste_kosten ??
-          (snap as any).vaste_directe_kosten ??
-          (snap as any).indirecte_kosten,
-        0
-      );
-      const accijns = componentPrice !== undefined ? 0 : toNumber((snap as any).accijns, 0);
-      const kostprijs = componentPrice !== undefined ? componentPrice : toNumber(
-        (snap as any).kostprijs,
-        productkosten + verpakkingskosten + opslag + accijns
-      );
-
-      out.push({
-        id: text((line as any).id) || createId(),
-        label,
-        qty,
-        componentSkuId,
-        activeVersionId: activeVid,
-        productkosten: qty * productkosten,
-        verpakkingskosten: qty * verpakkingskosten,
-        opslag: qty * opslag,
-        accijnzen: qty * accijns,
-        kostprijs: qty * kostprijs,
-        warnings,
-      });
-      return;
-    }
-
-    if (componentArticleId) {
-      const article = articleById.get(componentArticleId) ?? null;
-      const label = text((article as any)?.name ?? (article as any)?.naam) || componentArticleId;
-      const price = packagingPriceById.get(componentArticleId);
-      if (price === undefined) warnings.push("Geen actieve jaarprijs gevonden voor verpakkingsonderdeel.");
-      const unit = price ?? 0;
-      out.push({
-        id: text((line as any).id) || createId(),
-        label,
-        qty,
-        componentArticleId,
-        productkosten: 0,
-        verpakkingskosten: qty * unit,
-        opslag: 0,
-        accijnzen: 0,
-        kostprijs: qty * unit,
-        warnings,
-      });
-      return;
-    }
-
-    warnings.push("Onbekende BOM-regel: mist component_sku_id of component_article_id.");
-    out.push({
-      id: text((line as any).id) || createId(),
-      label: text((line as any).omschrijving) || "Onbekend onderdeel",
-      qty,
-      productkosten: 0,
-      verpakkingskosten: 0,
-      opslag: 0,
-      accijnzen: 0,
-      kostprijs: 0,
-      warnings,
+  const summaryRows: GenericRecord[] = [];
+  activeVersionIdBySku.forEach((versionId, skuId) => {
+    const version = versionById.get(versionId) ?? null;
+    const snap = findSnapshotRowForSku({ version, skuId, skuById });
+    if (!snap) return;
+    const componentSku = skuById.get(skuId) ?? null;
+    summaryRows.push({
+      ...(snap as GenericRecord),
+      sku_id: skuId,
+      product_id: text((snap as any).product_id) || text((componentSku as any)?.format_article_id),
     });
   });
 
-  return out;
+  const packagingRows = Array.from(packagingPriceById.entries()).map(([componentId, price]) => ({
+    jaar: selectedYear,
+    verpakkingsonderdeel_id: componentId,
+    prijs_per_stuk: price,
+  }));
+
+  const result = calculateComponentCostprice({
+    parentArticleId: selectedArticleId,
+    bomLines,
+    skus,
+    articles,
+    summaryRows,
+    packagingComponentPrices: packagingRows,
+    year: selectedYear,
+  });
+
+  return result.components.map((component, index) => ({
+    id: `${component.component_sku_id ?? component.component_article_id ?? "component"}-${index}`,
+    label: component.label,
+    qty: component.quantity,
+    componentSkuId: component.component_sku_id,
+    componentArticleId: component.component_article_id,
+    activeVersionId: component.component_sku_id ? activeVersionIdBySku.get(component.component_sku_id) ?? "" : "",
+    productkosten: component.primaire_kosten,
+    verpakkingskosten: component.verpakkingskosten,
+    opslag: component.vaste_kosten,
+    accijnzen: component.accijns,
+    kostprijs: component.kostprijs,
+    warnings: component.issues.map((issue) => issue.message),
+  }));
 }
 
 export function summarizeBomCostLines(args: { bomCostLines: BomCostLine[]; selectedBundleSkuId: string }) {

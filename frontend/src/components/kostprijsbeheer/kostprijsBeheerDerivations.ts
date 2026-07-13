@@ -34,6 +34,7 @@ export type ActiveCostCandidateOption = {
 export type ActiveCostRow = {
   key: string;
   skuId: string;
+  productId: string;
   artikelNaam: string;
   bierNaam: string;
   groupLabel: string;
@@ -389,6 +390,7 @@ export function buildActiveRows(args: {
       return {
         key: rowKeyBase ? rowKeyBase : `row-${index}`,
         skuId,
+        productId: effectiefProductId,
         artikelNaam: productNaam || bierNaam,
         bierNaam,
         groupLabel: groupLabels[0] || bierNaam,
@@ -441,6 +443,7 @@ export function buildActiveRows(args: {
     rawRows.push({
       key: skuId,
       skuId,
+      productId: skuArticleId,
       artikelNaam: label,
       bierNaam: groupLabel,
       groupLabel,
@@ -530,6 +533,7 @@ export function buildActiveRows(args: {
     rawRows.push({
       key: skuId,
       skuId,
+      productId: skuArticleId,
       artikelNaam: label,
       bierNaam: groupLabels[0],
       groupLabel: groupLabels[0],

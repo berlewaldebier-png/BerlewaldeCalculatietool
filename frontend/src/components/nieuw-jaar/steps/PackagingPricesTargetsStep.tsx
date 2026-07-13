@@ -26,6 +26,7 @@ type PackagingPricesTargetsStepProps = {
   currentPackagingPrices: PackagingPriceRow[];
   draftPackagingPrices: Record<string, number>;
   setDraftPackagingPrices: (setter: (current: Record<string, number>) => Record<string, number>) => void;
+  inflationPct: number;
 
   copyPackagingPricesFromSource: () => void;
   savePackagingPricesTarget: () => void;
@@ -43,9 +44,11 @@ export function PackagingPricesTargetsStep({
   currentPackagingPrices,
   draftPackagingPrices,
   setDraftPackagingPrices,
+  inflationPct,
   copyPackagingPricesFromSource,
   savePackagingPricesTarget,
 }: PackagingPricesTargetsStepProps) {
+  const normalizedInflationPct = Number.isFinite(Number(inflationPct)) ? Number(inflationPct) : 0;
   return (
     <div>
       <div className="editor-toolbar">
@@ -61,12 +64,21 @@ export function PackagingPricesTargetsStep({
         sturen de kostprijs door.
       </div>
 
+      <div className="placeholder-block" style={{ marginBottom: 14 }}>
+        <strong>Inflatie uit vaste kosten</strong>
+        <div className="muted" style={{ marginTop: 8 }}>
+          Verwachte inflatie: {normalizedInflationPct.toFixed(1).replace(".", ",")}%.
+          De kopieeractie verhoogt bronjaarprijzen met dit percentage. Daarna kun je elke doeljaarprijs handmatig overschrijven.
+        </div>
+      </div>
+
       <div className="dataset-editor-scroll">
         <table className="dataset-editor-table">
           <thead>
             <tr>
               <th style={{ width: "320px" }}>Onderdeel</th>
               <th style={{ width: "180px" }}>Bronjaar {sourceYear}</th>
+              <th style={{ width: "180px" }}>Bron + inflatie</th>
               <th style={{ width: "180px" }}>Doeljaar {targetYear}</th>
               <th style={{ width: "160px" }}>Delta</th>
             </tr>
@@ -78,6 +90,7 @@ export function PackagingPricesTargetsStep({
                   (priceRow) => priceRow.jaar === sourceYear && priceRow.verpakkingsonderdeel_id === row.componentId
                 )?.prijs_per_stuk ?? 0;
               const targetPrice = Number(draftPackagingPrices[row.componentId] ?? 0);
+              const inflatedPrice = Number((Number(sourcePrice ?? 0) * (1 + normalizedInflationPct / 100)).toFixed(2));
               const delta = targetPrice - Number(sourcePrice ?? 0);
               return (
                 <tr key={row.componentId}>
@@ -87,6 +100,14 @@ export function PackagingPricesTargetsStep({
                       className="dataset-input dataset-input-readonly"
                       type="number"
                       value={String(Number(sourcePrice ?? 0))}
+                      readOnly
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="dataset-input dataset-input-readonly"
+                      type="number"
+                      value={String(inflatedPrice)}
                       readOnly
                     />
                   </td>
@@ -127,7 +148,7 @@ export function PackagingPricesTargetsStep({
             onClick={copyPackagingPricesFromSource}
             disabled={isRunning}
           >
-            Kopieer bronjaar {sourceYear} naar {targetYear}
+            Kopieer bronjaar + inflatie
           </button>
         </div>
         <div className="editor-actions-group">

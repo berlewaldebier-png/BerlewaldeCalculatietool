@@ -897,6 +897,38 @@ async def post_douano_sync_stock_history_lots(
         raise HTTPException(status_code=500, detail="Stock-history LOT sync faalde.") from exc
 
 
+@router.post("/douano/sync/stock-movements")
+async def post_douano_sync_stock_movements(
+    data_collector: str = Query("stock_history_data"),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    tokens = _require_douano_tokens()
+    resource = "stock_movements"
+    try:
+        items, fetch_meta = await _fetch_exporter_resource(tokens=tokens, data_collector=data_collector)
+        stats = lot_costs_storage.upsert_douano_stock_movement_rows(items, source_ref=data_collector)
+        out_stats = {
+            **stats,
+            "fetch": fetch_meta,
+            "source_model": "full_douano_stock_history",
+            "filters": "none",
+        }
+        douano_sync_storage.set_sync_state(resource=resource, success=True, since_date=None, stats=out_stats, error="")
+        return {"resource": resource, **out_stats}
+    except HTTPException as exc:
+        douano_sync_storage.set_sync_state(
+            resource=resource,
+            success=False,
+            since_date=None,
+            stats={"fetch": {"path": f"/api/public/v1/exporter/{data_collector}", "data_collector": data_collector}},
+            error=str(exc.detail),
+        )
+        raise
+    except Exception as exc:
+        douano_sync_storage.set_sync_state(resource=resource, success=False, since_date=None, stats={}, error=str(exc))
+        raise HTTPException(status_code=500, detail="Stock movements sync faalde.") from exc
+
+
 @router.get("/douano/companies")
 def get_douano_companies(
     only_customers: bool = Query(False),
@@ -2034,6 +2066,7 @@ def post_break_even_first_use_backfill(
     try:
         year = int(payload.get("year", payload.get("jaar", 0)) or 0)
         plan_revenue = float(payload.get("plan_revenue", payload.get("plan_omzet", 0)) or 0)
+        plan_variable_cost = float(payload.get("plan_variable_cost", payload.get("plan_variabele_kosten", 0)) or 0)
         fixed_cost_total = float(payload.get("fixed_cost_total", payload.get("vaste_kosten", 0)) or 0)
         scenario_name = str(payload.get("scenario_name", payload.get("naam", "First-use backfill")) or "First-use backfill")
         basis = str(payload.get("basis", "invoice") or "invoice")
@@ -2042,6 +2075,7 @@ def post_break_even_first_use_backfill(
             "item": break_even_planning_service.create_first_use_backfill_plan(
                 year=year,
                 plan_revenue=plan_revenue,
+                plan_variable_cost=plan_variable_cost,
                 fixed_cost_total=fixed_cost_total,
                 scenario_name=scenario_name,
                 basis=basis,
@@ -2087,6 +2121,8 @@ def post_break_even_close_year(
                 year=int(payload.get("year", payload.get("jaar", 0)) or 0),
                 basis=str(payload.get("basis", "invoice") or "invoice"),
                 overwrite=bool(payload.get("overwrite", False)),
+                override_reason=str(payload.get("override_reason", "") or ""),
+                manual_inputs=payload.get("manual_inputs") if isinstance(payload.get("manual_inputs"), dict) else {},
             )
         }
     except ValueError as exc:
@@ -2135,6 +2171,47 @@ def delete_break_even_year_close(
     except Exception as exc:
         logger.exception("Break-even year close delete failed")
         raise HTTPException(status_code=500, detail="Jaarafsluiting kon niet worden verwijderd.") from exc
+
+
+@router.post("/break-even/year-closes/{year}/refresh-preview")
+def post_break_even_year_close_refresh_preview(
+    year: int,
+    payload: dict[str, Any] = Body(default={}),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "result": break_even_planning_service.preview_year_close_refresh(
+                year=int(year),
+                basis=str(payload.get("basis", "invoice") or "invoice"),
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even year close refresh preview failed")
+        raise HTTPException(status_code=500, detail="Jaarafsluiting refresh-preview kon niet worden berekend.") from exc
+
+
+@router.post("/break-even/year-closes/{year}/refresh")
+def post_break_even_year_close_refresh(
+    year: int,
+    payload: dict[str, Any] = Body(default={}),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "item": break_even_planning_service.refresh_year_close(
+                year=int(year),
+                basis=str(payload.get("basis", "invoice") or "invoice"),
+                reason=str(payload.get("reason", "") or ""),
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Break-even year close refresh failed")
+        raise HTTPException(status_code=500, detail="Jaarafsluiting kon niet worden ververst.") from exc
 
 
 @router.get("/break-even/model-review")
@@ -2304,6 +2381,15 @@ def post_lot_cost(payload: dict[str, Any], _: dict = Depends(require_admin)) -> 
             limit=50000,
         )
         return {"record": record, "snapshot_refresh": snapshot_refresh}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/lot-costs/{record_id}")
+def delete_lot_cost(record_id: str, _: dict = Depends(require_admin)) -> dict[str, Any]:
+    try:
+        deleted = lot_costs_storage.delete_lot_cost_record(record_id)
+        return {"record_id": record_id, "deleted": deleted}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

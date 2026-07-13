@@ -38,6 +38,28 @@ def _num(value: Any) -> float:
         return 0.0
 
 
+def _variable_cost_breakdown(
+    *,
+    cost_total: Any,
+    quantity: Any,
+    components: dict[str, Any] | None,
+) -> dict[str, float]:
+    total = _num(cost_total)
+    qty = _num(quantity)
+    fixed_unit = _num((components or {}).get("indirecte_kosten"))
+    excise_unit = _num((components or {}).get("accijns"))
+    fixed_total = min(total, max(0.0, fixed_unit * qty)) if fixed_unit and qty else 0.0
+    excise_total = max(0.0, excise_unit * qty) if excise_unit and qty else 0.0
+    variable_with_excise = max(0.0, total - fixed_total)
+    variable_without_excise = max(0.0, variable_with_excise - excise_total)
+    return {
+        "fixed_total_ex": fixed_total,
+        "excise_total_ex": excise_total,
+        "variable_cost_ex": variable_without_excise,
+        "variable_cost_with_excise_ex": variable_with_excise,
+    }
+
+
 def _snapshot_row_cost(row: dict[str, Any]) -> float:
     explicit = _num(row.get("kostprijs"))
     if explicit > 0:
@@ -847,6 +869,7 @@ def get_company_margin_summary(
     douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
     douano_margin_snapshot_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
 
     since_text = (since or "").strip()
     year_start, year_end = _year_bounds(year)
@@ -886,6 +909,8 @@ def get_company_margin_summary(
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines,
                     COALESCE(dc.distance_km_one_way, 0) AS distance_km_one_way,
                     COALESCE(SUM(snap.cost_total_ex), 0) AS snapshot_cost_total,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))) - GREATEST(0, COALESCE(csr.accijns, 0) * COALESCE(snap.quantity, 0)))), 0) AS variable_cost_ex,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))))), 0) AS variable_cost_with_excise_ex,
                     COALESCE(SUM(CASE WHEN COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS mapped_lines,
                     COALESCE(SUM(CASE WHEN COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL AND (snap.source_line_id IS NULL OR snap.missing_cost) THEN 1 ELSE 0 END), 0)::int AS missing_cost_lines
                 FROM douano_sales_order_lines l
@@ -896,6 +921,13 @@ def get_company_margin_summary(
                 LEFT JOIN douano_sales_line_cost_snapshots snap
                   ON snap.source_type = 'order'
                  AND snap.source_line_id = l.line_id
+                LEFT JOIN (
+                    SELECT version_id, sku_id, MAX(indirecte_kosten) AS indirecte_kosten, MAX(accijns) AS accijns
+                    FROM cost_version_sku_rows
+                    GROUP BY version_id, sku_id
+                ) csr
+                  ON csr.version_id = snap.kostprijsversie_id
+                 AND csr.sku_id = snap.sku_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_unmapped_rules r
@@ -913,7 +945,7 @@ def get_company_margin_summary(
             rows = cur.fetchall() or []
 
     out: list[dict[str, Any]] = []
-    for company_id, name, public_name, documents, lines, omzet, korting, charges, netto, total_quantity, ignored_lines, unmapped_lines, distance_km_one_way, snapshot_cost_total, mapped_lines, missing_cost_lines in rows:
+    for company_id, name, public_name, documents, lines, omzet, korting, charges, netto, total_quantity, ignored_lines, unmapped_lines, distance_km_one_way, snapshot_cost_total, variable_cost_ex, variable_cost_with_excise_ex, mapped_lines, missing_cost_lines in rows:
         cid = int(company_id or 0)
         cost_total = float(snapshot_cost_total or 0.0)
         margin = float(netto or 0.0) - cost_total
@@ -931,6 +963,8 @@ def get_company_margin_summary(
                 "charges_ex": float(charges or 0.0),
                 "netto_omzet_ex": float(netto or 0.0),
                 "kostprijs_ex": cost_total,
+                "variabel_ex": float(variable_cost_ex or 0.0),
+                "variabel_accijns_ex": float(variable_cost_with_excise_ex or 0.0),
                 "brutomarge_ex": margin,
                 "distance_km_one_way": km_one_way,
                 "km_total": km_total,
@@ -950,6 +984,7 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
     douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
     douano_margin_snapshot_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
 
     since_text = (since or "").strip()
     year_start, year_end = _year_bounds(year)
@@ -989,6 +1024,8 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines,
                     COALESCE(dc.distance_km_one_way, 0) AS distance_km_one_way,
                     COALESCE(SUM(snap.cost_total_ex), 0) AS snapshot_cost_total,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))) - GREATEST(0, COALESCE(csr.accijns, 0) * COALESCE(snap.quantity, 0)))), 0) AS variable_cost_ex,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))))), 0) AS variable_cost_with_excise_ex,
                     COALESCE(SUM(CASE WHEN COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS mapped_lines,
                     COALESCE(SUM(CASE WHEN COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL AND (snap.source_line_id IS NULL OR snap.missing_cost) THEN 1 ELSE 0 END), 0)::int AS missing_cost_lines
                 FROM douano_sales_invoice_lines l
@@ -999,6 +1036,13 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                 LEFT JOIN douano_sales_line_cost_snapshots snap
                   ON snap.source_type = 'invoice'
                  AND snap.source_line_id = l.line_id
+                LEFT JOIN (
+                    SELECT version_id, sku_id, MAX(indirecte_kosten) AS indirecte_kosten, MAX(accijns) AS accijns
+                    FROM cost_version_sku_rows
+                    GROUP BY version_id, sku_id
+                ) csr
+                  ON csr.version_id = snap.kostprijsversie_id
+                 AND csr.sku_id = snap.sku_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_unmapped_rules r
@@ -1016,7 +1060,7 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
             rows = cur.fetchall() or []
 
     out: list[dict[str, Any]] = []
-    for company_id, name, public_name, documents, lines, omzet, korting, charges, netto, _total_qty, ignored_lines, unmapped_lines, distance_km_one_way, snapshot_cost_total, mapped_lines, missing_cost_lines in rows:
+    for company_id, name, public_name, documents, lines, omzet, korting, charges, netto, _total_qty, ignored_lines, unmapped_lines, distance_km_one_way, snapshot_cost_total, variable_cost_ex, variable_cost_with_excise_ex, mapped_lines, missing_cost_lines in rows:
         cid = int(company_id or 0)
         cost_total = float(snapshot_cost_total or 0.0)
         margin = float(netto or 0.0) - cost_total
@@ -1034,6 +1078,8 @@ def _get_company_margin_summary_invoices(*, since: str = "", year: int = 0, limi
                 "charges_ex": float(charges or 0.0),
                 "netto_omzet_ex": float(netto or 0.0),
                 "kostprijs_ex": cost_total,
+                "variabel_ex": float(variable_cost_ex or 0.0),
+                "variabel_accijns_ex": float(variable_cost_with_excise_ex or 0.0),
                 "brutomarge_ex": margin,
                 "distance_km_one_way": km_one_way,
                 "km_total": km_total,
@@ -1168,6 +1214,7 @@ def list_company_lines(
     douano_product_ignore_storage.ensure_schema()
     postgres_storage.ensure_schema()
     douano_margin_snapshot_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
     cid = int(company_id or 0)
     if cid <= 0:
         return []
@@ -1218,6 +1265,8 @@ def list_company_lines(
                     snap.source_line_id IS NOT NULL AS has_snapshot,
                     snap.cost_price_ex,
                     COALESCE(snap.cost_total_ex, 0) AS cost_total_ex,
+                    GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))) - GREATEST(0, COALESCE(csr.accijns, 0) * COALESCE(snap.quantity, 0))) AS variable_cost_ex,
+                    GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0)))) AS variable_cost_with_excise_ex,
                     COALESCE(snap.margin_ex, 0) AS margin_ex,
                     COALESCE(snap.missing_cost, FALSE) AS missing_cost,
                     COALESCE(snap.mapped, FALSE) AS snapshot_mapped,
@@ -1236,6 +1285,13 @@ def list_company_lines(
                 LEFT JOIN douano_sales_line_cost_snapshots snap
                   ON snap.source_type = 'order'
                  AND snap.source_line_id = l.line_id
+                LEFT JOIN (
+                    SELECT version_id, sku_id, MAX(indirecte_kosten) AS indirecte_kosten, MAX(accijns) AS accijns
+                    FROM cost_version_sku_rows
+                    GROUP BY version_id, sku_id
+                ) csr
+                  ON csr.version_id = snap.kostprijsversie_id
+                 AND csr.sku_id = snap.sku_id
                 WHERE {where}
                 ORDER BY l.order_date DESC, l.line_id DESC
                 LIMIT %s
@@ -1264,6 +1320,8 @@ def list_company_lines(
         has_snapshot,
         cost_price_ex,
         cost_total_ex,
+        variable_cost_ex,
+        variable_cost_with_excise_ex,
         margin_ex,
         missing_cost,
         snapshot_mapped,
@@ -1298,6 +1356,8 @@ def list_company_lines(
                 "ignored": bool(ignored),
                 "cost_price_ex": float(cost_price_ex) if cost_price_ex is not None else None,
                 "cost_total_ex": float(cost_total_ex or 0),
+                "variabel_ex": float(variable_cost_ex or 0),
+                "variabel_accijns_ex": float(variable_cost_with_excise_ex or 0),
                 "margin_ex": float(margin_ex or 0),
                 "missing_cost": bool(missing_cost),
                 "mapped": bool(snapshot_mapped) or bool(sku_id_text),
@@ -1336,6 +1396,7 @@ def list_company_orders(
     douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
     douano_margin_snapshot_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
     cid = int(company_id or 0)
     if cid <= 0:
         return []
@@ -1370,12 +1431,21 @@ def list_company_orders(
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines,
                     COALESCE(SUM(snap.cost_total_ex), 0) AS snapshot_cost_total,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))) - GREATEST(0, COALESCE(csr.accijns, 0) * COALESCE(snap.quantity, 0)))), 0) AS variable_cost_ex,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))))), 0) AS variable_cost_with_excise_ex,
                     COALESCE(SUM(CASE WHEN COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL AND (snap.source_line_id IS NULL OR snap.missing_cost) THEN 1 ELSE 0 END), 0)::int AS missing_cost_lines
                 FROM douano_sales_orders o
                 JOIN douano_sales_order_lines l ON l.sales_order_id = o.sales_order_id
                 LEFT JOIN douano_sales_line_cost_snapshots snap
                   ON snap.source_type = 'order'
                  AND snap.source_line_id = l.line_id
+                LEFT JOIN (
+                    SELECT version_id, sku_id, MAX(indirecte_kosten) AS indirecte_kosten, MAX(accijns) AS accijns
+                    FROM cost_version_sku_rows
+                    GROUP BY version_id, sku_id
+                ) csr
+                  ON csr.version_id = snap.kostprijsversie_id
+                 AND csr.sku_id = snap.sku_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_unmapped_rules r
@@ -1407,6 +1477,8 @@ def list_company_orders(
         ignored_lines,
         unmapped_lines,
         snapshot_cost_total,
+        variable_cost_ex,
+        variable_cost_with_excise_ex,
         missing_cost_lines,
     ) in rows:
         oid = int(sales_order_id or 0)
@@ -1424,6 +1496,8 @@ def list_company_orders(
                 "charges_ex": float(charges_ex or 0),
                 "netto_omzet_ex": float(netto_omzet_ex or 0),
                 "kostprijs_ex": cost_total,
+                "variabel_ex": float(variable_cost_ex or 0.0),
+                "variabel_accijns_ex": float(variable_cost_with_excise_ex or 0.0),
                 "brutomarge_ex": margin,
                 "ignored_lines": int(ignored_lines or 0),
                 "unmapped_lines": int(unmapped_lines or 0),
@@ -1447,6 +1521,7 @@ def list_company_invoices(
     douano_unmapped_rule_storage.ensure_schema()
     postgres_storage.ensure_schema()
     douano_margin_snapshot_storage.ensure_schema()
+    cost_versions_storage.ensure_schema()
     cid = int(company_id or 0)
     if cid <= 0:
         return []
@@ -1482,12 +1557,21 @@ def list_company_invoices(
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS ignored_lines,
                     COALESCE(SUM(CASE WHEN ig.douano_product_id IS NULL AND m.douano_product_id IS NULL AND r.rule_id IS NULL THEN 1 ELSE 0 END), 0)::int AS unmapped_lines,
                     COALESCE(SUM(snap.cost_total_ex), 0) AS snapshot_cost_total,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))) - GREATEST(0, COALESCE(csr.accijns, 0) * COALESCE(snap.quantity, 0)))), 0) AS variable_cost_ex,
+                    COALESCE(SUM(GREATEST(0, COALESCE(snap.cost_total_ex, 0) - LEAST(COALESCE(snap.cost_total_ex, 0), GREATEST(0, COALESCE(csr.indirecte_kosten, 0) * COALESCE(snap.quantity, 0))))), 0) AS variable_cost_with_excise_ex,
                     COALESCE(SUM(CASE WHEN COALESCE(NULLIF(m.sku_id, ''), NULLIF(r.sku_id, '')) IS NOT NULL AND (snap.source_line_id IS NULL OR snap.missing_cost) THEN 1 ELSE 0 END), 0)::int AS missing_cost_lines
                 FROM douano_sales_invoices i
                 JOIN douano_sales_invoice_lines l ON l.sales_invoice_id = i.sales_invoice_id
                 LEFT JOIN douano_sales_line_cost_snapshots snap
                   ON snap.source_type = 'invoice'
                  AND snap.source_line_id = l.line_id
+                LEFT JOIN (
+                    SELECT version_id, sku_id, MAX(indirecte_kosten) AS indirecte_kosten, MAX(accijns) AS accijns
+                    FROM cost_version_sku_rows
+                    GROUP BY version_id, sku_id
+                ) csr
+                  ON csr.version_id = snap.kostprijsversie_id
+                 AND csr.sku_id = snap.sku_id
                 LEFT JOIN douano_product_mapping m ON m.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_product_ignore ig ON ig.douano_product_id = l.douano_product_id
                 LEFT JOIN douano_unmapped_rules r
@@ -1520,6 +1604,8 @@ def list_company_invoices(
         ignored_lines,
         unmapped_lines,
         snapshot_cost_total,
+        variable_cost_ex,
+        variable_cost_with_excise_ex,
         missing_cost_lines,
     ) in rows:
         inv_id = int(sales_invoice_id or 0)
@@ -1538,6 +1624,8 @@ def list_company_invoices(
                 "charges_ex": float(charges_ex or 0),
                 "netto_omzet_ex": float(netto_omzet_ex or 0),
                 "kostprijs_ex": cost_total,
+                "variabel_ex": float(variable_cost_ex or 0.0),
+                "variabel_accijns_ex": float(variable_cost_with_excise_ex or 0.0),
                 "brutomarge_ex": float(netto_omzet_ex or 0.0) - cost_total,
                 "ignored_lines": int(ignored_lines or 0),
                 "unmapped_lines": int(unmapped_lines or 0),
@@ -1732,6 +1820,12 @@ def list_order_lines(
 
         if only_missing_cost and not missing_cost:
             continue
+        cost_components = snapshot_components_index.get((kostprijsversie_id, sku_id_text), {}) if kostprijsversie_id and sku_id_text else {}
+        variable_breakdown = _variable_cost_breakdown(
+            cost_total=cost_total,
+            quantity=quantity,
+            components=cost_components,
+        )
 
         item = {
             "line_id": int(line_id or 0),
@@ -1753,6 +1847,8 @@ def list_order_lines(
             "ignored": bool(ignored),
             "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
             "cost_total_ex": float(cost_total),
+            "variabel_ex": float(variable_breakdown["variable_cost_ex"]),
+            "variabel_accijns_ex": float(variable_breakdown["variable_cost_with_excise_ex"]),
             "margin_ex": float(margin),
             "missing_cost": bool(missing_cost),
             "mapped": bool(sku_id_text),
@@ -1962,6 +2058,12 @@ def list_invoice_lines(
 
         if only_missing_cost and not missing_cost:
             continue
+        cost_components = snapshot_components_index.get((kostprijsversie_id, sku_id_text), {}) if kostprijsversie_id and sku_id_text else {}
+        variable_breakdown = _variable_cost_breakdown(
+            cost_total=cost_total,
+            quantity=quantity,
+            components=cost_components,
+        )
 
         item = {
             "line_id": int(line_id or 0),
@@ -1983,6 +2085,8 @@ def list_invoice_lines(
             "ignored": bool(ignored),
             "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
             "cost_total_ex": float(cost_total),
+            "variabel_ex": float(variable_breakdown["variable_cost_ex"]),
+            "variabel_accijns_ex": float(variable_breakdown["variable_cost_with_excise_ex"]),
             "margin_ex": float(margin),
             "missing_cost": bool(missing_cost),
             "mapped": bool(sku_id_text),

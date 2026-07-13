@@ -15,9 +15,16 @@ type PlanRow = {
   source_version_id: string;
   source_cost: number;
   source_primary: number;
+  source_packaging?: number;
+  source_overhead?: number;
+  source_excise?: number;
   scenario_primary: number;
+  target_packaging?: number;
+  target_overhead?: number;
+  target_excise?: number;
   target_cost: number;
   delta: number;
+  engine_version?: string;
 };
 
 type PlanResponse = {
@@ -37,7 +44,6 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState("");
 
-  const [scenarioOverrides, setScenarioOverrides] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>({});
 
   const sourceYear = Number(plan.source_year ?? 0);
@@ -60,14 +66,11 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
 
   useEffect(() => {
     const nextSelected: Record<string, boolean> = {};
-    const nextOverrides: Record<string, number> = {};
     rows.forEach((row) => {
       const key = `${row.bier_id}::${row.product_id}`;
       nextSelected[key] = true;
-      nextOverrides[key] = Number(row.scenario_primary ?? row.source_primary ?? 0);
     });
     setSelected(nextSelected);
-    setScenarioOverrides(nextOverrides);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceYear, targetYear]);
 
@@ -93,38 +96,6 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
     }
   }
 
-  async function saveDraft(message?: string) {
-    if (!sourceYear || !targetYear) return false;
-    setIsBusy(true);
-    setStatus("");
-    try {
-      const payload = {
-        source_year: sourceYear,
-        target_year: targetYear,
-        payload: {
-          scenario_primary_costs: scenarioOverrides,
-          selections: Object.entries(selected)
-            .filter(([, value]) => Boolean(value))
-            .map(([key]) => key)
-        }
-      };
-      const response = await fetch(`${API_BASE_URL}/meta/kostprijs-activatie-draft`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error(await response.text());
-      setStatus(message ?? "Concept opgeslagen.");
-      return true;
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Concept opslaan mislukt.");
-      return false;
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   async function activate() {
     if (!sourceYear || !targetYear) return;
     const selectedKeys = Object.entries(selected).filter(([, value]) => Boolean(value)).map(([key]) => key);
@@ -132,11 +103,8 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
       setStatus("Selecteer minimaal 1 product.");
       return;
     }
-    const confirmText = `Weet je zeker dat je kostprijzen wilt activeren voor ${targetYear}? Dit maakt nieuwe definitieve kostprijsversies en zet activaties voor ${targetYear}.`;
+    const confirmText = `Weet je zeker dat je kostprijzen wilt activeren voor ${targetYear}? Dit maakt nieuwe definitieve kostprijsversies, zet activaties voor ${targetYear} en bevriest het break-even plan.`;
     if (!confirm(confirmText)) return;
-
-    const ok = await saveDraft("Concept opgeslagen. Activering starten...");
-    if (!ok) return;
 
     setIsBusy(true);
     setStatus("");
@@ -153,11 +121,12 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
           source_year: sourceYear,
           target_year: targetYear,
           selections,
-          dry_run: false
+          dry_run: false,
+          create_break_even_plan: true
         })
       });
       if (!response.ok) throw new Error(await response.text());
-      setStatus(`Kostprijzen geactiveerd voor ${targetYear}.`);
+      setStatus(`Kostprijzen geactiveerd en break-even plan bevroren voor ${targetYear}.`);
       router.push(`/nieuwe-kostprijsberekening?mode=landing&focus=activations&year=${encodeURIComponent(String(targetYear))}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Activeren mislukt.");
@@ -173,8 +142,8 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
       <div className="module-card-header">
         <div className="module-card-title">Kostprijzen activeren {targetYear}</div>
         <div className="module-card-text">
-          Op basis van het bronjaar en de ingevulde jaar-data maken we nieuwe kostprijsversies en zetten we activaties voor het doeljaar.
-          Verkoopprijzen worden hierbij niet automatisch aangepast.
+          Dit is een read-only controle van de kostprijs-engine uit Nieuw jaar voorbereiden. Hier kies je alleen welke engine-regels
+          definitief geactiveerd worden; kostprijzen worden op deze pagina niet opnieuw berekend.
         </div>
       </div>
 
@@ -188,9 +157,6 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
           <span className="editor-pill">{totalSelected} geselecteerd</span>
         </div>
         <div className="editor-actions-group">
-          <button type="button" className="editor-button editor-button-secondary" onClick={() => void saveDraft()} disabled={isBusy}>
-            Opslaan
-          </button>
           <button type="button" className="editor-button editor-button-secondary" onClick={() => void refreshPlan("Plan ververst.")} disabled={isBusy}>
             Preview verversen
           </button>
@@ -207,17 +173,22 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
               <th style={{ width: "60px" }} />
               <th style={{ width: "220px" }}>Bier</th>
               <th style={{ width: "220px" }}>Product</th>
-              <th style={{ width: "160px" }}>Bron kostprijs</th>
-              <th style={{ width: "160px" }}>Bron inkoop</th>
-              <th style={{ width: "200px" }}>Scenario inkoop</th>
-              <th style={{ width: "160px" }}>Doel kostprijs</th>
+              <th style={{ width: "130px" }}>Bron inkoop</th>
+              <th style={{ width: "130px" }}>Bron verpakking</th>
+              <th style={{ width: "130px" }}>Bron ABC</th>
+              <th style={{ width: "130px" }}>Bron accijns</th>
+              <th style={{ width: "130px" }}>Bron kostprijs</th>
+              <th style={{ width: "130px" }}>Doel inkoop</th>
+              <th style={{ width: "130px" }}>Doel verpakking</th>
+              <th style={{ width: "130px" }}>Doel ABC</th>
+              <th style={{ width: "130px" }}>Doel accijns</th>
+              <th style={{ width: "130px" }}>Doel kostprijs</th>
               <th style={{ width: "140px" }}>Delta</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
               const key = `${row.bier_id}::${row.product_id}`;
-              const scenarioValue = scenarioOverrides[key] ?? Number(row.scenario_primary ?? row.source_primary ?? 0);
               return (
                 <tr key={key}>
                   <td>
@@ -229,21 +200,15 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
                   </td>
                   <td>{row.biernaam}</td>
                   <td>{row.product_label}</td>
-                  <td>{formatEur(Number(row.source_cost ?? 0))}</td>
                   <td>{formatEur(Number(row.source_primary ?? 0))}</td>
-                  <td>
-                    <input
-                      className="dataset-input"
-                      type="number"
-                      value={String(Number.isFinite(scenarioValue) ? scenarioValue : 0)}
-                      onChange={(event) =>
-                        setScenarioOverrides((current) => ({
-                          ...current,
-                          [key]: Number(event.target.value)
-                        }))
-                      }
-                    />
-                  </td>
+                  <td>{formatEur(Number(row.source_packaging ?? 0))}</td>
+                  <td>{formatEur(Number(row.source_overhead ?? 0))}</td>
+                  <td>{formatEur(Number(row.source_excise ?? 0))}</td>
+                  <td>{formatEur(Number(row.source_cost ?? 0))}</td>
+                  <td>{formatEur(Number(row.scenario_primary ?? 0))}</td>
+                  <td>{formatEur(Number(row.target_packaging ?? 0))}</td>
+                  <td>{formatEur(Number(row.target_overhead ?? 0))}</td>
+                  <td>{formatEur(Number(row.target_excise ?? 0))}</td>
                   <td>{formatEur(Number(row.target_cost ?? 0))}</td>
                   <td>{formatEur(Number(row.delta ?? 0))}</td>
                 </tr>
@@ -251,8 +216,8 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
             })}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="muted">
-                  Geen rijen gevonden. Controleer of er actieve kostprijzen zijn in bronjaar {sourceYear}.
+                <td colSpan={13} className="muted">
+                  Geen engine-regels gevonden. Open Nieuw jaar voorbereiden, controleer stap Kostprijs en sla/commit het concept opnieuw op.
                 </td>
               </tr>
             ) : null}
@@ -262,4 +227,3 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
     </section>
   );
 }
-

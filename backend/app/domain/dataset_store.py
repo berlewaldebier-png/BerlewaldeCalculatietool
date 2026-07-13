@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from app.domain import dashboard_service
+from app.domain import break_even_planning_storage
 from app.domain import fixed_costs_storage, postgres_storage, production_storage, product_model_storage
 from app.domain import kostprijs_activation_storage
 from app.utils import json_seed
@@ -154,6 +155,9 @@ DATASET_DEFAULTS: dict[str, Any] = {
     # Scenario inkoop (primair) inputs per jaar voor kostprijs-activering.
     # Shape: [{jaar, bier_id, product_id, scenario_primaire_kosten}]
     "kostprijs-scenario-inkoop": [],
+    # Definitive target-year costprice engine rows created by Nieuw jaar voorbereiden.
+    # Shape: [{source_year, target_year, owner, rows, created_at}]
+    "kostprijs-target-engine-rows": [],
     # Draft storage for "Kostprijzen activeren" wizard (Phase E+).
     "kostprijs-activatie-drafts": [],
 }
@@ -1598,118 +1602,274 @@ def _compute_target_product_components(
     return (max(liters, 0.0), max(packaging, 0.0))
 
 
+def _normalize_costprice_engine_row(row: dict[str, Any], *, source_year: int, target_year: int) -> dict[str, Any]:
+    def _text(value: Any) -> str:
+        return str(value or "").strip()
+
+    def _num(value: Any) -> float:
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    status = _text(row.get("status"))
+    if status and status != "ok":
+        raise ValueError(
+            "Kostprijs-engine bevat blokkerende regel "
+            f"{_text(row.get('biernaam'))} / {_text(row.get('product_label'))}: {_text(row.get('status_text'))}"
+        )
+    bier_id = _text(row.get("bier_id"))
+    product_id = _text(row.get("product_id"))
+    if not bier_id or not product_id:
+        raise ValueError("Kostprijs-engine regel mist bier_id of product_id.")
+    source_cost = _num(row.get("source_cost"))
+    target_cost = _num(row.get("target_cost"))
+    if source_cost > 0 and target_cost + 0.005 < source_cost:
+        raise ValueError(
+            "Kostprijs-engine regel is lager dan bronjaar "
+            f"voor {_text(row.get('biernaam'))} / {_text(row.get('product_label'))}: "
+            f"{target_cost:.2f} < {source_cost:.2f}"
+        )
+    return {
+        "bier_id": bier_id,
+        "biernaam": _text(row.get("biernaam")),
+        "sku_id": _text(row.get("sku_id")),
+        "product_id": product_id,
+        "product_type": _text(row.get("product_type")),
+        "product_label": _text(row.get("product_label")),
+        "source_version_id": _text(row.get("source_version_id")),
+        "source_cost": source_cost,
+        "source_primary": _num(row.get("source_primary")),
+        "source_packaging": _num(row.get("source_packaging")),
+        "source_overhead": _num(row.get("source_overhead")),
+        "source_excise": _num(row.get("source_excise")),
+        "scenario_primary": _num(row.get("scenario_primary")),
+        "target_packaging": _num(row.get("target_packaging")),
+        "target_overhead": _num(row.get("target_overhead")),
+        "target_excise": _num(row.get("target_excise")),
+        "target_cost": target_cost,
+        "delta": target_cost - source_cost,
+        "engine_version": _text(row.get("engine_version")) or "costprice-ssot-v1",
+        "source_year": int(source_year),
+        "target_year": int(target_year),
+    }
+
+
+def _costprice_engine_rows_from_payload(payload: dict[str, Any], *, source_year: int, target_year: int) -> list[dict[str, Any]]:
+    data = payload.get("data", {}) if isinstance(payload.get("data", {}), dict) else {}
+    rows = data.get("costprice_engine_target_rows") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        normalized_row = _normalize_costprice_engine_row(raw, source_year=source_year, target_year=target_year)
+        key = (
+            str(normalized_row.get("bier_id", "") or ""),
+            str(normalized_row.get("product_id", "") or ""),
+            str(normalized_row.get("sku_id", "") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(normalized_row)
+    return normalized
+
+
+def _load_persisted_costprice_engine_rows(*, owner: str, source_year: int, target_year: int) -> list[dict[str, Any]]:
+    payload = load_dataset("kostprijs-target-engine-rows")
+    if not isinstance(payload, list):
+        return []
+    matches = [
+        row
+        for row in payload
+        if isinstance(row, dict)
+        and int(row.get("source_year", 0) or 0) == int(source_year)
+        and int(row.get("target_year", 0) or 0) == int(target_year)
+        and str(row.get("owner", "") or "") == str(owner or "")
+        and isinstance(row.get("rows"), list)
+    ]
+    if not matches:
+        return []
+    matches.sort(key=lambda row: str(row.get("created_at", "") or ""), reverse=True)
+    rows = matches[0].get("rows")
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _persist_costprice_engine_rows(
+    *,
+    owner: str,
+    source_year: int,
+    target_year: int,
+    rows: list[dict[str, Any]],
+) -> None:
+    existing = load_dataset("kostprijs-target-engine-rows")
+    if not isinstance(existing, list):
+        existing = []
+    kept = [
+        row
+        for row in existing
+        if isinstance(row, dict)
+        and not (
+            int(row.get("source_year", 0) or 0) == int(source_year)
+            and int(row.get("target_year", 0) or 0) == int(target_year)
+            and str(row.get("owner", "") or "") == str(owner or "")
+        )
+    ]
+    kept.append(
+        {
+            "source_year": int(source_year),
+            "target_year": int(target_year),
+            "owner": str(owner or ""),
+            "created_at": datetime.now(UTC).isoformat(),
+            "rows": rows,
+        }
+    )
+    save_dataset("kostprijs-target-engine-rows", kept)
+
+
 def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: int) -> dict[str, Any]:
     require_postgres()
     if source_year <= 0 or target_year <= 0:
         raise ValueError("Bronjaar en doeljaar moeten geldig zijn.")
 
-    versions = [row for row in load_kostprijsversies() if isinstance(row, dict)]
-    version_by_id = {str(row.get("id", "") or ""): row for row in versions}
-    activations = _latest_activations_for_year(source_year)
-
-    scenario_by_key = _load_scenario_primary_costs_for_year(target_year)
-    draft = load_kostprijs_activatie_draft(owner=str(owner or ""), target_year=int(target_year))
-    draft_payload = (draft or {}).get("payload") if isinstance(draft, dict) else {}
-    draft_overrides = (draft_payload or {}).get("scenario_primary_costs") if isinstance(draft_payload, dict) else {}
-    if not isinstance(draft_overrides, dict):
-        draft_overrides = {}
-
-    # Eigen productie overrides come from the nieuw-jaar wizard draft (same owner+target_year).
     new_year_draft = load_new_year_draft(owner=str(owner or ""), target_year=int(target_year))
-    ny_payload = (new_year_draft or {}).get("payload") if isinstance(new_year_draft, dict) else {}
-    ny_data = (ny_payload or {}).get("data") if isinstance(ny_payload, dict) else {}
-    eigen_overrides = (ny_data or {}).get("eigen_productie_overrides") if isinstance(ny_data, dict) else {}
-    if not isinstance(eigen_overrides, dict):
-        eigen_overrides = {}
-
-    rows: list[dict[str, Any]] = []
-    for activation in activations:
-        bier_id = str(activation.get("bier_id", "") or "").strip()
-        product_id = str(activation.get("product_id", "") or "").strip()
-        product_type = str(activation.get("product_type", "") or "").strip()
-        version_id = str(activation.get("kostprijsversie_id", "") or "").strip()
-        if not bier_id or not product_id or not version_id:
-            continue
-        version = version_by_id.get(version_id)
-        if not isinstance(version, dict):
-            continue
-        basis = version.get("basisgegevens", {}) if isinstance(version.get("basisgegevens", {}), dict) else {}
-        bier_snapshot = version.get("bier_snapshot", {}) if isinstance(version.get("bier_snapshot", {}), dict) else {}
-        biernaam = str(basis.get("biernaam", "") or "").strip()
-        snapshot_row = _find_snapshot_product_row(version, product_id)
-        if not isinstance(snapshot_row, dict):
-            continue
-        source_cost = float(snapshot_row.get("kostprijs", 0.0) or 0.0)
-        source_primary = float(snapshot_row.get("primaire_kosten", 0.0) or 0.0)
-        soort = str(version.get("type", "") or "").strip().lower()
-        bier_alcohol = float(bier_snapshot.get("alcoholpercentage", basis.get("alcoholpercentage", 0.0)) or 0.0)
-        bier_tarief_accijns = str(bier_snapshot.get("tarief_accijns", basis.get("tarief_accijns", "Hoog")) or "Hoog")
-        bier_belastingsoort = str(bier_snapshot.get("belastingsoort", basis.get("belastingsoort", "Accijns")) or "Accijns")
-        eigen_override = eigen_overrides.get(bier_id) if soort != "inkoop" else None
-        if isinstance(eigen_override, dict):
-            try:
-                bier_alcohol = float(eigen_override.get("alcoholpercentage", bier_alcohol) or bier_alcohol)
-            except (TypeError, ValueError):
-                bier_alcohol = bier_alcohol
-            bier_tarief_accijns = str(eigen_override.get("tarief_accijns", bier_tarief_accijns) or bier_tarief_accijns)
-
-        key = f"{bier_id}::{product_id}"
-        scenario_primary = scenario_by_key.get(key, source_primary)
-        if key in draft_overrides:
-            try:
-                scenario_primary = float(draft_overrides.get(key) or 0.0)
-            except (TypeError, ValueError):
-                scenario_primary = scenario_primary
-
-        liters, packaging_cost = _compute_target_product_components(
-            product_type=product_type, product_id=product_id, target_year=target_year
+    ny_payload_for_engine = (new_year_draft or {}).get("payload") if isinstance(new_year_draft, dict) else {}
+    if isinstance(ny_payload_for_engine, dict):
+        engine_rows = _costprice_engine_rows_from_payload(
+            ny_payload_for_engine,
+            source_year=int(source_year),
+            target_year=int(target_year),
         )
-        # For inkoop cost versions we treat packaging as included in the purchase price.
-        # The legacy snapshots and the UI both expect verpakkingskosten = 0.0 for inkoop rows.
-        if soort == "inkoop":
-            packaging_cost = 0.0
-        if soort != "inkoop" and isinstance(eigen_override, dict):
-            liter_prijs = _compute_eigen_productie_liter_prijs_from_override(override=eigen_override, target_year=target_year)
-            if liter_prijs > 0 and float(liters) > 0:
-                scenario_primary = float(liter_prijs) * float(liters)
-        if soort == "inkoop":
-            vaste_kosten_per_liter = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
-        else:
-            vaste_kosten_per_liter = float(bereken_directe_vaste_kosten_per_productieliter_herverdeeld(target_year) or 0.0)
-        vaste_kosten = vaste_kosten_per_liter * float(liters)
-        accijns = float(
-            bereken_accijns_voor_liters(
-                year=target_year,
-                liters=float(liters),
-                alcoholpercentage=float(bier_alcohol),
-                tarief_accijns=bier_tarief_accijns,
-                belastingsoort=bier_belastingsoort,
-            )
-        )
-        target_cost = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(accijns)
-        delta = target_cost - source_cost
-        rows.append(
+        if engine_rows:
+            return {"source_year": int(source_year), "target_year": int(target_year), "rows": engine_rows}
+    persisted_rows = _load_persisted_costprice_engine_rows(
+        owner=str(owner or ""),
+        source_year=int(source_year),
+        target_year=int(target_year),
+    )
+    if persisted_rows:
+        return {"source_year": int(source_year), "target_year": int(target_year), "rows": persisted_rows}
+
+    raise ValueError(
+        "Geen kostprijs-engine output gevonden voor deze jaaractivatie. "
+        "Open Nieuw jaar voorbereiden, controleer stap Kostprijs en sla het concept opnieuw op."
+    )
+
+
+def _fixed_cost_total_for_year(year: int) -> float:
+    rows = load_dataset("vaste-kosten")
+    if not isinstance(rows, dict):
+        return 0.0
+    year_rows = rows.get(str(int(year or 0)))
+    if not isinstance(year_rows, list):
+        return 0.0
+    total = 0.0
+    for row in year_rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            total += float(row.get("bedrag_per_jaar", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _new_year_plan_targets_from_draft(*, owner: str, target_year: int, fixed_cost_total: float) -> dict[str, Any]:
+    draft = load_new_year_draft(owner=str(owner or ""), target_year=int(target_year))
+    payload = (draft or {}).get("payload") if isinstance(draft, dict) else {}
+    data = (payload or {}).get("data") if isinstance(payload, dict) else {}
+    targets = (data or {}).get("plan_targets") if isinstance(data, dict) else {}
+    if not isinstance(targets, dict):
+        targets = {}
+
+    def _num(value: Any) -> float:
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    revenue = _num(targets.get("revenue"))
+    variable_cost = _num(targets.get("variable_cost"))
+    contribution = _num(targets.get("contribution"))
+    if contribution <= 0 and revenue > 0 and variable_cost > 0:
+        contribution = revenue - variable_cost
+    return {
+        "revenue": revenue,
+        "variable_cost": variable_cost,
+        "contribution": contribution,
+        "fixed_costs": float(fixed_cost_total),
+        "operating_result": contribution - float(fixed_cost_total) if contribution else 0.0,
+        "liters": _num(targets.get("liters")),
+        "units": _num(targets.get("units")),
+        "price_change_pct": _num(targets.get("price_change_pct")),
+        "volume_change_pct": _num(targets.get("volume_change_pct")),
+        "mix_assumption": str(targets.get("mix_assumption", "") or "").strip(),
+    }
+
+
+def _create_new_year_break_even_plan_snapshot(
+    *,
+    owner: str,
+    source_year: int,
+    target_year: int,
+    selected_rows: list[dict[str, Any]],
+    activation_result: dict[str, Any],
+) -> dict[str, Any]:
+    fixed_total = _fixed_cost_total_for_year(int(target_year))
+    targets = _new_year_plan_targets_from_draft(
+        owner=str(owner or ""),
+        target_year=int(target_year),
+        fixed_cost_total=fixed_total,
+    )
+    planning_rows: list[dict[str, Any]] = []
+    for row in selected_rows:
+        if not isinstance(row, dict):
+            continue
+        sku_key = f"{str(row.get('bier_id', '') or '')}::{str(row.get('product_id', '') or '')}"
+        planning_rows.append(
             {
-                "bier_id": bier_id,
-                "biernaam": biernaam,
-                "product_id": product_id,
-                "product_type": product_type,
-                "product_label": str(snapshot_row.get("verpakking", "") or snapshot_row.get("product_label", "") or ""),
-                "source_version_id": version_id,
-                "source_cost": float(source_cost),
-                "source_primary": float(source_primary),
-                "scenario_primary": float(scenario_primary),
-                "target_cost": float(target_cost),
-                "delta": float(delta),
+                "sku_id": sku_key,
+                "bier_id": str(row.get("bier_id", "") or ""),
+                "product_id": str(row.get("product_id", "") or ""),
+                "sku_name": str(row.get("product_label", "") or ""),
+                "category": str(row.get("biernaam", "") or ""),
+                "planned_units": 0.0,
+                "planned_liters": 0.0,
+                "planned_revenue": 0.0,
+                "planned_variable_cost": 0.0,
+                "planned_contribution": 0.0,
+                "planned_variable_cost_unit": float(row.get("target_cost", 0.0) or 0.0),
+                "planned_cost_unit": float(row.get("target_cost", 0.0) or 0.0),
+                "source": "new_year_preparation",
             }
         )
 
-    rows.sort(key=lambda r: (str(r.get("biernaam", "") or ""), str(r.get("product_label", "") or "")))
-    return {
+    payload = {
+        "kind": "break_even_plan",
+        "year": int(target_year),
         "source_year": int(source_year),
-        "target_year": int(target_year),
-        "rows": rows,
+        "scenario_name": f"Nieuw jaar voorbereiden {target_year}",
+        "fixed_cost_total": fixed_total,
+        "targets": targets,
+        "planning_rows": planning_rows,
+        "metadata": {
+            "source": "new_year_preparation",
+            "owner": str(owner or ""),
+            "activation_result": activation_result,
+            "planning_scope": "Frozen plan created after target-year cost price activation.",
+            "cost_context_policy": "Sales year determines active costprice context; historic source-year rows remain unchanged.",
+        },
     }
+    return break_even_planning_storage.create_plan_snapshot(
+        year=int(target_year),
+        scenario_name=f"Nieuw jaar voorbereiden {target_year}",
+        source="new_year_preparation",
+        payload=payload,
+        replace_active=True,
+    )
 
 
 def activate_kostprijzen_for_year(
@@ -1719,6 +1879,7 @@ def activate_kostprijzen_for_year(
     target_year: int,
     selections: list[dict[str, str]] | None = None,
     dry_run: bool = False,
+    create_break_even_plan: bool = True,
 ) -> dict[str, Any]:
     require_postgres()
     plan = get_kostprijs_activatie_plan(owner=owner, source_year=source_year, target_year=target_year)
@@ -1755,6 +1916,7 @@ def activate_kostprijzen_for_year(
 
     if not rows_by_beer:
         return {"created_versions": 0, "activated": 0, "detail": "Geen geselecteerde rijen."}
+    selected_plan_rows = [row for rows in rows_by_beer.values() for row in rows]
 
     versions = [row for row in load_kostprijsversies() if isinstance(row, dict)]
     version_by_id = {str(row.get("id", "") or ""): row for row in versions}
@@ -1866,35 +2028,31 @@ def activate_kostprijzen_for_year(
                 invoer_payload["ingredienten"] = ingredienten
         # Build per-liter summary values (these drive PrijsvoorstelWizard comparisons).
         per_liter_candidates: list[float] = []
+        overhead_per_liter_candidates: list[float] = []
+        excise_per_liter_candidates: list[float] = []
+        total_per_liter_candidates: list[float] = []
         for r in beer_rows:
             product_id = str(r.get("product_id", "") or "").strip()
             product_type = str(r.get("product_type", "") or "").strip()
             label = str(r.get("product_label", "") or "")
             source_primary = float(r.get("source_primary", 0.0) or 0.0)
             scenario_primary = float(r.get("scenario_primary", source_primary) or source_primary)
-            liters, packaging_cost = _compute_target_product_components(
-                product_type=product_type, product_id=product_id, target_year=target_year
-            )
-            if soort == "inkoop":
-                packaging_cost = 0.0
-            if soort == "inkoop":
-                vaste_kosten_per_liter = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
-            else:
-                vaste_kosten_per_liter = float(bereken_directe_vaste_kosten_per_productieliter_herverdeeld(target_year) or 0.0)
-            vaste_kosten = vaste_kosten_per_liter * float(liters)
-            accijns = float(
-                bereken_accijns_voor_liters(
-                    year=target_year,
-                    liters=float(liters),
-                    alcoholpercentage=float(bier_alcohol),
-                    tarief_accijns=bier_tarief_accijns,
-                    belastingsoort=bier_belastingsoort,
+            try:
+                liters, _legacy_packaging = _compute_target_product_components(
+                    product_type=product_type, product_id=product_id, target_year=target_year
                 )
-            )
-            kostprijs = float(scenario_primary) + float(packaging_cost) + float(vaste_kosten) + float(accijns)
+            except ValueError:
+                liters = 0.0
+            packaging_cost = float(r.get("target_packaging", 0.0) or 0.0)
+            vaste_kosten = float(r.get("target_overhead", 0.0) or 0.0)
+            accijns = float(r.get("target_excise", 0.0) or 0.0)
+            kostprijs = float(r.get("target_cost", 0.0) or 0.0)
             if float(liters) > 0 and float(scenario_primary) > 0:
                 try:
                     per_liter_candidates.append(float(scenario_primary) / float(liters))
+                    overhead_per_liter_candidates.append(float(vaste_kosten) / float(liters))
+                    excise_per_liter_candidates.append(float(accijns) / float(liters))
+                    total_per_liter_candidates.append(float(kostprijs) / float(liters))
                 except ZeroDivisionError:
                     pass
             row_payload = {
@@ -1914,31 +2072,11 @@ def activate_kostprijzen_for_year(
             else:
                 samengestelde_snapshot.append(row_payload)
 
-        vaste_kosten_per_liter_summary = 0.0
-        if soort == "inkoop":
-            vaste_kosten_per_liter_summary = float(bereken_indirecte_vaste_kosten_per_ingekochte_liter(target_year) or 0.0)
-        else:
-            vaste_kosten_per_liter_summary = float(bereken_directe_vaste_kosten_per_productieliter_herverdeeld(target_year) or 0.0)
-
-        # Estimate variabele kosten per liter from scenario primary costs. For inkoop this should
-        # be stable across verpakkingen (scenario_primary scales with liters).
+        # Summary values are derived from the engine rows above. Do not recalculate them here.
         variabele_kosten_per_liter_summary = float(sum(per_liter_candidates) / len(per_liter_candidates)) if per_liter_candidates else 0.0
-
-        # Accijns is linear in liters; compute per-liter by evaluating liters=1.
-        accijns_per_liter_summary = float(
-            bereken_accijns_voor_liters(
-                year=target_year,
-                liters=1.0,
-                alcoholpercentage=float(bier_alcohol),
-                tarief_accijns=bier_tarief_accijns,
-                belastingsoort=bier_belastingsoort,
-            )
-        )
-        integrale_kostprijs_per_liter_summary = (
-            float(variabele_kosten_per_liter_summary)
-            + float(vaste_kosten_per_liter_summary)
-            + float(accijns_per_liter_summary)
-        )
+        vaste_kosten_per_liter_summary = float(sum(overhead_per_liter_candidates) / len(overhead_per_liter_candidates)) if overhead_per_liter_candidates else 0.0
+        accijns_per_liter_summary = float(sum(excise_per_liter_candidates) / len(excise_per_liter_candidates)) if excise_per_liter_candidates else 0.0
+        integrale_kostprijs_per_liter_summary = float(sum(total_per_liter_candidates) / len(total_per_liter_candidates)) if total_per_liter_candidates else 0.0
 
         record = normalize_berekening_record(
             {
@@ -1992,13 +2130,23 @@ def activate_kostprijzen_for_year(
             raise ValueError("Kon kostprijsproducten niet activeren.")
         activated_scopes += len(product_ids)
 
-    dashboard_service.invalidate_dashboard_summary_cache()
-    return {
+    result = {
         "created_versions": int(created_versions),
         "activated": int(activated_scopes),
         "version_ids": created_version_ids,
         "dry_run": bool(dry_run),
     }
+    if create_break_even_plan and not dry_run:
+        result["break_even_plan"] = _create_new_year_break_even_plan_snapshot(
+            owner=str(owner or ""),
+            source_year=int(source_year),
+            target_year=int(target_year),
+            selected_rows=selected_plan_rows,
+            activation_result=result,
+        )
+
+    dashboard_service.invalidate_dashboard_summary_cache()
+    return result
 
 
 def delete_new_year_drafts_for_target_year(*, target_year: int) -> dict[str, Any]:
@@ -2056,6 +2204,16 @@ def commit_new_year(
 
     payload = payload if isinstance(payload, dict) else {}
     draft_data = payload.get("data", {}) if isinstance(payload.get("data", {}), dict) else {}
+    costprice_engine_rows = _costprice_engine_rows_from_payload(
+        payload,
+        source_year=int(source_year),
+        target_year=int(target_year),
+    )
+    if not costprice_engine_rows:
+        raise ValueError(
+            "Geen kostprijs-engine output meegegeven. "
+            "Controleer stap Kostprijs in Nieuw jaar voorbereiden en sla het concept opnieuw op."
+        )
 
     report: dict[str, Any] = {"source_year": int(source_year), "target_year": int(target_year), "results": {}}
 
@@ -2107,7 +2265,11 @@ def commit_new_year(
             vaste_payload = load_dataset("vaste-kosten")
             if not isinstance(vaste_payload, dict):
                 vaste_payload = {}
-            vaste_payload[str(target_year)] = [row for row in vaste_kosten_target if isinstance(row, dict)]
+            vaste_payload[str(target_year)] = [
+                {key: value for key, value in row.items() if key != "ignored"}
+                for row in vaste_kosten_target
+                if isinstance(row, dict) and not bool(row.get("ignored", False))
+            ]
             saved = save_dataset("vaste-kosten", vaste_payload)
             report["results"]["vaste_kosten_override"] = {"saved": bool(saved), "rows": len(vaste_payload.get(str(target_year), []))}
 
@@ -2236,6 +2398,14 @@ def commit_new_year(
                 )
             saved = save_dataset("kostprijs-scenario-inkoop", kept)
             report["results"]["kostprijs_scenario_inkoop"] = {"saved": bool(saved), "rows": len(kept)}
+
+        _persist_costprice_engine_rows(
+            owner=str(owner or ""),
+            source_year=int(source_year),
+            target_year=int(target_year),
+            rows=costprice_engine_rows,
+        )
+        report["results"]["kostprijs_engine_rows"] = {"saved": True, "rows": len(costprice_engine_rows)}
 
         # Draft is no longer needed after commit.
         try:
@@ -2444,6 +2614,18 @@ def rollback_year(
                 if removed_scenario and not dry_run:
                     postgres_storage.save_dataset("kostprijs-scenario-inkoop", kept_scenario, overwrite=True)
 
+            engine_rows = postgres_storage.load_dataset("kostprijs-target-engine-rows", None)
+            if isinstance(engine_rows, list):
+                kept_engine = [
+                    row
+                    for row in engine_rows
+                    if not (isinstance(row, dict) and int(row.get("target_year", 0) or 0) == year_value)
+                ]
+                removed_engine = len(engine_rows) - len(kept_engine)
+                report["results"]["kostprijs-target-engine-rows"] = {"removed": removed_engine}
+                if removed_engine and not dry_run:
+                    postgres_storage.save_dataset("kostprijs-target-engine-rows", kept_engine, overwrite=True)
+
     if not dry_run:
         dashboard_service.invalidate_dashboard_summary_cache()
     return report
@@ -2578,9 +2760,41 @@ def rollback_yearset(*, year: int, dry_run: bool = False) -> dict[str, Any]:
             if removed and not dry_run:
                 save_dataset("verkoopprijzen", kept)
 
+        advies_payload = load_dataset("adviesprijzen")
+        if isinstance(advies_payload, list):
+            kept_advies: list[dict[str, Any]] = []
+            removed_advies = 0
+            for row in advies_payload:
+                if not isinstance(row, dict):
+                    continue
+                if int(row.get("jaar", 0) or 0) == year_value:
+                    removed_advies += 1
+                    continue
+                kept_advies.append(row)
+            report["results"]["adviesprijzen"] = {"removed_rows": int(removed_advies)}
+            if removed_advies and not dry_run:
+                save_dataset("adviesprijzen", kept_advies)
+
+        plan_rows = break_even_planning_storage.list_plan_snapshots(year=year_value, include_archived=False)
+        new_year_plan_rows = [
+            row
+            for row in plan_rows
+            if isinstance(row, dict) and str(row.get("source", "") or "") == "new_year_preparation"
+        ]
+        report["results"]["break_even_plan_snapshots"] = {
+            "would_archive" if dry_run else "archived": len(new_year_plan_rows)
+        }
+        if not dry_run:
+            for row in new_year_plan_rows:
+                snapshot_id = str(row.get("id", "") or "")
+                if snapshot_id:
+                    break_even_planning_storage.archive_plan_snapshot(snapshot_id=snapshot_id)
+
         # Also remove any lingering drafts for this year (optional hygiene).
         try:
-            res = delete_new_year_drafts_for_target_year(target_year=year_value)
+            res = {"deleted": 0}
+            if not dry_run:
+                res = delete_new_year_drafts_for_target_year(target_year=year_value)
             report["results"]["drafts_deleted"] = res
         except Exception:
             report["results"]["drafts_deleted"] = {"deleted": 0}

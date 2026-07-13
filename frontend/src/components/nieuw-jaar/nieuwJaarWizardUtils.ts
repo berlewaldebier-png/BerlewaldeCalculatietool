@@ -70,6 +70,9 @@ export function snapshotProductCostFromRecord(record: any, productId: string) {
   return {
     kostprijs: Number(found.kostprijs ?? 0),
     primaireKosten: Number(found.primaire_kosten ?? found.primaireKosten ?? 0),
+    verpakkingskosten: Number(found.verpakkingskosten ?? 0),
+    vasteKosten: Number(found.vaste_kosten ?? found.manufacturing_overhead ?? 0) + Number(found.business_overhead ?? 0),
+    accijns: Number(found.accijns ?? 0),
     productType: String(found.product_type ?? ""),
     productLabel: String(found.verpakking ?? found.verpakkingseenheid ?? found.omschrijving ?? productId),
   };

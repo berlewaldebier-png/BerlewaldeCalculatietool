@@ -41,7 +41,7 @@ function getChannelSellInPriceOverride(
   const prices = normalizeChannelMap(
     (row as any).sell_in_prices ?? (row as any).kanaalprijzen ?? {}
   );
-  const value = prices[channelCode];
+  const value = prices[channelCode] ?? prices.list;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 

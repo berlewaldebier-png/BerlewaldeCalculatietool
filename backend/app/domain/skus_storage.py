@@ -440,6 +440,21 @@ def _validate_sku_classification(row: dict[str, Any]) -> None:
     product_group = str(row.get("product_group", row.get("productgroep", "")) or "").strip()
     alcohol_category = str(row.get("alcohol_category", row.get("alcoholcategorie", "")) or "").strip()
     packaging_type = str(row.get("packaging_type", row.get("verpakkingstype", "")) or "").strip()
+    cost_origin = str(row.get("cost_origin", "") or "").strip()
+
+    if cost_origin:
+        allowed_cost_origins = {
+            "purchased_batch",
+            "own_production_batch",
+            "derived_from_parent",
+            "composed_sellable",
+            "merchandise_component",
+            "service_manual",
+            "historical_manual",
+            "ignored_revenue_line",
+        }
+        if cost_origin not in allowed_cost_origins:
+            raise ValueError(f"Ongeldige cost_origin '{cost_origin}' voor SKU '{sku_id}'.")
 
     if not (product_group or alcohol_category or packaging_type):
         return
@@ -576,6 +591,10 @@ def ensure_schema() -> None:
                         code TEXT NOT NULL DEFAULT '',
                         name TEXT NOT NULL DEFAULT '',
                         active BOOLEAN NOT NULL DEFAULT TRUE,
+                        cost_origin TEXT NOT NULL DEFAULT '',
+                        cost_parent_sku_id TEXT NOT NULL DEFAULT '',
+                        cost_parent_quantity NUMERIC NOT NULL DEFAULT 0,
+                        cost_source_label TEXT NOT NULL DEFAULT '',
                         payload JSONB NOT NULL DEFAULT '{}'::jsonb,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         CONSTRAINT skus_kind_scope_ux UNIQUE (kind, beer_id, format_article_id, article_id)
@@ -584,10 +603,15 @@ def ensure_schema() -> None:
                 )
                 # Migrate from the old uniqueness constraint (beer_id, format_article_id).
                 cur.execute("ALTER TABLE skus DROP CONSTRAINT IF EXISTS skus_beer_format_ux;")
+                cur.execute("ALTER TABLE skus ADD COLUMN IF NOT EXISTS cost_origin TEXT NOT NULL DEFAULT '';")
+                cur.execute("ALTER TABLE skus ADD COLUMN IF NOT EXISTS cost_parent_sku_id TEXT NOT NULL DEFAULT '';")
+                cur.execute("ALTER TABLE skus ADD COLUMN IF NOT EXISTS cost_parent_quantity NUMERIC NOT NULL DEFAULT 0;")
+                cur.execute("ALTER TABLE skus ADD COLUMN IF NOT EXISTS cost_source_label TEXT NOT NULL DEFAULT '';")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_beer ON skus(beer_id);")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_format ON skus(format_article_id);")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_kind ON skus(kind);")
                 cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_article ON skus(article_id);")
+                cur.execute("CREATE INDEX IF NOT EXISTS ix_skus_cost_origin ON skus(cost_origin);")
             if not postgres_storage.in_transaction():
                 conn.commit()
         _SCHEMA_READY = True
@@ -599,7 +623,9 @@ def load_dataset(default_value: Any) -> Any:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, kind, beer_id, format_article_id, article_id, code, name, active, payload, updated_at
+                SELECT id, kind, beer_id, format_article_id, article_id, code, name, active,
+                       cost_origin, cost_parent_sku_id, cost_parent_quantity, cost_source_label,
+                       payload, updated_at
                 FROM skus
                 ORDER BY active DESC, name ASC, id ASC
                 """
@@ -608,7 +634,22 @@ def load_dataset(default_value: Any) -> Any:
     if not rows:
         return default_value
     out: list[dict[str, Any]] = []
-    for rid, kind, beer_id, format_article_id, article_id, code, name, active, payload, updated_at in rows:
+    for (
+        rid,
+        kind,
+        beer_id,
+        format_article_id,
+        article_id,
+        code,
+        name,
+        active,
+        cost_origin,
+        cost_parent_sku_id,
+        cost_parent_quantity,
+        cost_source_label,
+        payload,
+        updated_at,
+    ) in rows:
         if isinstance(payload, str):
             payload = json.loads(payload)
         if not isinstance(payload, dict):
@@ -626,6 +667,10 @@ def load_dataset(default_value: Any) -> Any:
                 "naam": str(name or ""),
                 "active": bool(active),
                 "actief": bool(active),
+                "cost_origin": str(cost_origin or payload.get("cost_origin", "") or ""),
+                "cost_parent_sku_id": str(cost_parent_sku_id or payload.get("cost_parent_sku_id", "") or ""),
+                "cost_parent_quantity": float(cost_parent_quantity or payload.get("cost_parent_quantity", 0) or 0),
+                "cost_source_label": str(cost_source_label or payload.get("cost_source_label", "") or ""),
                 "updated_at": updated_at.isoformat() if updated_at else "",
             }
         )
@@ -650,6 +695,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
         code = str(row.get("code", "") or "").strip()
         name = str(row.get("name", row.get("naam", "")) or "").strip()
         active = bool(row.get("active", row.get("actief", True)))
+        cost_origin = str(row.get("cost_origin", "") or "").strip()
+        cost_parent_sku_id = str(row.get("cost_parent_sku_id", "") or "").strip()
+        cost_parent_quantity = row.get("cost_parent_quantity", 0) or 0
+        cost_source_label = str(row.get("cost_source_label", "") or "").strip()
         payload = {k: v for (k, v) in row.items() if k not in {"naam"}}
 
         sellable_subtype = str(payload.get("sellable_subtype", "") or "").strip().lower()
@@ -660,7 +709,22 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
             if not packaging_type:
                 raise ValueError(f"SKU '{rid}' is beer_bundle maar mist packaging_type.")
         incoming_ids.append(rid)
-        params.append((rid, kind, beer_id, format_article_id, article_id, code, name, active, json.dumps(payload), now))
+        params.append((
+            rid,
+            kind,
+            beer_id,
+            format_article_id,
+            article_id,
+            code,
+            name,
+            active,
+            cost_origin,
+            cost_parent_sku_id,
+            cost_parent_quantity,
+            cost_source_label,
+            json.dumps(payload),
+            now,
+        ))
 
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
@@ -672,8 +736,12 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
             if params:
                 cur.executemany(
                     """
-                    INSERT INTO skus (id, kind, beer_id, format_article_id, article_id, code, name, active, payload, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                    INSERT INTO skus (
+                        id, kind, beer_id, format_article_id, article_id, code, name, active,
+                        cost_origin, cost_parent_sku_id, cost_parent_quantity, cost_source_label,
+                        payload, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         kind = EXCLUDED.kind,
                         beer_id = EXCLUDED.beer_id,
@@ -682,6 +750,10 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         code = EXCLUDED.code,
                         name = EXCLUDED.name,
                         active = EXCLUDED.active,
+                        cost_origin = EXCLUDED.cost_origin,
+                        cost_parent_sku_id = EXCLUDED.cost_parent_sku_id,
+                        cost_parent_quantity = EXCLUDED.cost_parent_quantity,
+                        cost_source_label = EXCLUDED.cost_source_label,
                         payload = EXCLUDED.payload,
                         updated_at = EXCLUDED.updated_at
                     """,

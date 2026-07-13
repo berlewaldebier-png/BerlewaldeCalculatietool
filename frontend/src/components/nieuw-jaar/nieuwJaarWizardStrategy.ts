@@ -98,7 +98,7 @@ export function effectiveSourceMargin(args: {
     productType: args.productType,
     basisParentForStrategy: args.basisParentForStrategy,
   });
-  const keyProductId = followId || args.productId;
+  const keyProductId = args.channel === "list" ? args.productId : followId || args.productId;
   const rows = getStrategyRowsForYear({
     rows: args.verkoopprijzen,
     year: args.sourceYear,
@@ -142,7 +142,7 @@ export function explicitSourceSellInPrice(args: {
     productType: args.productType,
     basisParentForStrategy: args.basisParentForStrategy,
   });
-  const keyProductId = followId || args.productId;
+  const keyProductId = args.channel === "list" ? args.productId : followId || args.productId;
   const rows = getStrategyRowsForYear({
     rows: args.verkoopprijzen,
     year: args.sourceYear,

@@ -123,7 +123,22 @@ async function postRollbackYearset(year: number) {
   return payload;
 }
 
-async function postFirstUseBackfill(params: { year: number; planRevenue: number; fixedCosts: number }) {
+async function previewRollbackYearset(year: number) {
+  const response = await fetch(
+    `${API_BASE_URL}/meta/rollback-yearset?year=${encodeURIComponent(String(year))}&dry_run=true`,
+    {
+      method: "POST",
+      credentials: "include",
+    }
+  );
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw new Error(String(payload?.detail || payload?.error || `Rollback-preview mislukt (${response.status}).`));
+  }
+  return payload;
+}
+
+async function postFirstUseBackfill(params: { year: number; planRevenue: number; planVariableCost: number; fixedCosts: number }) {
   const response = await fetch(`${API_BASE_URL}/integrations/break-even/first-use-backfill`, {
     method: "POST",
     credentials: "include",
@@ -134,6 +149,7 @@ async function postFirstUseBackfill(params: { year: number; planRevenue: number;
       scenario_name: `First-use backfill ${params.year}`,
       replace_active: true,
       plan_revenue: params.planRevenue,
+      plan_variable_cost: params.planVariableCost,
       fixed_cost_total: params.fixedCosts,
       basis: "invoice",
     }),
@@ -185,12 +201,15 @@ function num(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function planMetric(plan: PlanSnapshot | undefined, key: "revenue" | "fixed_costs") {
+function planMetric(plan: PlanSnapshot | undefined, key: "revenue" | "variable_cost" | "fixed_costs") {
   const payload = (plan?.payload ?? {}) as Record<string, unknown>;
   const targets = (payload.targets ?? {}) as Record<string, unknown>;
   const model = (payload.model ?? {}) as Record<string, unknown>;
   if (key === "fixed_costs") {
     return num(targets.fixed_cost_total ?? targets.fixed_costs ?? model.fixed_cost_total);
+  }
+  if (key === "variable_cost") {
+    return num(targets.variable_cost ?? model.variable_cost);
   }
   return num(targets[key] ?? model[key]);
 }
@@ -311,6 +330,7 @@ export function JaarsetsPanel() {
   const [editingPlan, setEditingPlan] = useState<PlanSnapshot | null>(null);
   const [backfillYear, setBackfillYear] = useState("2025");
   const [backfillRevenue, setBackfillRevenue] = useState("144000");
+  const [backfillVariableCost, setBackfillVariableCost] = useState("");
   const [backfillFixedCosts, setBackfillFixedCosts] = useState("56000");
 
   const rows = useMemo(() => buildRows({ yearsets, plans, closes }), [yearsets, plans, closes]);
@@ -348,6 +368,7 @@ export function JaarsetsPanel() {
     setEditingPlan(plan);
     setBackfillYear(String(plan.jaar || ""));
     setBackfillRevenue(String(planMetric(plan, "revenue") || ""));
+    setBackfillVariableCost(String(planMetric(plan, "variable_cost") || ""));
     setBackfillFixedCosts(String(planMetric(plan, "fixed_costs") || ""));
     setInfo("");
     setError("");
@@ -356,6 +377,7 @@ export function JaarsetsPanel() {
   function saveBackfill() {
     const year = Number(backfillYear);
     const planRevenue = Number(backfillRevenue);
+    const planVariableCost = Number(backfillVariableCost);
     const fixedCosts = Number(backfillFixedCosts);
     if (!year || !planRevenue || !fixedCosts) {
       setError("Vul jaar, plan omzet en plan vaste kosten in.");
@@ -363,7 +385,28 @@ export function JaarsetsPanel() {
     }
     const ok = window.confirm(`First-use backfill voor ${year} opslaan? Het actieve break-even plan voor dit jaar wordt vervangen.`);
     if (!ok) return;
-    runAction("backfill", () => postFirstUseBackfill({ year, planRevenue, fixedCosts }), "First-use backfill opgeslagen.");
+    runAction("backfill", () => postFirstUseBackfill({ year, planRevenue, planVariableCost, fixedCosts }), "First-use backfill opgeslagen.");
+  }
+
+  async function confirmRollbackYearset(year: number) {
+    setBusy("rollback");
+    setError("");
+    setInfo("");
+    try {
+      const preview = await previewRollbackYearset(year);
+      const summary = JSON.stringify(preview?.results ?? preview, null, 2);
+      const ok = window.confirm(
+        `Jaarset ${year} terugdraaien?\n\nPreview:\n${summary}\n\nDit raakt geen Douano ruwe data, verkoopregels, LOT-historie of oudere jaren.`
+      );
+      if (!ok) return;
+      await postRollbackYearset(year);
+      setInfo("Jaarset rollback uitgevoerd.");
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Rollback mislukt.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -491,9 +534,7 @@ export function JaarsetsPanel() {
                           title="Rollback jaarset"
                           disabled={busy !== null || !row.isLastYear}
                           onClick={() => {
-                            const ok = window.confirm(`Jaarset ${row.year} terugdraaien? Kostprijzen en offertes blijven staan.`);
-                            if (!ok) return;
-                            runAction("rollback", () => postRollbackYearset(row.year), "Jaarset rollback uitgevoerd.");
+                            void confirmRollbackYearset(row.year);
                           }}
                         >
                           <Trash2 size={16} aria-hidden="true" />
@@ -529,6 +570,10 @@ export function JaarsetsPanel() {
             <label className="form-field">
               <span>Plan omzet</span>
               <input value={backfillRevenue} onChange={(event) => setBackfillRevenue(event.target.value)} inputMode="decimal" />
+            </label>
+            <label className="form-field">
+              <span>Plan variabele kosten</span>
+              <input value={backfillVariableCost} onChange={(event) => setBackfillVariableCost(event.target.value)} inputMode="decimal" placeholder="Leeg = afgeleid uit werkelijke ratio" />
             </label>
             <label className="form-field">
               <span>Plan vaste kosten</span>

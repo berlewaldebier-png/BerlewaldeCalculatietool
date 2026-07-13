@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -18,6 +19,7 @@ type IngredientRule = {
   hoeveelheid: number;
   eenheid: string;
   prijs: number;
+  source_prijs?: number;
   benodigd_in_recept: number;
 };
 
@@ -48,6 +50,8 @@ type EigenProductieReceptenStepProps = {
   updateEigenIngredient: (bierId: string, ingredientId: string, patch: Partial<IngredientRule>) => void;
   deleteEigenIngredient: (bierId: string, ingredientId: string) => void;
   addEigenIngredient: (bierId: string) => void;
+  applyIngredientInflation: (bierId: string) => void;
+  inflationPct: number;
 
   getProductieForYear: (year: number) => GenericRecord | null;
   computeEigenProductieReceptTotals: (override: EigenProductieOverride, batchGrootte: number) => EigenProductieTotals;
@@ -68,10 +72,23 @@ export function EigenProductieReceptenStep({
   updateEigenIngredient,
   deleteEigenIngredient,
   addEigenIngredient,
+  applyIngredientInflation,
+  inflationPct,
   getProductieForYear,
   computeEigenProductieReceptTotals,
   calculateEigenProductieKostenRecept,
 }: EigenProductieReceptenStepProps) {
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const normalizedInflationPct = Number.isFinite(Number(inflationPct)) ? Number(inflationPct) : 0;
+  const sortedBieren = useMemo(
+    () => [...eigenProductieBieren].sort((a, b) => a.biernaam.localeCompare(b.biernaam, "nl-NL")),
+    [eigenProductieBieren]
+  );
+
+  function setAllGroups(open: boolean) {
+    setOpenGroups(Object.fromEntries(sortedBieren.map((bier) => [bier.bierId, open])));
+  }
+
   return (
     <div>
       <div className="module-card compact-card" style={{ marginBottom: 14 }}>
@@ -88,8 +105,23 @@ export function EigenProductieReceptenStep({
         </div>
       ) : null}
 
-      {eigenProductieBieren.map((bier) => {
+      {sortedBieren.length > 0 ? (
+        <div className="editor-actions" style={{ paddingTop: 0 }}>
+          <div className="editor-actions-group">
+            <button type="button" className="editor-button editor-button-secondary" onClick={() => setAllGroups(true)}>
+              Alles openen
+            </button>
+            <button type="button" className="editor-button editor-button-secondary" onClick={() => setAllGroups(false)}>
+              Alles sluiten
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="wizard-stack">
+      {sortedBieren.map((bier) => {
         const bierId = bier.bierId;
+        const isOpen = Boolean(openGroups[bierId]);
         const sourceVersion = sourceEigenProductieVersionByBierId.get(bierId);
         const sourceBasis =
           typeof sourceVersion?.basisgegevens === "object" && sourceVersion?.basisgegevens ? sourceVersion.basisgegevens : {};
@@ -101,10 +133,55 @@ export function EigenProductieReceptenStep({
         const totals = computeEigenProductieReceptTotals(override, batchGrootte);
 
         return (
-          <div key={bierId} className="module-card compact-card" style={{ marginBottom: 14 }}>
-            <div className="module-card-title">{bier.biernaam}</div>
-            <div className="module-card-text">
+          <section key={bierId} className="module-card compact-card">
+            <button
+              type="button"
+              className="module-card-title"
+              style={{
+                width: "100%",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                cursor: "pointer",
+                background: "transparent",
+                border: 0,
+                padding: 0,
+                textAlign: "left",
+              }}
+              onClick={() => setOpenGroups((current) => ({ ...current, [bierId]: !isOpen }))}
+              aria-expanded={isOpen}
+            >
+              <span>{isOpen ? "v" : ">"} {bier.biernaam}</span>
+              <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                {bier.stijl ? <span className="pill">{bier.stijl}</span> : null}
+                <span className="editor-pill">{(override.ingredienten ?? []).length} ingredienten</span>
+              </span>
+            </button>
+
+            {isOpen ? (
+              <>
+            <div className="module-card-text" style={{ marginTop: 10 }}>
               {bier.stijl ? `${bier.stijl} · ` : ""}bronjaar {sourceYear} (read-only) links, doeljaar {targetYear} rechts.
+            </div>
+
+            <div className="placeholder-block" style={{ marginTop: 12 }}>
+              <strong>Inflatie uit vaste kosten</strong>
+              <div className="muted" style={{ marginTop: 8 }}>
+                Verwachte inflatie: {normalizedInflationPct.toFixed(1).replace(".", ",")}%.
+                De knop verhoogt leveranciersprijzen vanaf de opgeslagen bronprijs. Daarna kun je per ingredient handmatig overschrijven.
+              </div>
+              <div className="editor-actions" style={{ marginTop: 10, padding: 0 }}>
+                <div className="editor-actions-group">
+                  <button
+                    type="button"
+                    className="editor-button editor-button-secondary"
+                    onClick={() => applyIngredientInflation(bierId)}
+                    disabled={isRunning}
+                  >
+                    Inflatie toepassen
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="data-table" style={{ marginTop: 12 }}>
@@ -184,6 +261,7 @@ export function EigenProductieReceptenStep({
                     <th>Omschrijving</th>
                     <th>Inhoud verpakking</th>
                     <th>Eenheid</th>
+                    <th>Bronprijs</th>
                     <th>Leveranciersprijs</th>
                     <th>Hoeveel in recept</th>
                     <th>Kosten recept</th>
@@ -193,7 +271,7 @@ export function EigenProductieReceptenStep({
                 <tbody>
                   {(override.ingredienten ?? []).length === 0 ? (
                     <tr>
-                      <td className="dataset-empty" colSpan={8}>
+                      <td className="dataset-empty" colSpan={9}>
                         Nog geen ingredienten. Voeg een regel toe.
                       </td>
                     </tr>
@@ -227,6 +305,14 @@ export function EigenProductieReceptenStep({
                           className="dataset-input"
                           value={regel.eenheid ?? ""}
                           onChange={(event) => updateEigenIngredient(bierId, regel.id, { eenheid: event.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="dataset-input dataset-input-readonly"
+                          type="number"
+                          value={String(Number(regel.source_prijs ?? regel.prijs ?? 0))}
+                          readOnly
                         />
                       </td>
                       <td>
@@ -277,9 +363,12 @@ export function EigenProductieReceptenStep({
               </div>
               <div className="editor-actions-group" />
             </div>
-          </div>
+              </>
+            ) : null}
+          </section>
         );
       })}
+      </div>
 
       <div className="editor-actions wizard-footer-actions">
         <div className="editor-actions-group">
