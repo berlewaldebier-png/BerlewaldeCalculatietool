@@ -481,6 +481,7 @@ def validate_dataset_write(name: str, data: Any) -> None:
         "trace-batch-consumptions",
         "incidentele-kosten",
         "kostprijs-scenario-inkoop",
+        "kostprijs-target-engine-rows",
         "kostprijs-activatie-drafts",
         "berekeningen",
         "kostprijsversies",
