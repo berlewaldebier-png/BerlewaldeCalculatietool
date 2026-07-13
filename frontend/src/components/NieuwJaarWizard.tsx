@@ -1336,7 +1336,12 @@ export function NieuwJaarWizard(props: NieuwJaarWizardProps) {
       await refreshFromServer();
       setCommitConflict("");
       setStatus(`Definitief opgeslagen: jaar ${targetYear} is aangemaakt.`);
-      setActiveStep(9);
+      // Next step in the workflow: activate cost prices for the new year.
+      router.push(
+        `/kostprijs-activatie?source_year=${encodeURIComponent(String(sourceYear))}&target_year=${encodeURIComponent(
+          String(targetYear)
+        )}`
+      );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Afronden mislukt.");
     } finally {
