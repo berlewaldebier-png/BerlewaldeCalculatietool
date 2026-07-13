@@ -24,9 +24,16 @@ class KostprijsActivatieRow(BaseModel):
     source_version_id: str
     source_cost: float
     source_primary: float
+    source_packaging: float = 0.0
+    source_overhead: float = 0.0
+    source_excise: float = 0.0
     scenario_primary: float
+    target_packaging: float = 0.0
+    target_overhead: float = 0.0
+    target_excise: float = 0.0
     target_cost: float
     delta: float
+    engine_version: str = ""
 
 
 class KostprijsActivatiePlanResponse(BaseModel):

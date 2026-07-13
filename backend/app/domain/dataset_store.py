@@ -1745,6 +1745,13 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
             target_year=int(target_year),
         )
         if engine_rows:
+            engine_rows.sort(
+                key=lambda row: (
+                    str(row.get("biernaam", "") or "").lower(),
+                    str(row.get("product_label", "") or "").lower(),
+                    str(row.get("sku_id", "") or "").lower(),
+                )
+            )
             return {"source_year": int(source_year), "target_year": int(target_year), "rows": engine_rows}
     persisted_rows = _load_persisted_costprice_engine_rows(
         owner=str(owner or ""),
@@ -1752,6 +1759,13 @@ def get_kostprijs_activatie_plan(*, owner: str, source_year: int, target_year: i
         target_year=int(target_year),
     )
     if persisted_rows:
+        persisted_rows.sort(
+            key=lambda row: (
+                str(row.get("biernaam", "") or "").lower(),
+                str(row.get("product_label", "") or "").lower(),
+                str(row.get("sku_id", "") or "").lower(),
+            )
+        )
         return {"source_year": int(source_year), "target_year": int(target_year), "rows": persisted_rows}
 
     raise ValueError(

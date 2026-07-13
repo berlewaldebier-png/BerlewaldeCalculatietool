@@ -62,7 +62,16 @@ export function KostprijsActivatieClient({ initialPlan }: { initialPlan: PlanRes
     )
   );
 
-  const rows = Array.isArray(plan.rows) ? plan.rows : [];
+  const rows = useMemo(
+    () =>
+      (Array.isArray(plan.rows) ? plan.rows : []).slice().sort(
+        (a, b) =>
+          String(a.biernaam ?? "").localeCompare(String(b.biernaam ?? ""), "nl-NL") ||
+          String(a.product_label ?? "").localeCompare(String(b.product_label ?? ""), "nl-NL") ||
+          String(a.product_id ?? "").localeCompare(String(b.product_id ?? ""), "nl-NL")
+      ),
+    [plan.rows]
+  );
 
   useEffect(() => {
     const nextSelected: Record<string, boolean> = {};
