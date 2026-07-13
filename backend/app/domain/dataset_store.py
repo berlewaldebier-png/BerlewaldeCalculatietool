@@ -1874,7 +1874,16 @@ def _create_new_year_break_even_plan_snapshot(
         "metadata": {
             "source": "new_year_preparation",
             "owner": str(owner or ""),
-            "activation_result": activation_result,
+            "activation_result": {
+                "created_versions": int(activation_result.get("created_versions", 0) or 0),
+                "activated": int(activation_result.get("activated", 0) or 0),
+                "version_ids": [
+                    str(version_id)
+                    for version_id in activation_result.get("version_ids", [])
+                    if str(version_id or "").strip()
+                ],
+                "dry_run": bool(activation_result.get("dry_run", False)),
+            },
             "planning_scope": "Frozen plan created after target-year cost price activation.",
             "cost_context_policy": "Sales year determines active costprice context; historic source-year rows remain unchanged.",
         },
@@ -2010,6 +2019,32 @@ def activate_kostprijzen_for_year(
     selected_plan_rows = [row for rows in rows_by_beer.values() for row in rows]
 
     versions = [row for row in load_kostprijsversies() if isinstance(row, dict)]
+    if not dry_run:
+        existing_year_activation_ids = [
+            str(version.get("id", "") or "")
+            for version in versions
+            if int(version.get("jaar", 0) or 0) == int(target_year)
+            and isinstance(version.get("jaarovergang"), dict)
+            and str(version.get("jaarovergang", {}).get("aangemaakt_via", "") or "") == "kostprijs_activatie"
+            and str(version.get("id", "") or "").strip()
+        ]
+        if existing_year_activation_ids:
+            existing_ids = set(existing_year_activation_ids)
+            existing_activations = [
+                row
+                for row in load_kostprijsproductactiveringen()
+                if isinstance(row, dict)
+                and int(row.get("jaar", 0) or 0) == int(target_year)
+                and str(row.get("kostprijsversie_id", "") or "") in existing_ids
+            ]
+            return {
+                "created_versions": 0,
+                "activated": len(existing_activations),
+                "version_ids": existing_year_activation_ids,
+                "dry_run": False,
+                "already_activated": True,
+                "detail": f"Kostprijzen voor {target_year} zijn al geactiveerd via Nieuw jaar voorbereiden.",
+            }
     version_by_id = {str(row.get("id", "") or ""): row for row in versions}
     now = datetime.now(UTC).isoformat()
 
