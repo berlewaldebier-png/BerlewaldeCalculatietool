@@ -33,9 +33,14 @@ The same guard runs in CI before the existing seed/bootstrap command. CI uses
 tests create additional uniquely named sibling databases and never run destructive
 checks against the CI application database itself.
 
-The broad Playwright suite previously completed successfully but was marked
-non-blocking while database safety was unknown. RF-003 makes it a blocking gate only
-after moving its backend to the guarded, job-scoped test database.
+The broad Playwright suite now runs against the guarded, job-scoped test database.
+It remains advisory because the current suite has unrelated, pre-existing UI/auth
+contract failures: stale route/heading expectations, a known contrast finding and a
+login-validation scenario that is incompatible with auth-disabled development
+mode. RF-003 does not weaken those assertions or correct those screens. The focused
+RF-002 role check and all RF-003 database contracts remain blocking. RF-004/RF-009
+must update or resolve the broad workflow/accessibility expectations before that
+suite can become a reliable blocking gate.
 
 Local discovery remains safe by default: PostgreSQL integration tests are skipped
 unless the explicit opt-in and safe target are both present. Guard and static

@@ -15,16 +15,10 @@ async function globalSetup(config: FullConfig) {
   });
   const page = await browser.newPage();
 
-  const meResponse = await page.request.get(new URL("/api/auth/me", baseURL).toString());
-  if (meResponse.ok()) {
-    // Auth-disabled development mode already exposes the synthetic local admin.
-    await page.goto(new URL("/", baseURL).toString());
-  } else {
-    await page.goto(new URL("/login", baseURL).toString());
-    await page.getByLabel("Gebruikersnaam").fill(username);
-    await page.locator('input[autocomplete="current-password"]').fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-  }
+  await page.goto(new URL("/login", baseURL).toString());
+  await page.getByLabel("Gebruikersnaam").fill(username);
+  await page.locator('input[autocomplete="current-password"]').fill(password);
+  await page.getByRole("button", { name: "Inloggen" }).click();
 
   // Wait until we are not on /login anymore (server-side redirect happens after cookie is set).
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
