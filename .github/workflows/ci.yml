@@ -105,6 +105,10 @@ jobs:
           raise SystemExit("Timeout waiting for frontend")
           PY
 
+      - name: RF-002 auth role visibility
+        working-directory: frontend
+        run: npx playwright test tests/e2e/auth.permissions.spec.ts --retries=0
+
       # RF-001 records E2E results, but RF-003 must establish the guarded,
       # disposable-data harness before these tests become a blocking gate.
       - name: Playwright (non-blocking until RF-003)

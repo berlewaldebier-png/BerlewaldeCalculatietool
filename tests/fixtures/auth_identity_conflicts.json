@@ -1,0 +1,22 @@
+[
+  {
+    "id": "fixture-user-1",
+    "username": "Alice",
+    "email": "finance@example.invalid"
+  },
+  {
+    "id": "fixture-user-2",
+    "username": "alice",
+    "email": "FINANCE@example.invalid"
+  },
+  {
+    "id": "fixture-user-3",
+    "username": "Bob",
+    "email": null
+  },
+  {
+    "id": "fixture-user-4",
+    "username": "BOB",
+    "email": ""
+  }
+]
