@@ -43,7 +43,20 @@ required_rf003_contracts = {
     "test_postgres_schema_safety.PostgresSchemaSafetyTests.test_populated_fk_reset_exposes_current_non_atomic_partial_failure",
     "test_runtime_ddl_inventory.RuntimeDdlInventoryTests.test_runtime_ddl_inventory_matches_owned_baseline",
 }
-missing = sorted((required_lot_contracts | required_rf003_contracts).difference(ids))
+required_rf004_contracts = {
+    "test_workflow_failure_characterization.DouanoWorkflowFailureTests.test_nth_raw_write_failure_leaves_prior_write_and_rerun_converges",
+    "test_workflow_failure_characterization.LotWorkflowFailureTests.test_opening_import_nth_row_failure_leaves_prior_row_and_rerun_converges",
+    "test_workflow_failure_characterization.NewYearDraftConcurrencyTests.test_same_owner_and_year_is_last_write_wins_with_frozen_fingerprints",
+    "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_concurrent_quote_create_exposes_max_plus_one_unique_conflict",
+    "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_cost_route_snapshot_failure_leaves_activation_and_retry_is_idempotent",
+    "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_new_year_failure_rolls_back_all_target_markers",
+    "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_ors_raised_failure_rolls_back_earlier_cache_write",
+    "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_year_close_snapshot_survives_later_production_failure_and_requires_overwrite_retry",
+    "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_year_close_api_commit_precedes_incidental_reconciliation_and_draft_removal",
+}
+missing = sorted(
+    (required_lot_contracts | required_rf003_contracts | required_rf004_contracts).difference(ids)
+)
 
 if loader.errors:
     raise SystemExit("unittest discovery errors:\n" + "\n".join(loader.errors))
@@ -52,5 +65,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT and RF-003 safety contracts collected"
+    "all required LOT, RF-003 and RF-004 contracts collected"
 )
