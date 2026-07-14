@@ -233,7 +233,8 @@ class WorkflowPostgresCharacterizationTests(unittest.IsolatedAsyncioTestCase):
             ):
                 with self.assertRaises(HTTPException) as raised:
                     data_routes.post_activate_kostprijsversie("rf004-version-1", data={}, _={})
-            self.assertEqual(raised.exception.status_code, 500)
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(raised.exception.detail, "injected snapshot failure")
 
             with database.connect() as conn:
                 active_after_failure = int(
