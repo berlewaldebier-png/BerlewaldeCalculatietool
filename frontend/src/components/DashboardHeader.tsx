@@ -22,7 +22,13 @@ import {
 } from "lucide-react";
 
 import { API_BASE_URL } from "@/lib/api";
-import { fetchMe, logout, type AuthSession } from "@/lib/auth";
+import {
+  fetchMe,
+  hasCapability,
+  logout,
+  type AuthCapability,
+  type AuthSession
+} from "@/lib/auth";
 import { SmartGlobalSearch } from "@/components/SmartGlobalSearch";
 
 type Crumb = {
@@ -35,7 +41,7 @@ type AccountMenuItem = {
   description: string;
   href: string;
   icon: typeof Bell;
-  adminOnly?: boolean;
+  capability?: AuthCapability;
 };
 
 const settingsItems: AccountMenuItem[] = [
@@ -45,34 +51,35 @@ const settingsItems: AccountMenuItem[] = [
     description: "Bedrijfsgegevens, BTW, valuta",
     href: "/instellingen/bedrijf",
     icon: Building2,
-    adminOnly: true
+    capability: "calculation-settings:manage"
   },
   {
     label: "Calculatie instellingen",
     description: "Formules, staffels, defaults",
     href: "/instellingen",
     icon: Calculator,
-    adminOnly: true
+    capability: "calculation-settings:manage"
   },
   {
     label: "Kostprijsbeheer",
     description: "Categorieen, overhead, ABC-kosten",
     href: "/instellingen/kostprijsbeheer",
-    icon: Coins
+    icon: Coins,
+    capability: "costs:view"
   },
   {
     label: "Team & rechten",
     description: "Gebruikers, rollen, rechtenmatrix",
     href: "/beheer/users",
     icon: Users,
-    adminOnly: true
+    capability: "users:view"
   },
   {
     label: "Datakwaliteit",
     description: "Douano, LOTs, koppelingen, margechecks",
     href: "/beheer/api",
     icon: PlugZap,
-    adminOnly: true
+    capability: "douano:sync"
   }
 ];
 
@@ -242,9 +249,17 @@ export function DashboardHeader() {
   const crumbs = useMemo(() => buildBreadcrumb(pathname), [pathname]);
   const displayName = session?.display_name || "Beheerder";
   const role = String(session?.role || "").toLowerCase();
-  const isAdmin = role === "admin";
-  const visibleSettingsItems = settingsItems.filter((item) => !item.adminOnly || isAdmin);
-  const roleLabel = isAdmin ? "Admin" : role || "Gebruiker";
+  const visibleSettingsItems = settingsItems.filter(
+    (item) => !item.capability || hasCapability(session, item.capability)
+  );
+  const roleLabel =
+    ({
+      admin: "Administrator",
+      management: "Management",
+      brewer: "Brouwer",
+      sales: "Sales",
+      user: "Gebruiker"
+    }[role] ?? role) || "Gebruiker";
 
   return (
     <header className="dashboard-header">

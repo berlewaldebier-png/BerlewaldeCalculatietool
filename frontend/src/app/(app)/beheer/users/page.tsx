@@ -2,10 +2,14 @@ import { PageShell } from "@/components/PageShell";
 import { SectionCard } from "@/components/SectionCard";
 import { UserAdminPanel } from "@/components/UserAdminPanel";
 import { UserManagementTable } from "@/components/UserManagementTable";
-import { getBootstrap } from "@/lib/apiServer";
-import type { AuthUser } from "@/lib/apiShared";
+import { apiGetServer, getBootstrap } from "@/lib/apiServer";
+import type { AuthUser, MeResponse } from "@/lib/apiShared";
 
 export default async function UsersPage() {
+  const session = await apiGetServer<MeResponse>("/auth/me", "/beheer/users");
+  const canManageUsers = Array.isArray(session.capabilities)
+    ? session.capabilities.includes("users:manage")
+    : session.role === "admin";
   let bootstrap: any;
   let users: AuthUser[] = [];
   let usersLoadError = "";
@@ -32,7 +36,7 @@ export default async function UsersPage() {
   return (
     <PageShell
       title="Users"
-      subtitle="Auth-basis staat klaar. Hier zie je de huidige readiness van users, rollen en toekomstige login."
+      subtitle="Bekijk gebruikers, rollen en de actuele authenticatieconfiguratie."
       activePath="/beheer"
       navigation={navigation}
     >
@@ -56,8 +60,8 @@ export default async function UsersPage() {
       </div>
 
       <SectionCard
-        title="Auth readiness"
-        description="De backend is voorbereid op users en rollen, maar login wordt nog niet afgedwongen zodat we rustig verder kunnen migreren."
+        title="Authenticatie"
+        description="Lokale ontwikkeling kan een expliciete login-bypass gebruiken. Buiten local en test moet authenticatie actief en veilig geconfigureerd zijn."
       >
         <div className="record-card-grid">
           <div className="wizard-toggle-card">
@@ -77,7 +81,7 @@ export default async function UsersPage() {
 
       <SectionCard
         title="Gebruikers"
-        description="Dit zijn de users die straks voor login en rollen gebruikt kunnen worden."
+        description="Dit zijn de gebruikers en rollen die voor login en autorisatie worden gebruikt."
       >
         {usersLoadError ? (
           <div className="placeholder-block">
@@ -85,16 +89,18 @@ export default async function UsersPage() {
             {usersLoadError}
           </div>
         ) : (
-          <UserManagementTable initialUsers={users} />
+          <UserManagementTable initialUsers={users} canManage={canManageUsers} />
         )}
       </SectionCard>
 
-      <SectionCard
-        title="Acties"
-        description="Beheer admins en users. In local kun je met admin/admin inloggen; in T gebruik je bootstrap token voor de eerste admin."
-      >
-        <UserAdminPanel hasAdmin={Boolean(authStatus.has_admin)} />
-      </SectionCard>
+      {canManageUsers ? (
+        <SectionCard
+          title="Acties"
+          description="Beheer gebruikers en rollen. In local kun je met admin/admin inloggen; buiten local gebruik je een bootstrap token voor de eerste administrator."
+        >
+          <UserAdminPanel hasAdmin={Boolean(authStatus.has_admin)} />
+        </SectionCard>
+      ) : null}
     </PageShell>
   );
 }

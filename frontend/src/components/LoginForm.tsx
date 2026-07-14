@@ -14,13 +14,14 @@ import {
 } from "lucide-react";
 
 import { API_BASE_URL } from "@/lib/api";
-import { fetchMe, writeAuthSession } from "@/lib/auth";
+import { fetchMe, writeAuthSession, type AuthCapability } from "@/lib/auth";
 
 type LoginResponse = {
   authenticated: boolean;
   username: string;
   display_name: string;
   role: string;
+  capabilities?: AuthCapability[];
 };
 
 type PasswordForgotResponse = {
@@ -106,7 +107,8 @@ export function LoginForm() {
       writeAuthSession({
         username: payload.username,
         display_name: payload.display_name,
-        role: payload.role
+        role: payload.role,
+        capabilities: payload.capabilities ?? []
       });
       window.location.replace(nextPath);
       router.refresh();

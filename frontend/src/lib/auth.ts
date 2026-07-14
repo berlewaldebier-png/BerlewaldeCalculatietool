@@ -1,8 +1,31 @@
+export type AuthRole = "admin" | "management" | "brewer" | "sales" | "user";
+
+export type AuthCapability =
+  | "admin:all"
+  | "users:view"
+  | "users:manage"
+  | "costs:view"
+  | "costs:draft"
+  | "costs:activate"
+  | "quotes:manage"
+  | "douano:sync"
+  | "calculation-settings:manage"
+  | "product-mappings:manage";
+
 export type AuthSession = {
   username: string;
   display_name: string;
   role: string;
+  capabilities: AuthCapability[];
 };
+
+export function hasCapability(
+  session: Pick<AuthSession, "role" | "capabilities"> | null | undefined,
+  capability: AuthCapability
+): boolean {
+  if (session?.role === "admin") return true;
+  return Array.isArray(session?.capabilities) && session.capabilities.includes(capability);
+}
 
 export function readAuthSession(): AuthSession | null {
   // Auth is cookie-based; the server is the source of truth.
@@ -30,7 +53,10 @@ export async function fetchMe(): Promise<AuthSession | null> {
   return {
     username: String(payload.username ?? ""),
     display_name: String(payload.display_name ?? ""),
-    role: String(payload.role ?? "")
+    role: String(payload.role ?? ""),
+    capabilities: Array.isArray(payload.capabilities)
+      ? payload.capabilities.map((value: unknown) => String(value)) as AuthCapability[]
+      : []
   };
 }
 

@@ -18,7 +18,11 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.api.routes.integrations import _fetch_paged_resource, _parse_json_payload, router as integrations_router
 from app.api.routes.meta import _raise_internal_error
-from app.domain.auth_dependencies import require_admin
+from app.domain.auth_dependencies import (
+    require_admin,
+    require_douano_sync,
+    require_product_mappings_manage,
+)
 from app.domain import douano_client
 
 
@@ -63,17 +67,34 @@ class _FakeAsyncClient:
 
 
 class ApiAuthorizationTests(unittest.TestCase):
-    def test_integration_mutations_require_admin(self) -> None:
+    def test_douano_sync_requires_douano_sync_capability(self) -> None:
         protected_routes = [
             ("POST", "/integrations/douano/sync/companies"),
             ("POST", "/integrations/douano/sync/products"),
             ("POST", "/integrations/douano/sync/sales-orders"),
             ("POST", "/integrations/douano/sync/sales-invoices"),
+            ("POST", "/integrations/douano/sync/stock-history-lots"),
+            ("POST", "/integrations/douano/sync/stock-movements"),
+        ]
+
+        for method, path in protected_routes:
+            with self.subTest(method=method, path=path):
+                route = _find_route(path, method)
+                self.assertIn(require_douano_sync, _route_dependency_calls(route))
+
+    def test_product_mapping_corrections_require_mapping_capability(self) -> None:
+        for method in ("PUT", "DELETE"):
+            with self.subTest(method=method):
+                route = _find_route(
+                    "/integrations/douano/product-mappings/{douano_product_id}", method
+                )
+                self.assertIn(require_product_mappings_manage, _route_dependency_calls(route))
+
+    def test_other_sensitive_integration_mutations_remain_admin_only(self) -> None:
+        protected_routes = [
             ("PUT", "/integrations/douano/unmapped-rules"),
             ("POST", "/integrations/douano/backfill-line-snapshots"),
             ("POST", "/integrations/douano/create-service-sku"),
-            ("PUT", "/integrations/douano/product-mappings/{douano_product_id}"),
-            ("DELETE", "/integrations/douano/product-mappings/{douano_product_id}"),
             ("PUT", "/integrations/douano/product-ignored/{douano_product_id}"),
             ("DELETE", "/integrations/douano/product-ignored/{douano_product_id}"),
         ]

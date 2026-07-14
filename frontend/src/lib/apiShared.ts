@@ -52,6 +52,7 @@ export type MeResponse = {
   username: string;
   display_name: string;
   role: string;
+  capabilities?: string[];
 };
 
 export type GenericRecord = Record<string, unknown>;

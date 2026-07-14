@@ -17,7 +17,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app import config_validation
 from app.api.routes import auth as auth_routes
-from app.domain import auth_service, postgres_storage
+from app.domain import auth_policy, auth_service, postgres_storage
 from app.domain.auth_dependencies import get_current_session, require_admin, require_user
 from app.schemas.auth import LoginRequest
 
@@ -47,8 +47,8 @@ def _request(cookies: dict[str, str] | None = None) -> Request:
 
 
 class AuthEnvironmentCharacterizationTests(unittest.TestCase):
-    def test_disabled_auth_synthesizes_admin_in_every_environment(self) -> None:
-        for environment in ("local", "dev", "development", "test", "staging", "production"):
+    def test_disabled_auth_synthesizes_admin_only_in_explicit_bypass_environments(self) -> None:
+        for environment in ("local", "dev", "development", "test"):
             with self.subTest(environment=environment), patch.dict(
                 "os.environ",
                 {
@@ -64,8 +64,25 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
                         "username": "local-admin",
                         "display_name": "Local admin",
                         "role": "admin",
+                        "capabilities": list(auth_policy.capabilities_for_role("admin")),
                     },
                 )
+
+        for environment in ("staging", "production"):
+            with self.subTest(environment=environment), patch.dict(
+                "os.environ",
+                {
+                    "CALCULATIETOOL_ENV": environment,
+                    "CALCULATIETOOL_AUTH_ENABLED": "false",
+                },
+                clear=True,
+            ), self.assertRaises(HTTPException) as failed_closed:
+                get_current_session(_request())
+            self.assertEqual(failed_closed.exception.status_code, 503)
+            self.assertEqual(
+                failed_closed.exception.detail,
+                "Authenticatie is niet veilig geconfigureerd.",
+            )
 
     def test_enabled_auth_flag_accepts_only_current_truthy_spellings(self) -> None:
         for value in ("1", "true", "TRUE", "yes", "on"):
@@ -93,7 +110,7 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
             ), self.assertRaises(RuntimeError):
                 auth_service._auth_secret()
 
-    def test_production_configuration_currently_allows_disabled_auth_without_a_secret(self) -> None:
+    def test_production_configuration_rejects_disabled_auth(self) -> None:
         with patch.dict(
             "os.environ",
             {
@@ -102,7 +119,7 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
                 "CALCULATIETOOL_CORS_ORIGINS": "https://example.invalid",
             },
             clear=True,
-        ), patch.object(postgres_storage, "uses_postgres", return_value=False):
+        ), patch.object(postgres_storage, "uses_postgres", return_value=False), self.assertRaises(RuntimeError):
             config_validation.validate_config()
 
     def test_enabled_production_auth_rejects_missing_or_default_secret(self) -> None:
@@ -120,8 +137,8 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
             ), patch.object(postgres_storage, "uses_postgres", return_value=False), self.assertRaises(RuntimeError):
                 config_validation.validate_config()
 
-    def test_startup_config_matrix_accepts_current_environments_but_rejects_test(self) -> None:
-        for environment in ("local", "dev", "development", "staging", "production"):
+    def test_startup_config_matrix_accepts_bypass_only_for_local_and_test(self) -> None:
+        for environment in ("local", "dev", "development", "test"):
             for enabled in ("false", "true"):
                 with self.subTest(environment=environment, enabled=enabled), patch.dict(
                     "os.environ",
@@ -135,12 +152,24 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
                 ), patch.object(postgres_storage, "uses_postgres", return_value=False):
                     config_validation.validate_config()
 
-        for enabled in ("false", "true"):
-            with self.subTest(environment="test", enabled=enabled), patch.dict(
+        for environment in ("staging", "production"):
+            with self.subTest(environment=environment, enabled="true"), patch.dict(
                 "os.environ",
                 {
-                    "CALCULATIETOOL_ENV": "test",
-                    "CALCULATIETOOL_AUTH_ENABLED": enabled,
+                    "CALCULATIETOOL_ENV": environment,
+                    "CALCULATIETOOL_AUTH_ENABLED": "true",
+                    "CALCULATIETOOL_AUTH_SECRET": AUTH_SECRET,
+                    "CALCULATIETOOL_CORS_ORIGINS": "https://example.invalid",
+                },
+                clear=True,
+            ), patch.object(postgres_storage, "uses_postgres", return_value=False):
+                config_validation.validate_config()
+
+            with self.subTest(environment=environment, enabled="false"), patch.dict(
+                "os.environ",
+                {
+                    "CALCULATIETOOL_ENV": environment,
+                    "CALCULATIETOOL_AUTH_ENABLED": "false",
                     "CALCULATIETOOL_AUTH_SECRET": AUTH_SECRET,
                     "CALCULATIETOOL_CORS_ORIGINS": "https://example.invalid",
                 },
@@ -166,7 +195,7 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
             ("local", 1, True),
             ("dev", 1, True),
             ("development", 1, True),
-            ("test", 0, False),
+            ("test", 1, True),
             ("staging", 0, False),
             ("production", 0, False),
         ):

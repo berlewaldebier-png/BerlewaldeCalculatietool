@@ -16,7 +16,7 @@ from uuid import uuid4
 import httpx
 import jwt
 
-from app.domain import postgres_storage
+from app.domain import auth_policy, postgres_storage
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,8 @@ TEMP_ADMIN_PASSWORD = "admin"
 _schema_ready = False
 _schema_lock = Lock()
 SESSION_COOKIE_NAME = "calculatietool_session"
+LOCAL_ENVIRONMENTS = frozenset({"local", "dev", "development"})
+AUTH_BYPASS_ENVIRONMENTS = frozenset({*LOCAL_ENVIRONMENTS, "test"})
 
 
 def environment_name() -> str:
@@ -36,7 +38,11 @@ def environment_name() -> str:
 
 
 def _is_local_environment() -> bool:
-    return environment_name() in {"local", "dev", "development"}
+    return environment_name() in LOCAL_ENVIRONMENTS
+
+
+def auth_bypass_allowed() -> bool:
+    return environment_name() in AUTH_BYPASS_ENVIRONMENTS
 
 
 def _auth_secret() -> str:
@@ -626,7 +632,7 @@ def create_user(*, username: str, password: str, display_name: str, email: str |
         raise ValueError("Wachtwoord moet minimaal 10 tekens zijn.")
     if normalized_email and "@" not in normalized_email:
         raise ValueError("Emailadres ongeldig.")
-    if role not in {"admin", "user"}:
+    if not auth_policy.is_supported_role(role):
         raise ValueError("Ongeldige rol.")
     now = datetime.utcnow()
     with postgres_storage.connect() as conn:
@@ -705,8 +711,8 @@ def auth_status() -> dict[str, Any]:
             "mode": auth_mode(),
             "postgres_configured": bool(postgres_storage.database_url()),
             "storage_provider": postgres_storage.storage_provider(),
-            "user_count": 1 if _is_local_environment() else 0,
-            "has_admin": _is_local_environment(),
+            "user_count": 1 if auth_bypass_allowed() else 0,
+            "has_admin": auth_bypass_allowed(),
         }
     users = list_users()
     return {
@@ -737,7 +743,7 @@ def update_user(
     normalized_display_name = display_name.strip() if display_name is not None else None
     if display_name is not None and len(normalized_display_name) < 2:
         raise ValueError("Naam moet minimaal 2 tekens zijn.")
-    if role is not None and role not in {"admin", "user"}:
+    if role is not None and not auth_policy.is_supported_role(role):
         raise ValueError("Ongeldige rol.")
 
     now = datetime.utcnow()
