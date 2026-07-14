@@ -57,8 +57,12 @@ npm run build
 npm run test:pricing
 ```
 
-Deze baseline gebruikt geen seed-, reset- of migratiecommando's. End-to-endtests
-blijven onderdeel van CI met de daar geconfigureerde wegwerp-PostgreSQL-service.
+Deze baseline gebruikt lokaal geen seed-, reset- of migratiecommando's.
+End-to-endtests blijven zichtbaar in CI, maar zijn conform het goedgekeurde
+roadmap-slice RF-001 niet blokkerend totdat RF-003 het testharnas voor een
+bewaakte, uitsluitend wegwerpbare database heeft vastgelegd. Bekende E2E-afwijkingen
+worden dus niet stil overgeslagen en mogen ook niet met appwijzigingen binnen
+RF-001 worden weggewerkt.
 
 De ESLint-baseline gebruikt de Next.js core-web-vitals- en TypeScript-regels. Vier
 reeds repository-brede schuldcategorieën zijn tijdelijk uitgezonderd:

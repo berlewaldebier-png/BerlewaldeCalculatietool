@@ -105,7 +105,10 @@ jobs:
           raise SystemExit("Timeout waiting for frontend")
           PY
 
-      - name: Playwright (smoke + audit)
+      # RF-001 records E2E results, but RF-003 must establish the guarded,
+      # disposable-data harness before these tests become a blocking gate.
+      - name: Playwright (non-blocking until RF-003)
+        continue-on-error: true
         working-directory: frontend
         run: npx playwright test
 
