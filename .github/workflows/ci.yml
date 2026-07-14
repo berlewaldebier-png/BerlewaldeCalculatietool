@@ -83,6 +83,7 @@ jobs:
           npm run typecheck
           npm run build
           npm run test:pricing
+          npm run test:workflows
 
       - name: Install Playwright browsers
         working-directory: frontend
