@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const iPhone13 = devices["iPhone 13"];
+const browserChannel = process.platform === "win32" ? "msedge" : undefined;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -24,7 +25,7 @@ export default defineConfig({
       name: "chromium-desktop",
       // Prefer the system browser to avoid EPERM issues spawning the bundled Playwright Chromium
       // in restricted environments.
-      use: { ...devices["Desktop Chrome"], browserName: "chromium", channel: "msedge" }
+      use: { ...devices["Desktop Chrome"], browserName: "chromium", channel: browserChannel }
     },
     {
       name: "chromium-mobile",
@@ -36,7 +37,7 @@ export default defineConfig({
         deviceScaleFactor: iPhone13.deviceScaleFactor,
         isMobile: iPhone13.isMobile,
         hasTouch: iPhone13.hasTouch,
-        channel: "msedge"
+        channel: browserChannel
       }
     }
   ]

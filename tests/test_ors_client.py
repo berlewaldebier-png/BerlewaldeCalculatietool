@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -46,6 +47,16 @@ class _FakeAsyncClient:
 
 
 class OrsClientTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._api_key_patcher = patch.dict(
+            os.environ,
+            {"CALCULATIETOOL_ORS_API_KEY": "unit-test-api-key"},
+        )
+        self._api_key_patcher.start()
+
+    def tearDown(self) -> None:
+        self._api_key_patcher.stop()
+
     def test_geocode_returns_coordinate(self) -> None:
         payload = {
             "features": [
@@ -96,6 +107,13 @@ class OrsClientTests(unittest.TestCase):
                 asyncio.run(OrsClient().geocode("Teststraat 1, NL"))
 
         self.assertIn("ORS request faalde", str(exc.exception))
+
+    def test_geocode_requires_api_key(self) -> None:
+        with patch.dict(os.environ, {"CALCULATIETOOL_ORS_API_KEY": ""}):
+            with self.assertRaises(RuntimeError) as exc:
+                asyncio.run(OrsClient().geocode("Teststraat 1, NL"))
+
+        self.assertIn("ORS API key ontbreekt", str(exc.exception))
 
 
 if __name__ == "__main__":

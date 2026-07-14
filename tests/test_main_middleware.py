@@ -37,6 +37,10 @@ class _FakeConnectionManager:
         self.exited = True
 
 
+class _FakeRequest:
+    method = "POST"
+
+
 class MainMiddlewareTests(unittest.IsolatedAsyncioTestCase):
     async def test_postgres_request_connection_releases_connection(self) -> None:
         manager = _FakeConnectionManager()
@@ -50,7 +54,7 @@ class MainMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         ), patch("app.main.db_pool.get_connection", return_value=manager), patch(
             "app.main.postgres_storage.set_request_connection", return_value=token
         ) as set_connection, patch("app.main.postgres_storage.reset_request_connection") as reset_connection:
-            response = await postgres_request_connection(object(), call_next)
+            response = await postgres_request_connection(_FakeRequest(), call_next)
 
         self.assertEqual(response, "ok")
         self.assertTrue(manager.entered)

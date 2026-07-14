@@ -10,7 +10,7 @@ async function login(page: Page) {
 
   await page.goto("/login");
   await page.getByLabel("Gebruikersnaam").fill(TEST_USERNAME);
-  await page.getByLabel("Wachtwoord").fill(TEST_PASSWORD);
+  await page.locator('input[autocomplete="current-password"]').fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "Inloggen" }).click();
   await expect(page).not.toHaveURL(/\/login/);
 }

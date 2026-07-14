@@ -7,7 +7,7 @@ async function ensureLoggedIn(page: Page) {
 
   await page.goto("/login");
   await page.getByLabel("Gebruikersnaam").fill(process.env.TEST_USERNAME || "admin");
-  await page.getByLabel("Wachtwoord").fill(process.env.TEST_PASSWORD || "admin");
+  await page.locator('input[autocomplete="current-password"]').fill(process.env.TEST_PASSWORD || "admin");
   await page.getByRole("button", { name: "Inloggen" }).click();
   await expect(page).not.toHaveURL(/\/login/);
 }

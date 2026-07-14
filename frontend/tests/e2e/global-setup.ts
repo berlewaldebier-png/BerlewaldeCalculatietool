@@ -10,12 +10,14 @@ async function globalSetup(config: FullConfig) {
     return;
   }
 
-  const browser = await chromium.launch({ channel: "msedge" });
+  const browser = await chromium.launch({
+    channel: process.platform === "win32" ? "msedge" : undefined
+  });
   const page = await browser.newPage();
 
   await page.goto(new URL("/login", baseURL).toString());
   await page.getByLabel("Gebruikersnaam").fill(username);
-  await page.getByLabel("Wachtwoord").fill(password);
+  await page.locator('input[autocomplete="current-password"]').fill(password);
   await page.getByRole("button", { name: "Inloggen" }).click();
 
   // Wait until we are not on /login anymore (server-side redirect happens after cookie is set).

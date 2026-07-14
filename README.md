@@ -34,6 +34,44 @@ Meer context:
 - [REGRESSIECHECKS.md](C:\Users\hansh\.codex\CalculatieTool\REGRESSIECHECKS.md)
 - [MIGRATIE_UI.md](C:\Users\hansh\.codex\CalculatieTool\MIGRATIE_UI.md)
 
+## Reproduceerbare ontwikkelbaseline
+
+De ondersteunde runtimes zijn Node.js 22 en Python 3.11 (zie `.nvmrc` en
+`.python-version`). De officiële Python-testrunner is de ingebouwde `unittest`
+runner; pytest is geen onderdeel van de baseline.
+
+Voer vanuit de repository-root uit:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_unittest_discovery.py
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Voer daarna vanuit `frontend` uit:
+
+```powershell
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+npm run test:pricing
+```
+
+Deze baseline gebruikt lokaal geen seed-, reset- of migratiecommando's.
+End-to-endtests blijven zichtbaar in CI, maar zijn conform het goedgekeurde
+roadmap-slice RF-001 niet blokkerend totdat RF-003 het testharnas voor een
+bewaakte, uitsluitend wegwerpbare database heeft vastgelegd. Bekende E2E-afwijkingen
+worden dus niet stil overgeslagen en mogen ook niet met appwijzigingen binnen
+RF-001 worden weggewerkt.
+
+De ESLint-baseline gebruikt de Next.js core-web-vitals- en TypeScript-regels. Vier
+reeds repository-brede schuldcategorieën zijn tijdelijk uitgezonderd:
+`no-explicit-any`, `no-unused-vars`, `no-require-imports` en
+`no-unescaped-entities`. Bestaande hook-, image- en toegankelijkheidsmeldingen
+blijven zichtbaar als waarschuwingen. Het oplossen of aanscherpen daarvan hoort
+in een afzonderlijk goedgekeurd refactor-slice; RF-001 verandert geen appcode om
+de lintbaseline kunstmatig groen te maken.
+
 ## Status
 
 Afgeronde migratiefasen:
