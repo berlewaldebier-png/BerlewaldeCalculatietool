@@ -19,7 +19,7 @@ async function ensureLoggedIn(page: Page) {
 
   await page.goto("/login");
   await page.getByLabel("Gebruikersnaam").fill(USERNAME);
-  await page.getByLabel("Wachtwoord").fill(PASSWORD);
+  await page.locator('input[autocomplete="current-password"]').fill(PASSWORD);
   await screenshot(page, "01-login-form.png");
   await page.getByRole("button", { name: "Inloggen" }).click();
   await expect(page).not.toHaveURL(/\/login/);
@@ -102,7 +102,7 @@ test.describe("Maturity audit (read-only)", () => {
     const page = await context.newPage();
     await page.goto("/login");
     await page.getByLabel("Gebruikersnaam").fill("wrong-user");
-    await page.getByLabel("Wachtwoord").fill("wrong-pass");
+    await page.locator('input[autocomplete="current-password"]').fill("wrong-pass");
     await page.getByRole("button", { name: "Inloggen" }).click();
     await expect(page.locator(".login-error")).toBeVisible();
     await expect(page.locator(".login-error")).not.toHaveText(/^\\s*$/);
