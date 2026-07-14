@@ -95,7 +95,10 @@ test.describe("Maturity audit (read-only)", () => {
   test("Form validation: login errors are clear", async ({ browser, baseURL }) => {
     // Use a persistent context with a fresh userDataDir so no system/browser-profile cookies leak in.
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "calculatietool-audit-"));
-    const context = await chromium.launchPersistentContext(userDataDir, { channel: "msedge", baseURL });
+    const context = await chromium.launchPersistentContext(userDataDir, {
+      channel: process.platform === "win32" ? "msedge" : undefined,
+      baseURL
+    });
     const page = await context.newPage();
     await page.goto("/login");
     await page.getByLabel("Gebruikersnaam").fill("wrong-user");

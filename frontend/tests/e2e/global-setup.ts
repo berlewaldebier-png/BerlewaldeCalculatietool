@@ -10,7 +10,9 @@ async function globalSetup(config: FullConfig) {
     return;
   }
 
-  const browser = await chromium.launch({ channel: "msedge" });
+  const browser = await chromium.launch({
+    channel: process.platform === "win32" ? "msedge" : undefined
+  });
   const page = await browser.newPage();
 
   await page.goto(new URL("/login", baseURL).toString());
