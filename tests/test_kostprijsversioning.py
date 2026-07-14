@@ -120,7 +120,7 @@ class KostprijsVersioningTests(unittest.TestCase):
                     "bier_id": "bier-1",
                     "status": "definitief",
                     "basisgegevens": {"jaar": 2026, "biernaam": "Testbier", "alcoholpercentage": 6.5},
-                    "soort_berekening": {"type": "Inkoop"},
+                    "soort_berekening": {"type": "Eigen productie"},
                     "resultaat_snapshot": {
                         "integrale_kostprijs_per_liter": 1.0,
                         "producten": {
@@ -159,7 +159,7 @@ class KostprijsVersioningTests(unittest.TestCase):
                 "bier_id": "bier-1",
                 "status": "definitief",
                 "basisgegevens": {"jaar": 2026, "biernaam": "Testbier", "alcoholpercentage": 6.5},
-                "soort_berekening": {"type": "Inkoop"},
+                "soort_berekening": {"type": "Eigen productie"},
                 "resultaat_snapshot": {
                     "integrale_kostprijs_per_liter": 1.0,
                     "producten": {
