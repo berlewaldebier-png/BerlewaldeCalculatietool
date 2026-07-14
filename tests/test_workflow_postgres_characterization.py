@@ -66,7 +66,14 @@ def _seed_cost_activation_prerequisites(database: DisposablePostgresDatabase) ->
     cost_versions_storage.ensure_schema()
     kostprijs_activation_storage.ensure_schema()
     with database.connect() as conn:
-        conn.execute("INSERT INTO skus (id) VALUES ('rf004-sku-1'), ('rf004-sku-2')")
+        conn.execute(
+            """
+            INSERT INTO skus (id, kind, article_id)
+            VALUES
+                ('rf004-sku-1', 'article', 'rf004-article-1'),
+                ('rf004-sku-2', 'article', 'rf004-article-2')
+            """
+        )
         conn.execute(
             """
             INSERT INTO cost_versions (id, jaar, status, bier_id, versie_nummer, payload)
@@ -703,6 +710,7 @@ class WorkflowPostgresCharacterizationTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _seed_companies(database: DisposablePostgresDatabase, *, count: int) -> None:
+        company_distance_storage.ensure_schema()
         douano_sync_storage.ensure_schema()
         with database.connect() as conn:
             for company_id in range(1, count + 1):
