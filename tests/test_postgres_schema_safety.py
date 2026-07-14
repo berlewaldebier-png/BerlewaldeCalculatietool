@@ -231,8 +231,11 @@ class PostgresSchemaSafetyTests(unittest.TestCase):
                 conn.execute("INSERT INTO skus (id) VALUES ('rf003-sku')")
                 conn.execute(
                     """
-                    INSERT INTO cost_versions (id, jaar, status, bier_id, versie_nummer)
-                    VALUES ('rf003-version', 2099, 'definitief', 'rf003-beer', 1)
+                    INSERT INTO cost_versions (
+                        id, jaar, status, bier_id, versie_nummer, payload
+                    ) VALUES (
+                        'rf003-version', 2099, 'definitief', 'rf003-beer', 1, '{}'::jsonb
+                    )
                     """
                 )
                 conn.execute(
