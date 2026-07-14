@@ -34,11 +34,23 @@ required_lot_contracts = {
     "test_lot_contract.LotContractTests.test_snapshot_backfill_uses_keyset_pagination",
     "test_lot_contract.LotContractTests.test_legacy_company_lines_route_stays_snapshot_only",
 }
-missing = sorted(required_lot_contracts.difference(ids))
+required_rf003_contracts = {
+    "test_disposable_postgres_guard.DisposablePostgresGuardTests.test_non_test_database_name_is_always_rejected",
+    "test_disposable_postgres_guard.DisposablePostgresGuardTests.test_production_environment_is_always_rejected",
+    "test_disposable_postgres_guard.DisposablePostgresGuardTests.test_remote_host_is_always_rejected",
+    "test_postgres_schema_safety.PostgresSchemaSafetyTests.test_dashboard_first_read_mutates_schema_then_warm_read_is_pure",
+    "test_postgres_schema_safety.PostgresSchemaSafetyTests.test_legacy_quote_shapes_are_destructively_removed_only_in_fixture",
+    "test_postgres_schema_safety.PostgresSchemaSafetyTests.test_populated_fk_reset_exposes_current_non_atomic_partial_failure",
+    "test_runtime_ddl_inventory.RuntimeDdlInventoryTests.test_runtime_ddl_inventory_matches_owned_baseline",
+}
+missing = sorted((required_lot_contracts | required_rf003_contracts).difference(ids))
 
 if loader.errors:
     raise SystemExit("unittest discovery errors:\n" + "\n".join(loader.errors))
 if missing:
-    raise SystemExit("Required LOT contract tests were not discovered:\n" + "\n".join(missing))
+    raise SystemExit("Required contract tests were not discovered:\n" + "\n".join(missing))
 
-print(f"unittest discovery: {len(ids)} tests; all required LOT contracts collected")
+print(
+    f"unittest discovery: {len(ids)} tests; "
+    "all required LOT and RF-003 safety contracts collected"
+)

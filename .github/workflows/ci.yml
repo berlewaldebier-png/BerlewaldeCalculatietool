@@ -14,11 +14,11 @@ jobs:
         env:
           POSTGRES_USER: calculatietool
           POSTGRES_PASSWORD: calculatietool
-          POSTGRES_DB: calculatietool
+          POSTGRES_DB: calculatietool_test_ci
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U calculatietool -d calculatietool"
+          --health-cmd "pg_isready -U calculatietool -d calculatietool_test_ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -28,9 +28,10 @@ jobs:
       CALCULATIETOOL_BACKEND_STORAGE_PROVIDER: postgres
       CALCULATIETOOL_POSTGRES_HOST: 127.0.0.1
       CALCULATIETOOL_POSTGRES_PORT: "5432"
-      CALCULATIETOOL_POSTGRES_DB: calculatietool
+      CALCULATIETOOL_POSTGRES_DB: calculatietool_test_ci
       CALCULATIETOOL_POSTGRES_USER: calculatietool
       CALCULATIETOOL_POSTGRES_PASSWORD: calculatietool
+      CALCULATIETOOL_ALLOW_DISPOSABLE_DB_TESTS: "1"
       # Playwright uses the local temp admin in local env
       TEST_USERNAME: admin
       TEST_PASSWORD: admin
@@ -48,6 +49,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+
+      - name: Verify disposable database target
+        run: python scripts/check_disposable_postgres_target.py
 
       - name: Bootstrap database (seed)
         run: |
@@ -109,10 +113,7 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/auth.permissions.spec.ts --retries=0
 
-      # RF-001 records E2E results, but RF-003 must establish the guarded,
-      # disposable-data harness before these tests become a blocking gate.
-      - name: Playwright (non-blocking until RF-003)
-        continue-on-error: true
+      - name: Playwright (disposable database gate)
         working-directory: frontend
         run: npx playwright test
 
