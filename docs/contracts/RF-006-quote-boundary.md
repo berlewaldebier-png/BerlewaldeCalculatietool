@@ -24,3 +24,5 @@ The executable registry is `contracts/boundary-contracts.json`; pseudonymous req
 ## Compatibility and rollback
 
 No migration, backfill, dual write, or persisted-data cleanup is involved. The adapter can be reverted while retaining the registry, snapshots, and characterization tests. OpenAPI remains intentionally permissive and is snapshot-protected; a future strict response model requires a separately approved compatibility change.
+
+The frontend quote boundary owns the temporary `ok` compatibility alias. It remains because older or external consumers cannot yet be proven absent. Remove it only in a separately approved contract-cleanup slice after supported-client inventory and acceptance/production deviation counts both demonstrate zero `ok` payloads for an agreed observation period.
