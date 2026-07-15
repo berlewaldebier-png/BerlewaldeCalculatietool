@@ -11,6 +11,7 @@ from app.domain import dataset_store
 from app.domain import cost_versions_storage
 from app.domain import dashboard_service
 from app.domain import erp_dashboard_service
+from app.domain import auth_policy
 from app.domain import auth_service
 from app.domain import postgres_storage
 from app.domain import kostprijs_activation_storage
@@ -22,7 +23,7 @@ from app.domain import setup_service
 from app.domain import product_model_storage
 from app.domain import douano_margin_service
 from app.domain.ors_client import OrsClient, Coordinate
-from app.domain.auth_dependencies import require_admin, require_user
+from app.domain.auth_dependencies import require_admin, require_cost_activation, require_cost_draft, require_user
 from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
 from app.schemas.kostprijs_activation import (
     ActivateKostprijzenRequest,
@@ -147,7 +148,7 @@ def get_customer_sales_summary(
 
 
 @router.get("/navigation", response_model=list[NavigationItem])
-def get_navigation() -> list[NavigationItem]:
+def get_navigation(session: dict = Depends(require_user)) -> list[NavigationItem]:
     setup_required = not setup_service.has_active_costprices()
     year_flow_item = (
         NavigationItem(
@@ -166,7 +167,7 @@ def get_navigation() -> list[NavigationItem]:
             section="Beheer",
         )
     )
-    return [
+    items = [
         NavigationItem(
             key="productie",
             label="Productie",
@@ -282,20 +283,34 @@ def get_navigation() -> list[NavigationItem]:
         ),
     ]
 
+    hidden_keys: set[str] = set()
+    if not auth_policy.has_capability(session, auth_policy.CAP_COSTS_DRAFT):
+        hidden_keys.update({"nieuwe-kostprijsberekening", "recept-hercalculatie", "inkoopfacturen"})
+    if not auth_policy.has_capability(session, auth_policy.CAP_QUOTES_MANAGE):
+        hidden_keys.add("prijsvoorstel")
+    if not auth_policy.has_capability(session, auth_policy.CAP_PRODUCT_MAPPINGS_MANAGE):
+        hidden_keys.add("productkoppeling")
+    return [item for item in items if item.key not in hidden_keys]
+
+
+def _dashboard_summary_payload(summary: Any, session: dict[str, Any]) -> dict[str, Any]:
+    can_manage_quotes = auth_policy.has_capability(session, auth_policy.CAP_QUOTES_MANAGE)
+    return {
+        "concept_berekeningen": summary.concept_berekeningen,
+        "definitieve_berekeningen": summary.definitieve_berekeningen,
+        "concept_prijsvoorstellen": summary.concept_prijsvoorstellen if can_manage_quotes else 0,
+        "definitieve_prijsvoorstellen": summary.definitieve_prijsvoorstellen if can_manage_quotes else 0,
+        "klaar_om_te_activeren": summary.klaar_om_te_activeren,
+        "klaar_om_te_activeren_waarschuwing": summary.klaar_om_te_activeren_waarschuwing,
+        "aflopende_offertes": summary.aflopende_offertes if can_manage_quotes else 0,
+        "aflopende_offertes_items": summary.aflopende_offertes_items if can_manage_quotes else [],
+    }
+
 
 @router.get("/dashboard-summary", response_model=DashboardSummary)
-def get_dashboard_summary() -> DashboardSummary:
+def get_dashboard_summary(session: dict = Depends(require_user)) -> DashboardSummary:
     summary = dashboard_service.get_dashboard_summary()
-    return DashboardSummary(
-        concept_berekeningen=summary.concept_berekeningen,
-        definitieve_berekeningen=summary.definitieve_berekeningen,
-        concept_prijsvoorstellen=summary.concept_prijsvoorstellen,
-        definitieve_prijsvoorstellen=summary.definitieve_prijsvoorstellen,
-        klaar_om_te_activeren=summary.klaar_om_te_activeren,
-        klaar_om_te_activeren_waarschuwing=summary.klaar_om_te_activeren_waarschuwing,
-        aflopende_offertes=summary.aflopende_offertes,
-        aflopende_offertes_items=summary.aflopende_offertes_items,
-    )
+    return DashboardSummary(**_dashboard_summary_payload(summary, session))
 
 
 @router.get("/bootstrap")
@@ -313,22 +328,13 @@ def get_bootstrap(
     payload: dict[str, Any] = {"datasets": {}}
 
     if navigation:
-        payload["navigation"] = get_navigation()
+        payload["navigation"] = get_navigation(session)
 
     for name in names:
         try:
             if name == "dashboard-summary":
                 summary = dashboard_service.get_dashboard_summary()
-                payload["datasets"][name] = {
-                    "concept_berekeningen": summary.concept_berekeningen,
-                    "definitieve_berekeningen": summary.definitieve_berekeningen,
-                    "concept_prijsvoorstellen": summary.concept_prijsvoorstellen,
-                    "definitieve_prijsvoorstellen": summary.definitieve_prijsvoorstellen,
-                    "klaar_om_te_activeren": summary.klaar_om_te_activeren,
-                    "klaar_om_te_activeren_waarschuwing": summary.klaar_om_te_activeren_waarschuwing,
-                    "aflopende_offertes": summary.aflopende_offertes,
-                    "aflopende_offertes_items": summary.aflopende_offertes_items,
-                }
+                payload["datasets"][name] = _dashboard_summary_payload(summary, session)
                 continue
             if name == "erp-dashboard":
                 payload["datasets"][name] = erp_dashboard_service.get_erp_dashboard(
@@ -343,7 +349,7 @@ def get_bootstrap(
                 payload["datasets"][name] = auth_service.auth_status()
                 continue
             if name == "auth-users":
-                if str(session.get("role", "") or "") != "admin":
+                if not auth_policy.has_capability(session, auth_policy.CAP_USERS_VIEW):
                     raise HTTPException(status_code=403, detail="Geen rechten.")
                 payload["datasets"][name] = auth_service.list_users()
                 continue
@@ -417,7 +423,7 @@ def get_kostprijs_activatie_plan(
 @router.put("/kostprijs-activatie-draft")
 def put_kostprijs_activatie_draft(
     payload: UpsertKostprijsActivatieDraftRequest,
-    user: dict[str, Any] = Depends(require_user),
+    user: dict[str, Any] = Depends(require_cost_draft),
 ) -> dict[str, Any]:
     return {
         "draft": dataset_store.upsert_kostprijs_activatie_draft(
@@ -432,7 +438,7 @@ def put_kostprijs_activatie_draft(
 @router.delete("/kostprijs-activatie-draft")
 def delete_kostprijs_activatie_draft(
     target_year: int,
-    user: dict[str, Any] = Depends(require_user),
+    user: dict[str, Any] = Depends(require_cost_draft),
 ) -> dict[str, Any]:
     return dataset_store.delete_kostprijs_activatie_draft(
         owner=str(user.get("username", "") or ""),
@@ -443,9 +449,9 @@ def delete_kostprijs_activatie_draft(
 @router.post("/activate-kostprijzen")
 def post_activate_kostprijzen(
     payload: ActivateKostprijzenRequest,
-    user: dict[str, Any] = Depends(require_admin),
+    user: dict[str, Any] = Depends(require_cost_activation),
 ) -> dict[str, Any]:
-    # Admin-only: this writes new definitive kostprijsversies + activations for the target year.
+    # Capability-gated: this writes new definitive cost versions and activations for the target year.
     try:
         selections = [{"bier_id": s.bier_id, "product_id": s.product_id} for s in payload.selections]
         if bool(payload.dry_run):

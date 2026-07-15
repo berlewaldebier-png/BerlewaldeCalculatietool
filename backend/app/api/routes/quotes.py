@@ -5,10 +5,14 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.domain import dashboard_service, quote_drafts_storage
-from app.domain.auth_dependencies import require_user
+from app.domain.auth_dependencies import require_quotes_manage
 
 
-router = APIRouter(prefix="/quotes", tags=["quotes"], dependencies=[Depends(require_user)])
+router = APIRouter(
+    prefix="/quotes",
+    tags=["quotes"],
+    dependencies=[Depends(require_quotes_manage)],
+)
 
 
 @router.get("")

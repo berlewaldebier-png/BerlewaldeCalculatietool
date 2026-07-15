@@ -5,9 +5,10 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
+import type { AuthRole } from "@/lib/auth";
 import type { AuthUser } from "@/lib/apiShared";
 
-type UserRole = "admin" | "user";
+type UserRole = AuthRole;
 
 type EditDraft = {
   display_name: string;
@@ -29,6 +30,7 @@ type UpdateUserPayload = {
 
 type UserManagementTableProps = {
   initialUsers: AuthUser[];
+  canManage: boolean;
 };
 
 function formatDate(value: string) {
@@ -38,10 +40,13 @@ function formatDate(value: string) {
 }
 
 function asUserRole(value: string): UserRole {
-  return value === "admin" ? "admin" : "user";
+  if (["admin", "management", "brewer", "sales", "user"].includes(value)) {
+    return value as UserRole;
+  }
+  return "user";
 }
 
-export function UserManagementTable({ initialUsers }: UserManagementTableProps) {
+export function UserManagementTable({ initialUsers, canManage }: UserManagementTableProps) {
   const router = useRouter();
   const [users, setUsers] = useState<AuthUser[]>(initialUsers);
   const [editingUser, setEditingUser] = useState<AuthUser | null>(null);
@@ -174,7 +179,7 @@ export function UserManagementTable({ initialUsers }: UserManagementTableProps) 
               <th>Email</th>
               <th>Status</th>
               <th>Aangemaakt</th>
-              <th style={{ textAlign: "right" }}>Acties</th>
+              {canManage ? <th style={{ textAlign: "right" }}>Acties</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -188,7 +193,7 @@ export function UserManagementTable({ initialUsers }: UserManagementTableProps) 
                 <td>{user.email || "-"}</td>
                 <td>{user.is_active ? "Actief" : "Inactief"}</td>
                 <td>{formatDate(user.created_at)}</td>
-                <td>
+                {canManage ? <td>
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.45rem" }}>
                     <button
                       type="button"
@@ -210,7 +215,7 @@ export function UserManagementTable({ initialUsers }: UserManagementTableProps) 
                       <Trash2 size={17} aria-hidden="true" />
                     </button>
                   </div>
-                </td>
+                </td> : null}
               </tr>
             ))}
           </tbody>
@@ -261,8 +266,11 @@ export function UserManagementTable({ initialUsers }: UserManagementTableProps) 
                   value={draft.role}
                   onChange={(event) => setDraft((current) => ({ ...current, role: asUserRole(event.target.value) }))}
                 >
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
+                  <option value="sales">Sales</option>
+                  <option value="brewer">Brouwer</option>
+                  <option value="management">Management (CEO/CFO)</option>
+                  <option value="admin">Administrator</option>
+                  {draft.role === "user" ? <option value="user">Gebruiker (legacy)</option> : null}
                 </select>
               </label>
 

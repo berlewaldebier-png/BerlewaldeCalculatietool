@@ -14,7 +14,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.api.utils import create_dataset_crud_router
 from app.domain import dataset_store, douano_margin_service, postgres_storage, product_model_storage
-from app.domain.auth_dependencies import require_admin
+from app.domain.auth_dependencies import (
+    require_admin,
+    require_cost_activation,
+    require_product_mappings_manage,
+)
 from app.schemas.sku_composition import (
     UpsertBundleRequest,
     UpsertBundleResponse,
@@ -72,7 +76,7 @@ router = create_dataset_crud_router(_STANDARD_DATASETS, protected=True)
 def put_sku_classification(
     sku_id: str,
     data: dict[str, Any] = Body(default_factory=dict),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_product_mappings_manage),
 ) -> dict[str, Any]:
     """Update classification for a SKU.
 
@@ -118,7 +122,7 @@ def put_sku_classification(
 def post_activate_kostprijsversie(
     version_id: str,
     data: dict[str, Any] = Body(default_factory=dict),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_cost_activation),
 ) -> dict[str, Any]:
     """Activate a cost version."""
     try:
@@ -179,7 +183,7 @@ def post_activate_kostprijsversie(
 def post_activate_kostprijsversie_products(
     version_id: str,
     data: dict[str, Any] = Body(...),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_cost_activation),
 ) -> dict[str, Any]:
     """Activate specific products for a cost version."""
     try:

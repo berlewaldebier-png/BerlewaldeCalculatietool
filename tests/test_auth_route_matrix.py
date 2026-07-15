@@ -19,7 +19,31 @@ from app.api.routes.data import router as data_router
 from app.api.routes.integrations import router as integrations_router
 from app.api.routes.meta import router as meta_router
 from app.api.routes.quotes import router as quotes_router
-from app.domain.auth_dependencies import require_admin, require_user
+from app.domain.auth_dependencies import (
+    require_admin,
+    require_cost_activation,
+    require_cost_draft,
+    require_dataset_mutation,
+    require_douano_sync,
+    require_product_mappings_manage,
+    require_quotes_manage,
+    require_user,
+    require_users_manage,
+    require_users_view,
+)
+
+
+CAPABILITY_DEPENDENCIES = {
+    require_admin: "admin",
+    require_users_view: "users:view",
+    require_users_manage: "users:manage",
+    require_cost_activation: "costs:activate",
+    require_cost_draft: "costs:draft",
+    require_dataset_mutation: "dataset:mutate",
+    require_quotes_manage: "quotes:manage",
+    require_douano_sync: "douano:sync",
+    require_product_mappings_manage: "product-mappings:manage",
+}
 
 
 def _route(router, path: str, method: str) -> APIRoute:
@@ -45,21 +69,26 @@ def _dependency_calls(route: APIRoute) -> set[object]:
 
 def _static_access(route: APIRoute) -> str:
     calls = _dependency_calls(route)
-    if require_admin in calls:
-        return "admin"
+    for dependency, label in CAPABILITY_DEPENDENCIES.items():
+        if dependency in calls:
+            return label
     if require_user in calls:
         return "user"
     return "public"
 
 
 class AuthRouteMatrixTests(unittest.TestCase):
-    def test_every_non_auth_api_route_is_at_least_user_protected(self) -> None:
+    def test_every_non_auth_api_route_has_an_authenticated_dependency(self) -> None:
+        authenticated_dependencies = {require_user, *CAPABILITY_DEPENDENCIES}
         for router in (data_router, meta_router, quotes_router, integrations_router):
             for route in router.routes:
                 if not isinstance(route, APIRoute):
                     continue
                 with self.subTest(path=route.path, methods=sorted(route.methods or [])):
-                    self.assertIn(require_user, _dependency_calls(route))
+                    self.assertTrue(
+                        authenticated_dependencies.intersection(_dependency_calls(route)),
+                        f"Missing authenticated dependency: {sorted(route.methods or [])} {route.path}",
+                    )
 
     def test_auth_route_access_matrix_matches_current_behavior(self) -> None:
         expected = {
@@ -70,10 +99,10 @@ class AuthRouteMatrixTests(unittest.TestCase):
             ("POST", "/auth/change-password"): "manual-user-cookie",
             ("POST", "/auth/logout"): "public",
             ("GET", "/auth/me"): "manual-user-cookie",
-            ("GET", "/auth/users"): "admin",
+            ("GET", "/auth/users"): "users:view",
             ("POST", "/auth/bootstrap-admin"): "public-bootstrap-token",
-            ("POST", "/auth/users"): "admin",
-            ("PUT", "/auth/users/{username}"): "admin",
+            ("POST", "/auth/users"): "users:manage",
+            ("PUT", "/auth/users/{username}"): "users:manage",
         }
         observed: dict[tuple[str, str], str] = {}
         manual_user_paths = {("POST", "/auth/change-password"), ("GET", "/auth/me")}
@@ -106,19 +135,19 @@ class AuthRouteMatrixTests(unittest.TestCase):
                 route = _route(integrations_router, path, "GET")
                 self.assertEqual(_static_access(route), "user")
 
-    def test_quote_read_and_mutation_routes_are_user_not_admin(self) -> None:
+    def test_quote_read_and_mutation_routes_use_quote_capability(self) -> None:
         for route in quotes_router.routes:
             if not isinstance(route, APIRoute):
                 continue
             with self.subTest(path=route.path, methods=sorted(route.methods or [])):
-                self.assertEqual(_static_access(route), "user")
+                self.assertEqual(_static_access(route), "quotes:manage")
 
-    def test_user_management_api_is_admin_even_though_page_route_has_no_frontend_role_gate(self) -> None:
-        self.assertEqual(_static_access(_route(auth_router, "/auth/users", "GET")), "admin")
-        self.assertEqual(_static_access(_route(auth_router, "/auth/users", "POST")), "admin")
-        self.assertEqual(_static_access(_route(auth_router, "/auth/users/{username}", "PUT")), "admin")
+    def test_user_management_api_separates_view_from_mutation(self) -> None:
+        self.assertEqual(_static_access(_route(auth_router, "/auth/users", "GET")), "users:view")
+        self.assertEqual(_static_access(_route(auth_router, "/auth/users", "POST")), "users:manage")
+        self.assertEqual(_static_access(_route(auth_router, "/auth/users/{username}", "PUT")), "users:manage")
 
-    def test_complete_route_access_fingerprint_matches_rf_002_baseline(self) -> None:
+    def test_complete_route_access_fingerprint_matches_rf_005_policy(self) -> None:
         manual_access = {
             ("POST", "/auth/change-password"): "manual-user-cookie",
             ("GET", "/auth/me"): "manual-user-cookie",
@@ -136,7 +165,7 @@ class AuthRouteMatrixTests(unittest.TestCase):
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         self.assertEqual(len(rows), 158, normalized)
-        self.assertEqual(digest, "b72db2ac9b7f8efacfb72f8dbac442058cd2a96a15663cc7b458f7f4c11135f6", normalized)
+        self.assertEqual(digest, "5a3e86dc24bb6716d44576dd517b8a3915fa72c15ba96cd01bcb05f62e8e723c", normalized)
 
 
 if __name__ == "__main__":

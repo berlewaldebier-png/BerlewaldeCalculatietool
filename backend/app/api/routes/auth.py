@@ -4,8 +4,12 @@ import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
-from app.domain import auth_service
-from app.domain.auth_dependencies import require_admin
+from app.domain import auth_policy, auth_service
+from app.domain.auth_dependencies import (
+    get_current_session,
+    require_users_manage,
+    require_users_view,
+)
 from app.rate_limits import limiter
 from app.schemas.auth import (
     AuthStatus,
@@ -65,8 +69,12 @@ def post_login(request: Request, payload: LoginRequest, response: Response) -> L
             path="/",
             max_age=60 * 60 * 12,
         )
+        response.delete_cookie(auth_service.LOGGED_OUT_COOKIE_NAME, path="/")
         logger.info(f"Successful login for user: {authenticated['username']}")
-        return LoginResponse(**authenticated)
+        return LoginResponse(
+            **authenticated,
+            capabilities=list(auth_policy.capabilities_for_role(authenticated["role"])),
+        )
     except HTTPException:
         raise
     except RuntimeError as exc:
@@ -134,29 +142,36 @@ def post_change_password(request: Request, payload: PasswordChangeRequest) -> Pa
 @router.post("/logout")
 def post_logout(response: Response) -> dict[str, bool]:
     """Logout the current user."""
-    response.delete_cookie(auth_service.SESSION_COOKIE_NAME, path="/")
+    secure = auth_service.environment_name() not in {"local", "dev", "development"}
+    response.delete_cookie(
+        auth_service.SESSION_COOKIE_NAME,
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="lax",
+    )
+    if not auth_service.auth_enabled() and auth_service.auth_bypass_allowed():
+        response.set_cookie(
+            key=auth_service.LOGGED_OUT_COOKIE_NAME,
+            value="1",
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+            max_age=60 * 60 * 24 * 365,
+        )
     return {"logged_out": True}
 
 
 @router.get("/me", response_model=MeResponse)
 def get_me(request: Request) -> MeResponse:
     """Get current user information."""
-    if not auth_service.auth_enabled():
-        return MeResponse(
-            authenticated=True,
-            username="local-admin",
-            display_name="Local admin",
-            role="admin",
-        )
-    token = request.cookies.get(auth_service.SESSION_COOKIE_NAME, "")
-    session = auth_service.verify_session_token(token)
-    if not session:
-        raise HTTPException(status_code=401, detail="Niet ingelogd.")
+    session = get_current_session(request)
     return MeResponse(authenticated=True, **session)
 
 
 @router.get("/users", response_model=list[AuthUser])
-def get_auth_users(_: dict = Depends(require_admin)) -> list[AuthUser]:
+def get_auth_users(_: dict = Depends(require_users_view)) -> list[AuthUser]:
     """Get list of all users."""
     return [AuthUser(**user) for user in auth_service.list_users()]
 
@@ -187,7 +202,7 @@ def post_bootstrap_admin(
 @router.post("/users", response_model=CreateUserResponse)
 def post_create_user(
     payload: CreateUserRequest,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_users_manage),
 ) -> CreateUserResponse:
     """Create a new user."""
     try:
@@ -209,7 +224,7 @@ def post_create_user(
 def put_update_user(
     username: str,
     payload: UpdateUserRequest,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_users_manage),
 ) -> dict[str, bool]:
     """Update user profile, role, or active status."""
     try:

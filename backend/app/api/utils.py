@@ -12,7 +12,7 @@ from typing import Any, Callable
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response, status
 
 from app.domain import correction_run_storage, dataset_store
-from app.domain.auth_dependencies import require_admin, require_user
+from app.domain.auth_dependencies import require_dataset_mutation, require_user
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def create_dataset_crud_router(
         dataset_name: str,
         response: Response,
         data: dict[str, Any] = Body(...),
-        _: dict = Depends(require_admin),
+        _: dict = Depends(require_dataset_mutation),
     ) -> dict[str, Any]:
         """Create one item resource. Requires a unique `id` field."""
         if dataset_name not in dataset_names:
@@ -134,7 +134,7 @@ def create_dataset_crud_router(
         response: Response,
         data: dict[str, Any] = Body(...),
         if_match: str | None = Header(default=None, alias="If-Match"),
-        _: dict = Depends(require_admin),
+        _: dict = Depends(require_dataset_mutation),
     ) -> dict[str, Any]:
         """Replace one item resource. Requires `If-Match` to prevent lost updates."""
         if dataset_name not in dataset_names:
@@ -153,7 +153,7 @@ def create_dataset_crud_router(
         response: Response,
         data: dict[str, Any] = Body(...),
         if_match: str | None = Header(default=None, alias="If-Match"),
-        _: dict = Depends(require_admin),
+        _: dict = Depends(require_dataset_mutation),
     ) -> dict[str, Any]:
         """Partially update one item resource. Requires `If-Match`."""
         if dataset_name not in dataset_names:
@@ -170,7 +170,7 @@ def create_dataset_crud_router(
         dataset_name: str,
         item_id: str,
         if_match: str | None = Header(default=None, alias="If-Match"),
-        _: dict = Depends(require_admin),
+        _: dict = Depends(require_dataset_mutation),
     ) -> dict[str, Any]:
         """Delete one item resource. Requires `If-Match`."""
         if dataset_name not in dataset_names:
@@ -184,7 +184,7 @@ def create_dataset_crud_router(
     def put_dataset(
         dataset_name: str,
         data: Any = Body(...),
-        _: dict = Depends(require_admin),
+        _: dict = Depends(require_dataset_mutation),
     ) -> dict[str, Any]:
         """Update a dataset."""
         if dataset_name not in dataset_names:

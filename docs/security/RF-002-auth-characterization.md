@@ -2,6 +2,8 @@
 
 Status: characterization only. This document records current repository behavior; it does not approve the behavior or authorize RF-005.
 
+> Historical baseline: RF-005 intentionally supersedes the fail-open and two-role observations below. See `docs/security/RF-005-fail-closed-auth.md` for the approved current policy.
+
 ## Scope and safety
 
 - **Observed:** RF-001 is merged and RF-002 changes only tests, pseudonymous fixtures and this evidence document.

@@ -4,12 +4,13 @@ import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
+import type { AuthRole } from "@/lib/auth";
 
 type CreateUserPayload = {
   username: string;
   password: string;
   display_name: string;
-  role: "admin" | "user";
+  role: Exclude<AuthRole, "user">;
   email?: string | null;
 };
 
@@ -39,7 +40,7 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
   const [newDisplayName, setNewDisplayName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [newRole, setNewRole] = useState<"admin" | "user">("user");
+  const [newRole, setNewRole] = useState<Exclude<AuthRole, "user">>("sales");
   const [createError, setCreateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
 
@@ -120,7 +121,7 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
       setNewDisplayName("");
       setNewEmail("");
       setNewPassword("");
-      setNewRole("user");
+      setNewRole("sales");
       router.refresh();
     } catch {
       setCreateError("De backend is niet bereikbaar.");
@@ -241,10 +242,12 @@ export function UserAdminPanel({ hasAdmin }: UserAdminPanelProps) {
             <select
               className="dataset-input"
               value={newRole}
-              onChange={(event) => setNewRole(event.target.value === "admin" ? "admin" : "user")}
+              onChange={(event) => setNewRole(event.target.value as Exclude<AuthRole, "user">)}
             >
-              <option value="user">User</option>
-              <option value="admin">Admin</option>
+              <option value="sales">Sales</option>
+              <option value="brewer">Brouwer</option>
+              <option value="management">Management (CEO/CFO)</option>
+              <option value="admin">Administrator</option>
             </select>
           </label>
 

@@ -46,12 +46,11 @@ async function proxy(request: NextRequest, context: RouteContext) {
     // Forward it explicitly so browser sessions are established correctly.
     outHeaders.delete("set-cookie");
     const headerAny = response.headers as any;
-    const setCookies: string[] =
-      typeof headerAny.getSetCookie === "function" ? (headerAny.getSetCookie() as string[]) : [];
-    const singleSetCookie = response.headers.get("set-cookie");
-    if (singleSetCookie) {
-      setCookies.push(singleSetCookie);
-    }
+    const setCookies: string[] = typeof headerAny.getSetCookie === "function"
+      ? (headerAny.getSetCookie() as string[])
+      : response.headers.get("set-cookie")
+        ? [response.headers.get("set-cookie") as string]
+        : [];
     for (const cookie of setCookies) {
       if (cookie) {
         outHeaders.append("set-cookie", cookie);

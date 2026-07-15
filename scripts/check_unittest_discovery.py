@@ -54,8 +54,22 @@ required_rf004_contracts = {
     "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_year_close_snapshot_survives_later_production_failure_and_requires_overwrite_retry",
     "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_year_close_api_commit_precedes_incidental_reconciliation_and_draft_removal",
 }
+required_rf005_contracts = {
+    "test_auth_characterization.AuthEnvironmentCharacterizationTests.test_disabled_auth_synthesizes_admin_only_in_explicit_bypass_environments",
+    "test_auth_characterization.AuthEnvironmentCharacterizationTests.test_production_configuration_rejects_disabled_auth",
+    "test_auth_characterization.AuthEnvironmentCharacterizationTests.test_explicit_local_logout_blocks_synthetic_admin_but_accepts_a_new_session",
+    "test_auth_characterization.AuthSessionCharacterizationTests.test_local_logout_deletes_session_and_persists_explicit_logged_out_marker",
+    "test_auth_role_policy.AuthRolePolicyTests.test_exact_approved_role_capability_matrix",
+    "test_auth_role_policy.AuthRolePolicyTests.test_named_dependencies_enforce_the_matrix",
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_complete_route_access_fingerprint_matches_rf_005_policy",
+}
 missing = sorted(
-    (required_lot_contracts | required_rf003_contracts | required_rf004_contracts).difference(ids)
+    (
+        required_lot_contracts
+        | required_rf003_contracts
+        | required_rf004_contracts
+        | required_rf005_contracts
+    ).difference(ids)
 )
 
 if loader.errors:
@@ -65,5 +79,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003 and RF-004 contracts collected"
+    "all required LOT, RF-003, RF-004 and RF-005 contracts collected"
 )

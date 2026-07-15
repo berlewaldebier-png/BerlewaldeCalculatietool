@@ -18,7 +18,12 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from app.domain.douano_client import parse_json_payload as _client_parse_json_payload
 from app.domain.douano_client import probe_url as _probe_url
 from app.domain.douano_client import request as _douano_request
-from app.domain.auth_dependencies import require_admin, require_user
+from app.domain.auth_dependencies import (
+    require_admin,
+    require_douano_sync,
+    require_product_mappings_manage,
+    require_user,
+)
 from app.domain import douano_oauth_storage
 from app.domain import douano_sync_storage
 from app.domain import douano_product_mapping_storage
@@ -627,7 +632,7 @@ def get_douano_sync_status() -> dict[str, Any]:
 @router.post("/douano/sync/companies")
 async def post_douano_sync_companies(
     max_pages: int = Query(10, ge=1, le=200),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_douano_sync),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
@@ -655,7 +660,7 @@ async def post_douano_sync_companies(
 async def post_douano_sync_products(
     max_pages: int = Query(10, ge=1, le=200),
     is_sellable: bool = Query(True, description="Wanneer true: filter_by_is_sellable=true"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_douano_sync),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     query: dict[str, str] = {}
@@ -703,7 +708,7 @@ async def post_douano_sync_sales_orders(
     since_date: str = Query("", description="Optioneel: filter orders client-side op date >= since_date (YYYY-MM-DD)."),
     recompute_snapshots: bool = Query(True, description="Herbereken opgeslagen omzet/marge kostprijssnapshots na orders-sync."),
     snapshot_limit: int = Query(50000, ge=1, le=50000),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_douano_sync),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
@@ -779,7 +784,7 @@ async def post_douano_sync_sales_invoices(
     since_date: str = Query("", description="Optioneel: filter invoices client-side op date >= since_date (YYYY-MM-DD)."),
     recompute_snapshots: bool = Query(True, description="Herbereken opgeslagen omzet/marge kostprijssnapshots na invoices-sync."),
     snapshot_limit: int = Query(50000, ge=1, le=50000),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_douano_sync),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     try:
@@ -860,7 +865,7 @@ async def post_douano_sync_stock_history_lots(
     data_collector: str = Query("stock_history_data"),
     recompute_snapshots: bool = Query(True, description="Herbereken opgeslagen omzet/marge kostprijssnapshots na LOT-sync."),
     snapshot_limit: int = Query(50000, ge=1, le=50000),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_douano_sync),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     resource = "stock_history_lots"
@@ -900,7 +905,7 @@ async def post_douano_sync_stock_history_lots(
 @router.post("/douano/sync/stock-movements")
 async def post_douano_sync_stock_movements(
     data_collector: str = Query("stock_history_data"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_douano_sync),
 ) -> dict[str, Any]:
     tokens = _require_douano_tokens()
     resource = "stock_movements"
@@ -1944,7 +1949,7 @@ def post_douano_create_historical_beer_sku(payload: dict[str, Any], _: dict = De
 def put_douano_product_mapping(
     douano_product_id: int,
     payload: dict[str, Any],
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_product_mappings_manage),
 ) -> dict[str, Any]:
     try:
         sku_id = str(payload.get("sku_id", "") or "").strip()
@@ -1991,7 +1996,7 @@ def put_douano_product_mapping(
 @router.delete("/douano/product-mappings/{douano_product_id}")
 def delete_douano_product_mapping(
     douano_product_id: int,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_product_mappings_manage),
 ) -> dict[str, Any]:
     deleted = douano_product_mapping_storage.delete_mapping(douano_product_id=int(douano_product_id or 0))
     snapshot_refresh = douano_margin_service.backfill_line_snapshots_for_douano_products(
@@ -2136,7 +2141,7 @@ def post_break_even_close_year(
 def get_break_even_year_close_preview(
     year: int = Query(...),
     basis: str = Query("invoice"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_user),
 ) -> dict[str, Any]:
     try:
         return {"preview": break_even_planning_service.build_year_close_payload(year=int(year), basis=str(basis or "invoice"))}
@@ -2162,7 +2167,7 @@ def get_break_even_year_closes(
 @router.delete("/break-even/year-closes/{year}")
 def delete_break_even_year_close(
     year: int,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_user),
 ) -> dict[str, Any]:
     try:
         return {"item": break_even_planning_storage.delete_year_close_snapshot(year=int(year))}

@@ -46,6 +46,7 @@ class LoginResponse(BaseModel):
     username: str
     display_name: str
     role: str
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class MeResponse(BaseModel):
@@ -53,6 +54,7 @@ class MeResponse(BaseModel):
     username: str
     display_name: str
     role: str
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class CreateUserRequest(BaseModel):

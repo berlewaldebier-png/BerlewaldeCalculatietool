@@ -17,7 +17,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app import config_validation
 from app.api.routes import auth as auth_routes
-from app.domain import auth_service, postgres_storage
+from app.domain import auth_policy, auth_service, postgres_storage
 from app.domain.auth_dependencies import get_current_session, require_admin, require_user
 from app.schemas.auth import LoginRequest
 
@@ -47,8 +47,8 @@ def _request(cookies: dict[str, str] | None = None) -> Request:
 
 
 class AuthEnvironmentCharacterizationTests(unittest.TestCase):
-    def test_disabled_auth_synthesizes_admin_in_every_environment(self) -> None:
-        for environment in ("local", "dev", "development", "test", "staging", "production"):
+    def test_disabled_auth_synthesizes_admin_only_in_explicit_bypass_environments(self) -> None:
+        for environment in ("local", "dev", "development", "test"):
             with self.subTest(environment=environment), patch.dict(
                 "os.environ",
                 {
@@ -64,8 +64,56 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
                         "username": "local-admin",
                         "display_name": "Local admin",
                         "role": "admin",
+                        "capabilities": list(auth_policy.capabilities_for_role("admin")),
                     },
                 )
+
+        for environment in ("staging", "production"):
+            with self.subTest(environment=environment), patch.dict(
+                "os.environ",
+                {
+                    "CALCULATIETOOL_ENV": environment,
+                    "CALCULATIETOOL_AUTH_ENABLED": "false",
+                },
+                clear=True,
+            ), self.assertRaises(HTTPException) as failed_closed:
+                get_current_session(_request())
+            self.assertEqual(failed_closed.exception.status_code, 503)
+            self.assertEqual(
+                failed_closed.exception.detail,
+                "Authenticatie is niet veilig geconfigureerd.",
+            )
+
+    def test_explicit_local_logout_blocks_synthetic_admin_but_accepts_a_new_session(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "CALCULATIETOOL_ENV": "local",
+                "CALCULATIETOOL_AUTH_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            logged_out_request = _request({auth_service.LOGGED_OUT_COOKIE_NAME: "1"})
+            with self.assertRaises(HTTPException) as logged_out:
+                get_current_session(logged_out_request)
+            self.assertEqual(logged_out.exception.status_code, 401)
+            self.assertEqual(logged_out.exception.detail, "Niet ingelogd.")
+
+            token = auth_service.issue_session_token(
+                username="sales-fixture",
+                display_name="Sales Fixture",
+                role="sales",
+            )
+            new_session = get_current_session(
+                _request(
+                    {
+                        auth_service.LOGGED_OUT_COOKIE_NAME: "1",
+                        auth_service.SESSION_COOKIE_NAME: token,
+                    }
+                )
+            )
+            self.assertEqual(new_session["username"], "sales-fixture")
+            self.assertEqual(new_session["role"], "sales")
 
     def test_enabled_auth_flag_accepts_only_current_truthy_spellings(self) -> None:
         for value in ("1", "true", "TRUE", "yes", "on"):
@@ -93,7 +141,7 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
             ), self.assertRaises(RuntimeError):
                 auth_service._auth_secret()
 
-    def test_production_configuration_currently_allows_disabled_auth_without_a_secret(self) -> None:
+    def test_production_configuration_rejects_disabled_auth(self) -> None:
         with patch.dict(
             "os.environ",
             {
@@ -102,7 +150,7 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
                 "CALCULATIETOOL_CORS_ORIGINS": "https://example.invalid",
             },
             clear=True,
-        ), patch.object(postgres_storage, "uses_postgres", return_value=False):
+        ), patch.object(postgres_storage, "uses_postgres", return_value=False), self.assertRaises(RuntimeError):
             config_validation.validate_config()
 
     def test_enabled_production_auth_rejects_missing_or_default_secret(self) -> None:
@@ -120,8 +168,8 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
             ), patch.object(postgres_storage, "uses_postgres", return_value=False), self.assertRaises(RuntimeError):
                 config_validation.validate_config()
 
-    def test_startup_config_matrix_accepts_current_environments_but_rejects_test(self) -> None:
-        for environment in ("local", "dev", "development", "staging", "production"):
+    def test_startup_config_matrix_accepts_bypass_only_for_local_and_test(self) -> None:
+        for environment in ("local", "dev", "development", "test"):
             for enabled in ("false", "true"):
                 with self.subTest(environment=environment, enabled=enabled), patch.dict(
                     "os.environ",
@@ -135,12 +183,24 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
                 ), patch.object(postgres_storage, "uses_postgres", return_value=False):
                     config_validation.validate_config()
 
-        for enabled in ("false", "true"):
-            with self.subTest(environment="test", enabled=enabled), patch.dict(
+        for environment in ("staging", "production"):
+            with self.subTest(environment=environment, enabled="true"), patch.dict(
                 "os.environ",
                 {
-                    "CALCULATIETOOL_ENV": "test",
-                    "CALCULATIETOOL_AUTH_ENABLED": enabled,
+                    "CALCULATIETOOL_ENV": environment,
+                    "CALCULATIETOOL_AUTH_ENABLED": "true",
+                    "CALCULATIETOOL_AUTH_SECRET": AUTH_SECRET,
+                    "CALCULATIETOOL_CORS_ORIGINS": "https://example.invalid",
+                },
+                clear=True,
+            ), patch.object(postgres_storage, "uses_postgres", return_value=False):
+                config_validation.validate_config()
+
+            with self.subTest(environment=environment, enabled="false"), patch.dict(
+                "os.environ",
+                {
+                    "CALCULATIETOOL_ENV": environment,
+                    "CALCULATIETOOL_AUTH_ENABLED": "false",
                     "CALCULATIETOOL_AUTH_SECRET": AUTH_SECRET,
                     "CALCULATIETOOL_CORS_ORIGINS": "https://example.invalid",
                 },
@@ -166,7 +226,7 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
             ("local", 1, True),
             ("dev", 1, True),
             ("development", 1, True),
-            ("test", 0, False),
+            ("test", 1, True),
             ("staging", 0, False),
             ("production", 0, False),
         ):
@@ -302,7 +362,11 @@ class AuthSessionCharacterizationTests(unittest.TestCase):
                     response,
                 )
 
-            cookie = response.headers["set-cookie"]
+            cookies = response.headers.getlist("set-cookie")
+            cookie = next(value for value in cookies if auth_service.SESSION_COOKIE_NAME in value)
+            logged_out_cookie = next(
+                value for value in cookies if auth_service.LOGGED_OUT_COOKIE_NAME in value
+            )
             self.assertEqual(result.username, "alice")
             self.assertIn(f"{auth_service.SESSION_COOKIE_NAME}=characterization-token", cookie)
             self.assertIn("HttpOnly", cookie)
@@ -310,6 +374,30 @@ class AuthSessionCharacterizationTests(unittest.TestCase):
             self.assertIn("Path=/", cookie)
             self.assertIn("SameSite=lax", cookie)
             self.assertEqual("Secure" in cookie, secure_expected)
+            self.assertIn("Max-Age=0", logged_out_cookie)
+
+    def test_local_logout_deletes_session_and_persists_explicit_logged_out_marker(self) -> None:
+        response = Response()
+        with patch.dict(
+            "os.environ",
+            {
+                "CALCULATIETOOL_ENV": "local",
+                "CALCULATIETOOL_AUTH_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            self.assertEqual(auth_routes.post_logout(response), {"logged_out": True})
+
+        cookies = response.headers.getlist("set-cookie")
+        session_cookie = next(value for value in cookies if auth_service.SESSION_COOKIE_NAME in value)
+        logged_out_cookie = next(
+            value for value in cookies if auth_service.LOGGED_OUT_COOKIE_NAME in value
+        )
+        self.assertIn("Max-Age=0", session_cookie)
+        self.assertIn(f"{auth_service.LOGGED_OUT_COOKIE_NAME}=1", logged_out_cookie)
+        self.assertIn("Max-Age=31536000", logged_out_cookie)
+        self.assertIn("HttpOnly", logged_out_cookie)
+        self.assertIn("SameSite=lax", logged_out_cookie)
 
 
 if __name__ == "__main__":

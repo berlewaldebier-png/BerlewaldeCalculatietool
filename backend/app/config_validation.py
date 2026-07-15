@@ -22,9 +22,17 @@ def validate_config() -> None:
         if not postgres_storage.database_url():
             errors.append("PostgreSQL configured but missing connection URL (CALCULATIETOOL_POSTGRES_*)")
     
-    # Check auth configuration
+    # Check environment and auth configuration
     from app.domain import auth_service
-    if auth_service.auth_enabled():
+    env = auth_service.environment_name()
+    if env not in {"local", "dev", "development", "test", "staging", "production"}:
+        errors.append(f"Invalid CALCULATIETOOL_ENV: {env}")
+
+    if not auth_service.auth_enabled() and not auth_service.auth_bypass_allowed():
+        errors.append(
+            "CALCULATIETOOL_AUTH_ENABLED must be true outside local/dev/test environments"
+        )
+    elif auth_service.auth_enabled():
         try:
             secret = auth_service._auth_secret()
             if "change-me" in secret.lower() or secret == "":
@@ -33,11 +41,6 @@ def validate_config() -> None:
                 )
         except RuntimeError as e:
             errors.append(f"CALCULATIETOOL_AUTH_SECRET / AUTH_SECRET issue: {e}")
-    
-    # Check environment
-    env = os.getenv("CALCULATIETOOL_ENV", "local").strip().lower()
-    if env not in {"local", "dev", "development", "staging", "production"}:
-        errors.append(f"Invalid CALCULATIETOOL_ENV: {env}")
     
     # Validate CORS origins
     cors_origins = os.getenv("CALCULATIETOOL_CORS_ORIGINS", "http://localhost:3000").split(",")
@@ -64,5 +67,6 @@ def log_startup_info() -> None:
     logger.info(f"Environment: {auth_service.environment_name()}")
     logger.info(f"Storage Provider: {postgres_storage.storage_provider()}")
     logger.info(f"Auth Enabled: {auth_service.auth_enabled()}")
+    logger.info(f"Auth Bypass Allowed: {auth_service.auth_bypass_allowed()}")
     logger.info(f"Auth Mode: {auth_service.auth_mode()}")
     logger.info("=" * 60)
