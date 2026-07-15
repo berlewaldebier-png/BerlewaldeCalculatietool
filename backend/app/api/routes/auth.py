@@ -69,6 +69,7 @@ def post_login(request: Request, payload: LoginRequest, response: Response) -> L
             path="/",
             max_age=60 * 60 * 12,
         )
+        response.delete_cookie(auth_service.LOGGED_OUT_COOKIE_NAME, path="/")
         logger.info(f"Successful login for user: {authenticated['username']}")
         return LoginResponse(
             **authenticated,
@@ -141,7 +142,24 @@ def post_change_password(request: Request, payload: PasswordChangeRequest) -> Pa
 @router.post("/logout")
 def post_logout(response: Response) -> dict[str, bool]:
     """Logout the current user."""
-    response.delete_cookie(auth_service.SESSION_COOKIE_NAME, path="/")
+    secure = auth_service.environment_name() not in {"local", "dev", "development"}
+    response.delete_cookie(
+        auth_service.SESSION_COOKIE_NAME,
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="lax",
+    )
+    if not auth_service.auth_enabled() and auth_service.auth_bypass_allowed():
+        response.set_cookie(
+            key=auth_service.LOGGED_OUT_COOKIE_NAME,
+            value="1",
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+            max_age=60 * 60 * 24 * 365,
+        )
     return {"logged_out": True}
 
 

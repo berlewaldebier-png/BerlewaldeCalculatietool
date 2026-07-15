@@ -29,6 +29,7 @@ TEMP_ADMIN_PASSWORD = "admin"
 _schema_ready = False
 _schema_lock = Lock()
 SESSION_COOKIE_NAME = "calculatietool_session"
+LOGGED_OUT_COOKIE_NAME = "calculatietool_logged_out"
 LOCAL_ENVIRONMENTS = frozenset({"local", "dev", "development"})
 AUTH_BYPASS_ENVIRONMENTS = frozenset({*LOCAL_ENVIRONMENTS, "test"})
 

@@ -40,6 +40,19 @@ async function mockBrowserSession(page: import("@playwright/test").Page, role: R
 }
 
 test.describe("RF-005 role visibility", () => {
+  test("logout stays on the login page until the next successful login", async ({ page }) => {
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Accountmenu openen" }).click();
+    await page.getByRole("menuitem", { name: /Uitloggen/ }).click();
+
+    await page.waitForURL("**/login");
+    await expect(page.getByRole("button", { name: "Inloggen" })).toBeVisible();
+    await page.reload();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("button", { name: "Inloggen" })).toBeVisible();
+  });
+
   test("sales can view cost prices but not administrative settings", async ({ page }) => {
     await mockBrowserSession(page, "sales");
     await page.goto("/");

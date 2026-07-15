@@ -20,6 +20,12 @@ def get_current_session(request: Request) -> dict:
                 status_code=503,
                 detail="Authenticatie is niet veilig geconfigureerd.",
             )
+        token = request.cookies.get(auth_service.SESSION_COOKIE_NAME, "")
+        session = auth_service.verify_session_token(token) if token else None
+        if session:
+            return auth_policy.enrich_session(session)
+        if request.cookies.get(auth_service.LOGGED_OUT_COOKIE_NAME, "") == "1":
+            raise HTTPException(status_code=401, detail="Niet ingelogd.")
         return auth_policy.enrich_session(
             {"username": "local-admin", "display_name": "Local admin", "role": "admin"}
         )

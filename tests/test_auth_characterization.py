@@ -84,6 +84,37 @@ class AuthEnvironmentCharacterizationTests(unittest.TestCase):
                 "Authenticatie is niet veilig geconfigureerd.",
             )
 
+    def test_explicit_local_logout_blocks_synthetic_admin_but_accepts_a_new_session(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "CALCULATIETOOL_ENV": "local",
+                "CALCULATIETOOL_AUTH_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            logged_out_request = _request({auth_service.LOGGED_OUT_COOKIE_NAME: "1"})
+            with self.assertRaises(HTTPException) as logged_out:
+                get_current_session(logged_out_request)
+            self.assertEqual(logged_out.exception.status_code, 401)
+            self.assertEqual(logged_out.exception.detail, "Niet ingelogd.")
+
+            token = auth_service.issue_session_token(
+                username="sales-fixture",
+                display_name="Sales Fixture",
+                role="sales",
+            )
+            new_session = get_current_session(
+                _request(
+                    {
+                        auth_service.LOGGED_OUT_COOKIE_NAME: "1",
+                        auth_service.SESSION_COOKIE_NAME: token,
+                    }
+                )
+            )
+            self.assertEqual(new_session["username"], "sales-fixture")
+            self.assertEqual(new_session["role"], "sales")
+
     def test_enabled_auth_flag_accepts_only_current_truthy_spellings(self) -> None:
         for value in ("1", "true", "TRUE", "yes", "on"):
             with self.subTest(value=value), patch.dict(
@@ -331,7 +362,11 @@ class AuthSessionCharacterizationTests(unittest.TestCase):
                     response,
                 )
 
-            cookie = response.headers["set-cookie"]
+            cookies = response.headers.getlist("set-cookie")
+            cookie = next(value for value in cookies if auth_service.SESSION_COOKIE_NAME in value)
+            logged_out_cookie = next(
+                value for value in cookies if auth_service.LOGGED_OUT_COOKIE_NAME in value
+            )
             self.assertEqual(result.username, "alice")
             self.assertIn(f"{auth_service.SESSION_COOKIE_NAME}=characterization-token", cookie)
             self.assertIn("HttpOnly", cookie)
@@ -339,6 +374,30 @@ class AuthSessionCharacterizationTests(unittest.TestCase):
             self.assertIn("Path=/", cookie)
             self.assertIn("SameSite=lax", cookie)
             self.assertEqual("Secure" in cookie, secure_expected)
+            self.assertIn("Max-Age=0", logged_out_cookie)
+
+    def test_local_logout_deletes_session_and_persists_explicit_logged_out_marker(self) -> None:
+        response = Response()
+        with patch.dict(
+            "os.environ",
+            {
+                "CALCULATIETOOL_ENV": "local",
+                "CALCULATIETOOL_AUTH_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            self.assertEqual(auth_routes.post_logout(response), {"logged_out": True})
+
+        cookies = response.headers.getlist("set-cookie")
+        session_cookie = next(value for value in cookies if auth_service.SESSION_COOKIE_NAME in value)
+        logged_out_cookie = next(
+            value for value in cookies if auth_service.LOGGED_OUT_COOKIE_NAME in value
+        )
+        self.assertIn("Max-Age=0", session_cookie)
+        self.assertIn(f"{auth_service.LOGGED_OUT_COOKIE_NAME}=1", logged_out_cookie)
+        self.assertIn("Max-Age=31536000", logged_out_cookie)
+        self.assertIn("HttpOnly", logged_out_cookie)
+        self.assertIn("SameSite=lax", logged_out_cookie)
 
 
 if __name__ == "__main__":

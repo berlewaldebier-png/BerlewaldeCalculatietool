@@ -17,6 +17,8 @@ The request-time 503 is defense in depth. A non-local deployment must not use it
 
 Existing authenticated contracts remain unchanged: the session cookie name, 12-hour lifetime, `HttpOnly`, `SameSite=lax`, environment-dependent `Secure`, HTTP 401 `Niet ingelogd.` and HTTP 403 `Geen rechten.`. Role matching remains case-sensitive.
 
+In local/test convenience mode, a valid signed session takes precedence over the synthetic administrator. Logout deletes that session and sets an `HttpOnly` marker that disables the synthetic fallback for that browser until the next successful login. This makes account switching possible without removing the explicit no-auth convenience mode for a fresh browser.
+
 ## Approved role matrix
 
 | Capability | Administrator | Management (CEO/CFO) | Brewer | Sales | Legacy `user` |

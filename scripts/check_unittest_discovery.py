@@ -57,6 +57,8 @@ required_rf004_contracts = {
 required_rf005_contracts = {
     "test_auth_characterization.AuthEnvironmentCharacterizationTests.test_disabled_auth_synthesizes_admin_only_in_explicit_bypass_environments",
     "test_auth_characterization.AuthEnvironmentCharacterizationTests.test_production_configuration_rejects_disabled_auth",
+    "test_auth_characterization.AuthEnvironmentCharacterizationTests.test_explicit_local_logout_blocks_synthetic_admin_but_accepts_a_new_session",
+    "test_auth_characterization.AuthSessionCharacterizationTests.test_local_logout_deletes_session_and_persists_explicit_logged_out_marker",
     "test_auth_role_policy.AuthRolePolicyTests.test_exact_approved_role_capability_matrix",
     "test_auth_role_policy.AuthRolePolicyTests.test_named_dependencies_enforce_the_matrix",
     "test_auth_route_matrix.AuthRouteMatrixTests.test_complete_route_access_fingerprint_matches_rf_005_policy",
