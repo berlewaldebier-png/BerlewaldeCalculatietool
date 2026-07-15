@@ -84,6 +84,7 @@ jobs:
           npm run build
           npm run test:pricing
           npm run test:workflows
+          npm run test:contracts
 
       - name: Install Playwright browsers
         working-directory: frontend

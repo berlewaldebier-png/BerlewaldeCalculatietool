@@ -2,6 +2,11 @@ import type {
   QuoteDraftRecord,
   QuotePersistencePayload,
 } from "@/components/offerte-samenstellen/types";
+import {
+  adaptQuoteDeleteResponse,
+  reportQuoteBoundaryDeviations,
+  type QuoteDeleteBoundary,
+} from "@/components/offerte-samenstellen/quoteBoundary";
 import { API_BASE_URL } from "@/lib/apiShared";
 
 
@@ -51,8 +56,11 @@ export function updateQuoteDraft(
   });
 }
 
-export function deleteQuoteDraft(draftId: string): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>(`/quotes/${encodeURIComponent(draftId)}`, {
+export async function deleteQuoteDraft(draftId: string): Promise<QuoteDeleteBoundary> {
+  const payload = await request<unknown>(`/quotes/${encodeURIComponent(draftId)}`, {
     method: "DELETE",
   });
+  const boundary = adaptQuoteDeleteResponse(payload);
+  reportQuoteBoundaryDeviations("quote-delete", boundary.deviations);
+  return boundary;
 }

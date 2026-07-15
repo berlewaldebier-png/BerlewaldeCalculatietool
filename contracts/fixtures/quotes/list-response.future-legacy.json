@@ -1,0 +1,33 @@
+{
+  "items": [
+    {
+      "id": "quote-contract-future",
+      "quote_number": "OFF-2026-0099",
+      "quote_number_seq": "99",
+      "schema_version": 2,
+      "draft_version": 1,
+      "status": "concept",
+      "year": 2026,
+      "customer_name": null,
+      "contact_name": "",
+      "channel_code": "retail",
+      "title": "Toekomstig contract",
+      "valid_until": null,
+      "active_scenario_id": "A",
+      "created_at": "2026-07-01T10:00:00+00:00",
+      "updated_at": "2026-07-02T11:30:00+00:00",
+      "finalized_at": null,
+      "payload": {
+        "schemaVersion": 2,
+        "draft": {},
+        "future_payload_field": {
+          "keep": true
+        }
+      },
+      "future_record_field": "keep"
+    }
+  ],
+  "future_envelope_field": {
+    "keep": true
+  }
+}

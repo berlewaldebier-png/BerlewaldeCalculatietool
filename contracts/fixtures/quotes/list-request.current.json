@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "path": "/quotes",
+  "query": {
+    "limit": 100,
+    "status": ""
+  },
+  "body": null
+}

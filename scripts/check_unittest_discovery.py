@@ -63,12 +63,19 @@ required_rf005_contracts = {
     "test_auth_role_policy.AuthRolePolicyTests.test_named_dependencies_enforce_the_matrix",
     "test_auth_route_matrix.AuthRouteMatrixTests.test_complete_route_access_fingerprint_matches_rf_005_policy",
 }
+required_rf006_contracts = {
+    "test_quote_boundary_characterization.QuoteBoundaryCharacterizationTests.test_registry_references_executable_request_and_response_snapshots",
+    "test_quote_boundary_characterization.QuoteBoundaryCharacterizationTests.test_selected_openapi_operations_match_snapshot",
+    "test_quote_boundary_characterization.QuoteBoundaryCharacterizationTests.test_typed_delete_adapter_preserves_unknown_fields_and_reports_alias",
+    "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_quote_boundary_roundtrip_preserves_database_payload_and_delete_count",
+}
 missing = sorted(
     (
         required_lot_contracts
         | required_rf003_contracts
         | required_rf004_contracts
         | required_rf005_contracts
+        | required_rf006_contracts
     ).difference(ids)
 )
 
@@ -79,5 +86,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004 and RF-005 contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005 and RF-006 contracts collected"
 )

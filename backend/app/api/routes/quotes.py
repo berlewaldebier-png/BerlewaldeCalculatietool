@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+from app.contracts.quote_boundary import adapt_quote_delete_response, quote_list_response
 from app.domain import dashboard_service, quote_drafts_storage
 from app.domain.auth_dependencies import require_quotes_manage
 
@@ -24,7 +25,7 @@ def get_quotes(
         items = quote_drafts_storage.list_drafts(status=status or None, limit=int(limit))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"items": items}
+    return quote_list_response(items)
 
 
 @router.get("/{quote_id}")
@@ -59,4 +60,5 @@ def put_quote(quote_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, A
 def delete_quote(quote_id: str) -> dict[str, Any]:
     result = quote_drafts_storage.delete_draft(quote_id)
     dashboard_service.invalidate_dashboard_summary_cache()
-    return result
+    response, _deviations = adapt_quote_delete_response(result)
+    return response

@@ -2,17 +2,22 @@ import Link from "next/link";
 
 import { PageShell } from "@/components/PageShell";
 import { PrijsvoorstellenTable } from "@/components/PrijsvoorstellenTable";
-import type { QuoteDraftRecord } from "@/components/offerte-samenstellen/types";
+import {
+  adaptQuoteListResponse,
+  reportQuoteBoundaryDeviations,
+} from "@/components/offerte-samenstellen/quoteBoundary";
 import { getBootstrap, apiGetServer } from "@/lib/apiServer";
 
 export default async function PrijsvoorstellenPage() {
   const [bootstrap, quotesResponse] = await Promise.all([
     getBootstrap([], true, "/prijsvoorstellen"),
-    apiGetServer<{ items: QuoteDraftRecord[] }>("/quotes?limit=100", "/prijsvoorstellen")
+    apiGetServer<unknown>("/quotes?limit=100", "/prijsvoorstellen")
   ]);
 
   const navigation = bootstrap.navigation ?? [];
-  const quotes = Array.isArray(quotesResponse.items) ? quotesResponse.items : [];
+  const quotesBoundary = adaptQuoteListResponse(quotesResponse);
+  reportQuoteBoundaryDeviations("quote-list", quotesBoundary.deviations);
+  const quotes = quotesBoundary.response.items;
 
   return (
     <PageShell

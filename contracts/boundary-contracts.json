@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "contracts": {
+    "quote-list": {
+      "method": "GET",
+      "path": "/quotes?limit=100",
+      "backend_source": "backend/app/api/routes/quotes.py:get_quotes",
+      "frontend_consumer": "frontend/src/app/(app)/prijsvoorstellen/page.tsx:PrijsvoorstellenPage",
+      "request_fixture": "contracts/fixtures/quotes/list-request.current.json",
+      "response_fixtures": [
+        "contracts/fixtures/quotes/list-response.current.json",
+        "contracts/fixtures/quotes/list-response.future-legacy.json"
+      ],
+      "compatibility": {
+        "unknown_fields": "preserve",
+        "malformed_known_fields": "report_without_rejecting_or_coercing",
+        "missing_or_non_array_items": "retain_existing_empty-list_fallback"
+      }
+    },
+    "quote-delete": {
+      "method": "DELETE",
+      "path": "/quotes/{quote_id}",
+      "backend_source": "backend/app/api/routes/quotes.py:delete_quote",
+      "frontend_consumer": "frontend/src/components/offerte-samenstellen/quoteApi.ts:deleteQuoteDraft",
+      "request_fixture": "contracts/fixtures/quotes/delete-request.current.json",
+      "response_fixtures": [
+        "contracts/fixtures/quotes/delete-response.deleted.json",
+        "contracts/fixtures/quotes/delete-response.not-found.json",
+        "contracts/fixtures/quotes/delete-response.future-legacy.json"
+      ],
+      "compatibility": {
+        "deleted": "integer row count returned by the backend",
+        "legacy_ok_alias": "accepted and reported without coercion",
+        "unknown_fields": "preserve",
+        "malformed_known_fields": "report_without_rejecting_or_coercing"
+      }
+    }
+  }
+}

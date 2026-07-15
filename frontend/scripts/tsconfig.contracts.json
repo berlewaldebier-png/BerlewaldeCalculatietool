@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "outDir": "../.tmp/contract-tests",
+    "rootDir": "..",
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "./quoteBoundary.contracttest.ts",
+    "../src/components/offerte-samenstellen/quoteBoundary.ts",
+    "../src/components/offerte-samenstellen/types.ts"
+  ]
+}
