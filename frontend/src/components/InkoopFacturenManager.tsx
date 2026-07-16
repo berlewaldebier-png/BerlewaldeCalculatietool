@@ -1610,6 +1610,7 @@ export function InkoopFacturenManager({
           current={buildWizardCurrentRecord()}
           skus={localSkus}
           articles={localArticles}
+          bomLines={localBomLines}
           costProductRows={buildDraftCostProductCandidates()}
           douanoMappings={douanoMappings}
           onRefreshMappings={refreshDouanoMappings}

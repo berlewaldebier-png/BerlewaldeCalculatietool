@@ -3749,6 +3749,32 @@ a {
   cursor: default;
 }
 
+.editor-saving-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.editor-saving-spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  animation: editor-saving-spin 800ms linear infinite;
+}
+
+@keyframes editor-saving-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-saving-spinner {
+    animation-duration: 1600ms;
+  }
+}
+
 .editor-actions {
   display: flex;
   justify-content: space-between;

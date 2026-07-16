@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { CostProductCandidate } from "@/components/berekeningen/steps/SellableVariantsStep";
 import { makeBeerSkuLabel } from "@/lib/skuLabels";
+import { selectExplicitBeerVariantSkus } from "@/components/berekeningen/sellableVariantProjection";
 
 type GenericRecord = Record<string, unknown>;
 type OptionRow = { id: string; label: string };
@@ -343,6 +344,7 @@ export function KoppelenStep({
   current,
   skus,
   articles,
+  bomLines,
   costProductRows,
   douanoMappings,
   onRefreshMappings,
@@ -351,6 +353,7 @@ export function KoppelenStep({
   current: GenericRecord;
   skus: GenericRecord[];
   articles: GenericRecord[];
+  bomLines: GenericRecord[];
   costProductRows: CostProductCandidate[];
   douanoMappings: Array<{ sku_id?: unknown; douano_product_id?: unknown; product_group?: unknown; alcohol_category?: unknown; packaging_type?: unknown }>;
   onRefreshMappings: () => Promise<void>;
@@ -389,12 +392,27 @@ export function KoppelenStep({
   }
 
   const relevantSkus = useMemo(() => {
+    const costProductIds = new Set(
+      (Array.isArray(costProductRows) ? costProductRows : [])
+        .map((row) => text(row.productId))
+        .filter(Boolean)
+    );
+    const explicitVariantIds = new Set(
+      selectExplicitBeerVariantSkus({
+        beerId,
+        skus: Array.isArray(skus) ? skus : [],
+        bomLines: Array.isArray(bomLines) ? bomLines : [],
+      }).map((sku) => text((sku as any).id))
+    );
     return (Array.isArray(skus) ? skus : [])
       .filter((sku) => {
         const kind = text((sku as any).kind).toLowerCase();
         const skuBeerId = text((sku as any).beer_id);
         if (!skuBeerId || skuBeerId !== beerId) return false;
-        return kind === "beer_format" || kind === "article";
+        if (kind === "beer_format") {
+          return costProductIds.has(text((sku as any).format_article_id));
+        }
+        return kind === "article" && explicitVariantIds.has(text((sku as any).id));
       })
       .map((sku) => ({
         sku,
@@ -403,7 +421,7 @@ export function KoppelenStep({
       }))
       .filter((row) => row.id)
       .sort((a, b) => a.label.localeCompare(b.label, "nl-NL"));
-  }, [articleById, beerId, beerName, skus]);
+  }, [articleById, beerId, beerName, bomLines, costProductRows, skus]);
 
   const defaultProductGroup = useMemo(
     () => findOptionId(productGroupOptions, productGroup) || productGroupOptions[0]?.id || productGroup,

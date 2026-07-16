@@ -5,6 +5,7 @@ import { API_BASE_URL } from "@/lib/api";
 import { TrashIcon } from "@/components/berekeningen/BerekeningenWizardParts";
 import { saveBaseBeerSku, saveSellableSkuBundle } from "@/features/sku-composition/skuCompositionIo";
 import { makeBeerSkuLabel, normalizeUnitLabel } from "@/lib/skuLabels";
+import { selectExplicitBeerVariantSkus } from "@/components/berekeningen/sellableVariantProjection";
 
 type GenericRecord = Record<string, unknown>;
 
@@ -206,12 +207,11 @@ export function SellableVariantsStep({
   const [savingKey, setSavingKey] = useState("");
 
   const savedVariantRows = useMemo(() => {
-    return (Array.isArray(skus) ? skus : [])
-      .filter((sku) => {
-        const kind = text((sku as any).kind).toLowerCase();
-        const skuBeerId = text((sku as any).beer_id);
-        return kind === "article" && skuBeerId === beerId;
-      })
+    return selectExplicitBeerVariantSkus({
+      beerId,
+      skus: Array.isArray(skus) ? skus : [],
+      bomLines: Array.isArray(bomLines) ? bomLines : [],
+    })
       .map((sku) => {
         const articleId = text((sku as any).article_id);
         const article = articleId ? articleById.get(articleId) : null;
