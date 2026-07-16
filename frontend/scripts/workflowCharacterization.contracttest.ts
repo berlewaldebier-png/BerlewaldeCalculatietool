@@ -5,6 +5,8 @@ type DatasetModule = typeof import("../src/lib/datasetItems");
 type WizardIoModule = typeof import("../src/components/berekeningen/berekeningenWizardIo");
 type BeerStyleModule = typeof import("../src/components/berekeningen/beerStylePersistence");
 type VariantProjectionModule = typeof import("../src/components/berekeningen/sellableVariantProjection");
+type PurchaseProjectionModule = typeof import("../src/components/berekeningen/purchaseProductProjection");
+type WizardDerivationsModule = typeof import("../src/components/berekeningen/berekeningenWizardDerivations");
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -122,7 +124,7 @@ async function run() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { reconcileDatasetItems } = require("../src/lib/datasetItems") as DatasetModule;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { saveBierRow, saveKostprijsversie } =
+  const { activateKostprijsversieProducts, saveBierRow, saveKostprijsversie } =
     require("../src/components/berekeningen/berekeningenWizardIo") as WizardIoModule;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { prepareBeerStylePersistence } =
@@ -130,6 +132,12 @@ async function run() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { selectExplicitBeerVariantSkus } =
     require("../src/components/berekeningen/sellableVariantProjection") as VariantProjectionModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { expandSelectedInkoopProductsToBasisproducten } =
+    require("../src/components/berekeningen/purchaseProductProjection") as PurchaseProjectionModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { buildResultaatSnapshotFromWizard } =
+    require("../src/components/berekeningen/berekeningenWizardDerivations") as WizardDerivationsModule;
   const originalFetch = globalThis.fetch;
 
   try {
@@ -259,6 +267,45 @@ async function run() {
     }
 
     {
+      let requestedPath = "";
+      let requestedBody = "";
+      let configuredTimeoutMs = 0;
+      const originalWindow = (globalThis as any).window;
+      (globalThis as any).window = {
+        setTimeout(handler: TimerHandler, timeout?: number, ...args: unknown[]) {
+          configuredTimeoutMs = Number(timeout ?? 0);
+          return globalThis.setTimeout(handler, timeout, ...args) as unknown as number;
+        },
+        clearTimeout(timeoutId: number) {
+          globalThis.clearTimeout(timeoutId);
+        },
+      };
+      globalThis.fetch = async (input, init = {}) => {
+        requestedPath = String(input);
+        requestedBody = String(init.body ?? "");
+        return jsonResponse({ activated: true });
+      };
+      try {
+        await activateKostprijsversieProducts("cost-activation", ["fmt-fles-33cl"]);
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+
+      assert(
+        requestedPath.endsWith("/data/kostprijsversies/cost-activation/activate-products"),
+        "Product activation request path changed."
+      );
+      assert(
+        requestedBody === JSON.stringify({ product_ids: ["fmt-fles-33cl"] }),
+        "Product activation request body changed."
+      );
+      assert(
+        configuredTimeoutMs === 120_000,
+        "Cost activation must allow the synchronous margin-snapshot refresh to complete."
+      );
+    }
+
+    {
       let idCount = 0;
       const prepared = prepareBeerStylePersistence({
         costRecord: {
@@ -337,6 +384,108 @@ async function run() {
         JSON.stringify(selected.map((row) => row.id)) === JSON.stringify(["explicit-box"]),
         "Only explicitly composed variants for the selected beer may be projected."
       );
+    }
+
+    {
+      const bottle = {
+        id: "fmt-fles-33cl",
+        jaar: 2026,
+        omschrijving: "Fles 33cl",
+        inhoud_per_eenheid_liter: 0.33,
+        totale_verpakkingskosten: 0,
+      };
+      const box = {
+        id: "fmt-doos-24-33cl",
+        jaar: 2026,
+        omschrijving: "Doos 24 * 33cl",
+        totale_inhoud_liter: 7.92,
+        totale_verpakkingskosten: 0,
+        basisproducten: [
+          {
+            basisproduct_id: "fmt-fles-33cl",
+            omschrijving: "Fles 33cl",
+            aantal: 24,
+            inhoud_per_eenheid_liter: 0.33,
+            totale_inhoud_liter: 7.92,
+          },
+          {
+            basisproduct_id: "fmt-fles-33cl",
+            omschrijving: "Fles 33cl (dubbele relatie)",
+            aantal: 24,
+            inhoud_per_eenheid_liter: 0.33,
+            totale_inhoud_liter: 7.92,
+          },
+          {
+            basisproduct_id: "verpakkingsonderdeel:doos-24",
+            omschrijving: "Doos 24 * 33cl",
+            aantal: 1,
+            inhoud_per_eenheid_liter: 0,
+            totale_inhoud_liter: 0,
+          },
+          {
+            basisproduct_id: "missing-format",
+            omschrijving: "Ontbrekende koppeling",
+            aantal: 1,
+          },
+        ],
+      };
+      const selected = [{ product: box, prijsPerEenheid: 24 }];
+      const expanded = expandSelectedInkoopProductsToBasisproducten(selected, [bottle]);
+
+      assert(
+        JSON.stringify(expanded.map((item) => String(item.product.id))) ===
+          JSON.stringify(["fmt-doos-24-33cl", "fmt-fles-33cl"]),
+        "A selected composite must remain visible and add each valid basis child exactly once."
+      );
+      assert(
+        Number(expanded[1]?.prijsPerEenheid) === 1,
+        "The historical composite-to-basis unit-cost derivation changed."
+      );
+
+      const snapshot = buildResultaatSnapshotFromWizard({
+        row: {
+          id: "cost-juweel",
+          bier_id: "beer-juweel",
+          basisgegevens: {
+            bier_id: "beer-juweel",
+            biernaam: "Berlewalde Het Juweel",
+            jaar: 2026,
+            belastingsoort: "Geen",
+            alcoholpercentage: 6.5,
+          },
+          soort_berekening: { type: "Inkoop" },
+          supplier_id: "beerselect",
+          supplier_config: {
+            packaging_costs_apply_by_sku: {},
+            excise_included_in_purchase_price: false,
+          },
+        },
+        productie: {},
+        vasteKosten: {},
+        tarievenHeffingen: [],
+        packagingComponentPrices: [],
+        basisproducten: [bottle],
+        samengesteldeProducten: [box],
+        getYearProduction: () => ({}),
+        getProductDisplayName: (product) => String(product.omschrijving ?? product.id ?? ""),
+        calculateVariabeleKostenPerLiter: () => 24 / 7.92,
+        getSelectedInkoopProducts: () => selected,
+      });
+      const basisRows = snapshot.producten.basisproducten;
+      const compositeRows = snapshot.producten.samengestelde_producten;
+
+      assert(
+        JSON.stringify(basisRows.map((row) => row.product_id)) === JSON.stringify(["fmt-fles-33cl"]),
+        "The result snapshot did not expose the composite's basis-product child."
+      );
+      assert(
+        JSON.stringify(compositeRows.map((row) => row.product_id)) === JSON.stringify(["fmt-doos-24-33cl"]),
+        "The result snapshot lost or duplicated the selected composite product."
+      );
+      assert(Number(basisRows[0]?.primaire_kosten) === 1, "Basis-product cost snapshot changed.");
+      assert(Number(basisRows[0]?.kostprijs) === 1, "Basis-product total cost snapshot changed.");
+      assert(Number(compositeRows[0]?.primaire_kosten) === 24, "Composite primary cost snapshot changed.");
+      assert(Number(compositeRows[0]?.kostprijs) === 24, "Composite total cost snapshot changed.");
     }
   } finally {
     globalThis.fetch = originalFetch;

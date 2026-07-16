@@ -777,44 +777,6 @@ function getSelectedInkoopProducts(
   }));
 }
 
-function expandSelectedInkoopProductsToBasisproducten(
-  selectedProducts: SelectedInkoopProduct[],
-  basisproducten: GenericRecord[]
-) {
-  const basisLookup = new Map(basisproducten.map((product) => [String(product.id ?? ""), product]));
-  const expanded: SelectedInkoopProduct[] = [];
-  const seen = new Set<string>();
-
-  for (const item of selectedProducts) {
-    const productId = String((item.product as GenericRecord).id ?? "");
-    if (!seen.has(productId)) {
-      expanded.push(item);
-      seen.add(productId);
-    }
-
-    const onderdelen = Array.isArray((item.product as GenericRecord).basisproducten)
-      ? ((item.product as GenericRecord).basisproducten as GenericRecord[])
-      : [];
-
-    for (const onderdeel of onderdelen) {
-      const basisId = String(onderdeel.basisproduct_id ?? "");
-      const basisproduct = basisLookup.get(basisId);
-      if (!basisproduct || seen.has(basisId)) {
-        continue;
-      }
-      const aantal = Number(onderdeel.aantal ?? 0);
-
-      expanded.push({
-        product: basisproduct,
-        prijsPerEenheid: aantal > 0 ? item.prijsPerEenheid / aantal : item.prijsPerEenheid
-      });
-      seen.add(basisId);
-    }
-  }
-
-  return expanded;
-}
-
 function getDirecteVasteKostenPerLiter(
   year: number,
   soort: string,
@@ -914,7 +876,6 @@ export {
   getSelectedInkoopProductRows,
   getInkoopFactuurregels,
   getSelectedInkoopProducts,
-  expandSelectedInkoopProductsToBasisproducten,
   getDirecteVasteKostenPerLiter,
   calculateVariabeleKostenPerLiter
 };

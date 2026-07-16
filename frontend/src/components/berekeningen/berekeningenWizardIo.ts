@@ -4,6 +4,8 @@ import { ApiRequestError, apiGetClient, apiRequestTextClient } from "@/lib/apiCl
 import { reconcileDatasetItems, saveDatasetItem } from "@/lib/datasetItems";
 import type { GenericRecord } from "@/components/berekeningen/berekeningenWizardUtils";
 
+const COST_ACTIVATION_TIMEOUT_MS = 120_000;
+
 export async function saveKostprijsversies(payload: GenericRecord[]) {
   await reconcileDatasetItems("kostprijsversies", payload);
 }
@@ -35,23 +37,31 @@ export async function saveBierRow(
 
 export async function activateKostprijsversie(versionId: string, effectiveFrom?: string) {
   const effective_from = String(effectiveFrom ?? "").trim();
-  await apiRequestTextClient(`/data/kostprijsversies/${encodeURIComponent(versionId)}/activate`, {
-    method: "POST",
-    ...(effective_from
-      ? {
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ effective_from }),
-        }
-      : {}),
-  });
+  await apiRequestTextClient(
+    `/data/kostprijsversies/${encodeURIComponent(versionId)}/activate`,
+    {
+      method: "POST",
+      ...(effective_from
+        ? {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ effective_from }),
+          }
+        : {}),
+    },
+    { timeoutMs: COST_ACTIVATION_TIMEOUT_MS }
+  );
 }
 
 export async function activateKostprijsversieProducts(versionId: string, productIds: string[]) {
-  await apiRequestTextClient(`/data/kostprijsversies/${encodeURIComponent(versionId)}/activate-products`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ product_ids: productIds }),
-  });
+  await apiRequestTextClient(
+    `/data/kostprijsversies/${encodeURIComponent(versionId)}/activate-products`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_ids: productIds }),
+    },
+    { timeoutMs: COST_ACTIVATION_TIMEOUT_MS }
+  );
 }
 
 export async function loadSkus(): Promise<GenericRecord[]> {

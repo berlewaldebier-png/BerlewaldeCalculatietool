@@ -62,6 +62,57 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
         self.assertIn("selectExplicitBeerVariantSkus({", wizard_source)
         self.assertIn("selectExplicitBeerVariantSkus({", coupling_source)
 
+    def test_cost_snapshot_uses_canonical_composite_to_basis_projection(self) -> None:
+        derivation_source = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "components"
+            / "berekeningen"
+            / "berekeningenWizardDerivations.ts"
+        ).read_text(encoding="utf-8")
+        legacy_source = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "components"
+            / "berekeningen"
+            / "berekeningenWizardLegacyHelpers.ts"
+        ).read_text(encoding="utf-8")
+        wizard_source = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "components"
+            / "BerekeningenWizard.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'from "@/components/berekeningen/purchaseProductProjection"',
+            derivation_source,
+        )
+        self.assertIn(
+            "expandSelectedInkoopProductsToBasisproducten(",
+            derivation_source,
+        )
+        self.assertNotIn(
+            "function expandSelectedInkoopProductsToBasisproducten(",
+            legacy_source,
+        )
+        self.assertIn(
+            "...(((snapshot as any)?.producten?.basisproducten as any[]) ?? [])",
+            wizard_source,
+        )
+        self.assertIn(
+            "...(((snapshot as any)?.producten?.samengestelde_producten as any[]) ?? [])",
+            wizard_source,
+        )
+        self.assertIn("costProductRows={buildCostProductCandidates()}", wizard_source)
+        self.assertIn("buildCostProductCandidates().forEach((candidate) => {", wizard_source)
+        self.assertIn("if (!skuId || activeSkuIds.has(skuId)) return;", wizard_source)
+        self.assertIn("const basisRows = ((snapshot as any)?.producten?.basisproducten", wizard_source)
+        self.assertIn("const compRows = ((snapshot as any)?.producten?.samengestelde_producten", wizard_source)
+
     def test_year_close_api_commit_precedes_incidental_reconciliation_and_draft_removal(self) -> None:
         source = _function_source(
             PROJECT_ROOT
