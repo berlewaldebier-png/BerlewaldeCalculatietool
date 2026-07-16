@@ -21,6 +21,7 @@ for path in (PROJECT_ROOT, BACKEND_ROOT):
 
 from app.api.routes import data as data_routes  # noqa: E402
 from app.api.routes import meta  # noqa: E402
+from app.api.routes import quotes as quote_routes  # noqa: E402
 from app.domain import (  # noqa: E402
     break_even_planning_service,
     break_even_planning_storage,
@@ -290,6 +291,23 @@ class WorkflowPostgresCharacterizationTests(unittest.IsolatedAsyncioTestCase):
             deleted = quote_drafts_storage.delete_draft(str(final["id"]))
             self.assertEqual(deleted, {"deleted": 1})
             self.assertIsNone(quote_drafts_storage.get_draft(str(final["id"])))
+
+    def test_quote_boundary_roundtrip_preserves_database_payload_and_delete_count(self) -> None:
+        with DisposablePostgresDatabase():
+            saved = quote_drafts_storage.save_draft(
+                _quote_payload(status="concept", marker="rf006-boundary")
+            )
+
+            listed = quote_routes.get_quotes(status="concept", limit=100)
+
+            self.assertEqual(len(listed["items"]), 1)
+            self.assertEqual(listed["items"][0], saved)
+            self.assertEqual(listed["items"][0]["payload"], saved["payload"])
+
+            deleted = quote_routes.delete_quote(str(saved["id"]))
+
+            self.assertEqual(deleted, {"deleted": 1})
+            self.assertIsNone(quote_drafts_storage.get_draft(str(saved["id"])))
 
     def test_concurrent_quote_create_exposes_max_plus_one_unique_conflict(self) -> None:
         with DisposablePostgresDatabase() as database:

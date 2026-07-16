@@ -1,0 +1,6 @@
+{
+  "method": "DELETE",
+  "path": "/quotes/quote-contract-001",
+  "query": {},
+  "body": null
+}

@@ -1,0 +1,101 @@
+{
+  "delete": {
+    "operationId": "delete_quote_quotes__quote_id__delete",
+    "parameters": [
+      {
+        "in": "path",
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "additionalProperties": true,
+              "title": "Response Delete Quote Quotes  Quote Id  Delete",
+              "type": "object"
+            }
+          }
+        },
+        "description": "Successful Response"
+      },
+      "422": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        },
+        "description": "Validation Error"
+      }
+    },
+    "summary": "Delete Quote",
+    "tags": [
+      "quotes"
+    ]
+  },
+  "list": {
+    "operationId": "get_quotes_quotes_get",
+    "parameters": [
+      {
+        "description": "Optionele statusfilter: concept | definitief",
+        "in": "query",
+        "name": "status",
+        "required": false,
+        "schema": {
+          "default": "",
+          "description": "Optionele statusfilter: concept | definitief",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      {
+        "in": "query",
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "responses": {
+      "200": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "additionalProperties": true,
+              "title": "Response Get Quotes Quotes Get",
+              "type": "object"
+            }
+          }
+        },
+        "description": "Successful Response"
+      },
+      "422": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        },
+        "description": "Validation Error"
+      }
+    },
+    "summary": "Get Quotes",
+    "tags": [
+      "quotes"
+    ]
+  }
+}

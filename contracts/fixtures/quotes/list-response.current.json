@@ -1,0 +1,30 @@
+{
+  "items": [
+    {
+      "id": "quote-contract-001",
+      "quote_number": "OFF-2026-0001",
+      "quote_number_seq": 1,
+      "schema_version": 1,
+      "draft_version": 3,
+      "status": "concept",
+      "year": 2026,
+      "customer_name": "Contractklant",
+      "contact_name": "Contactpersoon",
+      "channel_code": "horeca",
+      "title": "Voorstel contracttest",
+      "valid_until": null,
+      "active_scenario_id": "A",
+      "created_at": "2026-07-01T10:00:00+00:00",
+      "updated_at": "2026-07-02T11:30:00+00:00",
+      "finalized_at": null,
+      "payload": {
+        "schemaVersion": 1,
+        "draft": {
+          "basis": {
+            "klantNaam": "Contractklant"
+          }
+        }
+      }
+    }
+  ]
+}
