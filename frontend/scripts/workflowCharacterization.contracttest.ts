@@ -124,7 +124,7 @@ async function run() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { reconcileDatasetItems } = require("../src/lib/datasetItems") as DatasetModule;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { saveBierRow, saveKostprijsversie } =
+  const { activateKostprijsversieProducts, saveBierRow, saveKostprijsversie } =
     require("../src/components/berekeningen/berekeningenWizardIo") as WizardIoModule;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { prepareBeerStylePersistence } =
@@ -264,6 +264,45 @@ async function run() {
         "A partial-retry save must recover from create conflict through an ETag-protected update."
       );
       assert(api.rows.get("cost-new")?.status === "concept-retry", "Partial retry did not converge.");
+    }
+
+    {
+      let requestedPath = "";
+      let requestedBody = "";
+      let configuredTimeoutMs = 0;
+      const originalWindow = (globalThis as any).window;
+      (globalThis as any).window = {
+        setTimeout(handler: TimerHandler, timeout?: number, ...args: unknown[]) {
+          configuredTimeoutMs = Number(timeout ?? 0);
+          return globalThis.setTimeout(handler, timeout, ...args) as unknown as number;
+        },
+        clearTimeout(timeoutId: number) {
+          globalThis.clearTimeout(timeoutId);
+        },
+      };
+      globalThis.fetch = async (input, init = {}) => {
+        requestedPath = String(input);
+        requestedBody = String(init.body ?? "");
+        return jsonResponse({ activated: true });
+      };
+      try {
+        await activateKostprijsversieProducts("cost-activation", ["fmt-fles-33cl"]);
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+
+      assert(
+        requestedPath.endsWith("/data/kostprijsversies/cost-activation/activate-products"),
+        "Product activation request path changed."
+      );
+      assert(
+        requestedBody === JSON.stringify({ product_ids: ["fmt-fles-33cl"] }),
+        "Product activation request body changed."
+      );
+      assert(
+        configuredTimeoutMs === 120_000,
+        "Cost activation must allow the synchronous margin-snapshot refresh to complete."
+      );
     }
 
     {
