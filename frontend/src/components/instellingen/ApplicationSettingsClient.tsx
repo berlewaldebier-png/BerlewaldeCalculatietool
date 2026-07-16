@@ -3,13 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { API_BASE_URL } from "@/lib/api";
-
-type ApplicationSettings = {
-  company_name?: string;
-  currency?: string;
-  support_email?: string;
-};
+import {
+  saveApplicationSettings,
+  type ApplicationSettings
+} from "@/components/instellingen/applicationSettingsApi";
+import { apiErrorMessage } from "@/lib/apiClient";
 
 export function ApplicationSettingsClient({ initial }: { initial: ApplicationSettings }) {
   const router = useRouter();
@@ -30,21 +28,13 @@ export function ApplicationSettingsClient({ initial }: { initial: ApplicationSet
         currency: "EUR",
         support_email: supportEmail.trim() || "info@berlewaldebier.nl",
       };
-      const response = await fetch(`${API_BASE_URL}/data/application-settings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Opslaan mislukt.");
-      }
+      await saveApplicationSettings(payload);
       window.dispatchEvent(new Event("calculatietool-settings-changed"));
       setStatus("Opgeslagen.");
       setTone("success");
       router.refresh();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Opslaan mislukt.");
+      setStatus(apiErrorMessage(error, "Opslaan mislukt."));
       setTone("error");
     } finally {
       setIsSaving(false);

@@ -7,6 +7,8 @@ type BeerStyleModule = typeof import("../src/components/berekeningen/beerStylePe
 type VariantProjectionModule = typeof import("../src/components/berekeningen/sellableVariantProjection");
 type PurchaseProjectionModule = typeof import("../src/components/berekeningen/purchaseProductProjection");
 type WizardDerivationsModule = typeof import("../src/components/berekeningen/berekeningenWizardDerivations");
+type ApiClientModule = typeof import("../src/lib/apiClient");
+type ApplicationSettingsApiModule = typeof import("../src/components/instellingen/applicationSettingsApi");
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -138,9 +140,206 @@ async function run() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { buildResultaatSnapshotFromWizard } =
     require("../src/components/berekeningen/berekeningenWizardDerivations") as WizardDerivationsModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ApiRequestError, apiErrorMessage, apiRequestJsonClient } =
+    require("../src/lib/apiClient") as ApiClientModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { loadApplicationSettings, saveApplicationSettings } =
+    require("../src/components/instellingen/applicationSettingsApi") as ApplicationSettingsApiModule;
   const originalFetch = globalThis.fetch;
 
   try {
+    {
+      let requestCount = 0;
+      let requestedUrl = "";
+      let requestedInit: RequestInit | undefined;
+      globalThis.fetch = async (input, init) => {
+        requestCount += 1;
+        requestedUrl = String(input);
+        requestedInit = init;
+        return jsonResponse({
+          company_name: "Berlewalde Brouwerij",
+          currency: "EUR",
+          support_email: "info@berlewaldebier.nl",
+        });
+      };
+
+      const result = await loadApplicationSettings();
+
+      assert(requestCount === 1, "Application-settings read introduced an automatic retry.");
+      assert(requestedUrl.endsWith("/data/application-settings"), "Application-settings read URL changed.");
+      assert(requestedInit?.cache === "no-store", "Application-settings read cache contract changed.");
+      assert(requestedInit?.method === undefined, "Application-settings read method changed.");
+      assert(requestedInit?.credentials === undefined, "Application-settings read credential mode changed.");
+      assert(result.company_name === "Berlewalde Brouwerij", "Application-settings response changed.");
+    }
+
+    {
+      globalThis.fetch = async () =>
+        jsonResponse({
+          data: {
+            company_name: "Berlewalde Brouwerij",
+            currency: "EUR",
+            support_email: "info@berlewaldebier.nl",
+          },
+        });
+      const result = await loadApplicationSettings();
+      assert(result.company_name === "Berlewalde Brouwerij", "Application-settings envelope handling changed.");
+    }
+
+    {
+      let requestCount = 0;
+      let requestedUrl = "";
+      let requestedInit: RequestInit | undefined;
+      globalThis.fetch = async (input, init) => {
+        requestCount += 1;
+        requestedUrl = String(input);
+        requestedInit = init;
+        return new Response(null, { status: 204 });
+      };
+      const payload = {
+        company_name: "Berlewalde Brouwerij",
+        currency: "EUR",
+        support_email: "info@berlewaldebier.nl",
+      };
+
+      await saveApplicationSettings(payload);
+
+      assert(requestCount === 1, "Application-settings save introduced an automatic retry.");
+      assert(requestedUrl.endsWith("/data/application-settings"), "Application-settings save URL changed.");
+      assert(requestedInit?.method === "PUT", "Application-settings save method changed.");
+      assert(requestedInit?.credentials === undefined, "Application-settings save credential mode changed.");
+      assert(
+        new Headers(requestedInit?.headers).get("Content-Type") === "application/json",
+        "Application-settings content type changed."
+      );
+      assert(requestedInit?.body === JSON.stringify(payload), "Application-settings request payload changed.");
+    }
+
+    {
+      const statuses = [401, 403, 404, 409, 412, 422, 500];
+      for (const status of statuses) {
+        let requestCount = 0;
+        const body = JSON.stringify({
+          detail: `status-${status}`,
+          request_id: `request-${status}`,
+        });
+        globalThis.fetch = async () => {
+          requestCount += 1;
+          return new Response(body, {
+            status,
+            headers: { "Content-Type": "application/json" },
+          });
+        };
+
+        const error = await expectRejects(
+          () => saveApplicationSettings({ company_name: "Test" }),
+          `${status} must reject`
+        );
+
+        assert(error instanceof ApiRequestError, `${status} did not produce structured API metadata.`);
+        assert(error.status === status, `${status} metadata changed.`);
+        assert(error.category === "http", `${status} error category changed.`);
+        assert(error.detail === `status-${status}`, `${status} detail parsing changed.`);
+        assert(error.requestId === `request-${status}`, `${status} request id parsing changed.`);
+        assert(error.bodyText === body, `${status} raw response preservation changed.`);
+        assert(apiErrorMessage(error, "Opslaan mislukt.") === body, `${status} visible raw error text changed.`);
+        assert(requestCount === 1, `${status} introduced an automatic retry.`);
+      }
+    }
+
+    {
+      globalThis.fetch = async () =>
+        new Response("plain failure", {
+          status: 400,
+          headers: { "X-Request-ID": "plain-request" },
+        });
+      const error = await expectRejects(
+        () => saveApplicationSettings({ company_name: "Test" }),
+        "Plain-text error must reject"
+      );
+      assert(error instanceof ApiRequestError, "Plain-text error lost structured metadata.");
+      assert(error.detail === "", "Plain-text response unexpectedly invented a detail.");
+      assert(error.requestId === "plain-request", "Header request id metadata changed.");
+      assert(apiErrorMessage(error, "Opslaan mislukt.") === "plain failure", "Plain-text error copy changed.");
+    }
+
+    {
+      globalThis.fetch = async () => new Response(null, { status: 500 });
+      const error = await expectRejects(
+        () => saveApplicationSettings({ company_name: "Test" }),
+        "Empty HTTP error must reject"
+      );
+      assert(error instanceof ApiRequestError, "Empty HTTP error lost structured metadata.");
+      assert(
+        apiErrorMessage(error, "Opslaan mislukt.") === "Opslaan mislukt.",
+        "Empty HTTP error no longer uses the existing Dutch fallback."
+      );
+    }
+
+    {
+      globalThis.fetch = async () => new Response("not-json", { status: 200 });
+      const error = await expectRejects(
+        () => loadApplicationSettings(),
+        "Invalid JSON read must reject"
+      );
+      assert(error instanceof ApiRequestError, "Invalid JSON did not produce structured metadata.");
+      assert(error.category === "invalid_response", "Invalid JSON category changed.");
+      assert(error.bodyText === "not-json", "Invalid JSON raw body changed.");
+    }
+
+    {
+      let requestCount = 0;
+      globalThis.fetch = async () => {
+        requestCount += 1;
+        throw new TypeError("Failed to fetch");
+      };
+      const error = await expectRejects(
+        () => loadApplicationSettings(),
+        "Network failure must reject"
+      );
+      assert(error instanceof ApiRequestError, "Network failure did not produce structured metadata.");
+      assert(error.category === "network", "Network failure category changed.");
+      assert(error.message === "Failed to fetch", "Network failure message changed.");
+      assert(requestCount === 1, "Network failure introduced an automatic retry.");
+    }
+
+    {
+      globalThis.fetch = async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) {
+            reject(new Error("Missing timeout signal"));
+            return;
+          }
+          const rejectWithReason = () => reject(signal.reason);
+          if (signal.aborted) rejectWithReason();
+          else signal.addEventListener("abort", rejectWithReason, { once: true });
+        });
+      const error = await expectRejects(
+        () => apiRequestJsonClient("/slow-read", { cache: "no-store" }, { timeoutMs: 5 }),
+        "Timeout must reject"
+      );
+      assert(error instanceof ApiRequestError, "Timeout did not produce structured metadata.");
+      assert(error.category === "timeout", "Timeout category changed.");
+    }
+
+    {
+      const controller = new AbortController();
+      controller.abort();
+      globalThis.fetch = async (_input, init) => {
+        const signal = init?.signal;
+        if (signal?.aborted) throw signal.reason;
+        throw new Error("Expected an aborted signal");
+      };
+      const error = await expectRejects(
+        () => apiRequestJsonClient("/cancelled-read", { signal: controller.signal }),
+        "Explicit abort must reject"
+      );
+      assert(error instanceof ApiRequestError, "Explicit abort did not produce structured metadata.");
+      assert(error.category === "aborted", "Explicit abort category changed.");
+    }
+
     {
       const api = createDatasetApi([]);
       globalThis.fetch = api.fetchMock;

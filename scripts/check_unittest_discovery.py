@@ -77,6 +77,9 @@ required_rf007_contracts = {
     "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_cost_snapshot_uses_canonical_composite_to_basis_projection",
     "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_cost_style_save_uses_targeted_item_contract_and_busy_feedback",
 }
+required_rf008_contracts = {
+    "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_application_settings_read_and_save_contract_is_preserved",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -86,6 +89,7 @@ missing = sorted(
         | required_rf005a_contracts
         | required_rf006_contracts
         | required_rf007_contracts
+        | required_rf008_contracts
     ).difference(ids)
 )
 
@@ -96,5 +100,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006 and RF-007 contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007 and RF-008 contracts collected"
 )
