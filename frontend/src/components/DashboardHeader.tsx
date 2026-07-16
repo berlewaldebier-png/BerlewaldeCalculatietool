@@ -21,7 +21,6 @@ import {
   Users
 } from "lucide-react";
 
-import { API_BASE_URL } from "@/lib/api";
 import {
   fetchMe,
   hasCapability,
@@ -30,6 +29,8 @@ import {
   type AuthSession
 } from "@/lib/auth";
 import { SmartGlobalSearch } from "@/components/SmartGlobalSearch";
+import { loadApplicationSettings } from "@/components/instellingen/applicationSettingsApi";
+import { ApiRequestError } from "@/lib/apiClient";
 
 type Crumb = {
   label: string;
@@ -194,17 +195,16 @@ export function DashboardHeader() {
   useEffect(() => {
     let cancelled = false;
     const syncSettings = () => {
-      void fetch(`${API_BASE_URL}/data/application-settings`, { cache: "no-store" })
-        .then((response) => (response.ok ? response.json() : null))
+      void loadApplicationSettings()
         .then((payload) => {
           if (cancelled) return;
-          const nextCompanyName = String(payload?.data?.company_name || "").trim();
+          const nextCompanyName = String(payload.company_name || "").trim();
           if (nextCompanyName) {
             setCompanyName(nextCompanyName);
           }
         })
-        .catch(() => {
-          if (!cancelled) {
+        .catch((error) => {
+          if (!cancelled && !(error instanceof ApiRequestError && error.category === "http")) {
             setCompanyName("Berlewalde Brouwerij");
           }
         });

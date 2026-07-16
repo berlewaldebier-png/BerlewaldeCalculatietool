@@ -113,6 +113,53 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
         self.assertIn("const basisRows = ((snapshot as any)?.producten?.basisproducten", wizard_source)
         self.assertIn("const compRows = ((snapshot as any)?.producten?.samengestelde_producten", wizard_source)
 
+    def test_application_settings_read_and_save_contract_is_preserved(self) -> None:
+        header_source = (
+            PROJECT_ROOT / "frontend" / "src" / "components" / "DashboardHeader.tsx"
+        ).read_text(encoding="utf-8")
+        settings_source = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "components"
+            / "instellingen"
+            / "ApplicationSettingsClient.tsx"
+        ).read_text(encoding="utf-8")
+        adapter_path = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "components"
+            / "instellingen"
+            / "applicationSettingsApi.ts"
+        )
+        adapter_source = adapter_path.read_text(encoding="utf-8") if adapter_path.exists() else ""
+        combined_api_source = "\n".join((header_source, settings_source, adapter_source))
+
+        self.assertIn("/data/application-settings", combined_api_source)
+        self.assertIn('cache: "no-store"', combined_api_source)
+        self.assertIn('method: "PUT"', combined_api_source)
+        self.assertIn('"Content-Type": "application/json"', combined_api_source)
+        self.assertIn("body: JSON.stringify(payload)", combined_api_source)
+
+        self.assertIn('companyName.trim() || "Berlewalde Brouwerij"', settings_source)
+        self.assertIn('currency: "EUR"', settings_source)
+        self.assertIn(
+            'supportEmail.trim() || "info@berlewaldebier.nl"',
+            settings_source,
+        )
+        self.assertIn('setStatus("Opgeslagen.")', settings_source)
+        self.assertIn('setTone("success")', settings_source)
+        self.assertIn('new Event("calculatietool-settings-changed")', settings_source)
+        self.assertIn("disabled={isSaving}", settings_source)
+
+        self.assertIn('setCompanyName("Berlewalde Brouwerij")', header_source)
+        self.assertIn(
+            'window.addEventListener("calculatietool-settings-changed", syncSettings)',
+            header_source,
+        )
+        self.assertIn("if (cancelled) return", header_source)
+
     def test_year_close_api_commit_precedes_incidental_reconciliation_and_draft_removal(self) -> None:
         source = _function_source(
             PROJECT_ROOT

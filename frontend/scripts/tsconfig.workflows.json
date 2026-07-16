@@ -29,6 +29,7 @@
     "../src/components/berekeningen/beerStylePersistence.ts",
     "../src/components/berekeningen/sellableVariantProjection.ts",
     "../src/components/berekeningen/purchaseProductProjection.ts",
+    "../src/components/instellingen/applicationSettingsApi.ts",
     "../src/components/berekeningen/berekeningenWizardDerivations.ts",
     "../src/lib/kostprijsSnapshotEngine.ts",
     "../src/lib/kostprijsEngine.ts"
