@@ -2,6 +2,7 @@ import path from "node:path";
 
 type Row = Record<string, unknown> & { id: string };
 type DatasetModule = typeof import("../src/lib/datasetItems");
+type WizardIoModule = typeof import("../src/components/berekeningen/berekeningenWizardIo");
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -39,7 +40,7 @@ function jsonResponse(value: unknown, status = 200): Response {
 
 function createDatasetApi(initialRows: Row[]) {
   const rows = new Map(initialRows.map((row) => [row.id, structuredClone(row)]));
-  const calls: Array<{ method: string; id: string }> = [];
+  const calls: Array<{ method: string; id: string; bodyId: string; ifMatch: string }> = [];
   let mutationCount = 0;
   let failMutation = 0;
   let failStatus = 500;
@@ -63,19 +64,26 @@ function createDatasetApi(initialRows: Row[]) {
       return jsonResponse({ item: structuredClone(row), etag: `etag-${id}` });
     }
 
+    const body = init.body ? JSON.parse(String(init.body)) as Partial<Row> : {};
+    const headers = new Headers(init.headers);
     mutationCount += 1;
-    calls.push({ method, id });
+    calls.push({
+      method,
+      id,
+      bodyId: String(body.id ?? ""),
+      ifMatch: String(headers.get("If-Match") ?? ""),
+    });
     if (failMutation > 0 && mutationCount === failMutation) {
       return jsonResponse({ detail: `injected-${method.toLowerCase()}-${id || mutationCount}` }, failStatus);
     }
 
     if (method === "POST") {
-      const row = JSON.parse(String(init.body ?? "{}")) as Row;
+      const row = body as Row;
       rows.set(row.id, structuredClone(row));
       return jsonResponse({ item: row });
     }
     if (method === "PUT") {
-      const row = JSON.parse(String(init.body ?? "{}")) as Row;
+      const row = body as Row;
       rows.set(id, structuredClone(row));
       return jsonResponse({ item: row });
     }
@@ -107,6 +115,8 @@ async function run() {
   installAtAliasResolverForCompiledTests();
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { reconcileDatasetItems } = require("../src/lib/datasetItems") as DatasetModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { saveBierenRows } = require("../src/components/berekeningen/berekeningenWizardIo") as WizardIoModule;
   const originalFetch = globalThis.fetch;
 
   try {
@@ -157,7 +167,7 @@ async function run() {
     {
       const api = createDatasetApi([{ id: "changed", label: "Old" }, { id: "stale", label: "Stale" }]);
       globalThis.fetch = api.fetchMock;
-      api.injectFailure(1, 412);
+      api.injectFailure(1, 409);
       const error = await expectRejects(
         () => reconcileDatasetItems("channels", [{ id: "changed", label: "New" }]),
         "ETag conflict must reject"
@@ -165,6 +175,82 @@ async function run() {
       assert(error.message.includes("injected-put-changed"), "API conflict detail is no longer surfaced");
       assert(api.rows.get("changed")?.label === "Old", "conflicted update must not change the item");
       assert(api.rows.has("stale"), "later deletion must not run after an ETag conflict");
+    }
+
+    {
+      const api = createDatasetApi([
+        { id: "beer-update", biernaam: "Blond", stijl: "Old style", active: true },
+        { id: "beer-keep", biernaam: "Tripel", stijl: "Tripel", active: true },
+        { id: "beer-delete", biernaam: "Legacy", stijl: "Legacy", active: false },
+      ]);
+      globalThis.fetch = api.fetchMock;
+      const requestedRows: Row[] = [
+        { id: "beer-update", biernaam: "Blond", stijl: "Belgisch blond", active: true },
+        { id: "beer-keep", biernaam: "Tripel", stijl: "Tripel", active: true },
+        { id: "beer-create", biernaam: "Saison", stijl: "Saison", active: true },
+      ];
+
+      await saveBierenRows(requestedRows);
+
+      assert(
+        JSON.stringify(api.calls.map(({ method, id, bodyId }) => ({ method, id, bodyId })))
+          === JSON.stringify([
+            { method: "PUT", id: "beer-update", bodyId: "beer-update" },
+            { method: "POST", id: "", bodyId: "beer-create" },
+            { method: "DELETE", id: "beer-delete", bodyId: "" },
+          ]),
+        "Beer save must reconcile changed, new and deleted items without a collection PUT."
+      );
+      assert(api.calls[0].ifMatch === "etag-beer-update", "Beer update must carry its current ETag.");
+      assert(api.calls[2].ifMatch === "etag-beer-delete", "Beer delete must carry its current ETag.");
+      assert(
+        JSON.stringify([...api.rows.values()]) === JSON.stringify(requestedRows),
+        "Beer reconciliation changed ids, fields or final item order."
+      );
+    }
+
+    {
+      const api = createDatasetApi([
+        { id: "beer-update", biernaam: "Blond", stijl: "Old style" },
+        { id: "beer-delete", biernaam: "Legacy", stijl: "Legacy" },
+      ]);
+      globalThis.fetch = api.fetchMock;
+      const requestedRows: Row[] = [
+        { id: "beer-update", biernaam: "Blond", stijl: "Belgisch blond" },
+        { id: "beer-create", biernaam: "Saison", stijl: "Saison" },
+      ];
+
+      api.injectFailure(2);
+      const error = await expectRejects(
+        () => saveBierenRows(requestedRows),
+        "Second beer item failure must reject."
+      );
+      assert(error.message.includes("injected-post-2"), "Beer item failure detail is no longer surfaced.");
+      assert(
+        api.rows.get("beer-update")?.stijl === "Belgisch blond",
+        "The earlier beer update must remain committed after a later item failure."
+      );
+      assert(!api.rows.has("beer-create"), "The failed beer create must not appear committed.");
+      assert(api.rows.has("beer-delete"), "Deletion must be deferred after an earlier beer item failure.");
+
+      api.clearFailure();
+      await saveBierenRows(requestedRows);
+      assert(
+        JSON.stringify([...api.rows.values()]) === JSON.stringify(requestedRows),
+        "Retry after a partial beer save must converge to the requested rows."
+      );
+    }
+
+    {
+      globalThis.fetch = async () => new Response(null, { status: 500 });
+      const error = await expectRejects(
+        () => saveBierenRows([{ id: "beer", biernaam: "Blond", stijl: "Blond" }]),
+        "Empty API failure must reject."
+      );
+      assert(
+        error.message === "Bierstamdata opslaan mislukt.",
+        "The existing beer-save fallback message changed."
+      );
     }
   } finally {
     globalThis.fetch = originalFetch;

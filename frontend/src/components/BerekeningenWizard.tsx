@@ -9,6 +9,7 @@ import { ApiRequestError } from "@/lib/apiClient";
 import {
   activateKostprijsversie,
   activateKostprijsversieProducts,
+  saveBierenRows,
   saveKostprijsversie,
   loadDouanoProductMappings,
   loadArticles,
@@ -158,7 +159,6 @@ type EnrichedFactuurRegel = {
 };
 
 const KOSTPRIJSVERSIES_API = `${API_BASE_URL}/data/kostprijsversies`;
-const BIEREN_API = `/api/data/bieren`;
 
 function emptyInkoopFactuur() {
   const id = createId();
@@ -749,19 +749,6 @@ export function BerekeningenWizard({
       updated_at: new Date().toISOString(),
       created_at: String((existing as any)?.created_at ?? "") || new Date().toISOString(),
     };
-  }
-
-  async function saveBierenRows(rows: GenericRecord[]) {
-    const response = await fetch(BIEREN_API, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(rows),
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      const detail = String((payload as any)?.detail ?? "Bierstamdata opslaan mislukt.");
-      throw new Error(detail);
-    }
   }
 
   function prepareStyleForCurrent() {

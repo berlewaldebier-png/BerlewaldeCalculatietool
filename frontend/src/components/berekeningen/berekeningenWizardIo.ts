@@ -12,6 +12,17 @@ export async function saveKostprijsversie(payload: GenericRecord): Promise<Gener
   return upsertDatasetItem("kostprijsversies", payload);
 }
 
+export async function saveBierenRows(payload: GenericRecord[]) {
+  try {
+    await reconcileDatasetItems("bieren", payload);
+  } catch (error) {
+    if (error instanceof Error && error.message === "API request mislukt") {
+      throw new Error("Bierstamdata opslaan mislukt.");
+    }
+    throw error;
+  }
+}
+
 export async function activateKostprijsversie(versionId: string, effectiveFrom?: string) {
   const effective_from = String(effectiveFrom ?? "").trim();
   await apiRequestTextClient(`/data/kostprijsversies/${encodeURIComponent(versionId)}/activate`, {

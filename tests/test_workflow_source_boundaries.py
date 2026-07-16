@@ -30,6 +30,24 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
         self.assertLess(style_index, activation_index)
         self.assertIn("Afronden gelukt, maar nieuwe artikelen automatisch activeren mislukt", source)
 
+    def test_cost_style_save_uses_item_reconciliation_contract(self) -> None:
+        wizard_source = (
+            PROJECT_ROOT / "frontend" / "src" / "components" / "BerekeningenWizard.tsx"
+        ).read_text(encoding="utf-8")
+        io_source = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "components"
+            / "berekeningen"
+            / "berekeningenWizardIo.ts"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("saveBierenRows,", wizard_source)
+        self.assertNotIn("async function saveBierenRows(", wizard_source)
+        self.assertNotIn("BIEREN_API", wizard_source)
+        self.assertIn('reconcileDatasetItems("bieren", payload)', io_source)
+
     def test_year_close_api_commit_precedes_incidental_reconciliation_and_draft_removal(self) -> None:
         source = _function_source(
             PROJECT_ROOT

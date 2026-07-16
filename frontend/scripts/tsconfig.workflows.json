@@ -21,6 +21,9 @@
     "./workflowCharacterization.contracttest.ts",
     "../src/lib/datasetItems.ts",
     "../src/lib/api.ts",
-    "../src/lib/apiShared.ts"
+    "../src/lib/apiShared.ts",
+    "../src/lib/apiClient.ts",
+    "../src/components/berekeningen/berekeningenWizardIo.ts",
+    "../src/components/berekeningen/berekeningenWizardUtils.ts"
   ]
 }

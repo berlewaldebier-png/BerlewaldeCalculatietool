@@ -72,6 +72,10 @@ required_rf006_contracts = {
 required_rf005a_contracts = {
     "test_auth_role_policy.AuthRolePolicyTests.test_complete_navigation_projection_matches_rf_005a_role_contract",
 }
+required_rf007_contracts = {
+    "test_dataset_resource_crud.DatasetResourceCrudTests.test_bieren_item_reconciliation_preserves_projection_sync_in_production",
+    "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_cost_style_save_uses_item_reconciliation_contract",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -80,6 +84,7 @@ missing = sorted(
         | required_rf005_contracts
         | required_rf005a_contracts
         | required_rf006_contracts
+        | required_rf007_contracts
     ).difference(ids)
 )
 
@@ -90,5 +95,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A and RF-006 contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006 and RF-007 contracts collected"
 )
