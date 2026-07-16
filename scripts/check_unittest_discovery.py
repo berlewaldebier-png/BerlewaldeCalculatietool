@@ -74,7 +74,7 @@ required_rf005a_contracts = {
 }
 required_rf007_contracts = {
     "test_dataset_resource_crud.DatasetResourceCrudTests.test_bieren_item_reconciliation_preserves_projection_sync_in_production",
-    "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_cost_style_save_uses_item_reconciliation_contract",
+    "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_cost_style_save_uses_targeted_item_contract_and_busy_feedback",
 }
 missing = sorted(
     (

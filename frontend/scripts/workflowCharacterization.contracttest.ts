@@ -3,6 +3,8 @@ import path from "node:path";
 type Row = Record<string, unknown> & { id: string };
 type DatasetModule = typeof import("../src/lib/datasetItems");
 type WizardIoModule = typeof import("../src/components/berekeningen/berekeningenWizardIo");
+type BeerStyleModule = typeof import("../src/components/berekeningen/beerStylePersistence");
+type VariantProjectionModule = typeof import("../src/components/berekeningen/sellableVariantProjection");
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -41,6 +43,7 @@ function jsonResponse(value: unknown, status = 200): Response {
 function createDatasetApi(initialRows: Row[]) {
   const rows = new Map(initialRows.map((row) => [row.id, structuredClone(row)]));
   const calls: Array<{ method: string; id: string; bodyId: string; ifMatch: string }> = [];
+  const requests: Array<{ method: string; id: string }> = [];
   let mutationCount = 0;
   let failMutation = 0;
   let failStatus = 500;
@@ -50,6 +53,7 @@ function createDatasetApi(initialRows: Row[]) {
     const method = String(init.method ?? "GET").toUpperCase();
     const itemMatch = url.pathname.match(/\/items\/([^/]+)$/);
     const id = itemMatch ? decodeURIComponent(itemMatch[1]) : "";
+    requests.push({ method, id });
 
     if (method === "GET" && !id) {
       return jsonResponse({
@@ -79,6 +83,7 @@ function createDatasetApi(initialRows: Row[]) {
 
     if (method === "POST") {
       const row = body as Row;
+      if (rows.has(row.id)) return jsonResponse({ detail: "already exists" }, 409);
       rows.set(row.id, structuredClone(row));
       return jsonResponse({ item: row });
     }
@@ -97,6 +102,7 @@ function createDatasetApi(initialRows: Row[]) {
   return {
     rows,
     calls,
+    requests,
     fetchMock,
     injectFailure(atMutation: number, status = 500) {
       mutationCount = 0;
@@ -116,7 +122,14 @@ async function run() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { reconcileDatasetItems } = require("../src/lib/datasetItems") as DatasetModule;
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { saveBierenRows } = require("../src/components/berekeningen/berekeningenWizardIo") as WizardIoModule;
+  const { saveBierRow, saveKostprijsversie } =
+    require("../src/components/berekeningen/berekeningenWizardIo") as WizardIoModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { prepareBeerStylePersistence } =
+    require("../src/components/berekeningen/beerStylePersistence") as BeerStyleModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { selectExplicitBeerVariantSkus } =
+    require("../src/components/berekeningen/sellableVariantProjection") as VariantProjectionModule;
   const originalFetch = globalThis.fetch;
 
   try {
@@ -178,78 +191,151 @@ async function run() {
     }
 
     {
-      const api = createDatasetApi([
-        { id: "beer-update", biernaam: "Blond", stijl: "Old style", active: true },
-        { id: "beer-keep", biernaam: "Tripel", stijl: "Tripel", active: true },
-        { id: "beer-delete", biernaam: "Legacy", stijl: "Legacy", active: false },
-      ]);
+      const api = createDatasetApi([]);
       globalThis.fetch = api.fetchMock;
-      const requestedRows: Row[] = [
-        { id: "beer-update", biernaam: "Blond", stijl: "Belgisch blond", active: true },
-        { id: "beer-keep", biernaam: "Tripel", stijl: "Tripel", active: true },
-        { id: "beer-create", biernaam: "Saison", stijl: "Saison", active: true },
-      ];
+      const requested = { id: "beer-create", biernaam: "Saison", stijl: "Saison", active: true };
 
-      await saveBierenRows(requestedRows);
+      await saveBierRow(requested, { knownExisting: false });
 
       assert(
-        JSON.stringify(api.calls.map(({ method, id, bodyId }) => ({ method, id, bodyId })))
-          === JSON.stringify([
-            { method: "PUT", id: "beer-update", bodyId: "beer-update" },
-            { method: "POST", id: "", bodyId: "beer-create" },
-            { method: "DELETE", id: "beer-delete", bodyId: "" },
-          ]),
-        "Beer save must reconcile changed, new and deleted items without a collection PUT."
+        JSON.stringify(api.requests) === JSON.stringify([{ method: "POST", id: "" }]),
+        "A known-new beer must be created directly without a list read or expected item 404."
       );
-      assert(api.calls[0].ifMatch === "etag-beer-update", "Beer update must carry its current ETag.");
-      assert(api.calls[2].ifMatch === "etag-beer-delete", "Beer delete must carry its current ETag.");
-      assert(
-        JSON.stringify([...api.rows.values()]) === JSON.stringify(requestedRows),
-        "Beer reconciliation changed ids, fields or final item order."
-      );
+      assert(api.rows.get("beer-create")?.stijl === "Saison", "The targeted beer create changed its payload.");
     }
 
     {
       const api = createDatasetApi([
         { id: "beer-update", biernaam: "Blond", stijl: "Old style" },
-        { id: "beer-delete", biernaam: "Legacy", stijl: "Legacy" },
+        { id: "beer-keep", biernaam: "Tripel", stijl: "Tripel" },
       ]);
       globalThis.fetch = api.fetchMock;
-      const requestedRows: Row[] = [
+      await saveBierRow(
         { id: "beer-update", biernaam: "Blond", stijl: "Belgisch blond" },
-        { id: "beer-create", biernaam: "Saison", stijl: "Saison" },
-      ];
-
-      api.injectFailure(2);
-      const error = await expectRejects(
-        () => saveBierenRows(requestedRows),
-        "Second beer item failure must reject."
+        { knownExisting: true }
       );
-      assert(error.message.includes("injected-post-2"), "Beer item failure detail is no longer surfaced.");
       assert(
-        api.rows.get("beer-update")?.stijl === "Belgisch blond",
-        "The earlier beer update must remain committed after a later item failure."
+        JSON.stringify(api.requests) ===
+          JSON.stringify([
+            { method: "GET", id: "beer-update" },
+            { method: "PUT", id: "beer-update" },
+          ]),
+        "An existing beer must use its item ETag and must not reconcile unrelated beer rows."
       );
-      assert(!api.rows.has("beer-create"), "The failed beer create must not appear committed.");
-      assert(api.rows.has("beer-delete"), "Deletion must be deferred after an earlier beer item failure.");
-
-      api.clearFailure();
-      await saveBierenRows(requestedRows);
-      assert(
-        JSON.stringify([...api.rows.values()]) === JSON.stringify(requestedRows),
-        "Retry after a partial beer save must converge to the requested rows."
-      );
+      assert(api.calls[0].ifMatch === "etag-beer-update", "Beer update must carry its current ETag.");
+      assert(api.rows.get("beer-keep")?.stijl === "Tripel", "Targeted beer save changed an unrelated beer.");
     }
 
     {
       globalThis.fetch = async () => new Response(null, { status: 500 });
       const error = await expectRejects(
-        () => saveBierenRows([{ id: "beer", biernaam: "Blond", stijl: "Blond" }]),
+        () => saveBierRow({ id: "beer", biernaam: "Blond", stijl: "Blond" }, { knownExisting: false }),
         "Empty API failure must reject."
       );
       assert(
         error.message === "Bierstamdata opslaan mislukt.",
         "The existing beer-save fallback message changed."
+      );
+    }
+
+    {
+      const api = createDatasetApi([]);
+      globalThis.fetch = api.fetchMock;
+      const version = { id: "cost-new", status: "concept" };
+      await saveKostprijsversie(version, { knownExisting: false });
+      await saveKostprijsversie({ ...version, status: "concept-retry" }, { knownExisting: false });
+
+      assert(
+        JSON.stringify(api.requests) ===
+          JSON.stringify([
+            { method: "POST", id: "" },
+            { method: "POST", id: "" },
+            { method: "GET", id: "cost-new" },
+            { method: "PUT", id: "cost-new" },
+          ]),
+        "A partial-retry save must recover from create conflict through an ETag-protected update."
+      );
+      assert(api.rows.get("cost-new")?.status === "concept-retry", "Partial retry did not converge.");
+    }
+
+    {
+      let idCount = 0;
+      const prepared = prepareBeerStylePersistence({
+        costRecord: {
+          id: "cost-1",
+          basisgegevens: {
+            sku_type: "bier",
+            biernaam: "Berlewalde Het Juweel",
+            alcoholpercentage: 6.5,
+            stijl: "Belgisch blond",
+          },
+        },
+        beers: [],
+        createId: () => `beer-${++idCount}`,
+        nowIso: "2026-07-16T10:00:00.000Z",
+      });
+      assert(prepared !== null, "Beer style preparation unexpectedly skipped a beer calculation.");
+      assert(prepared.beerRecord.id === "beer-1", "Beer style preparation changed generated identity.");
+      assert(prepared.costRecord.bier_id === "beer-1", "Cost record did not receive the beer identity.");
+      assert(
+        (prepared.costRecord.basisgegevens as Record<string, unknown>).bier_id === "beer-1",
+        "Cost basis data did not receive the same beer identity."
+      );
+
+      const repeated = prepareBeerStylePersistence({
+        costRecord: prepared.costRecord,
+        beers: [],
+        createId: () => `beer-${++idCount}`,
+        nowIso: "2026-07-16T10:01:00.000Z",
+      });
+      assert(
+        repeated?.beerRecord.id === "beer-1",
+        "A partial retry without refreshed beer state created a duplicate beer identity."
+      );
+      assert(idCount === 1, "Repeated preparation unexpectedly generated a second beer id.");
+    }
+
+    {
+      const globalArticleSkus: Row[] = [
+        { id: "merch", kind: "article", beer_id: "", article_id: "article-merch" },
+        { id: "service", kind: "article", beer_id: "", article_id: "article-service" },
+      ];
+      assert(
+        selectExplicitBeerVariantSkus({
+          beerId: "",
+          skus: globalArticleSkus,
+          bomLines: [],
+        }).length === 0,
+        "An empty beer id must never project global article SKUs as saved beer variants."
+      );
+
+      const selected = selectExplicitBeerVariantSkus({
+        beerId: "beer-1",
+        skus: [
+          ...globalArticleSkus,
+          { id: "base", kind: "beer_format", beer_id: "beer-1", article_id: "format-1" },
+          {
+            id: "explicit-box",
+            kind: "article",
+            beer_id: "beer-1",
+            article_id: "article-box",
+            sellable_subtype: "beer_bundle",
+          },
+          { id: "other-beer-box", kind: "article", beer_id: "beer-2", article_id: "article-other" },
+          { id: "uncomposed", kind: "article", beer_id: "beer-1", article_id: "article-uncomposed" },
+        ],
+        bomLines: [
+          {
+            id: "bom-box",
+            parent_article_id: "article-box",
+            component_sku_id: "base",
+            quantity: 12,
+          },
+        ],
+      });
+      assert(
+        JSON.stringify(selected.map((row) => row.id)) === JSON.stringify(["explicit-box"]),
+        "Only explicitly composed variants for the selected beer may be projected."
       );
     }
   } finally {

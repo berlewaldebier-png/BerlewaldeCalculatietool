@@ -7,6 +7,20 @@ type ListResponse<T extends DatasetRow> = {
   item_etags?: Record<string, string>;
 };
 
+type SaveDatasetItemOptions = {
+  knownExisting?: boolean;
+};
+
+class DatasetRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "DatasetRequestError";
+  }
+}
+
 function rowId(row: DatasetRow): string {
   return String(row.id ?? "").trim();
 }
@@ -37,7 +51,7 @@ async function readError(response: Response, fallback: string): Promise<string> 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) {
-    throw new Error(await readError(response, "API request mislukt"));
+    throw new DatasetRequestError(await readError(response, "API request mislukt"), response.status);
   }
   return (await response.json()) as T;
 }
@@ -88,6 +102,23 @@ export async function upsertDatasetItem<T extends DatasetRow>(datasetName: strin
     }
   );
   return result.item;
+}
+
+export async function saveDatasetItem<T extends DatasetRow>(
+  datasetName: string,
+  row: T,
+  options: SaveDatasetItemOptions = {}
+): Promise<T> {
+  if (options.knownExisting) return upsertDatasetItem(datasetName, row);
+
+  try {
+    return await createDatasetItem(datasetName, row);
+  } catch (error) {
+    if (error instanceof DatasetRequestError && error.status === 409) {
+      return upsertDatasetItem(datasetName, row);
+    }
+    throw error;
+  }
 }
 
 export async function reconcileDatasetItems<T extends DatasetRow>(datasetName: string, nextRows: T[]): Promise<void> {

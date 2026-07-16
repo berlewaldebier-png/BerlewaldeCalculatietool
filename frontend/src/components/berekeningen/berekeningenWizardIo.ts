@@ -1,20 +1,30 @@
 "use client";
 
 import { ApiRequestError, apiGetClient, apiRequestTextClient } from "@/lib/apiClient";
-import { reconcileDatasetItems, upsertDatasetItem } from "@/lib/datasetItems";
+import { reconcileDatasetItems, saveDatasetItem } from "@/lib/datasetItems";
 import type { GenericRecord } from "@/components/berekeningen/berekeningenWizardUtils";
 
 export async function saveKostprijsversies(payload: GenericRecord[]) {
   await reconcileDatasetItems("kostprijsversies", payload);
 }
 
-export async function saveKostprijsversie(payload: GenericRecord): Promise<GenericRecord> {
-  return upsertDatasetItem("kostprijsversies", payload);
+type TargetedSaveOptions = {
+  knownExisting?: boolean;
+};
+
+export async function saveKostprijsversie(
+  payload: GenericRecord,
+  options: TargetedSaveOptions = {}
+): Promise<GenericRecord> {
+  return saveDatasetItem("kostprijsversies", payload, options);
 }
 
-export async function saveBierenRows(payload: GenericRecord[]) {
+export async function saveBierRow(
+  payload: GenericRecord,
+  options: TargetedSaveOptions = {}
+): Promise<GenericRecord> {
   try {
-    await reconcileDatasetItems("bieren", payload);
+    return await saveDatasetItem("bieren", payload, options);
   } catch (error) {
     if (error instanceof Error && error.message === "API request mislukt") {
       throw new Error("Bierstamdata opslaan mislukt.");

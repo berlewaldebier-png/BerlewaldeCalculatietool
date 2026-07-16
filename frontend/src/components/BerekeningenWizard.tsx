@@ -9,7 +9,7 @@ import { ApiRequestError } from "@/lib/apiClient";
 import {
   activateKostprijsversie,
   activateKostprijsversieProducts,
-  saveBierenRows,
+  saveBierRow,
   saveKostprijsversie,
   loadDouanoProductMappings,
   loadArticles,
@@ -34,10 +34,15 @@ import {
   unwrapDatasetListPayload,
 } from "@/components/berekeningen/berekeningenWizardUtils";
 import {
+  prepareBeerStylePersistence,
+  type PreparedBeerStylePersistence,
+} from "@/components/berekeningen/beerStylePersistence";
+import { selectExplicitBeerVariantSkus } from "@/components/berekeningen/sellableVariantProjection";
+import {
   buildResultaatSnapshotFromWizard,
   validateCurrentBeforePersistFromWizard,
 } from "@/components/berekeningen/berekeningenWizardDerivations";
-import { CurrencyInput, TrashIcon } from "@/components/berekeningen/BerekeningenWizardParts";
+import { CurrencyInput, SavingIndicator, TrashIcon } from "@/components/berekeningen/BerekeningenWizardParts";
 import {
   formatCurrencyDisplay,
   formatDecimalValue,
@@ -705,120 +710,63 @@ export function BerekeningenWizard({
     }) as GenericRecord | null;
   }
 
-  function findBeerIdentityRow(beerName: string, alcoholpercentage: number | null, rows = localBieren) {
-    const wantedName = beerName.trim().toLowerCase();
-    if (!wantedName) return null;
-    return (Array.isArray(rows) ? rows : []).find((row: any) => {
-      const names = [row?.biernaam, row?.naam, row?.name].map((value) => String(value ?? "").trim().toLowerCase());
-      if (!names.includes(wantedName)) return false;
-      if (alcoholpercentage === null) return true;
-      const rowAlcohol = parseOptionalNumber(row?.alcoholpercentage);
-      return rowAlcohol === null || Math.abs(rowAlcohol - alcoholpercentage) < 0.0001;
-    }) as GenericRecord | null;
-  }
-
-  function buildBeerStylePayload(styleName: string, existing?: GenericRecord | null) {
-    const target = getCurrentTargetRow();
-    const basis = ((target?.basisgegevens as GenericRecord) ?? (current.basisgegevens as GenericRecord) ?? {}) as GenericRecord;
-    const beerName = String((basis as any).biernaam ?? "").trim();
-    const alcoholpercentage = parseOptionalNumber((basis as any).alcoholpercentage);
-    if (!beerName) {
-      throw new Error("Vul eerst de biernaam in voordat je een stijl opslaat.");
-    }
-    if (alcoholpercentage === null) {
-      throw new Error("Vul eerst een geldig alcoholpercentage in voordat je een stijl opslaat.");
-    }
-    const style = String(styleName ?? "").trim();
-    if (!style) {
-      throw new Error("Stijlnaam ontbreekt.");
-    }
-    const id = String((existing as any)?.id ?? "").trim() || createId();
-    return {
-      ...(existing ?? {}),
-      id,
-      biernaam: beerName,
-      naam: beerName,
-      name: beerName,
-      stijl: style,
-      alcoholpercentage,
-      belastingsoort: String((basis as any).belastingsoort ?? "Accijns"),
-      tarief_accijns: String((basis as any).tarief_accijns ?? "Hoog"),
-      btw_tarief: String((basis as any).btw_tarief ?? "21%"),
-      actief: true,
-      active: true,
-      updated_at: new Date().toISOString(),
-      created_at: String((existing as any)?.created_at ?? "") || new Date().toISOString(),
-    };
-  }
-
   function prepareStyleForCurrent() {
     const sourceRows = rowsRef.current;
     const currentId = String(current.id ?? "");
     const target = sourceRows.find((row) => String(row.id ?? "") === currentId);
     if (!target) return null;
+    const prepared = prepareBeerStylePersistence({
+      costRecord: target,
+      beers: localBieren,
+      createId,
+      nowIso: new Date().toISOString(),
+    });
+    if (!prepared) return null;
 
-    const basis = (target.basisgegevens as GenericRecord) ?? {};
-    const skuType = String((basis as any).sku_type ?? "bier").trim().toLowerCase();
-    if (skuType !== "bier") return null;
-
-    const styleName = String((basis as any).stijl ?? "").trim();
-    if (!styleName) return null;
-
-    const existingBeerId = String((basis as any).bier_id ?? (target as any).bier_id ?? "").trim();
-    const alcoholpercentage = parseOptionalNumber((basis as any).alcoholpercentage);
-    const beerName = String((basis as any).biernaam ?? "").trim();
-    const existingById = existingBeerId
-      ? ((Array.isArray(localBieren) ? localBieren : []).find((row: any) => String(row?.id ?? "").trim() === existingBeerId) as GenericRecord | null)
-      : null;
-    const existing = existingById ?? findBeerIdentityRow(beerName, alcoholpercentage);
-    const styleRecord = buildBeerStylePayload(styleName, existing);
-    const beerId = String((styleRecord as any).id ?? "").trim();
-
-    if (existingBeerId && existingById) {
-      (target as any).bier_id = existingBeerId;
-      (target.basisgegevens as GenericRecord) = {
-        ...basis,
-        stijl: styleName,
-        bier_id: existingBeerId,
-      };
-      rowsRef.current = sourceRows.map((row) => (String(row.id ?? "") === currentId ? target : row));
-      setRows(rowsRef.current);
-    }
-    const nextBieren = existing
-      ? localBieren.map((row: any) => (String(row?.id ?? "").trim() === beerId ? styleRecord : row))
-      : [...localBieren, styleRecord];
-
-    (target as any).bier_id = beerId;
-    (target.basisgegevens as GenericRecord) = {
-      ...basis,
-      stijl: styleName,
-      bier_id: beerId,
-    };
-    rowsRef.current = sourceRows.map((row) => (String(row.id ?? "") === currentId ? target : row));
+    rowsRef.current = sourceRows.map((row) =>
+      String(row.id ?? "") === currentId ? prepared.costRecord : row
+    );
     setRows(rowsRef.current);
-    return { nextBieren };
+    return prepared;
   }
 
-  async function persistPreparedStyle(prepared: { nextBieren: GenericRecord[] } | null) {
+  async function persistPreparedStyle(prepared: PreparedBeerStylePersistence | null) {
     if (!prepared) return;
-    await saveBierenRows(prepared.nextBieren);
-    setLocalBieren(prepared.nextBieren);
+    const savedBeer = await saveBierRow(prepared.beerRecord, {
+      knownExisting: prepared.beerWasExisting,
+    });
+    const beerId = String(savedBeer.id ?? "");
+    const hasBeer = localBieren.some((row) => String(row.id ?? "") === beerId);
+    const nextBieren = hasBeer
+      ? localBieren.map((row) => (String(row.id ?? "") === beerId ? savedBeer : row))
+      : [...localBieren, savedBeer];
+    setLocalBieren(nextBieren);
   }
 
   async function createStyleFromCombobox(name: string): Promise<{ id: string; name: string }> {
     const styleName = String(name ?? "").trim();
     if (!styleName) throw new Error("Stijlnaam ontbreekt.");
     const target = getCurrentTargetRow();
-    const basis = ((target?.basisgegevens as GenericRecord) ?? (current.basisgegevens as GenericRecord) ?? {}) as GenericRecord;
-    const beerName = String((basis as any).biernaam ?? "").trim();
-    const alcoholpercentage = parseOptionalNumber((basis as any).alcoholpercentage);
-    const existing = findBeerIdentityRow(beerName, alcoholpercentage);
-    const styleRecord = buildBeerStylePayload(styleName, existing);
-    const beerId = String((styleRecord as any).id ?? "").trim();
-    const nextBieren = existing
-      ? localBieren.map((row: any) => (String(row?.id ?? "").trim() === beerId ? styleRecord : row))
+    const source = cloneRecord(target ?? current);
+    source.basisgegevens = {
+      ...((source.basisgegevens as GenericRecord) ?? {}),
+      stijl: styleName,
+    };
+    const prepared = prepareBeerStylePersistence({
+      costRecord: source,
+      beers: localBieren,
+      createId,
+      nowIso: new Date().toISOString(),
+    });
+    if (!prepared) throw new Error("Bierstamdata voor deze stijl kan niet worden voorbereid.");
+    const styleRecord = await saveBierRow(prepared.beerRecord, {
+      knownExisting: prepared.beerWasExisting,
+    });
+    const beerId = String(styleRecord.id ?? "").trim();
+    const hasBeer = localBieren.some((row) => String(row.id ?? "") === beerId);
+    const nextBieren = hasBeer
+      ? localBieren.map((row) => (String(row.id ?? "") === beerId ? styleRecord : row))
       : [...localBieren, styleRecord];
-    await saveBierenRows(nextBieren);
     setLocalBieren(nextBieren);
     return { id: beerId, name: String((styleRecord as any).stijl ?? styleName).trim() };
   }
@@ -829,13 +777,13 @@ export function BerekeningenWizard({
     setIsSaving(true);
     try {
       const preparedStyle = prepareStyleForCurrent();
-      const nextCurrent = cloneRecord(current);
+      const nextCurrent = cloneRecord(preparedStyle?.costRecord ?? current);
       syncPrimaryInkoopFactuur(nextCurrent);
       nextCurrent.bier_snapshot = cloneRecord((nextCurrent.basisgegevens as GenericRecord) ?? {});
       nextCurrent.resultaat_snapshot = buildResultaatSnapshot(nextCurrent);
       nextCurrent.updated_at = new Date().toISOString();
       nextCurrent.aangepast_op = nextCurrent.updated_at;
-      const saved = await saveKostprijsversie(nextCurrent);
+      const saved = await saveKostprijsversie(nextCurrent, { knownExisting: isEditingExisting });
       await persistPreparedStyle(preparedStyle);
       const savedId = String(saved.id ?? "");
       const hadCurrent = rowsRef.current.some((row) => String(row.id ?? "") === savedId);
@@ -909,7 +857,7 @@ export function BerekeningenWizard({
       const firstTimeProductIds = isPlannedRecipe ? [] : buildFirstTimeActivationProductIds();
 
       const nowIso = new Date().toISOString();
-      const nextCurrent = cloneRecord(current);
+      const nextCurrent = cloneRecord(preparedStyle?.costRecord ?? current);
       syncPrimaryInkoopFactuur(nextCurrent);
       nextCurrent.status = isPlannedRecipe ? "concept" : "definitief";
       nextCurrent.finalized_at = isPlannedRecipe ? "" : nowIso;
@@ -917,7 +865,7 @@ export function BerekeningenWizard({
       nextCurrent.aangepast_op = nowIso;
       nextCurrent.bier_snapshot = cloneRecord((nextCurrent.basisgegevens as GenericRecord) ?? {});
       nextCurrent.resultaat_snapshot = buildResultaatSnapshot(nextCurrent);
-      const saved = await saveKostprijsversie(nextCurrent);
+      const saved = await saveKostprijsversie(nextCurrent, { knownExisting: isEditingExisting });
       await persistPreparedStyle(preparedStyle);
       const refreshedResponse = await fetch(KOSTPRIJSVERSIES_API, {
         cache: "no-store"
@@ -1699,6 +1647,7 @@ export function BerekeningenWizard({
         current={current}
         skus={Array.isArray(localSkus) ? localSkus : []}
         articles={Array.isArray(localArticles) ? localArticles : []}
+        bomLines={Array.isArray(localBomLines) ? localBomLines : []}
         costProductRows={buildCostProductCandidates()}
         douanoMappings={Array.isArray(douanoMappings) ? douanoMappings : []}
         onRefreshMappings={refreshDouanoMappings}
@@ -1835,16 +1784,17 @@ export function BerekeningenWizard({
       });
     });
 
-    const extraRows = (Array.isArray(localSkus) ? localSkus : [])
+    const extraRows = selectExplicitBeerVariantSkus({
+      beerId,
+      skus: Array.isArray(localSkus) ? localSkus : [],
+      bomLines: Array.isArray(localBomLines) ? localBomLines : [],
+    })
       .filter((sku: any) => {
-        const skuBeerId = String(sku?.beer_id ?? "").trim();
-        if (!beerId || skuBeerId !== beerId) return false;
         const skuId = String(sku?.id ?? "").trim();
         if (skuId && seenSkuIds.has(skuId)) return false;
-        const kind = String(sku?.kind ?? "").trim().toLowerCase();
         const productId = String(sku?.article_id || sku?.format_article_id || "").trim();
         if (productId && !isCostProductEnabled(productId)) return false;
-        return kind === "beer_format" || kind === "article";
+        return true;
       })
       .map((sku: any) => {
         const articleId = String(sku?.article_id || sku?.format_article_id || "").trim();
@@ -2018,12 +1968,11 @@ export function BerekeningenWizard({
       ...(((snapshot as any)?.producten?.samengestelde_producten ?? []) as SummaryProductRow[]),
     ];
 
-    const rows = (Array.isArray(localSkus) ? localSkus : [])
-      .filter((sku: any) => {
-        const kind = String(sku?.kind ?? "").trim().toLowerCase();
-        const skuBeerId = String(sku?.beer_id ?? "").trim();
-        return kind === "article" && skuBeerId === beerId;
-      })
+    const rows = selectExplicitBeerVariantSkus({
+      beerId,
+      skus: Array.isArray(localSkus) ? localSkus : [],
+      bomLines: Array.isArray(localBomLines) ? localBomLines : [],
+    })
       .map((sku: any) => {
         const articleId = String(sku?.article_id ?? "").trim();
         const article = articleId ? articleById.get(articleId) : null;
@@ -2374,7 +2323,12 @@ export function BerekeningenWizard({
           </div>
           <div className="cpq-topbar-actions">
             {onBackToLanding ? (
-              <button type="button" className="editor-button editor-button-secondary" onClick={onBackToLanding}>
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                onClick={onBackToLanding}
+                disabled={isSaving}
+              >
                 Terug
               </button>
             ) : null}
@@ -2457,18 +2411,18 @@ export function BerekeningenWizard({
                 id: step.id,
                 title: step.label,
                 description: step.description,
-                disabled: invoiceSourceMissing && index > 0,
+                disabled: isSaving || (invoiceSourceMissing && index > 0),
               }))}
               activeIndex={currentIndex}
               onSelect={(index) => {
-                if (invoiceSourceMissing && index > 0) return;
+                if (isSaving || (invoiceSourceMissing && index > 0)) return;
                 setActiveStepIndex(index);
               }}
             />
 
           </aside>
 
-          <main className="cpq-main">
+          <main className="cpq-main" aria-busy={isSaving}>
             <div className="wizard-shell wizard-shell-single" style={{ marginTop: 0 }}>
               <div className="wizard-step-card wizard-step-stage-card">
                 <div className="wizard-step-header">
@@ -2489,6 +2443,7 @@ export function BerekeningenWizard({
                         type="button"
                         className="editor-button editor-button-secondary"
                         onClick={() => setActiveStepIndex(Math.max(0, currentIndex - 1))}
+                        disabled={isSaving}
                       >
                         Vorige
                       </button>
@@ -2503,7 +2458,7 @@ export function BerekeningenWizard({
                           onClick={handleSave}
                           disabled={invoiceSourceMissing || isSaving}
                         >
-                          Opslaan
+                          {isSaving ? <SavingIndicator label="Opslaan..." /> : "Opslaan"}
                         </button>
                         <button
                           type="button"
@@ -2526,7 +2481,7 @@ export function BerekeningenWizard({
                           }}
                           disabled={isSaving}
                         >
-                          {isSaving ? "Opslaan..." : primaryActionLabel}
+                          {isSaving ? <SavingIndicator label="Opslaan..." /> : primaryActionLabel}
                         </button>
                       </>
                     ) : (
@@ -2540,7 +2495,12 @@ export function BerekeningenWizard({
             </div>
 
             {status ? (
-              <div className={`editor-status wizard-inline-status${statusTone ? ` ${statusTone}` : ""}`}>{status}</div>
+              <div
+                className={`editor-status wizard-inline-status${statusTone ? ` ${statusTone}` : ""}`}
+                aria-live="polite"
+              >
+                {status}
+              </div>
             ) : null}
           </main>
 

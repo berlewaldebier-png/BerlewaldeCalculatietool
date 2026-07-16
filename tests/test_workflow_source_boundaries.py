@@ -22,7 +22,7 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
             "  async function handleDeleteCurrent()",
         )
 
-        version_index = source.index("await saveKostprijsversie(nextCurrent)")
+        version_index = source.index("await saveKostprijsversie(nextCurrent, { knownExisting: isEditingExisting })")
         style_index = source.index("await persistPreparedStyle(preparedStyle)")
         activation_index = source.index("await activateKostprijsversieProducts")
 
@@ -30,7 +30,7 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
         self.assertLess(style_index, activation_index)
         self.assertIn("Afronden gelukt, maar nieuwe artikelen automatisch activeren mislukt", source)
 
-    def test_cost_style_save_uses_item_reconciliation_contract(self) -> None:
+    def test_cost_style_save_uses_targeted_item_contract_and_busy_feedback(self) -> None:
         wizard_source = (
             PROJECT_ROOT / "frontend" / "src" / "components" / "BerekeningenWizard.tsx"
         ).read_text(encoding="utf-8")
@@ -42,11 +42,25 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
             / "berekeningen"
             / "berekeningenWizardIo.ts"
         ).read_text(encoding="utf-8")
+        coupling_source = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "components"
+            / "berekeningen"
+            / "steps"
+            / "KoppelenStep.tsx"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("saveBierenRows,", wizard_source)
-        self.assertNotIn("async function saveBierenRows(", wizard_source)
+        self.assertIn("saveBierRow,", wizard_source)
+        self.assertNotIn("saveBierenRows", wizard_source)
         self.assertNotIn("BIEREN_API", wizard_source)
-        self.assertIn('reconcileDatasetItems("bieren", payload)', io_source)
+        self.assertIn('saveDatasetItem("bieren", payload, options)', io_source)
+        self.assertNotIn('reconcileDatasetItems("bieren"', io_source)
+        self.assertIn('aria-busy={isSaving}', wizard_source)
+        self.assertIn('<SavingIndicator label="Opslaan..." />', wizard_source)
+        self.assertIn("selectExplicitBeerVariantSkus({", wizard_source)
+        self.assertIn("selectExplicitBeerVariantSkus({", coupling_source)
 
     def test_year_close_api_commit_precedes_incidental_reconciliation_and_draft_removal(self) -> None:
         source = _function_source(

@@ -31,3 +31,15 @@ export function TrashIcon() {
     </svg>
   );
 }
+
+export function SavingIndicator({ label = "Opslaan..." }: { label?: string }) {
+  return (
+    <span className="editor-saving-indicator" role="status" aria-live="polite">
+      <svg className="editor-saving-spinner" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+        <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+      <span>{label}</span>
+    </span>
+  );
+}
