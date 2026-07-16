@@ -8,6 +8,7 @@ import {
   type ResultaatSnapshot,
 } from "@/lib/kostprijsSnapshotEngine";
 import type { GenericRecord } from "@/components/berekeningen/berekeningenWizardUtils";
+import { expandSelectedInkoopProductsToBasisproducten } from "@/components/berekeningen/purchaseProductProjection";
 import { supplierPackagingAppliesForProduct } from "@/components/berekeningen/steps/SupplierConfigStep";
 
 export type BerekeningSubjectType = "bier" | "artikel" | "dienst";
@@ -92,7 +93,12 @@ export function buildResultaatSnapshotFromWizard(params: {
   const methodologyVersion = hasAnyAbc ? "abc_v1" : "legacy";
   const fixedPerLiterEffective = hasAnyAbc ? overheadPerLiter.totalPerLiter : fixedPerLiter;
   const geselecteerdeInkoopProducten =
-    soort === "Inkoop" ? getSelectedInkoopProducts(row, jaar, basisproducten, samengesteldeProducten) : [];
+    soort === "Inkoop"
+      ? expandSelectedInkoopProductsToBasisproducten(
+          getSelectedInkoopProducts(row, jaar, basisproducten, samengesteldeProducten),
+          basisproducten
+        )
+      : [];
   const basisIds = new Set(
     (Array.isArray(basisproducten) ? basisproducten : [])
       .map((item) => String((item as any)?.id ?? "").trim())
