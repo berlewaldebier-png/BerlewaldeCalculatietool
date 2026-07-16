@@ -69,12 +69,16 @@ required_rf006_contracts = {
     "test_quote_boundary_characterization.QuoteBoundaryCharacterizationTests.test_typed_delete_adapter_preserves_unknown_fields_and_reports_alias",
     "test_workflow_postgres_characterization.WorkflowPostgresCharacterizationTests.test_quote_boundary_roundtrip_preserves_database_payload_and_delete_count",
 }
+required_rf005a_contracts = {
+    "test_auth_role_policy.AuthRolePolicyTests.test_complete_navigation_projection_matches_rf_005a_role_contract",
+}
 missing = sorted(
     (
         required_lot_contracts
         | required_rf003_contracts
         | required_rf004_contracts
         | required_rf005_contracts
+        | required_rf005a_contracts
         | required_rf006_contracts
     ).difference(ids)
 )
@@ -86,5 +90,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005 and RF-006 contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A and RF-006 contracts collected"
 )

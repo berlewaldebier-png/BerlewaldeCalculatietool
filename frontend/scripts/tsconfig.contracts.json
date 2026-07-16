@@ -19,7 +19,9 @@
   },
   "include": [
     "./quoteBoundary.contracttest.ts",
+    "./navigationPermissions.contracttest.ts",
     "../src/components/offerte-samenstellen/quoteBoundary.ts",
-    "../src/components/offerte-samenstellen/types.ts"
+    "../src/components/offerte-samenstellen/types.ts",
+    "../src/components/navigation/navigationProjection.ts"
   ]
 }
