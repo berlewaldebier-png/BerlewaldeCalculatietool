@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 import sys
@@ -149,6 +150,27 @@ class AuthRolePolicyTests(unittest.TestCase):
                     keys = {item.key for item in meta.get_navigation({"role": role})}
                     for key in {"nieuwe-kostprijsberekening", "prijsvoorstel", "productkoppeling"}:
                         self.assertEqual(key in keys, key in expected)
+
+    def test_complete_navigation_projection_matches_rf_005a_role_contract(self) -> None:
+        fixture_path = (
+            PROJECT_ROOT
+            / "contracts"
+            / "fixtures"
+            / "navigation"
+            / "role-navigation.current.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        expected_by_role = fixture["backend_hrefs_by_role"]
+        self.assertEqual(set(expected_by_role), set(auth_policy.SUPPORTED_ROLES))
+
+        with patch.object(meta.setup_service, "has_active_costprices", return_value=True):
+            for role, expected_hrefs in expected_by_role.items():
+                with self.subTest(role=role):
+                    actual_hrefs = [
+                        item.href
+                        for item in meta.get_navigation({"role": role})
+                    ]
+                    self.assertEqual(actual_hrefs, expected_hrefs)
 
     def test_dashboard_does_not_disclose_quote_summary_to_brewer(self) -> None:
         summary = SimpleNamespace(

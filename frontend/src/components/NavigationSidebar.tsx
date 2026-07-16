@@ -33,132 +33,18 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import type { NavigationItem } from "@/lib/apiShared";
+import {
+  buildNavigationProjection,
+  type SidebarSectionTitle,
+} from "@/components/navigation/navigationProjection";
 
-type DashboardNavItem = {
-  label: string;
-  href: string;
-  active?: boolean;
+const SECTION_ICONS: Record<SidebarSectionTitle, LucideIcon> = {
+  Analyse: ChartNoAxesCombined,
+  Prijsbeheer: Target,
+  Aanbod: Boxes,
+  Kostenstructuur: Layers3,
+  Beheren: Settings,
 };
-
-type DashboardNavGroup = {
-  title: string;
-  icon: LucideIcon;
-  items: DashboardNavItem[];
-};
-
-function buildNavGroups(navigation: NavigationItem[], activePath: string): DashboardNavGroup[] {
-  const normalized = navigation.map((item) => ({
-    label: item.label,
-    href: item.href
-  }));
-
-  const byHref = new Map(normalized.map((item) => [item.href, item]));
-  const activeNormalized = String(activePath || "/").trim() || "/";
-
-  // Frontend-owned entries that the backend navigation may not contain (yet).
-  const fallbackItems = [
-    { label: "Break-even analyseren", href: "/break-even" },
-    { label: "Scenario analyse", href: "/scenario-analyse" },
-    { label: "Omzet & marge", href: "/omzet-en-marge" },
-    { label: "Prijsvoorstel maken", href: "/prijsvoorstellen" },
-    { label: "Verkoopstrategie", href: "/verkoopstrategie" },
-    { label: "Adviesprijzen", href: "/adviesprijzen" },
-    { label: "Bieren", href: "/bieren" },
-    { label: "Producten en verpakkingen", href: "/producten-verpakking" },
-    { label: "Diensten", href: "/diensten" },
-    { label: "Kostprijs beheer", href: "/nieuwe-kostprijsberekening" },
-    { label: "Vaste kosten (ABC)", href: "/vaste-kosten" },
-    { label: "Incidentele kosten", href: "/incidentele-kosten" },
-    { label: "Productie en drivers", href: "/productie" },
-    { label: "Tarieven en heffingen", href: "/tarieven-heffingen" },
-    { label: "Brouwmoment", href: "/recept-hercalculatie" },
-    { label: "Inkoopfacturen", href: "/inkoopfacturen" },
-    { label: "Instellingen", href: "/instellingen" },
-    { label: "Jaar afsluiten", href: "/jaar-afsluiten" },
-    { label: "Nieuw jaar voorbereiden", href: "/nieuw-jaar-voorbereiden" },
-    { label: "Beheer", href: "/beheer" },
-    { label: "Productkoppeling", href: "/beheer/productkoppeling" },
-  ];
-  for (const item of fallbackItems) {
-    if (!byHref.has(item.href)) {
-      byHref.set(item.href, item);
-    }
-  }
-
-  const sectionSpecs: Array<{
-    title: string;
-    icon: LucideIcon;
-    items: Array<{ href: string; label: string }>;
-  }> = [
-    {
-      title: "Analyse",
-      icon: ChartNoAxesCombined,
-      items: [
-        { href: "/break-even", label: "Break-even analyseren" },
-        { href: "/scenario-analyse", label: "Scenario analyseren" },
-        { href: "/omzet-en-marge", label: "Omzet en marge" },
-      ],
-    },
-    {
-      title: "Prijsbeheer",
-      icon: Target,
-      items: [
-        { href: "/prijsvoorstellen", label: "Prijsvoorstel maken" },
-        { href: "/verkoopstrategie", label: "Verkoopstrategie" },
-        { href: "/adviesprijzen", label: "Adviesprijzen" },
-      ],
-    },
-    {
-      title: "Aanbod",
-      icon: Boxes,
-      items: [
-        { href: "/bieren", label: "Bieren" },
-        { href: "/producten-verpakking", label: "Producten en verpakkingen" },
-        { href: "/diensten", label: "Diensten" },
-      ],
-    },
-    {
-      title: "Kostenstructuur",
-      icon: Layers3,
-      items: [
-        { href: "/nieuwe-kostprijsberekening", label: "Kostprijs beheer" },
-        { href: "/vaste-kosten", label: "Vaste kosten (ABC)" },
-        { href: "/incidentele-kosten", label: "Incidenteel" },
-        { href: "/productie", label: "Productie en drivers" },
-        { href: "/tarieven-heffingen", label: "Tarieven en heffingen" },
-        { href: "/recept-hercalculatie", label: "Brouwmoment" },
-        { href: "/inkoopfacturen", label: "Inkoopfacturen" },
-        { href: "/instellingen", label: "Instellingen" },
-      ],
-    },
-    {
-      title: "Beheren",
-      icon: Settings,
-      items: [
-        { href: "/jaar-afsluiten", label: "Jaar afsluiten" },
-        { href: "/setup", label: "Setup" },
-        { href: "/nieuw-jaar-voorbereiden", label: "Nieuw jaar voorbereiden" },
-        { href: "/beheer/productkoppeling", label: "Productkoppeling" },
-        { href: "/beheer", label: "Beheer" },
-      ],
-    },
-  ];
-
-  return sectionSpecs.map((section) => {
-    const items: DashboardNavItem[] = [];
-    for (const spec of section.items) {
-      const found = byHref.get(spec.href);
-      if (!found) continue;
-      const href = found.href;
-      items.push({
-        ...found,
-        label: spec.label,
-        active: activeNormalized === href || (href !== "/" && activeNormalized.startsWith(`${href}/`)),
-      });
-    }
-    return { title: section.title, icon: section.icon, items };
-  }).filter((group) => group.items.length > 0);
-}
 
 function MenuIcon() {
   return (
@@ -212,7 +98,13 @@ export function NavigationSidebar({
   variant?: "default" | "pageShell";
   footer?: ReactNode;
 }) {
-  const groups = useMemo(() => buildNavGroups(navigation, activePath), [navigation, activePath]);
+  const groups = useMemo(
+    () => buildNavigationProjection(navigation, activePath).map((group) => ({
+      ...group,
+      icon: SECTION_ICONS[group.title],
+    })),
+    [navigation, activePath]
+  );
   const activeNormalized = String(activePath || "/").trim() || "/";
 
   return (
