@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_BASE_URL } from "@/lib/api";
@@ -39,6 +39,15 @@ type DatasetTableEditorProps = {
 type InternalRow = EditorRow & {
   _uiId: string;
 };
+
+type EditorStatus = {
+  kind: "success" | "error";
+  message: string;
+};
+
+function cellAccessibleName(columnLabel: string, rowNumber: number) {
+  return `${columnLabel}, rij ${rowNumber}`;
+}
 
 function createUiId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -81,6 +90,7 @@ export function DatasetTableEditor({
   onRowsChange
 }: DatasetTableEditorProps) {
   const router = useRouter();
+  const statusId = useId();
   const preparedRows = useMemo<InternalRow[]>(
     () =>
       initialRows.map((row, index) => {
@@ -94,7 +104,7 @@ export function DatasetTableEditor({
   );
 
   const [rows, setRows] = useState<InternalRow[]>(preparedRows);
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState<EditorStatus | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pageSize, setPageSize] = useState<PageSizeValue>(20);
   const [page, setPage] = useState(1);
@@ -217,7 +227,7 @@ export function DatasetTableEditor({
   }
 
   async function handleSave() {
-    setStatus("");
+    setStatus(null);
     setIsSaving(true);
 
     try {
@@ -225,7 +235,7 @@ export function DatasetTableEditor({
       const datasetName = Array.isArray(payload) ? datasetNameFromEndpoint(endpoint) : "";
       if (datasetName) {
         await reconcileDatasetItems(datasetName, payload as Array<Record<string, unknown>>);
-        setStatus("Opgeslagen.");
+        setStatus({ kind: "success", message: "Opgeslagen." });
         router.refresh();
         return;
       }
@@ -242,17 +252,21 @@ export function DatasetTableEditor({
         throw new Error(message || "Opslaan mislukt");
       }
 
-      setStatus("Opgeslagen.");
+      setStatus({ kind: "success", message: "Opgeslagen." });
       router.refresh();
-    } catch (error) {
-      setStatus(error instanceof Error ? `Opslaan mislukt: ${error.message}` : "Opslaan mislukt.");
+    } catch {
+      setStatus({
+        kind: "error",
+        message:
+          "Opslaan is niet volledig afgerond. Controleer de gegevens en probeer opnieuw. Sommige wijzigingen kunnen al zijn opgeslagen; vernieuw de pagina om de actuele gegevens te controleren."
+      });
     } finally {
       setIsSaving(false);
     }
   }
 
   return (
-    <section className="module-card">
+    <section className="module-card" aria-busy={isSaving}>
       <div className="module-card-header">
         <div className="module-card-title">{title}</div>
         {description ? <div className="module-card-text">{description}</div> : null}
@@ -266,11 +280,11 @@ export function DatasetTableEditor({
       </div>
 
       <div className="dataset-editor-scroll">
-        <table className="dataset-editor-table">
+        <table className="dataset-editor-table" aria-label={`${title} bewerkbare tabel`}>
           <thead>
             <tr>
               {columns.map((column) => (
-                <th key={column.key} style={column.width ? { width: column.width } : undefined}>
+                <th key={column.key} scope="col" style={column.width ? { width: column.width } : undefined}>
                   <SortButton
                     label={column.label}
                     active={sortKey === column.key}
@@ -279,7 +293,7 @@ export function DatasetTableEditor({
                   />
                 </th>
               ))}
-              <th />
+              <th scope="col" aria-label="Acties" />
             </tr>
           </thead>
           <tbody>
@@ -290,85 +304,92 @@ export function DatasetTableEditor({
                 </td>
               </tr>
             ) : null}
-            {pageRows.map((row) => (
-              <tr key={row._uiId}>
-                {columns.map((column) => {
-                  const type = column.type ?? "text";
-                  const value = row[column.key];
+            {pageRows.map((row, pageRowIndex) => {
+              const rowNumber = (currentPage - 1) * pageSize + pageRowIndex + 1;
+              return (
+                <tr key={row._uiId}>
+                  {columns.map((column) => {
+                    const type = column.type ?? "text";
+                    const value = row[column.key];
+                    const accessibleName = cellAccessibleName(column.label, rowNumber);
 
-                  if (type === "checkbox") {
-                    return (
-                      <td key={column.key}>
-                        <label className="dataset-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(value)}
+                    if (type === "checkbox") {
+                      return (
+                        <td key={column.key}>
+                          <label className="dataset-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(value)}
+                              disabled={column.readOnly}
+                              aria-label={accessibleName}
+                              onChange={(event) =>
+                                updateCell(row._uiId, column.key, event.target.checked)
+                              }
+                            />
+                            <span>{Boolean(value) ? "Ja" : "Nee"}</span>
+                          </label>
+                        </td>
+                      );
+                    }
+
+                    if (type === "select") {
+                      const options = column.options ?? [];
+                      return (
+                        <td key={column.key}>
+                          <select
+                            className={`dataset-input ${column.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                            value={value === null || value === undefined ? "" : String(value)}
                             disabled={column.readOnly}
-                            onChange={(event) =>
-                              updateCell(row._uiId, column.key, event.target.checked)
-                            }
-                          />
-                          <span>{Boolean(value) ? "Ja" : "Nee"}</span>
-                        </label>
-                      </td>
-                    );
-                  }
+                            aria-label={accessibleName}
+                            onChange={(event) => updateCell(row._uiId, column.key, event.target.value)}
+                          >
+                            <option value="">Kies...</option>
+                            {options.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      );
+                    }
 
-                  if (type === "select") {
-                    const options = column.options ?? [];
                     return (
                       <td key={column.key}>
-                        <select
+                        <input
                           className={`dataset-input ${column.readOnly ? "dataset-input-readonly" : ""}`.trim()}
+                          type={type === "number" ? "number" : "text"}
+                          step={type === "number" ? "any" : undefined}
                           value={value === null || value === undefined ? "" : String(value)}
-                          disabled={column.readOnly}
-                          onChange={(event) => updateCell(row._uiId, column.key, event.target.value)}
-                        >
-                          <option value="">Kies...</option>
-                          {options.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
+                          readOnly={column.readOnly}
+                          aria-label={accessibleName}
+                          onChange={(event) => {
+                            const nextValue =
+                              type === "number"
+                                ? event.target.value === ""
+                                  ? null
+                                  : Number(event.target.value)
+                                : event.target.value;
+                            updateCell(row._uiId, column.key, nextValue);
+                          }}
+                        />
                       </td>
                     );
-                  }
-
-                  return (
-                    <td key={column.key}>
-                      <input
-                        className={`dataset-input ${column.readOnly ? "dataset-input-readonly" : ""}`.trim()}
-                        type={type === "number" ? "number" : "text"}
-                        step={type === "number" ? "any" : undefined}
-                        value={value === null || value === undefined ? "" : String(value)}
-                        readOnly={column.readOnly}
-                        onChange={(event) => {
-                          const nextValue =
-                            type === "number"
-                              ? event.target.value === ""
-                                ? null
-                                : Number(event.target.value)
-                              : event.target.value;
-                          updateCell(row._uiId, column.key, nextValue);
-                        }}
-                      />
-                    </td>
-                  );
-                })}
-                <td>
-                  <button
-                    type="button"
-                    className="icon-button-table"
-                    aria-label="Verwijderen"
-                    title="Verwijderen"
-                    onClick={() => deleteRow(row._uiId)}
-                  >
-                    <TrashIcon />
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  })}
+                  <td>
+                    <button
+                      type="button"
+                      className="icon-button-table"
+                      aria-label={`Rij ${rowNumber} verwijderen`}
+                      title="Verwijderen"
+                      onClick={() => deleteRow(row._uiId)}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -397,8 +418,24 @@ export function DatasetTableEditor({
           </button>
         </div>
         <div className="editor-actions-group">
-          {status ? <span className="editor-status">{status}</span> : null}
-          <button type="button" className="editor-button" onClick={handleSave} disabled={isSaving}>
+          {status ? (
+            <span
+              id={statusId}
+              className="editor-status"
+              role={status.kind === "error" ? "alert" : "status"}
+              aria-atomic="true"
+            >
+              {status.message}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="editor-button"
+            onClick={handleSave}
+            disabled={isSaving}
+            aria-busy={isSaving}
+            aria-describedby={status ? statusId : undefined}
+          >
             {isSaving ? "Opslaan..." : "Opslaan"}
           </button>
         </div>
