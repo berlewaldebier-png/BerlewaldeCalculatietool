@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "RF-010-core-pricing-engine",
+  "baselineCommit": "8668cdf572c117851e40e0a7f3454e4cc39ed9c7",
+  "approval": {
+    "status": "pending-human-approval",
+    "approvedBy": null,
+    "approvedAt": null
+  },
+  "contract": {
+    "module": "frontend/src/lib/pricingEngine.ts",
+    "owner": "product-and-finance",
+    "currency": "EUR in these fixtures; the engine itself is currency-neutral and performs no conversion",
+    "unit": "one quoted sellable SKU unit; qty is the number of those units",
+    "precision": "raw JavaScript number outputs are protected exactly; display formatting is outside this seam",
+    "rounding": "only operations that explicitly call round2 or roundDownTo5Cents round their result"
+  },
+  "cases": [
+    {
+      "id": "PRICE-001-markup-margin-round-trip",
+      "operation": "markup-and-margin",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect the relationship between cost, markup, sell-in price and derived margin.",
+      "input": {
+        "costEx": 10,
+        "markupPct": 50
+      },
+      "expected": {
+        "sellInEx": 15,
+        "marginPct": 33.33333333333333,
+        "roundTripMarkupPct": 50
+      }
+    },
+    {
+      "id": "PRICE-002-representative-quote-line",
+      "operation": "quote-line-totals",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect a representative EUR quote line with quantity, discount, fee and returns.",
+      "input": {
+        "kostprijsEx": 2.37,
+        "offerPriceEx": 4.95,
+        "qty": 24,
+        "kortingPct": 10,
+        "feeExPerUnit": 0.15,
+        "retourPct": 2.5
+      },
+      "expected": {
+        "omzet": 100.737,
+        "kosten": 56.88,
+        "kortingEur": 11.880000000000003,
+        "feeEur": 3.5999999999999996,
+        "retourEur": 2.583,
+        "winst": 43.85699999999999,
+        "margePct": 43.536138658089875
+      }
+    },
+    {
+      "id": "PRICE-003-historical-explicit-input",
+      "operation": "quote-line-totals",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Show that this pure seam calculates from the supplied historical quote values and has no master-data lookup.",
+      "context": {
+        "quoteYear": 2025,
+        "inputSource": "persisted-quote-snapshot",
+        "laterMasterCostExNotReadByThisSeam": 3.25
+      },
+      "input": {
+        "kostprijsEx": 2,
+        "offerPriceEx": 4,
+        "qty": 10,
+        "kortingPct": 0
+      },
+      "expected": {
+        "omzet": 40,
+        "kosten": 20,
+        "kortingEur": 0,
+        "feeEur": 0,
+        "retourEur": 0,
+        "winst": 20,
+        "margePct": 50
+      }
+    },
+    {
+      "id": "PRICE-004-missing-cost-current-behaviour",
+      "operation": "quote-line-totals",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Expose the current missing-cost fallback instead of silently treating it as approved policy.",
+      "input": {
+        "offerPriceEx": 4,
+        "qty": 10,
+        "kortingPct": 0
+      },
+      "expected": {
+        "omzet": 40,
+        "kosten": 0,
+        "kortingEur": 0,
+        "feeEur": 0,
+        "retourEur": 0,
+        "winst": 40,
+        "margePct": 100
+      }
+    },
+    {
+      "id": "PRICE-005-zero-value-line",
+      "operation": "quote-line-totals",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect the current all-zero quote-line result.",
+      "input": {
+        "kostprijsEx": 0,
+        "offerPriceEx": 0,
+        "qty": 0,
+        "kortingPct": 0
+      },
+      "expected": {
+        "omzet": 0,
+        "kosten": 0,
+        "kortingEur": 0,
+        "feeEur": 0,
+        "retourEur": 0,
+        "winst": 0,
+        "margePct": 0
+      }
+    },
+    {
+      "id": "PRICE-006-negative-quantity-current-behaviour",
+      "operation": "quote-line-totals",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Expose that negative or credit-like quantities are clamped to zero in this rule.",
+      "input": {
+        "kostprijsEx": 2,
+        "offerPriceEx": 4,
+        "qty": -3,
+        "kortingPct": 0
+      },
+      "expected": {
+        "omzet": 0,
+        "kosten": 0,
+        "kortingEur": 0,
+        "feeEur": 0,
+        "retourEur": 0,
+        "winst": 0,
+        "margePct": 0
+      }
+    },
+    {
+      "id": "PRICE-007-free-units",
+      "operation": "quote-line-totals-with-free",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect revenue, cost and margin when quoted units include free units.",
+      "input": {
+        "kostprijsEx": 2,
+        "offerPriceEx": 4,
+        "qty": 10,
+        "freeQty": 2
+      },
+      "expected": {
+        "omzet": 32,
+        "kosten": 20,
+        "kortingEur": 8,
+        "winst": 12,
+        "margePct": 37.5
+      }
+    },
+    {
+      "id": "PRICE-008-vat-round-trip",
+      "operation": "vat-round-trip",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect the current 21 percent VAT conversion without introducing an implicit rounding point.",
+      "input": {
+        "priceEx": 12.5,
+        "vatPct": 21
+      },
+      "expected": {
+        "priceIncl": 15.125,
+        "priceExRoundTrip": 12.5
+      }
+    },
+    {
+      "id": "PRICE-009-advice-price-five-cent-rounding",
+      "operation": "advice-price-range",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect VAT application and the current downward five-cent advice-price rounding rule.",
+      "input": {
+        "kostprijsEx": 3.58,
+        "sellInEx": 3.58,
+        "adviesOpslagPct": 0,
+        "btwPct": 21
+      },
+      "expected": {
+        "inclRounded": 4.3,
+        "min": 4.25,
+        "max": 4.35,
+        "margeKlantPct": 0
+      }
+    },
+    {
+      "id": "PRICE-010-rounding-boundaries",
+      "operation": "rounding",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect cent rounding and downward five-cent rounding at representative boundaries.",
+      "input": {
+        "round2Value": 1.005,
+        "roundDown5CentsValue": 4.3318
+      },
+      "expected": {
+        "round2": 1.01,
+        "roundDown5Cents": 4.3
+      }
+    }
+  ]
+}
