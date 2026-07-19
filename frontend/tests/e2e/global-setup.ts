@@ -12,7 +12,9 @@ async function globalSetup(config: FullConfig) {
     return;
   }
 
-  const storageStatePath = "test-results/.auth/storageState.json";
+  // Keep auth outside Playwright's test-results output, which is cleared at
+  // the start of every separate Playwright command in CI.
+  const storageStatePath = "playwright/.auth/storageState.json";
   const browser = await chromium.launch({
     channel: process.platform === "win32" ? "msedge" : undefined
   });
