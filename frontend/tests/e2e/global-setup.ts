@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import { chromium, type FullConfig } from "@playwright/test";
 
 async function globalSetup(config: FullConfig) {
@@ -10,23 +12,36 @@ async function globalSetup(config: FullConfig) {
     return;
   }
 
+  const storageStatePath = "test-results/.auth/storageState.json";
   const browser = await chromium.launch({
     channel: process.platform === "win32" ? "msedge" : undefined
   });
-  const page = await browser.newPage();
+  try {
+    if (existsSync(storageStatePath)) {
+      const storedContext = await browser.newContext({ storageState: storageStatePath });
+      try {
+        const response = await storedContext.request.get(new URL("/api/auth/me", baseURL).toString());
+        const payload = response.ok() ? await response.json().catch(() => null) : null;
+        if (payload?.authenticated === true) {
+          return;
+        }
+      } finally {
+        await storedContext.close();
+      }
+    }
 
-  await page.goto(new URL("/login", baseURL).toString());
-  await page.getByLabel("Gebruikersnaam").fill(username);
-  await page.locator('input[autocomplete="current-password"]').fill(password);
-  await page.getByRole("button", { name: "Inloggen" }).click();
+    const page = await browser.newPage();
+    await page.goto(new URL("/login", baseURL).toString());
+    await page.getByLabel("Gebruikersnaam").fill(username);
+    await page.locator('input[autocomplete="current-password"]').fill(password);
+    await page.getByRole("button", { name: "Inloggen" }).click();
 
-  // Wait until we are not on /login anymore (server-side redirect happens after cookie is set).
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
-
-  const storageStatePath = "test-results/.auth/storageState.json";
-  await page.context().storageState({ path: storageStatePath });
-
-  await browser.close();
+    // Wait until we are not on /login anymore (server-side redirect happens after cookie is set).
+    await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
+    await page.context().storageState({ path: storageStatePath });
+  } finally {
+    await browser.close();
+  }
 }
 
 export default globalSetup;
