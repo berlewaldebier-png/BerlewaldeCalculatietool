@@ -68,7 +68,7 @@ test.describe("RF-009G navigation and form-action contract", () => {
     await expect(page.getByText("Stap 2: Samenstelling", { exact: true })).toBeVisible();
     expect(mutations.value()).toBe(0);
 
-    const previous = actions.getByRole("button", { name: "Vorige" });
+    const previous = actions.getByRole("button", { name: "Vorige", exact: true });
     await previous.focus();
     await page.keyboard.press("Tab");
     await expect(back).toBeFocused();
@@ -108,7 +108,7 @@ test.describe("RF-009G navigation and form-action contract", () => {
     await expect(page.getByText("Stap 2: Samenstelling", { exact: true })).toBeVisible();
     expect(mutations.value()).toBe(0);
 
-    const previous = actions.getByRole("button", { name: "Vorige" });
+    const previous = actions.getByRole("button", { name: "Vorige", exact: true });
     await previous.focus();
     await page.keyboard.press("Tab");
     await expect(back).toBeFocused();
