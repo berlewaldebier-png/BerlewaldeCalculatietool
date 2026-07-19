@@ -32,20 +32,35 @@ function normalizedSort(values: string[], direction: "asc" | "desc") {
     .map(({ value }) => value);
 }
 
+async function addUnsavedBeer(editor: Locator, name: string, style: string) {
+  const names = editor.getByRole("textbox", { name: /^Biernaam, rij/ });
+  const previousCount = await names.count();
+  await editor.getByRole("button", { name: "Rij toevoegen" }).click();
+  await expect(names).toHaveCount(previousCount + 1);
+
+  const nameInput = names.last();
+  const row = nameInput.locator("xpath=ancestor::tr");
+  await nameInput.fill(name);
+  await row.getByRole("textbox", { name: /^Stijl, rij/ }).fill(style);
+}
+
 test.describe("RF-009F editable table characterization", () => {
   test.skip(!TEST_USERNAME || !TEST_PASSWORD, "Requires TEST_USERNAME/TEST_PASSWORD");
 
-  test("keeps input order until the user requests ascending or descending sorting", async ({ page }) => {
+  test("keeps input order until the user requests ascending or descending sorting", async ({ page }, testInfo) => {
     await ensureLoggedIn(page);
     await page.goto("/bieren");
 
     const editor = page.locator(".module-card").filter({ hasText: "Bierstamdata" });
+    await editor.getByLabel("Per pagina").selectOption("0");
     const names = editor.getByRole("textbox", { name: /^Biernaam, rij/ });
-    const initialOrder = await inputValues(names);
-    expect(initialOrder.length).toBeGreaterThan(1);
+    const serverOrder = await inputValues(names);
+    const temporaryNames = ["Zulu RF009F", "alpha RF009F", "Mike RF009F"];
+    for (const [index, name] of temporaryNames.entries()) {
+      await addUnsavedBeer(editor, name, `Tijdelijke stijl ${index + 1}`);
+    }
 
-    await page.reload();
-    await expect(editor).toBeVisible();
+    const initialOrder = [...serverOrder, ...temporaryNames];
     expect(await inputValues(names)).toEqual(initialOrder);
 
     const sortButton = editor.getByRole("button", { name: /Biernaam/ });
@@ -58,19 +73,33 @@ test.describe("RF-009F editable table characterization", () => {
     await sortButton.focus();
     await page.keyboard.press("Enter");
     expect(await inputValues(names)).toEqual(normalizedSort(initialOrder, "asc"));
+
+    await testInfo.attach(`rf-009f-sorting-${testInfo.project.name}`, {
+      body: await editor.screenshot(),
+      contentType: "image/png"
+    });
   });
 
-  test("sorting resets pagination and keeps edited values attached to their row", async ({ page }) => {
+  test("sorting resets pagination and keeps edited values attached to their row", async ({ page }, testInfo) => {
     await ensureLoggedIn(page);
     await page.goto("/bieren");
 
     const editor = page.locator(".module-card").filter({ hasText: "Bierstamdata" });
-    const firstRow = editor.locator("tbody tr").first();
-    const originalId = await firstRow.getByRole("textbox", { name: /^ID, rij/ }).inputValue();
+    await editor.getByLabel("Per pagina").selectOption("0");
     const temporaryName = "ZZZ RF-009F tijdelijke browserwaarde";
-    await firstRow.getByRole("textbox", { name: /^Biernaam, rij/ }).fill(temporaryName);
+    const temporaryStyle = "RF-009F gekoppelde stijl";
+    const temporaryRows = [
+      [temporaryName, temporaryStyle],
+      ["Bravo RF009F", "Stijl B"],
+      ["Charlie RF009F", "Stijl C"],
+      ["Delta RF009F", "Stijl D"],
+      ["Echo RF009F", "Stijl E"],
+      ["Foxtrot RF009F", "Stijl F"]
+    ] as const;
+    for (const [name, style] of temporaryRows) {
+      await addUnsavedBeer(editor, name, style);
+    }
 
-    await editor.getByRole("button", { name: /Biernaam/ }).click();
     await editor.getByRole("button", { name: /Biernaam/ }).click();
 
     const editedRowIndex = await editor.locator("tbody tr").evaluateAll(
@@ -82,16 +111,19 @@ test.describe("RF-009F editable table characterization", () => {
     );
     expect(editedRowIndex).toBeGreaterThanOrEqual(0);
     const editedRow = editor.locator("tbody tr").nth(editedRowIndex);
-    expect(await editedRow.locator("input").first().inputValue()).toBe(originalId);
+    await expect(editedRow.getByRole("textbox", { name: /^Stijl, rij/ })).toHaveValue(temporaryStyle);
 
     await editor.getByLabel("Per pagina").selectOption("5");
-    if (await editor.getByRole("button", { name: "Volgende" }).isVisible()) {
-      await editor.getByRole("button", { name: "Volgende" }).click();
-      await expect(editor.getByRole("button", { name: "Vorige" })).toBeVisible();
+    await editor.getByRole("button", { name: "Volgende" }).click();
+    await expect(editor.getByRole("button", { name: "Vorige" })).toBeVisible();
 
-      await editor.getByRole("button", { name: /Biernaam/ }).press("Enter");
-      await expect(editor.getByRole("button", { name: "Vorige" })).toHaveCount(0);
-      await expect(editor.getByRole("textbox", { name: /rij 1$/ }).first()).toBeVisible();
-    }
+    await editor.getByRole("button", { name: /Biernaam/ }).press("Enter");
+    await expect(editor.getByRole("button", { name: "Vorige" })).toHaveCount(0);
+    await expect(editor.getByRole("textbox", { name: /rij 1$/ }).first()).toBeVisible();
+
+    await testInfo.attach(`rf-009f-pagination-${testInfo.project.name}`, {
+      body: await editor.screenshot(),
+      contentType: "image/png"
+    });
   });
 });
