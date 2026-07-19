@@ -109,11 +109,10 @@ test.describe("RF-009G navigation and form-action contract", () => {
     expect(mutations.value()).toBe(0);
 
     const previous = actions.getByRole("button", { name: "Vorige", exact: true });
+    await expect(save).toBeDisabled();
     await previous.focus();
     await page.keyboard.press("Tab");
     await expect(back).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(save).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(next).toBeFocused();
 
