@@ -8,17 +8,22 @@ export function SortButton({
   active,
   dir,
   onClick,
+  showInactiveIndicator = false,
 }: {
   label: string;
   active: boolean;
   dir: SortDir;
   onClick: () => void;
+  showInactiveIndicator?: boolean;
 }) {
+  const indicator = active ? (dir === "asc" ? "↑" : "↓") : "↕";
+  const nextDirection = active && dir === "asc" ? "aflopend" : "oplopend";
+
   return (
     <button
       type="button"
       onClick={onClick}
-      title="Sorteren"
+      title={`${label} ${nextDirection} sorteren`}
       style={{
         appearance: "none",
         background: "transparent",
@@ -31,10 +36,21 @@ export function SortButton({
         cursor: "pointer",
         textDecoration: "none",
         opacity: active ? 1 : 0.9,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.35rem",
       }}
     >
-      {label}
-      {active ? (dir === "asc" ? " ▲" : " ▼") : ""}
+      <span>{label}</span>
+      {active || showInactiveIndicator ? (
+        <span
+          aria-hidden="true"
+          data-sort-indicator={active ? dir : "none"}
+          style={{ minWidth: "1em", opacity: active ? 1 : 0.62, textAlign: "center" }}
+        >
+          {indicator}
+        </span>
+      ) : null}
     </button>
   );
 }
