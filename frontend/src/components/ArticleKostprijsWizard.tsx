@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { usePageShellHeader } from "@/components/PageShell";
 import { WizardSteps } from "@/components/WizardSteps";
+import { WizardActionBar } from "@/components/WizardActionBar";
 import { API_BASE_URL } from "@/lib/api";
 import { ApiRequestError } from "@/lib/apiClient";
 import { formatMoneyEUR } from "@/lib/formatters";
@@ -299,8 +300,10 @@ export function ArticleKostprijsWizard(props: Props) {
 
               </div>
 
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
+              <WizardActionBar
+                ariaLabel="Acties voor artikelkostprijsberekening"
+                leadingActions={
+                  <>
                   {stepIndex > 0 ? (
                     <button
                       type="button"
@@ -315,10 +318,12 @@ export function ArticleKostprijsWizard(props: Props) {
                     className="editor-button editor-button-secondary"
                     onClick={() => props.onBackToLanding?.()}
                   >
-                    Terug
+                    Terug naar Kostprijs beheren
                   </button>
-                </div>
-                <div className="editor-actions-group">
+                  </>
+                }
+                trailingActions={
+                  <>
                   <button type="button" className="editor-button editor-button-secondary" onClick={() => void persist("concept", { activate: false })}>
                     Opslaan
                   </button>
@@ -336,8 +341,9 @@ export function ArticleKostprijsWizard(props: Props) {
                   >
                     {isSaving ? "Opslaan..." : currentStep.id === "samenvatting" ? "Afronden" : "Volgende"}
                   </button>
-                </div>
-              </div>
+                  </>
+                }
+              />
             </div>
           </div>
 
