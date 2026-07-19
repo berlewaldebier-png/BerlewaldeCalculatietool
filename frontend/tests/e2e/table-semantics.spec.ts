@@ -114,7 +114,7 @@ test.describe("RF-009F editable table characterization", () => {
     await expect(editedRow.getByRole("textbox", { name: /^Stijl, rij/ })).toHaveValue(temporaryStyle);
 
     await editor.getByLabel("Per pagina").selectOption("5");
-    await editor.getByRole("button", { name: "Volgende" }).click();
+    await editor.getByRole("button", { name: "Volgende" }).press("Enter");
     await expect(editor.getByRole("button", { name: "Vorige" })).toBeVisible();
 
     await editor.getByRole("button", { name: /Biernaam/ }).press("Enter");
