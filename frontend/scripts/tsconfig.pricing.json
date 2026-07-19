@@ -21,6 +21,7 @@
   },
   "include": [
     "./pricingEngine.contracttest.ts",
+    "./financialGoldenFixtures.contracttest.ts",
     "./quoteBuilderGuards.contracttest.ts",
     "./quoteScenarioCalculations.contracttest.ts",
     "./centralSkuIndex.contracttest.ts",
