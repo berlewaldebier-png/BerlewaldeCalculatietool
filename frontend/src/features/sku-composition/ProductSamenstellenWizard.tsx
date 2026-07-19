@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { WizardSteps } from "@/components/WizardSteps";
+import { WizardActionBar } from "@/components/WizardActionBar";
 import { buildCentralSkuIndex } from "@/features/sku/centralSkuIndex";
 import { API_BASE_URL } from "@/lib/api";
 import { StepControle } from "@/features/sku-composition/steps/StepControle";
@@ -700,8 +701,10 @@ export function ProductSamenstellenWizard(props: Props) {
                 ) : null}
               </div>
 
-              <div className="editor-actions wizard-footer-actions">
-                <div className="editor-actions-group">
+              <WizardActionBar
+                ariaLabel="Acties voor product samenstellen"
+                leadingActions={
+                  <>
                   {stepIndex > 0 ? (
                     <button
                       type="button"
@@ -711,18 +714,19 @@ export function ProductSamenstellenWizard(props: Props) {
                       Vorige
                     </button>
                   ) : null}
-                </div>
-                <div className="editor-actions-group">
                   {currentStep.id === "lijst" ? null : (
                     <button
                       type="button"
                       className="editor-button editor-button-secondary"
                       onClick={() => window.history.back()}
                     >
-                      Terug
+                      Terug naar vorige pagina
                     </button>
                   )}
-
+                  </>
+                }
+                trailingActions={
+                  <>
                   {currentStep.id === "controle" ? (
                     <>
                       <button
@@ -751,7 +755,7 @@ export function ProductSamenstellenWizard(props: Props) {
                           void saveSellable({ goToList: true });
                         }}
                       >
-                        {isSaving ? "Opslaan..." : "Opslaan & verder"}
+                        {isSaving ? "Opslaan..." : "Opslaan en doorgaan"}
                       </button>
                     </>
                   ) : currentStep.id === "lijst" ? null : (
@@ -780,8 +784,9 @@ export function ProductSamenstellenWizard(props: Props) {
                       </button>
                     </>
                   )}
-                </div>
-              </div>
+                  </>
+                }
+              />
             </div>
           </div>
           {status ? <div className="editor-status wizard-inline-status">{status}</div> : null}

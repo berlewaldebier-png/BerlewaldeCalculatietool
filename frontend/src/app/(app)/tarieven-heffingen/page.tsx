@@ -1,4 +1,5 @@
 import { DatasetTableEditor } from "@/components/DatasetTableEditor";
+import { PageBackLink } from "@/components/PageBackLink";
 import { PageShell } from "@/components/PageShell";
 import { getBootstrap } from "@/lib/apiServer";
 
@@ -21,6 +22,7 @@ export default async function TarievenHeffingenPage() {
       activePath="/tarieven-heffingen"
       navigation={navigation}
     >
+      <PageBackLink href="/instellingen/bedrijf" label="Terug naar Bedrijfsinstellingen" />
       <DatasetTableEditor
         endpoint="/data/tarieven-heffingen"
         initialRows={rows}

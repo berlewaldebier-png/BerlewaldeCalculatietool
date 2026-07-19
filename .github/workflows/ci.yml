@@ -127,6 +127,10 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/table-semantics.spec.ts --retries=0
 
+      - name: RF-009G navigation and form-action contract
+        working-directory: frontend
+        run: npx playwright test tests/e2e/navigation-actions.spec.ts --retries=0
+
       # RF-003 makes the database target disposable, but the historical broad
       # maturity/a11y suite still has owned UI/auth failures outside this slice.
       # Keep collecting its result until RF-004/RF-009 update those contracts;

@@ -5245,6 +5245,31 @@ a {
   border-top: 1px solid var(--border);
 }
 
+.page-back-navigation {
+  margin: 0 0 1rem;
+}
+
+.page-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.page-back-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.page-back-link:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid var(--accent-border);
+  outline-offset: 3px;
+}
+
 .wizard-inline-status {
   margin-top: 0.85rem;
 }
