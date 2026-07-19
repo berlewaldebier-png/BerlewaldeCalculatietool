@@ -1,0 +1,425 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "RF-010-core-costprice-engine",
+  "baselineCommit": "8668cdf572c117851e40e0a7f3454e4cc39ed9c7",
+  "approval": {
+    "status": "pending-human-approval",
+    "approvedBy": null,
+    "approvedAt": null
+  },
+  "contract": {
+    "module": "frontend/src/lib/costpriceCalculationEngine.ts",
+    "owner": "product-and-finance",
+    "currency": "EUR",
+    "rawPrecision": "unrounded JavaScript number per component and total",
+    "displayPrecision": "current calculation-wizard formatCurrencyDisplay output after aggregate calculation",
+    "formula": "primaire_kosten + verpakkingskosten + vaste_kosten + accijns"
+  },
+  "cases": [
+    {
+      "id": "COST-001-direct-purchased-sku",
+      "operation": "direct-sku",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect the direct purchased-SKU component sum for a Juweel box of 24 x 33cl.",
+      "input": {
+        "primaryCost": 22.75,
+        "packagingCost": 0,
+        "overheadCost": 11.25,
+        "exciseCost": 3.86,
+        "liters": 7.92,
+        "sourceLabel": "Inkoopfactuur Juweel Doos 24 x 33cl"
+      },
+      "expected": {
+        "status": "ok",
+        "raw": {
+          "primaire_kosten": 22.75,
+          "verpakkingskosten": 0,
+          "vaste_kosten": 11.25,
+          "accijns": 3.86,
+          "kostprijs": 37.86
+        },
+        "display": {
+          "primaire_kosten": "€ 22.75",
+          "verpakkingskosten": "€ 0.00",
+          "vaste_kosten": "€ 11.25",
+          "accijns": "€ 3.86",
+          "kostprijs": "€ 37.86"
+        },
+        "issues": [],
+        "trace": [
+          { "code": "primary", "label": "Inkoop/ingredienten", "value": 22.75, "source": "Inkoopfactuur Juweel Doos 24 x 33cl" },
+          { "code": "packaging", "label": "Verpakking", "value": 0, "source": "Inkoopfactuur Juweel Doos 24 x 33cl" },
+          { "code": "abc", "label": "ABC/overhead", "value": 11.25, "source": "Inkoopfactuur Juweel Doos 24 x 33cl" },
+          { "code": "excise", "label": "Accijns", "value": 3.86, "source": "Inkoopfactuur Juweel Doos 24 x 33cl" }
+        ]
+      }
+    },
+    {
+      "id": "COST-002-derived-basis-bottle",
+      "operation": "derived-child",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect division of the purchased box component breakdown across 24 basis bottles.",
+      "input": {
+        "parent": {
+          "primaire_kosten": 22.75,
+          "verpakkingskosten": 0,
+          "vaste_kosten": 11.25,
+          "accijns": 3.86,
+          "kostprijs": 37.86
+        },
+        "factor": 24,
+        "extraPackagingCost": 0,
+        "parentLabel": "Juweel Doos 24 x 33cl"
+      },
+      "expected": {
+        "status": "ok",
+        "raw": {
+          "primaire_kosten": 0.9479166666666666,
+          "verpakkingskosten": 0,
+          "vaste_kosten": 0.46875,
+          "accijns": 0.16083333333333333,
+          "kostprijs": 1.5775
+        },
+        "display": {
+          "primaire_kosten": "€ 0.95",
+          "verpakkingskosten": "€ 0.00",
+          "vaste_kosten": "€ 0.47",
+          "accijns": "€ 0.16",
+          "kostprijs": "€ 1.58"
+        },
+        "issues": [],
+        "trace": [
+          { "code": "parent_primary", "label": "Parent inkoop/ingredienten gedeeld", "value": 0.9479166666666666, "source": "Juweel Doos 24 x 33cl" },
+          { "code": "parent_packaging", "label": "Parent verpakking gedeeld + eigen verpakking", "value": 0, "source": "Juweel Doos 24 x 33cl" },
+          { "code": "parent_abc", "label": "Parent ABC gedeeld", "value": 0.46875, "source": "Juweel Doos 24 x 33cl" },
+          { "code": "parent_excise", "label": "Parent accijns gedeeld", "value": 0.16083333333333333, "source": "Juweel Doos 24 x 33cl" }
+        ]
+      }
+    },
+    {
+      "id": "COST-003-own-brewed-sku",
+      "operation": "direct-sku",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect the current own-recipe SKU aggregation of ingredients, packaging, overhead and excise.",
+      "input": {
+        "primaryCost": 18.42,
+        "packagingCost": 9.36,
+        "overheadCost": 12.84,
+        "exciseCost": 4.08,
+        "liters": 7.92,
+        "sourceLabel": "Eigen recept Doos 24 x 33cl"
+      },
+      "expected": {
+        "status": "ok",
+        "raw": {
+          "primaire_kosten": 18.42,
+          "verpakkingskosten": 9.36,
+          "vaste_kosten": 12.84,
+          "accijns": 4.08,
+          "kostprijs": 44.7
+        },
+        "display": {
+          "primaire_kosten": "€ 18.42",
+          "verpakkingskosten": "€ 9.36",
+          "vaste_kosten": "€ 12.84",
+          "accijns": "€ 4.08",
+          "kostprijs": "€ 44.70"
+        },
+        "issues": [],
+        "trace": [
+          { "code": "primary", "label": "Inkoop/ingredienten", "value": 18.42, "source": "Eigen recept Doos 24 x 33cl" },
+          { "code": "packaging", "label": "Verpakking", "value": 9.36, "source": "Eigen recept Doos 24 x 33cl" },
+          { "code": "abc", "label": "ABC/overhead", "value": 12.84, "source": "Eigen recept Doos 24 x 33cl" },
+          { "code": "excise", "label": "Accijns", "value": 4.08, "source": "Eigen recept Doos 24 x 33cl" }
+        ]
+      }
+    },
+    {
+      "id": "COST-004-composed-giftset",
+      "operation": "component-composition",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect a composed gift set containing two Juweel bottles and one priced gift box.",
+      "input": {
+        "parentArticleId": "giftset-2",
+        "year": 2026,
+        "bomLines": [
+          { "parent_article_id": "giftset-2", "component_sku_id": "sku-fles-33cl", "quantity": 2 },
+          { "parent_article_id": "giftset-2", "component_article_id": "giftbox-2", "quantity": 1 }
+        ],
+        "skus": [
+          { "id": "sku-fles-33cl", "name": "Juweel Fles 33cl", "kind": "beer_format", "format_article_id": "fmt-fles-33cl" }
+        ],
+        "articles": [
+          { "id": "giftbox-2", "name": "Geschenkdoos 2", "kind": "packaging_component" }
+        ],
+        "summaryRows": [
+          {
+            "sku_id": "sku-fles-33cl",
+            "primaire_kosten": 0.9479166666666666,
+            "verpakkingskosten": 0,
+            "vaste_kosten": 0.46875,
+            "accijns": 0.16083333333333333,
+            "kostprijs": 1.5775
+          }
+        ],
+        "packagingComponentPrices": [
+          { "jaar": 2026, "verpakkingsonderdeel_id": "giftbox-2", "prijs_per_stuk": 0.91 }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "component_count": 2,
+        "raw": {
+          "primaire_kosten": 1.8958333333333333,
+          "verpakkingskosten": 0.91,
+          "vaste_kosten": 0.9375,
+          "accijns": 0.32166666666666666,
+          "kostprijs": 4.0649999999999995
+        },
+        "display": {
+          "primaire_kosten": "€ 1.90",
+          "verpakkingskosten": "€ 0.91",
+          "vaste_kosten": "€ 0.94",
+          "accijns": "€ 0.32",
+          "kostprijs": "€ 4.06"
+        },
+        "issues": [],
+        "components": [
+          {
+            "label": "Juweel Fles 33cl",
+            "quantity": 2,
+            "component_sku_id": "sku-fles-33cl",
+            "valid": true,
+            "raw": {
+              "primaire_kosten": 1.8958333333333333,
+              "verpakkingskosten": 0,
+              "vaste_kosten": 0.9375,
+              "accijns": 0.32166666666666666,
+              "kostprijs": 3.155
+            },
+            "display": {
+              "primaire_kosten": "€ 1.90",
+              "verpakkingskosten": "€ 0.00",
+              "vaste_kosten": "€ 0.94",
+              "accijns": "€ 0.32",
+              "kostprijs": "€ 3.16"
+            },
+            "issues": []
+          },
+          {
+            "label": "Geschenkdoos 2",
+            "quantity": 1,
+            "component_article_id": "giftbox-2",
+            "valid": true,
+            "raw": {
+              "primaire_kosten": 0,
+              "verpakkingskosten": 0.91,
+              "vaste_kosten": 0,
+              "accijns": 0,
+              "kostprijs": 0.91
+            },
+            "display": {
+              "primaire_kosten": "€ 0.00",
+              "verpakkingskosten": "€ 0.91",
+              "vaste_kosten": "€ 0.00",
+              "accijns": "€ 0.00",
+              "kostprijs": "€ 0.91"
+            },
+            "issues": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "COST-005-derived-extra-packaging",
+      "operation": "derived-child",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect a derived bottle with an additional EUR 0.12 packaging component after parent division.",
+      "input": {
+        "parent": {
+          "primaire_kosten": 22.75,
+          "verpakkingskosten": 0,
+          "vaste_kosten": 11.25,
+          "accijns": 3.86,
+          "kostprijs": 37.86
+        },
+        "factor": 24,
+        "extraPackagingCost": 0.12,
+        "parentLabel": "Juweel Doos 24 x 33cl"
+      },
+      "expected": {
+        "status": "ok",
+        "raw": {
+          "primaire_kosten": 0.9479166666666666,
+          "verpakkingskosten": 0.12,
+          "vaste_kosten": 0.46875,
+          "accijns": 0.16083333333333333,
+          "kostprijs": 1.6975
+        },
+        "display": {
+          "primaire_kosten": "€ 0.95",
+          "verpakkingskosten": "€ 0.12",
+          "vaste_kosten": "€ 0.47",
+          "accijns": "€ 0.16",
+          "kostprijs": "€ 1.70"
+        },
+        "issues": [],
+        "trace": [
+          { "code": "parent_primary", "label": "Parent inkoop/ingredienten gedeeld", "value": 0.9479166666666666, "source": "Juweel Doos 24 x 33cl" },
+          { "code": "parent_packaging", "label": "Parent verpakking gedeeld + eigen verpakking", "value": 0.12, "source": "Juweel Doos 24 x 33cl" },
+          { "code": "parent_abc", "label": "Parent ABC gedeeld", "value": 0.46875, "source": "Juweel Doos 24 x 33cl" },
+          { "code": "parent_excise", "label": "Parent accijns gedeeld", "value": 0.16083333333333333, "source": "Juweel Doos 24 x 33cl" }
+        ]
+      }
+    },
+    {
+      "id": "COST-006-missing-primary-component",
+      "operation": "direct-sku",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Expose that a missing primary-cost input currently becomes zero without a blocking issue.",
+      "input": {
+        "packagingCost": 0.45,
+        "overheadCost": 0.35,
+        "exciseCost": 0.2,
+        "liters": 0.75,
+        "sourceLabel": "Ontbrekende primaire kosten"
+      },
+      "expected": {
+        "status": "ok",
+        "raw": {
+          "primaire_kosten": 0,
+          "verpakkingskosten": 0.45,
+          "vaste_kosten": 0.35,
+          "accijns": 0.2,
+          "kostprijs": 1
+        },
+        "display": {
+          "primaire_kosten": "€ 0.00",
+          "verpakkingskosten": "€ 0.45",
+          "vaste_kosten": "€ 0.35",
+          "accijns": "€ 0.20",
+          "kostprijs": "€ 1.00"
+        },
+        "issues": [],
+        "trace": [
+          { "code": "primary", "label": "Inkoop/ingredienten", "value": 0, "source": "Ontbrekende primaire kosten" },
+          { "code": "packaging", "label": "Verpakking", "value": 0.45, "source": "Ontbrekende primaire kosten" },
+          { "code": "abc", "label": "ABC/overhead", "value": 0.35, "source": "Ontbrekende primaire kosten" },
+          { "code": "excise", "label": "Accijns", "value": 0.2, "source": "Ontbrekende primaire kosten" }
+        ]
+      }
+    },
+    {
+      "id": "COST-007-composition-without-bom",
+      "operation": "component-composition",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect the blocking result for a composed product without component rules.",
+      "input": {
+        "parentArticleId": "bundle-without-bom",
+        "year": 2026,
+        "bomLines": [],
+        "skus": [],
+        "articles": [],
+        "summaryRows": [],
+        "packagingComponentPrices": []
+      },
+      "expected": {
+        "valid": false,
+        "component_count": 0,
+        "raw": {
+          "primaire_kosten": 0,
+          "verpakkingskosten": 0,
+          "vaste_kosten": 0,
+          "accijns": 0,
+          "kostprijs": 0
+        },
+        "display": {
+          "primaire_kosten": "€ 0.00",
+          "verpakkingskosten": "€ 0.00",
+          "vaste_kosten": "€ 0.00",
+          "accijns": "€ 0.00",
+          "kostprijs": "€ 0.00"
+        },
+        "issues": [
+          { "code": "missing_bom", "message": "Geen componentregels gevonden voor bundle-without-bom.", "component_article_id": "bundle-without-bom" }
+        ],
+        "components": []
+      }
+    },
+    {
+      "id": "COST-008-cyclic-composition",
+      "operation": "component-composition",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect cycle detection and the blocking zero-cost result for an invalid composition.",
+      "input": {
+        "parentArticleId": "bundle-a",
+        "year": 2026,
+        "bomLines": [
+          { "parent_article_id": "bundle-a", "component_article_id": "bundle-b", "quantity": 1 },
+          { "parent_article_id": "bundle-b", "component_article_id": "bundle-a", "quantity": 1 }
+        ],
+        "skus": [],
+        "articles": [
+          { "id": "bundle-a", "name": "Bundel A", "kind": "article" },
+          { "id": "bundle-b", "name": "Bundel B", "kind": "article" }
+        ],
+        "summaryRows": [],
+        "packagingComponentPrices": []
+      },
+      "expected": {
+        "valid": false,
+        "component_count": 0,
+        "raw": {
+          "primaire_kosten": 0,
+          "verpakkingskosten": 0,
+          "vaste_kosten": 0,
+          "accijns": 0,
+          "kostprijs": 0
+        },
+        "display": {
+          "primaire_kosten": "€ 0.00",
+          "verpakkingskosten": "€ 0.00",
+          "vaste_kosten": "€ 0.00",
+          "accijns": "€ 0.00",
+          "kostprijs": "€ 0.00"
+        },
+        "issues": [
+          { "code": "component_cycle", "message": "Samenstelling bevat een cyclus bij bundle-a.", "component_article_id": "bundle-a" }
+        ],
+        "components": [
+          {
+            "label": "Bundel B",
+            "quantity": 1,
+            "component_article_id": "bundle-b",
+            "valid": false,
+            "raw": {
+              "primaire_kosten": 0,
+              "verpakkingskosten": 0,
+              "vaste_kosten": 0,
+              "accijns": 0,
+              "kostprijs": 0
+            },
+            "display": {
+              "primaire_kosten": "€ 0.00",
+              "verpakkingskosten": "€ 0.00",
+              "vaste_kosten": "€ 0.00",
+              "accijns": "€ 0.00",
+              "kostprijs": "€ 0.00"
+            },
+            "issues": [
+              { "code": "component_cycle", "message": "Samenstelling bevat een cyclus bij bundle-a.", "component_article_id": "bundle-a" }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -2,9 +2,9 @@
 
 ## Outcome and scope
 
-**Observed:** RF-010 core protects the current pure pricing calculations in `frontend/src/lib/pricingEngine.ts` with an executable, reviewable golden fixture set. It does not change application code, financial formulas, persisted values, database schemas, API contracts or UI behavior.
+**Observed:** RF-010 core protects the current pure commercial-pricing calculations in `frontend/src/lib/pricingEngine.ts` and the current SKU cost-price calculations in `frontend/src/lib/costpriceCalculationEngine.ts` with executable, reviewable golden fixture sets. It does not change application code, financial formulas, persisted values, database schemas, API contracts or UI behavior.
 
-The selected seam is intentionally limited to one existing rule family: sell-in pricing, markup/margin, quote-line totals, VAT conversion and advice-price rounding. The module was already pure and contract-tested, so no new adapter or abstraction was necessary.
+Both modules were already pure and contract-tested, so no new adapter or abstraction was necessary. The first fixture family covers sell-in pricing, markup/margin, quote-line totals, VAT conversion and advice-price rounding. The second covers direct purchased and own-recipe SKU aggregation, box-to-basis derivation, additional packaging and composed-product validation.
 
 RF-010A (active commercial context) and RF-010B (planning-cost anchor versus actual LOT cost) remain separate later slices. This fixture set does not select an active year, cost version, SKU activation or LOT.
 
@@ -40,10 +40,43 @@ The executable source is `frontend/scripts/fixtures/pricing-engine.golden.json`.
 | PRICE-009 | EUR 3.58 including the advice calculation becomes EUR 4.30 after downward EUR 0.05 rounding, with range EUR 4.25–4.35 | Confirm downward five-cent rounding and range semantics. |
 | PRICE-010 | `round2(1.005)` is EUR 1.01 and `roundDownTo5Cents(4.3318)` is EUR 4.30 | Confirm these representative rounding boundaries. |
 
+## Cost-price construction under protection
+
+The executable source is `frontend/scripts/fixtures/costprice-engine.golden.json`. The engine uses this component model:
+
+```text
+cost price = primary/purchase-or-ingredients
+           + packaging
+           + fixed/ABC overhead
+           + excise
+```
+
+For a derived basis SKU, each parent component is divided by the parent factor and any child-specific packaging is then added. For a composed sellable product, component SKU breakdowns are multiplied by BOM quantity and direct packaging-component prices are added.
+
+| ID | Business-readable current calculation | Expected review decision |
+| --- | --- | --- |
+| COST-001 | Purchased Juweel box: EUR 22.75 purchase + EUR 0.00 packaging + EUR 11.25 overhead + EUR 3.86 excise = **EUR 37.86** | Confirm these four component categories and addition order represent a directly purchased SKU. |
+| COST-002 | Basis bottle from a 24-bottle box: every COST-001 component is divided by 24; raw total `1.5775`, displayed **EUR 1.58** | Confirm parent-component division and that no packaging is silently added. |
+| COST-003 | Own-recipe box: EUR 18.42 ingredients + EUR 9.36 packaging + EUR 12.84 overhead + EUR 4.08 excise = **EUR 44.70** | Confirm own-production uses the same final four-part aggregation once upstream recipe/packaging values have been calculated. This case does not yet derive the EUR 18.42 from individual recipe lines. |
+| COST-004 | Gift set: two basis bottles at raw EUR 1.5775 each + EUR 0.91 gift box = raw `4.0649999999999995`; current aggregate display **EUR 4.06** | Review the component model. Also decide whether the observed EUR 4.06 aggregate versus EUR 4.07 sum of displayed components is acceptable as a frozen baseline or requires a separately approved rounding fix. |
+| COST-005 | Basis bottle with EUR 0.12 child packaging: raw EUR 1.5775 + EUR 0.12 = `1.6975`, displayed **EUR 1.70** | Confirm child-specific packaging is added after parent division. |
+| COST-006 | Missing primary cost is silently converted to EUR 0.00; other components total **EUR 1.00** and status remains `ok` | Confirm only as observed current behavior. Decide separately whether missing primary cost should block activation. |
+| COST-007 | A composed product without BOM lines is invalid, returns zero and reports `missing_bom` | Confirm this must remain blocking. |
+| COST-008 | A cyclic composition is invalid, returns zero and reports `component_cycle` | Confirm this must remain blocking. |
+
+### Cost-price scope boundary
+
+- **Observed:** COST-001/COST-003 protect the final component aggregation, not how an invoice line or recipe engine produced each input component.
+- **Observed:** COST-002/COST-005 protect the exact raw parent division and current wizard currency display.
+- **Observed:** COST-004 protects both the total and the component breakdown, including the current floating-point/display discrepancy. It does not silently normalize the total.
+- **Observed:** COST-007/COST-008 protect validation output; neither case writes or activates a zero cost.
+- **Unknown:** whether missing primary cost in COST-006 should remain non-blocking.
+- **Unknown:** whether the COST-004 aggregate must round mathematically to EUR 4.07, whether persisted precision should change, or whether only display behavior should change. RF-010 records the current EUR 4.06 result and stops before deciding.
+
 ## Coverage boundaries and open decisions
 
-- **Observed:** no equivalent Python implementation of this selected rule family was found in the repository. A TypeScript/Python parity runner is therefore not applicable; creating one would introduce a second implementation rather than protect an existing one.
-- **Observed:** the selected functions contain no dates or timezones. Timezone cases are not applicable to this seam.
+- **Observed:** no equivalent Python implementation of these selected rule families was found in the repository. A TypeScript/Python parity runner is therefore not applicable; creating one would introduce a second implementation rather than protect an existing one.
+- **Observed:** the selected functions contain no dates or timezones. Timezone cases are not applicable to these seams.
 - **Observed:** active SKU cost-source, year-transition and exact-LOT selection happen outside this module. They require the separate RF-010A and RF-010B snapshots already defined in the roadmap.
 - **Unknown:** whether a missing cost should block a quotation, show a warning or use another explicit fallback. RF-010 core records the present zero fallback only.
 - **Unknown:** the authoritative credit-note calculation path. Negative quantities currently produce zero in this seam.
@@ -53,16 +86,18 @@ These unknowns do not justify changing formulas in RF-010 core. They must be dec
 
 ## Regression and data safety
 
-- Fixture tests read a static JSON file and call pure functions only.
+- Fixture tests read static JSON files and call pure functions and the existing calculation-wizard currency formatter only.
 - Tests never connect to a database, external service or application API.
 - There is no fixture-update or auto-approval command; golden output changes require an intentional reviewed edit.
-- No real SKU, beer, quote, customer, price, LOT or user identifier is included.
+- No persisted SKU, quote, customer, LOT or user identifier is included. Cost fixtures use deterministic Juweel-shaped labels and synthetic identifiers only.
 - No migration or backfill is required.
 
 ## Performance observation
 
 **Observed, not a release threshold:** on the local Windows development machine with Node 24.14.1, 100,000 calls to the representative `calcOfferLineTotals` case completed in 30.341 ms (about 3.30 million calls/second; checksum `4353613.865805`). This measurement is recorded only to detect an obvious future order-of-magnitude regression. It is not a stable CI assertion, and GitHub CI on the repository's authoritative Node 22 runtime remains the compatibility gate.
 
+On the same machine/runtime, 10,000 complete COST-004 gift-set composition calculations completed in 61.308 ms (about 163,110 calls/second; checksum `40650`). This is likewise an observation, not a timing assertion.
+
 ## Approval gate
 
-Before squash-merging RF-010 core, product/finance must review PRICE-001 through PRICE-010. When approved, change the fixture-level status to `approved`, record the approver and date, and change every case decision status to `approved`. A rejected case must not be silently changed: record the discrepancy and open a separately approved behavior decision/fix.
+Before squash-merging RF-010 core, product/finance must review PRICE-001 through PRICE-010 and COST-001 through COST-008. When approved, change both fixture-level statuses to `approved`, record the approver and date, and change every case decision status to `approved`. A rejected case must not be silently changed: record the discrepancy and open a separately approved behavior decision/fix.
