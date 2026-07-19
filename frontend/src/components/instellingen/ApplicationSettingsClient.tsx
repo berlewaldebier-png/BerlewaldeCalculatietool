@@ -1,26 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { ActionStatus, type ActionStatusState } from "@/components/ActionStatus";
 import {
   saveApplicationSettings,
   type ApplicationSettings
 } from "@/components/instellingen/applicationSettingsApi";
-import { apiErrorMessage } from "@/lib/apiClient";
+import { ApiRequestError } from "@/lib/apiClient";
 
 export function ApplicationSettingsClient({ initial }: { initial: ApplicationSettings }) {
   const router = useRouter();
+  const statusId = useId();
   const [companyName, setCompanyName] = useState(initial.company_name || "Berlewalde Brouwerij");
   const [supportEmail, setSupportEmail] = useState(initial.support_email || "info@berlewaldebier.nl");
-  const [status, setStatus] = useState("");
-  const [tone, setTone] = useState<"" | "success" | "error">("");
+  const [status, setStatus] = useState<ActionStatusState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   async function handleSave() {
     setIsSaving(true);
-    setStatus("");
-    setTone("");
+    setStatus({ kind: "pending", message: "Bedrijfsinstellingen worden opgeslagen." });
     try {
       const payload: ApplicationSettings = {
         ...initial,
@@ -30,19 +30,27 @@ export function ApplicationSettingsClient({ initial }: { initial: ApplicationSet
       };
       await saveApplicationSettings(payload);
       window.dispatchEvent(new Event("calculatietool-settings-changed"));
-      setStatus("Opgeslagen.");
-      setTone("success");
+      setStatus({ kind: "success", message: "Bedrijfsinstellingen zijn opgeslagen." });
       router.refresh();
     } catch (error) {
-      setStatus(apiErrorMessage(error, "Opslaan mislukt."));
-      setTone("error");
+      const outcomeUncertain =
+        !(error instanceof ApiRequestError) || error.category !== "http" || error.status >= 500;
+      setStatus({
+        kind: "error",
+        message: outcomeUncertain
+          ? "Opslaan kon niet worden bevestigd."
+          : "Bedrijfsinstellingen zijn niet opgeslagen.",
+        guidance: outcomeUncertain
+          ? "De wijzigingen kunnen al zijn opgeslagen. Vernieuw de pagina om de actuele instellingen te controleren."
+          : "Controleer de bedrijfsgegevens en probeer opnieuw.",
+      });
     } finally {
       setIsSaving(false);
     }
   }
 
   return (
-    <section className="module-card">
+    <section className="module-card" aria-busy={isSaving}>
       <div className="module-card-header">
         <div className="module-card-title">Bedrijfsgegevens</div>
         <div className="module-card-text">
@@ -67,11 +75,18 @@ export function ApplicationSettingsClient({ initial }: { initial: ApplicationSet
 
       <div className="editor-actions">
         <div className="editor-actions-group">
-          {status ? <span className={`editor-status ${tone}`}>{status}</span> : null}
+          {status ? <ActionStatus id={statusId} {...status} /> : null}
         </div>
         <div className="editor-actions-group">
-          <button type="button" className="editor-button" disabled={isSaving} onClick={handleSave}>
-            {isSaving ? "Opslaan..." : "Bedrijfsinstellingen opslaan"}
+          <button
+            type="button"
+            className="editor-button"
+            disabled={isSaving}
+            onClick={handleSave}
+            aria-busy={isSaving}
+            aria-describedby={status ? statusId : undefined}
+          >
+            Bedrijfsinstellingen opslaan
           </button>
         </div>
       </div>

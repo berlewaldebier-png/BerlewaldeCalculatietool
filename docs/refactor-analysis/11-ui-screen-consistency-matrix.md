@@ -185,7 +185,8 @@ This is the recommended first implementation slice after human approval.
 2. **RF-009D:** tab behavior pilot on SCREEN-037, then SCREEN-006/034/036 where workflow tests permit.
 3. **RF-009E:** one non-destructive/read-only dialog behavior pilot; destructive and financial confirmations remain excluded.
 4. **RF-009F:** document and implement shared read-only versus editable table semantics; no universal table.
-5. **RF-012:** mobile shell, LOT overflow, large wizard composition and other screen-specific layout/workflow work.
+5. **RF-009G:** document and pilot the navigation/form-action contract for `Terug`, `Vorige`, `Annuleren`, `Opslaan`, `Opslaan en sluiten`, `Volgende` and `Afronden`; preserve each workflow's characterized save and cancellation behavior.
+6. **RF-012:** adopt approved primitives screen by screen; mobile shell, LOT overflow and large wizard composition remain screen-specific layout/workflow work.
 
 Each follow-on requires its own branch/PR unless the roadmap explicitly approves a combination.
 
@@ -202,6 +203,7 @@ The following decisions were recorded from the product-owner review on 2026-07-1
 7. **Unavailable features — approved.** Hide unavailable affordances such as non-functional notifications instead of presenting live-looking “Binnenkort” controls. This does not authorize route deletion or building the feature.
 8. **Mobile tables — working policy.** Quotations and small operational actions are the leading mobile-edit candidates. Dashboard, forecast, revenue/margin, product/cost summaries and alerts should be readable on mobile. Bulk cost, LOT, mapping, year and administration grids remain desktop-first, using contained horizontal scrolling when row/column relationships require it. Whether the complete quotation builder must support editing at 390px phone width or primarily tablet/laptop remains **Unknown** and must be confirmed before its RF-012 screen slice.
 9. **Messages and recovery — approved.** Use a consistent location by message category: field validation beside the field, form/editor save results beside the relevant action area, page-level load/access failures below the page title, and fatal failures in the error boundary. Where the system knows a safe recovery, state what failed, whether data was saved, and what the user should do. Never invent a persistence outcome or retry a non-idempotent write automatically.
+10. **Navigation and action labels — approved direction.** A page with a clear parent uses an explicit destination-oriented back link near the page start rather than ambiguous history. Wizard footers keep `Vorige` separate on the left and completion/continuation actions on the right, with the primary action last. `Volgende` must not imply a save; use `Opslaan en doorgaan` when continuing persists. Apply this contract only after the existing destination, save, cancel and unsaved-change behavior is characterized.
 
 ## Completion decision for RF-009A
 

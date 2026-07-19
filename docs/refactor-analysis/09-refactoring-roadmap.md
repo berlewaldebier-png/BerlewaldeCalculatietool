@@ -251,6 +251,43 @@ flowchart TD
 - Explicitly exclude table redesign, dirty-form policy, delete confirmation and responsive column redesign.
 - Run axe, keyboard, status, save/error and desktop/mobile screenshot regression checks.
 
+### RF-009C — Shared action-status and busy-state pilot
+
+- **Objective:** establish one accessible, visually consistent contract for pending, success, warning and error feedback before wider screen adoption.
+- **Included:** a shared status primitive; visible spinner and descriptive pending text; semantic success/warning/error colors with icon and text; `role=status` / `role=alert`; duplicate-submit prevention; actionable recovery guidance where the persistence outcome is known or explicitly uncertain.
+- **Pilot screens:** SCREEN-004 (`/account`) and SCREEN-029 (`/instellingen/bedrijf`). Save feedback remains beside the relevant form actions.
+- **Preserve:** request methods, URLs, payloads, password and settings validation, field values, save boundaries, settings-change event, refresh behavior, permissions and persisted data.
+- **Excluded:** table sorting, navigation/action placement, dialogs, tabs, global error boundaries, financial screens, automatic retries and adoption by every screen.
+- **Required tests:** desktop/mobile pending, success and error states; accessible announcement; contrast; spinner and busy relationship; duplicate-submit protection; validation failure; uncertain-outcome copy; intercepted mutations proving that browser tests do not change passwords or settings.
+- **Data migration:** none.
+- **Acceptance:** both pilots use the same status owner and action-area placement; users can distinguish progress, success and failure without color alone; errors provide a safe next step without exposing raw technical details.
+
+### RF-009D / RF-009E — Deferred tab and dialog pilots
+
+- RF-009D remains a separately approved tab-behavior pilot, beginning with SCREEN-037 and expanding only where workflow tests permit.
+- RF-009E remains a separately approved non-destructive/read-only dialog pilot. Destructive, financial and unsaved-form dialogs remain excluded.
+- Neither slice is implicitly authorized by RF-009C, RF-009F or RF-009G.
+
+### RF-009F — Read-only and editable table interaction contract
+
+- **Objective:** make sortable-table behavior discoverable and accessible without forcing one universal table implementation.
+- **Included:** classify read-only, editable, selectable and business-ordered tables; visible inactive sortable affordance; ascending/descending state; keyboard activation; `aria-sort`; explicit client-versus-server sorting ownership.
+- **Preserve:** row values, pagination, filters, API queries, manual/business order, edit/save behavior and financial meaning.
+- **Excluded:** making every table sortable, sorting wizard summaries/BOM/manual-order tables, mobile table redesign and changing server query contracts.
+- **Required tests:** sortable-column inventory, unchanged initial order, ascending/descending/keyboard behavior, `aria-sort`, pagination/filter interaction and desktop/mobile screenshots for each adopted table family.
+
+### RF-009G — Navigation and form-action contract
+
+- **Objective:** standardize the meaning and placement of `Terug`, `Vorige`, `Annuleren`, `Opslaan`, `Opslaan en sluiten`, `Volgende` and `Afronden` without changing what those actions do.
+- **Page contract:** when a clear parent exists, use an explicit destination link near the page start, such as `Terug naar Kostprijsbeheer`; do not depend on ambiguous browser-history navigation.
+- **Wizard contract:** place `Vorige` at the left and the secondary/primary action group at the right, with the primary continuation or completion action last. Use `Opslaan en doorgaan` when continuing also persists; use `Volgende` only when it does not imply a save.
+- **Meaning:** `Annuleren` stops or discards only after characterized unsaved-change behavior; `Opslaan` persists and stays; `Opslaan en sluiten` persists and returns to the known parent. Labels must describe the actual effect.
+- **Preserve:** destinations, save timing, validation, cancellation, draft behavior, dirty-state handling, permissions and workflow ordering.
+- **Excluded:** repository-wide button movement, browser back replacement without a known parent, new autosave, new confirmation dialogs and high-risk wizard adoption before characterization.
+- **Required tests:** exact destination/action effects, no-write cancel/back cases, dirty-state behavior, save/close navigation, keyboard order, focus after navigation and representative desktop/mobile screenshots.
+
+RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is not authorized by requesting the parent RF-009.
+
 ### Permission-state UI family
 
 - After RF-008A defines error semantics, RF-009 may introduce one accessible access-denied primitive under existing styles.

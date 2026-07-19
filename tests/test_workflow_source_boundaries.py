@@ -148,8 +148,11 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
             'supportEmail.trim() || "info@berlewaldebier.nl"',
             settings_source,
         )
-        self.assertIn('setStatus("Opgeslagen.")', settings_source)
-        self.assertIn('setTone("success")', settings_source)
+        self.assertIn(
+            'setStatus({ kind: "success", message: "Bedrijfsinstellingen zijn opgeslagen." })',
+            settings_source,
+        )
+        self.assertIn("<ActionStatus", settings_source)
         self.assertIn('new Event("calculatietool-settings-changed")', settings_source)
         self.assertIn("disabled={isSaving}", settings_source)
 

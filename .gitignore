@@ -18,5 +18,6 @@ frontend/.tmp/
 outputs/
 logs/
 frontend/test-results/
+frontend/playwright/.auth/
 frontend/audit/artifacts/
 frontend/audit/.last-run.json

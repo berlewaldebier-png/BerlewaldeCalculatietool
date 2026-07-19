@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useId, useState } from "react";
 
+import { ActionStatus, type ActionStatusState } from "@/components/ActionStatus";
 import { API_BASE_URL } from "@/lib/api";
 
 type AccountSettingsClientProps = {
@@ -14,22 +15,25 @@ export function AccountSettingsClient({ username, displayName, role }: AccountSe
   const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
-  const [status, setStatus] = useState("");
-  const [tone, setTone] = useState<"" | "success" | "error">("");
+  const statusId = useId();
+  const [status, setStatus] = useState<ActionStatusState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setStatus("");
-    setTone("");
+    setStatus(null);
 
     if (password !== passwordConfirm) {
-      setStatus("Wachtwoorden komen niet overeen.");
-      setTone("error");
+      setStatus({
+        kind: "error",
+        message: "Wachtwoorden komen niet overeen.",
+        guidance: "Controleer beide nieuwe wachtwoorden en probeer opnieuw.",
+      });
       return;
     }
 
     setIsSaving(true);
+    setStatus({ kind: "pending", message: "Wachtwoord wordt opgeslagen." });
     try {
       const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
         method: "POST",
@@ -42,18 +46,34 @@ export function AccountSettingsClient({ username, displayName, role }: AccountSe
       });
 
       if (!response.ok) {
-        const detail = await response.json().catch(() => null);
-        throw new Error(detail?.detail || "Wachtwoord wijzigen is niet gelukt.");
+        const payload = await response.json().catch(() => null);
+        const detail = typeof payload?.detail === "string" ? payload.detail : "";
+        const sessionExpired = response.status === 401;
+        setStatus({
+          kind: "error",
+          message:
+            response.status === 400 && detail
+              ? detail
+              : sessionExpired
+                ? "Je sessie is verlopen. Het wachtwoord is niet gewijzigd."
+                : "Wachtwoord wijzigen is niet gelukt.",
+          guidance: sessionExpired
+            ? "Log opnieuw in en probeer het daarna opnieuw."
+            : "Controleer het huidige en nieuwe wachtwoord en probeer opnieuw.",
+        });
+        return;
       }
 
       setCurrentPassword("");
       setPassword("");
       setPasswordConfirm("");
-      setStatus("Wachtwoord is gewijzigd.");
-      setTone("success");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Wachtwoord wijzigen is niet gelukt.");
-      setTone("error");
+      setStatus({ kind: "success", message: "Wachtwoord is gewijzigd." });
+    } catch {
+      setStatus({
+        kind: "error",
+        message: "Wachtwoord wijzigen kon niet worden bevestigd.",
+        guidance: "Vernieuw de pagina en controleer je verbinding voordat je het opnieuw probeert.",
+      });
     } finally {
       setIsSaving(false);
     }
@@ -90,7 +110,7 @@ export function AccountSettingsClient({ username, displayName, role }: AccountSe
           </div>
         </div>
 
-        <form className="settings-form-grid" onSubmit={handleChangePassword}>
+        <form className="settings-form-grid" onSubmit={handleChangePassword} aria-busy={isSaving}>
           <label className="settings-field">
             <span>Huidig wachtwoord</span>
             <input
@@ -121,15 +141,17 @@ export function AccountSettingsClient({ username, displayName, role }: AccountSe
 
           <div className="editor-actions settings-form-actions">
             <div className="editor-actions-group">
-              {status ? <span className={`editor-status ${tone}`}>{status}</span> : null}
+              {status ? <ActionStatus id={statusId} {...status} /> : null}
             </div>
             <div className="editor-actions-group">
               <button
                 type="submit"
                 className="editor-button"
                 disabled={isSaving || !currentPassword || !password || !passwordConfirm}
+                aria-busy={isSaving}
+                aria-describedby={status ? statusId : undefined}
               >
-                {isSaving ? "Opslaan..." : "Wachtwoord opslaan"}
+                Wachtwoord opslaan
               </button>
             </div>
           </div>
