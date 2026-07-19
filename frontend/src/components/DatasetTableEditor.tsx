@@ -284,12 +284,18 @@ export function DatasetTableEditor({
           <thead>
             <tr>
               {columns.map((column) => (
-                <th key={column.key} scope="col" style={column.width ? { width: column.width } : undefined}>
+                <th
+                  key={column.key}
+                  scope="col"
+                  aria-sort={sortKey === column.key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                  style={column.width ? { width: column.width } : undefined}
+                >
                   <SortButton
                     label={column.label}
                     active={sortKey === column.key}
                     dir={sortDir}
                     onClick={() => toggleSort(column.key)}
+                    showInactiveIndicator
                   />
                 </th>
               ))}

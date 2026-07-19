@@ -63,15 +63,24 @@ test.describe("RF-009F editable table characterization", () => {
     const initialOrder = [...serverOrder, ...temporaryNames];
     expect(await inputValues(names)).toEqual(initialOrder);
 
-    const sortButton = editor.getByRole("button", { name: /Biernaam/ });
+    const beerNameHeader = editor.getByRole("columnheader", { name: /Biernaam/ });
+    const sortButton = beerNameHeader.getByRole("button", { name: "Biernaam" });
+    await expect(beerNameHeader).toHaveAttribute("aria-sort", "none");
+    await expect(sortButton.locator("[data-sort-indicator='none']")).toHaveText("↕");
+
     await sortButton.click();
+    await expect(beerNameHeader).toHaveAttribute("aria-sort", "ascending");
+    await expect(sortButton.locator("[data-sort-indicator='asc']")).toHaveText("↑");
     expect(await inputValues(names)).toEqual(normalizedSort(initialOrder, "asc"));
 
     await sortButton.click();
+    await expect(beerNameHeader).toHaveAttribute("aria-sort", "descending");
+    await expect(sortButton.locator("[data-sort-indicator='desc']")).toHaveText("↓");
     expect(await inputValues(names)).toEqual(normalizedSort(initialOrder, "desc"));
 
     await sortButton.focus();
     await page.keyboard.press("Enter");
+    await expect(beerNameHeader).toHaveAttribute("aria-sort", "ascending");
     expect(await inputValues(names)).toEqual(normalizedSort(initialOrder, "asc"));
 
     await testInfo.attach(`rf-009f-sorting-${testInfo.project.name}`, {
