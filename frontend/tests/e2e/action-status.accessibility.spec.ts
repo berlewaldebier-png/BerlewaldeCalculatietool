@@ -112,7 +112,8 @@ test.describe("RF-009C shared action status", () => {
     const save = page.getByRole("button", { name: "Wachtwoord opslaan" });
     await save.click();
 
-    const status = page.getByRole("alert");
+    const form = page.locator("form").filter({ hasText: "Huidig wachtwoord" });
+    const status = form.getByRole("alert");
     await expect(status).toContainText("Wachtwoorden komen niet overeen");
     await expect(status).toContainText("Controleer beide nieuwe wachtwoorden");
     await expect(save).toHaveAttribute("aria-describedby", await status.getAttribute("id") as string);
