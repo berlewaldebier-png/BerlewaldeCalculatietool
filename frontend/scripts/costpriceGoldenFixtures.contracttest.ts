@@ -74,8 +74,9 @@ deepStrictEqual(
     "COST-006-missing-primary-component",
     "COST-007-composition-without-bom",
     "COST-008-cyclic-composition",
+    "COST-009-wizard-created-composed-product",
   ],
-  "RF-010 core requires the complete approved COST-001 through COST-008 set",
+  "RF-010 core requires the complete approved COST-001 through COST-009 set",
 );
 
 for (const fixture of fixtures.cases) {

@@ -420,6 +420,232 @@
           }
         ]
       }
+    },
+    {
+      "id": "COST-009-wizard-created-composed-product",
+      "operation": "component-composition",
+      "classification": "observed",
+      "decisionStatus": "needs-human-approval",
+      "purpose": "Protect the complete component sum for a deterministic Zwaar onder de boom-shaped product using the Article, SKU and BOM field shape persisted by Producten en verpakkingen. Values are representative fixtures, not a snapshot of live product prices.",
+      "input": {
+        "parentArticleId": "bundle-zwaar-onder-de-boom",
+        "year": 2026,
+        "bomLines": [
+          {
+            "id": "bom-zwaar-juweel",
+            "parent_article_id": "bundle-zwaar-onder-de-boom",
+            "component_sku_id": "sku-juweel-fles-33cl",
+            "component_article_id": "",
+            "quantity": 2,
+            "uom": "stuk"
+          },
+          {
+            "id": "bom-zwaar-blond",
+            "parent_article_id": "bundle-zwaar-onder-de-boom",
+            "component_sku_id": "sku-blond-fles-33cl",
+            "component_article_id": "",
+            "quantity": 1,
+            "uom": "stuk"
+          },
+          {
+            "id": "bom-zwaar-glas",
+            "parent_article_id": "bundle-zwaar-onder-de-boom",
+            "component_sku_id": "sku-glas-33cl",
+            "component_article_id": "",
+            "quantity": 1,
+            "uom": "stuk"
+          },
+          {
+            "id": "bom-zwaar-giftbox",
+            "parent_article_id": "bundle-zwaar-onder-de-boom",
+            "component_sku_id": "",
+            "component_article_id": "giftbox-zwaar",
+            "quantity": 1,
+            "uom": "stuk"
+          }
+        ],
+        "skus": [
+          {
+            "id": "sku-juweel-fles-33cl",
+            "name": "Juweel Fles 33cl",
+            "kind": "beer_format",
+            "format_article_id": "fmt-juweel-fles-33cl"
+          },
+          {
+            "id": "sku-blond-fles-33cl",
+            "name": "Blond Fles 33cl",
+            "kind": "beer_format",
+            "format_article_id": "fmt-blond-fles-33cl"
+          },
+          {
+            "id": "sku-glas-33cl",
+            "name": "Berlewalde Glas 33cl",
+            "kind": "article",
+            "article_id": "article-glas-33cl"
+          },
+          {
+            "id": "sku-bundle-zwaar-onder-de-boom",
+            "name": "Zwaar onder de boom",
+            "kind": "article",
+            "article_id": "bundle-zwaar-onder-de-boom"
+          }
+        ],
+        "articles": [
+          {
+            "id": "bundle-zwaar-onder-de-boom",
+            "name": "Zwaar onder de boom",
+            "kind": "bundle"
+          },
+          {
+            "id": "article-glas-33cl",
+            "name": "Berlewalde Glas 33cl",
+            "kind": "bundle"
+          },
+          {
+            "id": "giftbox-zwaar",
+            "name": "Geschenkdoos Zwaar",
+            "kind": "packaging_component"
+          }
+        ],
+        "summaryRows": [
+          {
+            "sku_id": "sku-juweel-fles-33cl",
+            "primaire_kosten": 1,
+            "verpakkingskosten": 0.25,
+            "vaste_kosten": 0.5,
+            "accijns": 0.25,
+            "kostprijs": 2
+          },
+          {
+            "sku_id": "sku-blond-fles-33cl",
+            "primaire_kosten": 1.5,
+            "verpakkingskosten": 0.25,
+            "vaste_kosten": 0.75,
+            "accijns": 0.25,
+            "kostprijs": 2.75
+          },
+          {
+            "sku_id": "sku-glas-33cl",
+            "primaire_kosten": 2,
+            "verpakkingskosten": 0.5,
+            "vaste_kosten": 0.5,
+            "accijns": 0,
+            "kostprijs": 3
+          }
+        ],
+        "packagingComponentPrices": [
+          {
+            "jaar": 2026,
+            "verpakkingsonderdeel_id": "giftbox-zwaar",
+            "prijs_per_stuk": 1.25
+          }
+        ]
+      },
+      "expected": {
+        "valid": true,
+        "component_count": 4,
+        "raw": {
+          "primaire_kosten": 5.5,
+          "verpakkingskosten": 2.5,
+          "vaste_kosten": 2.25,
+          "accijns": 0.75,
+          "kostprijs": 11
+        },
+        "display": {
+          "primaire_kosten": "€ 5.50",
+          "verpakkingskosten": "€ 2.50",
+          "vaste_kosten": "€ 2.25",
+          "accijns": "€ 0.75",
+          "kostprijs": "€ 11.00"
+        },
+        "issues": [],
+        "components": [
+          {
+            "label": "Juweel Fles 33cl",
+            "quantity": 2,
+            "component_sku_id": "sku-juweel-fles-33cl",
+            "valid": true,
+            "raw": {
+              "primaire_kosten": 2,
+              "verpakkingskosten": 0.5,
+              "vaste_kosten": 1,
+              "accijns": 0.5,
+              "kostprijs": 4
+            },
+            "display": {
+              "primaire_kosten": "€ 2.00",
+              "verpakkingskosten": "€ 0.50",
+              "vaste_kosten": "€ 1.00",
+              "accijns": "€ 0.50",
+              "kostprijs": "€ 4.00"
+            },
+            "issues": []
+          },
+          {
+            "label": "Blond Fles 33cl",
+            "quantity": 1,
+            "component_sku_id": "sku-blond-fles-33cl",
+            "valid": true,
+            "raw": {
+              "primaire_kosten": 1.5,
+              "verpakkingskosten": 0.25,
+              "vaste_kosten": 0.75,
+              "accijns": 0.25,
+              "kostprijs": 2.75
+            },
+            "display": {
+              "primaire_kosten": "€ 1.50",
+              "verpakkingskosten": "€ 0.25",
+              "vaste_kosten": "€ 0.75",
+              "accijns": "€ 0.25",
+              "kostprijs": "€ 2.75"
+            },
+            "issues": []
+          },
+          {
+            "label": "Berlewalde Glas 33cl",
+            "quantity": 1,
+            "component_sku_id": "sku-glas-33cl",
+            "valid": true,
+            "raw": {
+              "primaire_kosten": 2,
+              "verpakkingskosten": 0.5,
+              "vaste_kosten": 0.5,
+              "accijns": 0,
+              "kostprijs": 3
+            },
+            "display": {
+              "primaire_kosten": "€ 2.00",
+              "verpakkingskosten": "€ 0.50",
+              "vaste_kosten": "€ 0.50",
+              "accijns": "€ 0.00",
+              "kostprijs": "€ 3.00"
+            },
+            "issues": []
+          },
+          {
+            "label": "Geschenkdoos Zwaar",
+            "quantity": 1,
+            "component_article_id": "giftbox-zwaar",
+            "valid": true,
+            "raw": {
+              "primaire_kosten": 0,
+              "verpakkingskosten": 1.25,
+              "vaste_kosten": 0,
+              "accijns": 0,
+              "kostprijs": 1.25
+            },
+            "display": {
+              "primaire_kosten": "€ 0.00",
+              "verpakkingskosten": "€ 1.25",
+              "vaste_kosten": "€ 0.00",
+              "accijns": "€ 0.00",
+              "kostprijs": "€ 1.25"
+            },
+            "issues": []
+          }
+        ]
+      }
     }
   ]
 }

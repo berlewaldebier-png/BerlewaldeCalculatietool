@@ -20,6 +20,7 @@
   },
   "include": [
     "./workflowCharacterization.contracttest.ts",
+    "./skuCompositionWorkflow.contracttest.ts",
     "../src/lib/datasetItems.ts",
     "../src/lib/api.ts",
     "../src/lib/apiShared.ts",
@@ -31,6 +32,9 @@
     "../src/components/berekeningen/purchaseProductProjection.ts",
     "../src/components/instellingen/applicationSettingsApi.ts",
     "../src/components/berekeningen/berekeningenWizardDerivations.ts",
+    "../src/features/sku-composition/skuCompositionIo.ts",
+    "../src/features/sku-composition/skuCompositionUtils.ts",
+    "../src/lib/parsers/skuCompositionParsers.ts",
     "../src/lib/kostprijsSnapshotEngine.ts",
     "../src/lib/kostprijsEngine.ts"
   ]

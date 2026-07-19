@@ -63,17 +63,25 @@ For a derived basis SKU, each parent component is divided by the parent factor a
 | COST-006 | Missing primary cost is silently converted to EUR 0.00; other components total **EUR 1.00** and status remains `ok` | Confirm only as observed current behavior. Decide separately whether missing primary cost should block activation. |
 | COST-007 | A composed product without BOM lines is invalid, returns zero and reports `missing_bom` | Confirm this must remain blocking. |
 | COST-008 | A cyclic composition is invalid, returns zero and reports `component_cycle` | Confirm this must remain blocking. |
+| COST-009 | Representative `Zwaar onder de boom` composition created in the Producten en verpakkingen shape: two Juweel bottles + one Blond bottle + one glass + one gift box. Component categories total EUR 5.50 primary + EUR 2.50 packaging + EUR 2.25 overhead + EUR 0.75 excise = **EUR 11.00** | Confirm the rule that every distinct component SKU and packaging component is multiplied by its BOM quantity and included once. The amounts are deterministic test values, not the live product's current prices. |
 
 ### Cost-price scope boundary
 
 - **Observed:** COST-001/COST-003 protect the final component aggregation, not how an invoice line or recipe engine produced each input component.
 - **Observed:** COST-002/COST-005 protect the exact raw parent division and current wizard currency display.
 - **Observed:** COST-004 protects both the total and the component breakdown, including the current floating-point/display discrepancy. It does not silently normalize the total.
+- **Observed:** COST-009 starts from the exact Article/SKU/BOM field shape written by the current `upsert-bundle` endpoint and protects a multi-SKU composition rather than a single repeated beer component. `FLOW-COMPOSE-001` separately protects how that shape is requested and persisted.
 - **Observed:** COST-007/COST-008 protect validation output; neither case writes or activates a zero cost.
 - **Unknown:** whether missing primary cost in COST-006 should remain non-blocking.
 - **Unknown:** whether the COST-004 aggregate must round mathematically to EUR 4.07, whether persisted precision should change, or whether only display behavior should change. RF-010 records the current EUR 4.06 result and stops before deciding.
 
 ## Coverage boundaries and open decisions
+
+### FLOW-COMPOSE-001 — composed-product creation boundary
+
+`frontend/scripts/skuCompositionWorkflow.contracttest.ts` verifies that the Producten en verpakkingen save adapter sends all selected SKU components, quantities and packaging components to `/data/sku-composition/upsert-bundle`. `tests/test_sku_composition_contract.py` invokes the existing backend handler with in-memory mocked stores and verifies that it atomically prepares one parent Article, one sellable SKU and four BOM lines, then forwards the same lines to the normalized product-model projection.
+
+These tests perform no real database write. Together with COST-009 they protect the deterministic path from wizard save payload to persisted-shaped BOM to calculated component total. They do not prove that a particular live `Zwaar onder de boom` record currently has these fixture components or prices.
 
 - **Observed:** no equivalent Python implementation of these selected rule families was found in the repository. A TypeScript/Python parity runner is therefore not applicable; creating one would introduce a second implementation rather than protect an existing one.
 - **Observed:** the selected functions contain no dates or timezones. Timezone cases are not applicable to these seams.
@@ -88,6 +96,7 @@ These unknowns do not justify changing formulas in RF-010 core. They must be dec
 
 - Fixture tests read static JSON files and call pure functions and the existing calculation-wizard currency formatter only.
 - Tests never connect to a database, external service or application API.
+- The FLOW-COMPOSE-001 backend test replaces dataset and normalized projection persistence with in-memory mocks; it cannot modify development data.
 - There is no fixture-update or auto-approval command; golden output changes require an intentional reviewed edit.
 - No persisted SKU, quote, customer, LOT or user identifier is included. Cost fixtures use deterministic Juweel-shaped labels and synthetic identifiers only.
 - No migration or backfill is required.
@@ -100,4 +109,4 @@ On the same machine/runtime, 10,000 complete COST-004 gift-set composition calcu
 
 ## Approval gate
 
-Before squash-merging RF-010 core, product/finance must review PRICE-001 through PRICE-010 and COST-001 through COST-008. When approved, change both fixture-level statuses to `approved`, record the approver and date, and change every case decision status to `approved`. A rejected case must not be silently changed: record the discrepancy and open a separately approved behavior decision/fix.
+Before squash-merging RF-010 core, product/finance must review PRICE-001 through PRICE-010 and COST-001 through COST-009. When approved, change both fixture-level statuses to `approved`, record the approver and date, and change every case decision status to `approved`. A rejected case must not be silently changed: record the discrepancy and open a separately approved behavior decision/fix.
