@@ -119,6 +119,10 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/dataset-editor.accessibility.spec.ts --retries=0
 
+      - name: RF-009C shared action status
+        working-directory: frontend
+        run: npx playwright test tests/e2e/action-status.accessibility.spec.ts --retries=0
+
       # RF-003 makes the database target disposable, but the historical broad
       # maturity/a11y suite still has owned UI/auth failures outside this slice.
       # Keep collecting its result until RF-004/RF-009 update those contracts;
