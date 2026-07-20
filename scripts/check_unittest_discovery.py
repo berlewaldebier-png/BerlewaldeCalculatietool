@@ -80,6 +80,10 @@ required_rf007_contracts = {
 required_rf008_contracts = {
     "test_workflow_source_boundaries.FrontendWorkflowBoundaryTests.test_application_settings_read_and_save_contract_is_preserved",
 }
+required_rf010a_contracts = {
+    "test_active_commercial_context_capture.ActiveCommercialContextCaptureSafetyTests.test_private_target_requires_explicit_opt_in",
+    "test_active_commercial_context_capture.ActiveCommercialContextCaptureSafetyTests.test_production_is_rejected_even_with_private_opt_in",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -90,6 +94,7 @@ missing = sorted(
         | required_rf006_contracts
         | required_rf007_contracts
         | required_rf008_contracts
+        | required_rf010a_contracts
     ).difference(ids)
 )
 
@@ -100,5 +105,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007 and RF-008 contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008 and RF-010A contracts collected"
 )

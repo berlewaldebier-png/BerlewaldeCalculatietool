@@ -30,6 +30,7 @@ Repository validation after RF-006 added three approved roadmap refinements:
 1. **Permission projection correction:** backend role filtering must not be undone by frontend fallback navigation, and HTTP 403 must have a permission-specific recovery state.
 2. **Active commercial context SSOT:** completing and activating a yearset must establish one explicit operational context for new work while historical records retain their original year and frozen sources.
 3. **Planning cost versus actual LOT cost:** the first planning activation for a SKU and planning year is the stable planning-cost anchor used by Break-even and new Price proposals. Later purchase or brew LOTs for the same SKU create actual cost versions but do not silently replace that planning anchor. A newly introduced SKU receives its own first planning anchor. Omzet en Marge resolves actual cost from the exact LOT when available.
+4. **Canonical year-transition SKU parity:** “Nieuw jaar voorbereiden” must carry the complete canonical source SKU set into a target-year candidate by stable `sku_id`, preserving Beer/format/composition identity while recalculating only named year-sensitive values. UI display rows are not a domain input. A candidate with a missing, duplicate, misclassified or non-ready required SKU must not become operational. Detailed evidence and the approved presentation/history outcome are in `16-year-transition-sku-parity-analysis.md`.
 
 ### Required execution package for RF-010
 
@@ -37,9 +38,10 @@ When a future prompt says **start/implement RF-010**, it means the complete RF-0
 
 1. RF-010 core financial golden fixtures and pure seams;
 2. RF-010A active-commercial-context snapshot;
-3. RF-010B planning-cost-anchor versus actual-LOT-cost snapshot.
+3. RF-010C source-to-target SKU parity and historical-dossier snapshot;
+4. RF-010B planning-cost-anchor versus actual-LOT-cost snapshot.
 
-They execute in that dependency order. Each remains a separately reviewable branch/PR unless the implementation prompt explicitly approves a combined tests-only branch. RF-010 is not complete until RF-010A and RF-010B have both been approved.
+They execute in that dependency order. Each remains a separately reviewable branch/PR unless the implementation prompt explicitly approves a combined tests-only branch. RF-010 is not complete until RF-010A, RF-010C and RF-010B have all been approved.
 
 ## Dependency view
 
@@ -62,12 +64,15 @@ flowchart TD
     R8A --> R9
     R6 --> R10["RF-010 Financial rule seams"]
     R10 --> R10A["RF-010A Active commercial golden snapshot"]
+    R10A --> R10C["RF-010C Year-transition SKU parity snapshot"]
     R7B --> R10B["RF-010B Planning anchor versus actual LOT snapshot"]
-    R10 --> R10B
+    R10C --> R10B
     R3 --> R11["RF-011 Service/storage boundaries"]
     R4 --> R11
-    R10A --> R11A["RF-011A Read-only active commercial context resolver"]
+    R10C --> R11A["RF-011A Read-only active commercial context resolver"]
     R10B --> R11B["RF-011B Planning and actual-cost resolvers"]
+    R11A --> R11C["RF-011C Canonical year-transition planner"]
+    R11B --> R11C
     R8 --> R12["RF-012 Screen-by-screen refactors"]
     R9 --> R12
     R10 --> R12
@@ -76,9 +81,13 @@ flowchart TD
     R6 --> R13
     R11A --> R13A["RF-013A Explicit active yearset authority"]
     R11B --> R13B["RF-013B Canonical Beer/SKU planning-cost authority"]
-    R13A --> R12C["RF-012C New-quote and break-even consumer migrations"]
-    R13B --> R12C
+    R11C --> R13C["RF-013C Additive yearset reconciliation"]
+    R13A --> R13C
+    R13B --> R13C
+    R13C --> R12C["RF-012C Commercial consumer migrations"]
+    R13C --> R12D["RF-012D Cost overview and history UI"]
     R12C --> R14
+    R12D --> R14
     R12 --> R14["RF-014 Proven deprecated-path removal"]
     R13 --> R15["RF-015 Separately approved destructive cleanup"]
     R14 --> R15
@@ -318,6 +327,21 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Acceptance criteria:** finance/product approves the baseline meaning of cost price, selling price and advice price per context; all current outputs are reproducible; no source switch has occurred.
 - **Dependencies / complexity / risk / human confirmation:** RF-004/RF-006; **medium/large complexity, high financial risk**. Mandatory finance/product approval, including confirmation of whether unchanged selling prices were intentionally selected.
 
+**RF-010A implementation note (2026-07-20):** use a committed synthetic, development-shaped full-value fixture for CI and a committed hash-only manifest for the real development baseline. The local raw capture includes source identifiers, component breakdowns and final numbers but is piped directly through the fingerprint runner and is never committed. This preserves exact per-SKU/workflow parity without publishing commercial prices. The read-only capture currently records 35 activation/version/SKU combinations without a canonical cost row or matching stored result-snapshot row, 77 central 2026 rows versus 54 quote/break-even-ready rows, and 940 of 1,782 persisted 2026 actual order/invoice snapshots marked `missing_cost`. These are existing-state observations, not fixes; their SKU/year-transition meaning must be decided through RF-010C and their LOT-resolution meaning through RF-010B before RF-011A/RF-011B. Detailed evidence and the approval checklist are in `15-active-commercial-context-golden-snapshot.md`.
+
+### RF-010C — Source-to-target SKU parity and historical-dossier snapshot
+
+- **Objective / classification:** freeze the approved new-year identity contract and expose the current 2025→2026 differences before changing the writer, data model or consumers. This is read-only **characterisation**, not a data repair.
+- **Observed blocker:** the current new-year calculator consumes `buildActiveRows`, a presentation projection that can fan one SKU into multiple display groups and choose presentation labels/types. The target engine rows persist that projection. Separately, the cost-version read model returns all normalized cost rows as `basisproducten` and replaces `samengestelde_producten` with an empty list. See `16-year-transition-sku-parity-analysis.md`.
+- **Manifest contract:** one row per canonical source `sku_id`; Beer/subject identity; format/article identity; SKU kind; BOM/composition fingerprint; source cost-version/row and component fingerprint; liters/readiness; sales eligibility; external mapping identity; target row/version; changed-field allowlist; cost/price readiness reason; source-to-target lineage.
+- **Required cases:** Juweel `Doos 24 × 33cl` and keg/non-applicable keg; working Tripel control; Blond bottle/keg/box and missing Quote option; Weizen purchase method plus “recalculated from source year” provenance; “Alles onder de boom” display references versus physical SKU rows; composed box; explicitly created variant; historical 2025 snapshot versus normalized cost rows.
+- **Parity rules:** every required source SKU occurs exactly once in the target candidate under the same canonical identity; extra target SKUs are explicitly classified; composed/basis/variant meaning survives; target financial components match the approved calculation fixture; no zero/missing cost is labelled `n.v.t.`; silent Quote/Break-even exclusion is reported as a typed reason.
+- **Included / excluded:** synthetic full-value CI fixtures, private alias/hash-only local comparison, pure manifest/diff utilities and tests. Exclude database writes, current 2026 repair, activation, formula changes, UI changes, SKU merge/delete, historical snapshot reconstruction and consumer switching.
+- **Required tests:** duplicate UI projection; duplicate physical SKU; missing canonical cost row; zero cost; missing liters; missing sell-in; basis/composed mismatch; source/target label drift with stable ID; unknown/extra target row; one-to-many and many-to-one identity changes; original historical snapshot immutability.
+- **Data migration / rollout / rollback:** none. Test/documentation branch only; private commercial values never enter Git. Rollback removes the tests/manifest utility, not source data.
+- **Acceptance criteria:** every current source/target difference is classified as intended, defect or unknown; unknown identity/financial differences block RF-010B/RF-011A/RF-011C; product/finance confirms the source-to-target changed-field allowlist.
+- **Dependencies / complexity / risk / human confirmation:** RF-010A/RF-007B; **medium/large complexity, low runtime risk, high financial significance**. Mandatory product/finance/data approval. RF-010 remains incomplete until RF-010C and RF-010B pass.
+
 ### RF-010B — Planning-cost anchor versus actual LOT-cost golden snapshot
 
 - **Objective:** freeze the approved distinction between stable planning cost and realized LOT cost before centralizing any cost resolver or changing the data model.
@@ -363,6 +387,18 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Acceptance criteria:** both resolvers explain their chosen source; shadow outputs match approved fixtures; planning and actual contexts cannot be confused by the type/API; no consumer or database authority has switched yet.
 - **Dependencies / complexity / risk / human confirmation:** RF-010B/RF-011A; **medium complexity, medium/high financial risk**. Finance/data owner approves before RF-013B or RF-012C consumer migration.
 
+### RF-011C — Canonical read-only year-transition planner
+
+- **Objective:** introduce a pure application/domain planner that produces a target-year candidate manifest from canonical SKU, article/format, BOM, source cost row and approved year-input records. It must not consume React components, `ActiveCostRow`, grouped table rows or display labels as identity.
+- **Public result:** one entry per canonical `sku_id` with source/target year, Beer/subject, format/article, SKU classification, BOM fingerprint, source version/row, recalculated component breakdown, target readiness, provenance, changed fields and typed blocking reasons.
+- **Included / excluded:** adapters over existing stores, deterministic ordering/deduplication by stable ID, immutable source read, pure recalculation calls already protected by RF-010, and shadow comparison with the current new-year output. Exclude persistence, activation, data repair, UI switching, formula changes, identifier creation and fallback from names.
+- **Provenance contract:** cost method (`Inkoop`, `Eigen productie`, `Afgeleid`, `Zelf samengesteld`) is separate from version provenance (`Initiële berekening`, invoice, brew moment, or `Overgenomen en herberekend uit <source year>`).
+- **Historical contract:** the finalized original snapshot and normalized per-SKU rows are returned as separate representations; the planner may report differences but never overwrites one with the other.
+- **Required tests:** all RF-010C cases; UI-group fan-out cannot change manifest count; label changes cannot change identity; composed product remains composed; missing/zero/non-applicable are distinct; complete source maps exactly once; extra/missing target reason; deterministic repeat; read purity; performance.
+- **Rollout / rollback / observability:** shadow/test only. Compare alias/hash manifests and reason-code counts without logging prices or product metadata. Rollback removes the shadow call; no persisted state exists.
+- **Acceptance criteria:** the planner explains every source and changed target value; it never imports from the active-cost screen projection; RF-010C parity is exact or explicitly blocked; no database/application authority has switched.
+- **Dependencies / complexity / risk / human confirmation:** RF-010C/RF-010B/RF-011A/RF-011B; **medium/large complexity, medium runtime risk, high financial significance**. Product/finance/data approval before RF-013C.
+
 ## RF-012 — Refactor screens individually after their dependencies are protected
 
 - **Objective / findings:** address CODE-002 and UI findings without one UI rewrite. Included screens follow risk and dependency, not file size alone.
@@ -383,15 +419,28 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **RF-012C3 Omzet en Marge actuals:** migrate exact LOT resolution to RF-011B separately. An exact LOT determines the cost version regardless of order/invoice date. Missing or ambiguous LOT follows the approved visible fallback/warning policy.
 - **RF-012C4 Remaining pricing/advice screens:** migrate one screen at a time only after C1/C2/C3 parity. Advice price remains a distinct commercial output, not a substitute for sell-in price.
 - **Explicit exclusions:** no simultaneous quote and break-even rewrite; no historical quote mutation; no backfill of actual sales values; no formula/rounding redesign; no deletion of current year heuristics yet.
-- **Required tests:** new versus historical quote; activate-next-year switch; rollback to previous context; SKU identity parity; plan/actual join; channel price/advice source; URLs/actions/error states; full pricing and SKU parity.
+- **Required tests:** new versus historical quote; activate-next-year switch; rollback to previous context; RF-010C SKU-manifest identity parity; plan/actual join; channel price/advice source; URLs/actions/error states; full pricing and SKU parity. A required SKU must never disappear silently: an exclusion has a typed readiness reason available to the UI/logging boundary.
 - **Rollout / rollback / observability:** one sub-slice per branch/PR; old reader remains a compatibility fallback during rollout; compare generation/source IDs and numeric outputs; rollback consumer to old reader without removing RF-013A data.
 - **Acceptance criteria:** all new operational work uses one active generation; historical work remains unchanged; quote and break-even plan resolve the same canonical SKU cost and approved selling-price source.
-- **Dependencies / complexity / risk / human confirmation:** RF-010A/RF-010B/RF-011A/RF-011B/RF-013A/RF-013B and RF-008A where error handling is touched; **large combined programme, medium/high per consumer**. Product/finance confirmation per sub-slice.
+- **Dependencies / complexity / risk / human confirmation:** RF-010A/RF-010C/RF-010B/RF-011A/RF-011B/RF-011C/RF-013A/RF-013B/RF-013C and RF-008A where error handling is touched; **large combined programme, medium/high per consumer**. Product/finance confirmation per sub-slice.
+
+### RF-012D — Cost overview, format defaults and immutable history dossier
+
+- **Objective / classification:** refactor “Kostprijs beheren” and historical cost-version inspection onto the approved read models after data reconciliation. This combines a screen refactor with separately approved presentation corrections; it does not define cost authority.
+- **Default overview:** group by Beer and concrete SKU; show the planning `Doos 24 × 33cl` first and show keg when that Beer has one. Distinguish `n.v.t.` (format does not exist), `Niet geactiveerd` (SKU exists without activation), `Kostprijs ontbreekt` (invalid/non-positive active cost) and a valid formatted amount.
+- **History expansion:** “Alle varianten / historie” shows every concrete SKU and its stable planning anchor, later invoice/brew/LOT cost versions, source year, method, provenance and component breakdown. Viewing history is read-only and cannot rebaseline/activate implicitly.
+- **Duplicate presentation:** a physical `sku_id` appears once in the primary Beer tree. Cross-category/BOM references may link to it but cannot clone or persist it. “Alles onder de boom” must be classified as cross-reference, legitimate distinct SKU or legacy duplicate before any cleanup.
+- **Historical dossier:** show the immutable finalized snapshot separately from canonical normalized per-SKU operational rows and visibly report any legacy mismatch. Do not reconstruct or overwrite old snapshots.
+- **Included / excluded:** view models, semantic empty/missing/error states, provenance copy, grouped/expandable UI, typed readiness actions, read-only comparison and accessibility/responsive behavior. Exclude data repair, activation rule changes, cost formula changes, SKU merge/delete and automatic history mutation.
+- **Required tests:** Juweel box/keg/no-keg/missing cost; Tripel valid control; Blond source/target comparison; Weizen recalculated provenance; duplicate display reference; historical snapshot mismatch; keyboard/focus; mobile; permission; no-write view proof.
+- **Rollout / rollback / observability:** one screen/stage per branch/PR; compare displayed stable IDs/reason codes to RF-011 resolvers; route-level E2E and visual checks; rollback to old screen without changing reconciled data.
+- **Acceptance criteria:** the user can tell what is planned, what actually occurred, what is missing and why; valid numeric values match RF-010 fixtures; history is complete/read-only; no unavailable format is represented as numeric zero.
+- **Dependencies / complexity / risk / human confirmation:** RF-011A/RF-011B/RF-011C/RF-013B/RF-013C/RF-009; **large complexity, medium UI risk, high financial-context risk**. Product/finance/design approval required.
 
 ## RF-013 — Backward-compatible data-model improvements, one authority at a time
 
 - **Objective / findings:** implement approved outcomes for DATA-003–010/012–014 without destructive cleanup.
-- **Candidate order:** (1) quote expected-version/response adapter without migration; (2) read-only identity/classification/LOT divergence reports; (3) RF-013A explicit active-yearset authority after RF-011A; (4) RF-013B canonical Beer/SKU/planning-anchor authority after RF-011B; (5) additive revision/owner/identity/lineage/generation fields; (6) deterministic backfills; (7) dual read/write; (8) constraints/index validation after audits. Each is a separate PR/deployment.
+- **Candidate order:** (1) quote expected-version/response adapter without migration; (2) read-only identity/classification/LOT divergence reports; (3) RF-013A explicit active-yearset authority after RF-011A/RF-011C; (4) RF-013B canonical Beer/SKU/planning-anchor authority after RF-011B; (5) additive revision/owner/identity/lineage/generation fields; (6) RF-013C deterministic candidate reconciliation/backfill; (7) dual read/write and shadow validation; (8) constraints/index validation after audits. Each is a separate PR/deployment.
 - **Included / excluded:** one entity/relationship per slice, compatibility adapters and reconciliation. Exclude field/table removal, reinterpretation of ambiguous history, blanket FK/cascade changes and quote legacy cleanup.
 - **Affected screens/workflows/modules:** entity-specific; quote, user, product, activation, classification, LOT, Douano or relationship paths, never all together.
 - **Behaviour/contracts:** old rows/payloads/URLs remain readable/writable; unknown fields preserved; current results stable; historical ambiguity remains represented.
@@ -405,14 +454,14 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 
 - **Objective / classification:** add one authoritative, versioned pointer/generation for the operational commercial context. This is backward-compatible **data evolution**, not destructive cleanup.
 - **Activation contract:** saving or committing “Nieuw jaar voorbereiden” does not switch the application. The final activation step validates the target year and then atomically marks its commercial generation active. If validation or activation fails, the previous active generation remains active.
-- **Completeness checks:** target production year exists; required active SKU cost rows and components exist; selling-strategy rows satisfy the approved channel policy; advice-price channels satisfy the approved policy; active break-even plan exists and uses canonical SKU identity; no unexplained RF-010A parity differences.
-- **Representation:** additive table/record containing generation ID, operational year, status (`candidate/active/superseded/failed`), activated timestamp/actor, cost/pricing/advice/break-even source generation identifiers and compatibility metadata. Previous generations and domain rows are retained.
+- **Completeness checks:** target production year exists; RF-010C source-to-target SKU manifest is complete and unique; required active SKU cost rows, format/liters relations and components exist; selling-strategy rows satisfy the approved channel policy; advice-price channels satisfy the approved policy; active break-even plan exists and uses canonical SKU identity; no unexplained RF-010A/RF-010C parity differences.
+- **Representation:** additive table/record containing generation ID, operational year, status (`candidate/active/superseded/failed`), activated timestamp/actor, cost/pricing/advice/break-even source generation identifiers, source-generation/year lineage and compatibility metadata. Previous generations and domain rows are retained.
 - **Automatic migration/backfill:** idempotent and restartable. It may create a candidate from existing data and activate it only when completeness/hash checks prove one unambiguous current context. Ambiguity or incomplete data stops for human review; it never guesses from `max(productie)` or calendar year alone.
 - **Compatibility:** old application versions continue reading existing cost/pricing/advice tables. New readers can fall back to the old heuristic during rollout but must report that fallback. No dual write may reinterpret historical records.
 - **Required tests:** empty/2025-only/complete-2026/incomplete-2026/future candidate; concurrent activation; failed Nth completeness step; idempotent migration; previous-generation rollback; old/new application compatibility; hash/count parity; timezone and actor audit.
 - **Rollout / rollback / observability:** expand → backfill candidate → validate → activate → dual-read observation. Rollback changes the active pointer/generation status; it does not delete the newer yearset. Metrics include active generation/year, fallback reads, incomplete candidates and source mismatches.
 - **Acceptance criteria:** exactly one active commercial generation; switching is atomic; new work can identify its generation; old/historical data is untouched; rollback is rehearsed; no destructive SQL.
-- **Dependencies / complexity / risk / human confirmation:** RF-003/RF-006/RF-010A/RF-011A; **large complexity, high financial/data risk**. Mandatory finance/product/data/DBA approval.
+- **Dependencies / complexity / risk / human confirmation:** RF-003/RF-006/RF-010A/RF-010C/RF-011A/RF-011C; **large complexity, high financial/data risk**. Mandatory finance/product/data/DBA approval.
 
 ### RF-013B — Canonical Beer, Beer-SKU and planning-cost authority
 
@@ -425,6 +474,19 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Required tests:** RF-010B/RF-011B parity; duplicate Beer IDs/names; unknown/empty legacy Beer references; article/service/bundle subjects; first anchor; later same SKU; new SKU; own recipe; LOT lineage; two-version deployment; rollback; FK/unique constraint validation; zero data-loss hashes.
 - **Acceptance criteria:** every Beer cost has a valid canonical Beer relation; non-Beer costs use an explicit subject type rather than overloaded `bier_id`; every planning SKU/year has at most one anchor; actual LOT history remains unchanged; old application paths remain compatible until RF-014/RF-015.
 - **Dependencies / complexity / risk / human confirmation:** RF-003/RF-006/RF-010B/RF-011B; **large complexity, high data risk**. Mandatory finance/product/data/DBA approval and automatic-migration rehearsal on disposable production-shaped fixtures.
+
+### RF-013C — Additive yearset reconciliation and canonical activation
+
+- **Objective / classification:** replace the UI-derived new-year write input with RF-011C’s canonical manifest and automatically construct a complete target-year **candidate** without modifying historical rows. This is an approved behaviour correction plus backward-compatible data evolution.
+- **Write contract:** reuse stable canonical SKU IDs; write new cost-version SKU rows and generation entries under new IDs; preserve Beer/format/BOM/external mapping identity; store method separately from source-year/invoice/brew provenance; never derive identity from a label or grouped screen row.
+- **Automatic reconciliation:** idempotent and restartable. It inventories the existing target year, creates a new candidate generation for missing/incorrect entries, records alias/hash before/after manifests and stops on ambiguity. It does not update/delete old 2025/2026 versions, activations, LOTs, invoices, brew moments, quotes or actual snapshots.
+- **Activation gate:** exact RF-010C manifest coverage; one entry per required SKU; positive valid planning cost where applicable; valid format/liters; required sell-in/advice rows; active break-even plan; no unexplained financial difference. Only then may one transaction activate the new generation and supersede the previous pointer. Failure leaves the previous generation active.
+- **Existing incomplete 2026 state:** treat it as historical/current evidence, not as a template to overwrite. The candidate is compared to it; defects such as missing Blond/Juweel readiness remain visible in the reconciliation report until the candidate passes.
+- **Migration approach:** additive expand → dry-run manifest → candidate write → dual-read shadow → automatic validation → explicit product/finance approval → atomic activation. No destructive cleanup; old application readers remain compatible during observation.
+- **Required tests:** all RF-010C cases; partial write at every stage; duplicate submit/concurrent activation; idempotent rerun; source changed mid-run; incomplete/extra/ambiguous SKU; composed/BOM parity; Juweel/Blond/Tripel/Weizen controls; two application versions; rollback pointer; zero data-loss hashes.
+- **Observability / rollback:** generation/run ID, counts and reason codes without commercial values; before/after aliases/hashes; activation audit actor/time. Rollback selects the prior complete generation; it never deletes the candidate.
+- **Acceptance criteria:** new Quote and Break-even shadow readers see the same complete canonical SKU set and approved values; historical records/hashes are unchanged; every changed value has an approved year rule and lineage; automatic reconciliation is repeatable on a disposable production-shaped fixture.
+- **Dependencies / complexity / risk / human confirmation:** RF-010A/RF-010C/RF-010B/RF-011A/RF-011B/RF-011C/RF-013A/RF-013B; **large complexity, high financial/data risk**. Mandatory product/finance/data/DBA approval before activation. RF-012C/RF-012D cannot switch before RF-013C passes.
 
 ## RF-014 — Prove and remove deprecated paths individually
 
@@ -469,6 +531,8 @@ Stop a slice and return for human review if it discovers:
 - production data/schema not represented by fixtures;
 - an undocumented external consumer;
 - formula/rounding/time/identity ambiguity;
+- a missing, duplicate, misclassified or non-ready required SKU in a source-to-target year manifest;
+- a historical finalized snapshot that would need to be overwritten or guessed to make parity pass;
 - a different current role/retention contract;
 - inability to isolate a test database or restore data;
 - a behavioural difference outside the named screen/workflow;

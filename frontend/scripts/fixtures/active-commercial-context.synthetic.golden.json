@@ -1,0 +1,532 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "RF-010A-active-commercial-context-synthetic",
+  "baselineCommit": "e055fd2e5b544616ce790e3ea1e999706e2b47f0",
+  "capturedAt": "2026-07-20",
+  "source": {
+    "classification": "synthetic-dev-shaped",
+    "identifiers": "synthetic",
+    "names": "synthetic",
+    "numericValues": "non-production"
+  },
+  "approval": {
+    "status": "pending-human-approval",
+    "approvedBy": null,
+    "approvedAt": null
+  },
+  "audit": {
+    "years": [2025, 2026],
+    "counts": {
+      "skus": 2,
+      "articles": 2,
+      "beers": 1,
+      "costVersions": 2,
+      "costLines": 2,
+      "activationsByYear": { "2025": 1, "2026": 1 },
+      "sellingRowsByYear": { "2025": 1, "2026": 1 },
+      "adviceRowsByYear": { "2025": 0, "2026": 2 },
+      "historicalQuotes": 1,
+      "activePlans": 2,
+      "historicalActualSnapshotsByYear": { "2025": 1, "2026": 1 },
+      "historicalActualMissingCostByYear": { "2025": 0, "2026": 0 }
+    },
+    "activationDuplicateKeys": [],
+    "activationUnknownSkus": [],
+    "activationUnknownVersions": [],
+    "activationWithoutCanonicalCostLine": [],
+    "activationWithoutAnyCostRepresentation": []
+  },
+  "input": {
+    "channels": [
+      { "code": "horeca", "label": "Horeca", "actief": true, "volgorde": 1, "default_marge_pct": 40 },
+      { "code": "retail", "label": "Retail", "actief": true, "volgorde": 2, "default_marge_pct": 30 }
+    ],
+    "beers": [
+      { "id": "beer-001", "biernaam": "Beer 001", "active": true, "btw_tarief": "21%" }
+    ],
+    "skus": [
+      {
+        "id": "sku-001",
+        "kind": "beer_format",
+        "beer_id": "beer-001",
+        "format_article_id": "article-001",
+        "name": "SKU 001",
+        "active": true,
+        "packaging_type": "doos"
+      },
+      {
+        "id": "sku-002",
+        "kind": "article",
+        "article_id": "article-002",
+        "name": "SKU 002",
+        "active": true,
+        "payload": { "pricing_method": "manual_rate", "sellable_subtype": "dienst", "manual_rate_ex": 85 }
+      }
+    ],
+    "articles": [
+      { "id": "article-001", "kind": "format", "name": "Doos 24 x 33cl", "uom": "stuk", "content_liter": 7.92, "active": true },
+      {
+        "id": "article-002",
+        "kind": "article",
+        "name": "Dienst",
+        "uom": "uur",
+        "content_liter": 0,
+        "active": true,
+        "payload": { "pricing_method": "manual_rate", "sellable_subtype": "dienst", "manual_rate_ex": 85 }
+      }
+    ],
+    "costVersions": [
+      {
+        "id": "cost-version-2025",
+        "jaar": 2025,
+        "status": "definitief",
+        "bier_id": "beer-001",
+        "versie_nummer": 1,
+        "kostprijs": 1.34,
+        "basisgegevens": { "jaar": 2025, "sku_id": "sku-001", "article_id": "article-001", "btw_tarief": "21%", "uom": "stuk" },
+        "cost_lines": [
+          { "sku_id": "sku-001", "product_id": "article-001", "product_type": "sku", "primaire_kosten": 0.82, "inkoop": 0.82, "verpakkingskosten": 0.16, "indirecte_kosten": 0.12, "vaste_kosten": 0.12, "vaste_directe_kosten": 0.12, "accijns": 0.24, "kostprijs": 1.34 }
+        ]
+      },
+      {
+        "id": "cost-version-2026",
+        "jaar": 2026,
+        "status": "definitief",
+        "bier_id": "beer-001",
+        "versie_nummer": 2,
+        "kostprijs": 1.56,
+        "basisgegevens": { "jaar": 2026, "sku_id": "sku-001", "article_id": "article-001", "btw_tarief": "21%", "uom": "stuk" },
+        "cost_lines": [
+          { "sku_id": "sku-001", "product_id": "article-001", "product_type": "sku", "primaire_kosten": 0.96, "inkoop": 0.96, "verpakkingskosten": 0.18, "indirecte_kosten": 0.15, "vaste_kosten": 0.15, "vaste_directe_kosten": 0.15, "accijns": 0.27, "kostprijs": 1.56 }
+        ]
+      }
+    ],
+    "activations": [
+      { "id": "activation-2025", "sku_id": "sku-001", "jaar": 2025, "kostprijsversie_id": "cost-version-2025", "effectief_vanaf": "2025-01-01T00:00:00Z", "effectief_tot": "", "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z" },
+      { "id": "activation-2026", "sku_id": "sku-001", "jaar": 2026, "kostprijsversie_id": "cost-version-2026", "effectief_vanaf": "2026-01-01T00:00:00Z", "effectief_tot": "", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z" }
+    ],
+    "sellingPrices": [
+      { "id": "sales-2025", "jaar": 2025, "record_type": "verkoopstrategie_product", "sku_id": "sku-001", "bier_id": "beer-001", "product_id": "article-001", "sell_in_margins": { "horeca": 42, "retail": 30 }, "sell_in_prices": { "horeca": 2.35 } },
+      { "id": "sales-2026", "jaar": 2026, "record_type": "verkoopstrategie_product", "sku_id": "sku-001", "bier_id": "beer-001", "product_id": "article-001", "sell_in_margins": { "horeca": 44 }, "sell_in_prices": { "list": 2.75 } }
+    ],
+    "advicePrices": [
+      { "id": "advice-2026-horeca", "jaar": 2026, "channel_code": "horeca", "opslag_pct": 35 },
+      { "id": "advice-2026-retail", "jaar": 2026, "channel_code": "retail", "opslag_pct": 28 }
+    ],
+    "packagingComponentPrices": []
+  },
+  "historicalQuotes": [
+    { "id": "quote-001", "column_year": 2025, "status": "concept", "saved_draft_year": 2025, "financial_nodes": [{ "path": "scenarios.base.lines[0]", "skuId": "sku-001", "costPriceEx": 1.34, "standardPriceEx": 2.35, "offerUnitPriceEx": 2.25, "quantity": 48 }] }
+  ],
+  "historicalActualSnapshots": [
+    {
+      "id": "actual-line-001",
+      "source_type": "order",
+      "year": 2025,
+      "line_date": "2025-06-15",
+      "company_id": "company-001",
+      "external_product_id": "external-product-001",
+      "sku_id": "sku-001",
+      "bier_id": "beer-001",
+      "product_id": "article-001",
+      "lot_number": "lot-001",
+      "lot_internal_number": "",
+      "lot_transaction_number": "",
+      "cost_source": "lot_exact",
+      "cost_status": "resolved",
+      "kostprijsversie_id": "cost-version-2025",
+      "quantity": 24,
+      "net_revenue_ex": 56.4,
+      "cost_price_ex": 1.34,
+      "cost_total_ex": 32.16,
+      "margin_ex": 24.24,
+      "missing_cost": false,
+      "mapped": true,
+      "ignored": false
+    },
+    {
+      "id": "actual-line-002",
+      "source_type": "invoice",
+      "year": 2026,
+      "line_date": "2026-03-12",
+      "company_id": "company-001",
+      "external_product_id": "external-product-001",
+      "sku_id": "sku-001",
+      "bier_id": "beer-001",
+      "product_id": "article-001",
+      "lot_number": "lot-002",
+      "lot_internal_number": "",
+      "lot_transaction_number": "",
+      "cost_source": "lot_exact",
+      "cost_status": "resolved",
+      "kostprijsversie_id": "cost-version-2026",
+      "quantity": 24,
+      "net_revenue_ex": 66,
+      "cost_price_ex": 1.56,
+      "cost_total_ex": 37.44,
+      "margin_ex": 28.56,
+      "missing_cost": false,
+      "mapped": true,
+      "ignored": false
+    }
+  ],
+  "activeBreakEvenPlans": [
+    { "id": "plan-2025", "jaar": 2025, "status": "active", "source": "synthetic", "summary": { "planned_revenue": 2350 }, "targets": { "revenue": 2350 }, "planning_rows": [{ "sku_id": "sku-001", "planned_units": 1000, "planned_cost_unit": 1.34, "planned_revenue": 2350 }] },
+    { "id": "plan-2026", "jaar": 2026, "status": "active", "source": "synthetic", "summary": { "planned_revenue": 2750 }, "targets": { "revenue": 2750 }, "planning_rows": [{ "sku_id": "sku-001", "planned_units": 1000, "planned_cost_unit": 1.56, "planned_revenue": 2750 }] }
+  ],
+  "expected": {
+    "activeBreakEvenPlans": [
+      {
+        "id": "plan-2025",
+        "jaar": 2025,
+        "planning_rows": [
+          {
+            "planned_cost_unit": 1.34,
+            "planned_revenue": 2350,
+            "planned_units": 1000,
+            "sku_id": "sku-001"
+          }
+        ],
+        "source": "synthetic",
+        "status": "active",
+        "summary": {
+          "planned_revenue": 2350
+        },
+        "targets": {
+          "revenue": 2350
+        }
+      },
+      {
+        "id": "plan-2026",
+        "jaar": 2026,
+        "planning_rows": [
+          {
+            "planned_cost_unit": 1.56,
+            "planned_revenue": 2750,
+            "planned_units": 1000,
+            "sku_id": "sku-001"
+          }
+        ],
+        "source": "synthetic",
+        "status": "active",
+        "summary": {
+          "planned_revenue": 2750
+        },
+        "targets": {
+          "revenue": 2750
+        }
+      }
+    ],
+    "historicalQuotes": [
+      {
+        "column_year": 2025,
+        "financial_nodes": [
+          {
+            "costPriceEx": 1.34,
+            "offerUnitPriceEx": 2.25,
+            "path": "scenarios.base.lines[0]",
+            "quantity": 48,
+            "skuId": "sku-001",
+            "standardPriceEx": 2.35
+          }
+        ],
+        "id": "quote-001",
+        "saved_draft_year": 2025,
+        "status": "concept"
+      }
+    ],
+    "historicalActualSnapshots": [
+      {
+        "bier_id": "beer-001",
+        "company_id": "company-001",
+        "cost_price_ex": 1.34,
+        "cost_source": "lot_exact",
+        "cost_status": "resolved",
+        "cost_total_ex": 32.16,
+        "external_product_id": "external-product-001",
+        "id": "actual-line-001",
+        "ignored": false,
+        "kostprijsversie_id": "cost-version-2025",
+        "line_date": "2025-06-15",
+        "lot_internal_number": "",
+        "lot_number": "lot-001",
+        "lot_transaction_number": "",
+        "mapped": true,
+        "margin_ex": 24.24,
+        "missing_cost": false,
+        "net_revenue_ex": 56.4,
+        "product_id": "article-001",
+        "quantity": 24,
+        "sku_id": "sku-001",
+        "source_type": "order",
+        "year": 2025
+      },
+      {
+        "bier_id": "beer-001",
+        "company_id": "company-001",
+        "cost_price_ex": 1.56,
+        "cost_source": "lot_exact",
+        "cost_status": "resolved",
+        "cost_total_ex": 37.44,
+        "external_product_id": "external-product-001",
+        "id": "actual-line-002",
+        "ignored": false,
+        "kostprijsversie_id": "cost-version-2026",
+        "line_date": "2026-03-12",
+        "lot_internal_number": "",
+        "lot_number": "lot-002",
+        "lot_transaction_number": "",
+        "mapped": true,
+        "margin_ex": 28.56,
+        "missing_cost": false,
+        "net_revenue_ex": 66,
+        "product_id": "article-001",
+        "quantity": 24,
+        "sku_id": "sku-001",
+        "source_type": "invoice",
+        "year": 2026
+      }
+    ],
+    "years": [
+      {
+        "advicePriceContext": [],
+        "breakEvenPlanningContext": [
+          {
+            "contributionPerLiter": 0.142677,
+            "costPriceEx": 1.34,
+            "fixedCostAllocationEx": 0.12,
+            "litersPerUnit": 7.92,
+            "ref": "sku:sku-001",
+            "sellInEx": 2.35,
+            "sellInPerLiter": 0.296717,
+            "variableCostEx": 1.22,
+            "variableCostPerLiter": 0.15404,
+            "warnings": []
+          }
+        ],
+        "centralSkuContext": [
+          {
+            "contentLiter": 7.92,
+            "costOrigin": "unknown",
+            "costParentSkuId": "",
+            "costPriceEx": 1.34,
+            "hasActiveCost": true,
+            "isActive": true,
+            "manualRateEx": 0,
+            "pricingMethod": "cost_plus",
+            "sellInExByChannel": {
+              "horeca": 2.35,
+              "retail": 1.742
+            },
+            "skuId": "sku-001",
+            "subtype": "bier",
+            "uom": "stuk",
+            "vatRatePct": 21,
+            "warnings": []
+          },
+          {
+            "contentLiter": 0,
+            "costOrigin": "service_manual",
+            "costParentSkuId": "",
+            "costPriceEx": 0,
+            "hasActiveCost": false,
+            "isActive": false,
+            "manualRateEx": 85,
+            "pricingMethod": "manual_rate",
+            "sellInExByChannel": {},
+            "skuId": "sku-002",
+            "subtype": "dienst",
+            "uom": "uur",
+            "vatRatePct": 0,
+            "warnings": []
+          }
+        ],
+        "discrepancies": {
+          "breakEvenCost": [],
+          "quoteCostOrSellIn": []
+        },
+        "newQuoteContext": [
+          {
+            "channel": "Horeca",
+            "options": [
+              {
+                "costPriceEx": 1.34,
+                "kostprijsversieId": "cost-version-2025",
+                "litersPerUnit": 7.92,
+                "optionId": "sku:sku-001",
+                "standardPriceEx": 2.35,
+                "standardPriceYear": 2025,
+                "vatRatePct": 21
+              },
+              {
+                "costPriceEx": 0,
+                "kostprijsversieId": "",
+                "litersPerUnit": 0,
+                "optionId": "sku:sku-002",
+                "standardPriceEx": 85,
+                "vatRatePct": 0
+              }
+            ],
+            "warnings": []
+          },
+          {
+            "channel": "Retail",
+            "options": [
+              {
+                "costPriceEx": 1.34,
+                "kostprijsversieId": "cost-version-2025",
+                "litersPerUnit": 7.92,
+                "optionId": "sku:sku-001",
+                "standardPriceEx": 1.742,
+                "standardPriceYear": 2025,
+                "vatRatePct": 21
+              },
+              {
+                "costPriceEx": 0,
+                "kostprijsversieId": "",
+                "litersPerUnit": 0,
+                "optionId": "sku:sku-002",
+                "standardPriceEx": 85,
+                "vatRatePct": 0
+              }
+            ],
+            "warnings": []
+          }
+        ],
+        "year": 2025
+      },
+      {
+        "advicePriceContext": [
+          {
+            "adviceMarkupPct": 35,
+            "adviceMaximumInclVat": 3.6,
+            "adviceMinimumInclVat": 3.5,
+            "advicePriceInclVat": 3.55,
+            "channelCode": "horeca",
+            "costPriceEx": 1.56,
+            "customerMarginPct": 46.828169,
+            "sellInEx": 2.184,
+            "sellInSource": "opslag",
+            "skuId": "sku-001"
+          },
+          {
+            "adviceMarkupPct": 28,
+            "adviceMaximumInclVat": 3.15,
+            "adviceMinimumInclVat": 3.05,
+            "advicePriceInclVat": 3.1,
+            "channelCode": "retail",
+            "costPriceEx": 1.56,
+            "customerMarginPct": 39.109677,
+            "sellInEx": 2.028,
+            "sellInSource": "opslag",
+            "skuId": "sku-001"
+          }
+        ],
+        "breakEvenPlanningContext": [
+          {
+            "contributionPerLiter": 0.169192,
+            "costPriceEx": 1.56,
+            "fixedCostAllocationEx": 0.15,
+            "litersPerUnit": 7.92,
+            "ref": "sku:sku-001",
+            "sellInEx": 2.75,
+            "sellInPerLiter": 0.347222,
+            "variableCostEx": 1.41,
+            "variableCostPerLiter": 0.17803,
+            "warnings": []
+          }
+        ],
+        "centralSkuContext": [
+          {
+            "contentLiter": 7.92,
+            "costOrigin": "unknown",
+            "costParentSkuId": "",
+            "costPriceEx": 1.56,
+            "hasActiveCost": true,
+            "isActive": true,
+            "manualRateEx": 0,
+            "pricingMethod": "cost_plus",
+            "sellInExByChannel": {
+              "horeca": 2.75,
+              "retail": 2.75
+            },
+            "skuId": "sku-001",
+            "subtype": "bier",
+            "uom": "stuk",
+            "vatRatePct": 21,
+            "warnings": []
+          },
+          {
+            "contentLiter": 0,
+            "costOrigin": "service_manual",
+            "costParentSkuId": "",
+            "costPriceEx": 0,
+            "hasActiveCost": false,
+            "isActive": false,
+            "manualRateEx": 85,
+            "pricingMethod": "manual_rate",
+            "sellInExByChannel": {},
+            "skuId": "sku-002",
+            "subtype": "dienst",
+            "uom": "uur",
+            "vatRatePct": 0,
+            "warnings": []
+          }
+        ],
+        "discrepancies": {
+          "breakEvenCost": [],
+          "quoteCostOrSellIn": []
+        },
+        "newQuoteContext": [
+          {
+            "channel": "Horeca",
+            "options": [
+              {
+                "costPriceEx": 1.56,
+                "kostprijsversieId": "cost-version-2026",
+                "litersPerUnit": 7.92,
+                "optionId": "sku:sku-001",
+                "standardPriceEx": 2.75,
+                "standardPriceYear": 2026,
+                "vatRatePct": 21
+              },
+              {
+                "costPriceEx": 0,
+                "kostprijsversieId": "",
+                "litersPerUnit": 0,
+                "optionId": "sku:sku-002",
+                "standardPriceEx": 85,
+                "vatRatePct": 0
+              }
+            ],
+            "warnings": []
+          },
+          {
+            "channel": "Retail",
+            "options": [
+              {
+                "costPriceEx": 1.56,
+                "kostprijsversieId": "cost-version-2026",
+                "litersPerUnit": 7.92,
+                "optionId": "sku:sku-001",
+                "standardPriceEx": 2.75,
+                "standardPriceYear": 2026,
+                "vatRatePct": 21
+              },
+              {
+                "costPriceEx": 0,
+                "kostprijsversieId": "",
+                "litersPerUnit": 0,
+                "optionId": "sku:sku-002",
+                "standardPriceEx": 85,
+                "vatRatePct": 0
+              }
+            ],
+            "warnings": []
+          }
+        ],
+        "year": 2026
+      }
+    ]
+  }
+}
