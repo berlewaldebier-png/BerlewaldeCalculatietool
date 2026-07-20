@@ -87,6 +87,42 @@ class PlanningLotCostGoldenTests(unittest.TestCase):
             {**resolved, "mapped": True, "ignored": False, "lot_required": True}
         )
 
+    def test_lot_requirement_and_cost_requirement_are_independent(self) -> None:
+        non_lot_with_cost = douano_margin_service._snapshot_cost_status(
+            {
+                "mapped": True,
+                "ignored": False,
+                "missing_cost": False,
+                "cost_source": "baseline",
+                "lot_required": False,
+                "lot_number": "",
+            }
+        )
+        rounding_without_cost = douano_margin_service._snapshot_cost_status(
+            {
+                "mapped": True,
+                "ignored": False,
+                "missing_cost": False,
+                "cost_source": "no_cost_required",
+                "lot_required": False,
+                "lot_number": "",
+            }
+        )
+        explicitly_ignored = douano_margin_service._snapshot_cost_status(
+            {
+                "mapped": False,
+                "ignored": True,
+                "missing_cost": False,
+                "cost_source": "",
+                "lot_required": False,
+                "lot_number": "",
+            }
+        )
+
+        self.assertEqual(non_lot_with_cost, "resolved_active_sku_cost")
+        self.assertEqual(rounding_without_cost, "no_cost_required")
+        self.assertEqual(explicitly_ignored, "ignored")
+
     def test_approved_anchor_is_first_activation_but_current_latest_selection_deviates(self) -> None:
         report = build_report(
             {

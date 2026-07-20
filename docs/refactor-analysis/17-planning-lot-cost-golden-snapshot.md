@@ -1,7 +1,7 @@
 # 17 — Planning-cost anchor versus actual LOT-cost golden snapshot
 
 Date: 2026-07-20
-Status: RF-010B implemented as read-only regression protection; fallback and ambiguity policy remains pending human approval.
+Status: RF-010B implemented as read-only regression protection; target resolution policy approved, existing data remediation remains pending.
 
 RF-010B changes no calculation, activation, quote, Break-even, Omzet en Marge, database schema or persisted record. It records both the approved target semantics and today's executable behavior so RF-011B can centralize source selection without hiding a financial difference.
 
@@ -67,7 +67,23 @@ All figures below are **Observed** in the guarded read-only development capture 
 
 The zero captured planning deviation is not evidence that the current implementation satisfies the approved rule. There is no retained key with events for two different versions. The synthetic executable case supplies the absent but required January→May scenario and confirms that Quote and Break-even currently choose May.
 
-The 11 ambiguous exact LOT keys and 940 missing-cost snapshots are blocking deviations for RF-011B. They must be classified; no test or refactor may guess, rewrite or delete them to obtain a green comparison.
+The 11 ambiguous exact LOT keys and 940 missing-cost snapshots block consumer switching and data repair. RF-011B may expose them through a read-only resolver, but no test or refactor may guess, rewrite or delete them to obtain a green comparison.
+
+## LOT requirement and cost requirement are independent
+
+**Approved product clarification:** absence of a LOT does not determine whether a line needs a cost price. Existing Administrator maintenance classifications and Douano-to-internal SKU/LOT mappings remain authoritative inputs. RF-011B must preserve these distinct outcomes:
+
+| Cost policy | LOT policy | Required resolver outcome |
+|---|---|---|
+| Cost required | LOT required | Resolve internal SKU, then exact LOT or an explicitly approved LOT alias; otherwise unresolved |
+| Cost required | LOT not required | Resolve the approved SKU cost applicable on the transaction date and freeze it in the historical actual snapshot |
+| No cost required | LOT not applicable | Return typed status `no_cost_required`; do not invent a SKU cost and do not report `missing_cost` |
+| Ignore line | LOT not applicable | Return typed status `ignored` with the maintained reason |
+| Not classified | Unknown | Return unresolved with an Administrator maintenance action |
+
+An invoice rounding difference is the confirmed example of `no_cost_required`: it has no product cost price. When it is a financial rounding adjustment, its amount remains available for invoice-total reconciliation while its cost contribution is zero/not applicable. This is not the same as a genuine zero cost, a missing cost, an unmapped SKU or an ignored line.
+
+The executable characterization now calls the production status resolver for a cost-bearing non-LOT SKU, a `no_cost_required` rounding line and an explicitly ignored line. Future centralization may change the source model, but not collapse these states merely because `lot_number` is empty.
 
 ## Regression assets
 
@@ -113,14 +129,17 @@ Expected output is one line: `RF-010B private development fingerprint baseline O
 - [x] A newly introduced format/SKU receives its own independent first anchor.
 - [x] Exact LOT lineage overrides order/invoice date and later planning activations.
 - [x] Historical quotes and actual snapshots are not repriced during centralization.
-- [ ] Decide whether a missing LOT on a LOT-required product must block the margin row or may use a visibly labelled planning fallback.
-- [ ] Decide whether an unknown/near LOT must block until mapped, or may use a separately permissioned and auditable fallback.
-- [ ] Confirm that an ambiguous exact LOT always blocks and must never silently choose the highest version.
-- [ ] Decide who may explicitly rebaseline planning cost, what reason/evidence is mandatory, and whether Management plus Administrator or Administrator only has that capability.
+- [x] LOT requirement and cost requirement are separate maintained classifications; absence of a LOT never determines cost policy by itself.
+- [x] A cost-bearing non-LOT SKU resolves the approved cost applicable on the transaction date and freezes that value in the historical snapshot.
+- [x] A maintained `no_cost_required` line such as an invoice rounding difference receives no invented cost price and is not treated as missing.
+- [x] A missing LOT on a LOT-required product leaves actual cost unresolved; a visibly labelled planning estimate may be shown separately but is not definitive actual margin.
+- [x] An unknown/near LOT requires explicit Administrator mapping; near matches never resolve automatically.
+- [x] An ambiguous exact LOT blocks and must never silently choose the highest version.
+- [x] Brewer may prepare a rebaseline proposal; Management approves it; Administrator may execute only with recorded Management approval; Sales cannot rebaseline.
 - [ ] Classify the 940 missing-cost snapshots and 11 exact-LOT ambiguities before any consumer switch or data repair.
 
 ## Rollback and next dependency
 
 Rollback removes only the new tests, fixtures, audit helpers and this document. No data rollback or migration exists.
 
-RF-010B completes the technical RF-010 protection package, but finance/product approval remains pending for the unchecked decisions above. RF-011B may introduce a read-only resolver and deviation reporting only after those policies are decided; it must not switch consumers or repair persisted data. Additive planning-anchor and LOT-lineage authority remains RF-013B, with consumer migration later in RF-012C and history UI in RF-012D.
+RF-010B completes the technical RF-010 protection package and the target resolution policy is product/finance-approved. RF-011B may introduce a read-only resolver and deviation reporting with explicit unresolved/conflict states, but it must not switch consumers or repair persisted data. The 940 missing-cost snapshots and 11 exact-LOT ambiguities remain an item-level classification/remediation backlog before any consumer switch. Additive planning-anchor and LOT-lineage authority remains RF-013B, with consumer migration later in RF-012C and history UI in RF-012D.
