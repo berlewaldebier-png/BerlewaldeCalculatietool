@@ -342,6 +342,8 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Acceptance criteria:** every current source/target difference is classified as intended, defect or unknown; unknown identity/financial differences block RF-010B/RF-011A/RF-011C; product/finance confirms the source-to-target changed-field allowlist.
 - **Dependencies / complexity / risk / human confirmation:** RF-010A/RF-007B; **medium/large complexity, low runtime risk, high financial significance**. Mandatory product/finance/data approval. RF-010 remains incomplete until RF-010C and RF-010B pass.
 
+**RF-010C implementation note (2026-07-20):** this slice remains tests/audit/documentation only. The committed synthetic fixture covers canonical SKU uniqueness, UI fan-out, missing/extra identities, one-to-many/many-to-one lineage, composed classification, label drift, missing cost row versus non-positive cost, liters, sell-in, `n.v.t.`, provenance and historical snapshot/read-model divergence. A read-only private 2025→2026 audit records 66 unique source activations and 77 unique target activations, with 11 extra target SKUs, six UI-fan-out SKU IDs, 35 missing target cost rows, 23 sell-in-readiness gaps, 43 label changes, eight identity differences, 11 lineage mismatches and 108 of 143 historical dossier projections differing. These are baseline observations, not repairs. Unknown identity/lineage and readiness classifications block RF-011C/RF-013C; RF-010B may proceed only as the next read-only characterization slice.
+
 ### RF-010B — Planning-cost anchor versus actual LOT-cost golden snapshot
 
 - **Objective:** freeze the approved distinction between stable planning cost and realized LOT cost before centralizing any cost resolver or changing the data model.

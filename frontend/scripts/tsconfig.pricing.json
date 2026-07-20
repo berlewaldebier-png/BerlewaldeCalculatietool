@@ -31,6 +31,8 @@
     "./quoteOptionOrdering.contracttest.ts",
     "./costpriceCalculationEngine.contracttest.ts",
     "./activeCommercialContextGolden.contracttest.ts",
+    "./yearTransitionSkuParity.contracttest.ts",
+    "./yearTransitionSkuParity.ts",
     "../src/lib/pricingEngine.ts",
     "../src/lib/costpriceCalculationEngine.ts",
     "../src/lib/quoteBuilderGuards.ts",
@@ -49,6 +51,8 @@
     "../src/components/adviesprijzen/adviesprijzenUtils.ts",
     "../src/components/break-even/breakEvenUtils.ts",
     "../src/lib/packagingConfig.ts",
-    "../src/lib/skuLabels.ts"
+    "../src/lib/skuLabels.ts",
+    "../src/components/kostprijsbeheer/kostprijsBeheerDerivations.ts",
+    "../src/components/kostprijsbeheer/kostprijsBeheerUtils.ts"
   ]
 }

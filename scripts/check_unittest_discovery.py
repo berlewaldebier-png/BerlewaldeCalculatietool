@@ -84,6 +84,11 @@ required_rf010a_contracts = {
     "test_active_commercial_context_capture.ActiveCommercialContextCaptureSafetyTests.test_private_target_requires_explicit_opt_in",
     "test_active_commercial_context_capture.ActiveCommercialContextCaptureSafetyTests.test_production_is_rejected_even_with_private_opt_in",
 }
+required_rf010c_contracts = {
+    "test_year_transition_parity_capture.YearTransitionParityCaptureSafetyTests.test_capture_requires_explicit_pseudonymous_structure_acknowledgement",
+    "test_year_transition_parity_capture.YearTransitionParityCaptureSafetyTests.test_capture_rejects_non_forward_year_transition_before_connecting",
+    "test_year_transition_read_model_characterization.YearTransitionReadModelCharacterizationTests.test_normalized_rows_currently_replace_original_product_categories",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -95,6 +100,7 @@ missing = sorted(
         | required_rf007_contracts
         | required_rf008_contracts
         | required_rf010a_contracts
+        | required_rf010c_contracts
     ).difference(ids)
 )
 
@@ -105,5 +111,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008 and RF-010A contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A and RF-010C contracts collected"
 )

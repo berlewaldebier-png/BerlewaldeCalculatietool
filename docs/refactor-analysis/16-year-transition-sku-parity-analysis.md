@@ -163,8 +163,27 @@ Do not replace or delete these sources in one migration. Add authorities, backfi
 
 ## Limitations and open verification
 
-- **Unknown:** exact physical row counts and identifiers for the named products. A targeted read-only development-database extract was attempted but rejected by the workspace security guard because non-hashed product metadata may not be disclosed into the task context.
-- **Unknown:** which readiness condition specifically excludes Blond (`cost`, liters, sell-in or identity) until RF-010C runs an approved local comparison that emits only aliases/hashes and reason codes.
-- **Unknown:** whether “Alles onder de boom” is one SKU projected into multiple groups, multiple legitimate SKUs, old RF-007A-era variants, or a combination.
+- **Observed (RF-010C private read-only audit, 2026-07-20):** 2025 has 66 activation rows and 66 unique SKU IDs; 2026 has 77 activation rows and 77 unique SKU IDs. There are no physical duplicate SKU IDs inside either activation set. The target has no missing source SKU IDs and 11 extra target SKU IDs. Those 11 are not automatically defects: each must be classified as a deliberately introduced 2026 SKU or an invalid extra before candidate activation is designed.
+- **Observed:** the structural UI projection has 100 references and six SKU IDs occur in more than one display group. This is UI fan-out, not proof of six duplicate database SKU rows. The executable fixture also invokes the production `buildActiveRows` path and confirms that one composed SKU can currently produce two Beer-group rows.
+- **Observed:** 35 target activations have no matching canonical cost row; another 23 have a cost row but do not satisfy all currently active sell-in-channel expectations. These categories are deliberately separate from a non-positive numeric cost, missing liters and a format that is genuinely `n.v.t.`.
+- **Observed:** 43 common SKU IDs have a different persisted cost-row label between source and target. Stable SKU identity means a label change alone is not an identity change, but these labels require product validation because the current writer derives them from presentation rows.
+- **Observed:** eight common SKU IDs have an identity-field difference and 11 have a source-cost-version lineage mismatch. These remain **Unknown** in meaning and block RF-011C/RF-013C until classified; the committed baseline contains only counts and hashes, not product names, prices or raw IDs.
+- **Observed:** 108 of 143 activation/version dossiers differ between the original result snapshot and the normalized read projection. The characterization test confirms that the loader returns normalized rows under `basisproducten` and empties `samengestelde_producten`, while leaving the supplied historical payload object unchanged in memory. This is a read-model defect; it is not evidence that persisted history was deleted.
+- **Unknown:** which of the aliased incomplete rows corresponds to the user-reported Blond quote omission. The possible reason families are now frozen (`cost_row_missing`, `cost_non_positive`, `liters_missing`, `sell_in_missing`, identity/lineage), but mapping a private alias back to a named product requires a deliberate local operator report or later safe diagnostic UI.
+- **Unknown:** whether the named “Alles onder de boom” repetitions are solely the confirmed UI fan-out, multiple legitimate historical SKUs, old RF-007A-era variants, or a combination.
 - **High confidence:** the plan is incomplete without RF-010C/RF-011C/RF-013C/RF-012D because the UI-to-domain dependency and destructive read projection are directly confirmed in code.
+
+## RF-010C implementation and approval record
+
+RF-010C adds no runtime path, database write, schema change, migration, activation, repair or source-of-truth switch. The CI fixture is synthetic and development-shaped. The private capture opens an explicit read-only transaction, emits pseudonymous structure to the local test process, and commits only aggregate counts and SHA-256 fingerprints.
+
+The local private comparison command is intentionally not part of GitHub CI because CI has no private development database. Run it from `frontend/` after loading `backend/.env.local.ps1`, with `RF010C_PRIVATE_CAPTURE_STDIN=1`, and pipe `capture_year_transition_sku_parity.py --source-year 2025 --target-year 2026 --allow-private-development-host --acknowledge-pseudonymous-structure` into the compiled `yearTransitionSkuParity.contracttest.js`. Without `RF010C_PRINT_PRIVATE_MANIFEST=1`, success prints one non-sensitive confirmation line; any fingerprint or reason-count difference fails.
+
+Approval remains pending for:
+
+1. product/data classification of the 11 extra 2026 SKU IDs;
+2. investigation of the eight identity differences and 11 lineage mismatches;
+3. finance/product acceptance that all 35 missing cost rows and 23 channel-readiness gaps are current defects or explicitly non-operational items;
+4. confirmation that stable ID/BOM/external mapping are preserved fields, while only named year-sensitive calculation components may change;
+5. acceptance that RF-010B follows RF-010C and must not centralize or repair data.
 

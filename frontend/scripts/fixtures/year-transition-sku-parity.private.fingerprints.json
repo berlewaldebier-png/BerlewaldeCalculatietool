@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "RF-010C-year-transition-private-fingerprints",
+  "baselineCommit": "3fc9d8e",
+  "capturedAt": "2026-07-20",
+  "source": {
+    "environment": "private-development",
+    "identifiers": "pseudonymous in-memory only",
+    "commercialValues": "not committed",
+    "committedValues": "aggregate reason counts and SHA-256 fingerprints only"
+  },
+  "approval": {
+    "status": "pending-human-approval",
+    "approvedBy": null,
+    "approvedAt": null
+  },
+  "audit": {
+    "sourceYear": 2025,
+    "targetYear": 2026,
+    "counts": {
+      "sourceRows": 66,
+      "sourceUniqueSkus": 66,
+      "targetRows": 77,
+      "targetUniqueSkus": 77,
+      "uiProjectionRows": 100,
+      "historicalDossierRows": 143
+    },
+    "blockingReasonCounts": {
+      "extra_target_sku": 11,
+      "historical_dossier_difference": 108,
+      "identity_difference": 8,
+      "source_version_difference": 11,
+      "target_cost_row_missing": 35,
+      "target_sell_in_missing": 23
+    },
+    "duplicateUiProjectionSkuCount": 6,
+    "labelDriftSkuCount": 43,
+    "historicalDossierDifferenceCount": 108
+  },
+  "fingerprints": {
+    "sourceManifest": "sha256:db9eb15590131263919dac92486b84df5759386f2ba11fdfcd5ac34188dd6139",
+    "targetManifest": "sha256:6673802412bbbb237de1431975bf2023e26d5af926d2241124c8c4abec6d273a",
+    "sourceSkuSet": "sha256:8dd94aeb3285f2db2114e92c0cee6a9ed213bf6fce64d6c1aaa65c67b4af5ce9",
+    "targetSkuSet": "sha256:bbe766bb16a1b9924d5a21580075d60b83908e69e150a563251a6ffaa52ccd6a",
+    "identityDifferences": "sha256:e500543403163ec855145a375b989a79a8f959904f8100c90263a293160fdcec",
+    "readiness": "sha256:9cf4f0f849d81e6e10f1f49c764386c3947e1ccc0943dc79ce83f077010bd466",
+    "targetReadiness": "sha256:1c553ea7478bdcbd50e73f7266860be5e9c4188f6dc6a38f409425a11d72cc6e",
+    "historicalDossiers": "sha256:cf39aeb2229e12126895b7ced1e1cac60f91adc33dd1504aa9937e96fd63c5fa",
+    "report": "sha256:e819de9c1975d7cc062c5acdb4c844b37c245bf8f9f8aad6a0b4afa6b66fbe61"
+  }
+}
