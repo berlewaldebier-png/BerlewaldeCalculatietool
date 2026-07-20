@@ -89,6 +89,17 @@ required_rf010c_contracts = {
     "test_year_transition_parity_capture.YearTransitionParityCaptureSafetyTests.test_capture_rejects_non_forward_year_transition_before_connecting",
     "test_year_transition_read_model_characterization.YearTransitionReadModelCharacterizationTests.test_normalized_rows_currently_replace_original_product_categories",
 }
+required_rf010b_contracts = {
+    "test_planning_lot_cost_capture.PlanningLotCostCaptureSafetyTests.test_private_manifest_does_not_emit_identifiers_or_commercial_values",
+    "test_planning_lot_cost_capture.PlanningLotCostCaptureSafetyTests.test_private_target_requires_explicit_development_opt_in",
+    "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_approved_anchor_is_first_activation_but_current_latest_selection_deviates",
+    "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_break_even_currently_reads_only_the_open_latest_activation",
+    "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_exact_lot_wins_across_later_activation_and_order_date",
+    "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_lot_requirement_and_cost_requirement_are_independent",
+    "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_missing_unknown_and_near_lot_use_visible_latest_activation_fallbacks",
+    "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_ambiguous_exact_lot_is_silently_resolved_to_highest_version_today",
+    "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_reopened_historical_quote_keeps_its_saved_cost_reference",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -101,6 +112,7 @@ missing = sorted(
         | required_rf008_contracts
         | required_rf010a_contracts
         | required_rf010c_contracts
+        | required_rf010b_contracts
     ).difference(ids)
 )
 
@@ -111,5 +123,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A and RF-010C contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C and RF-010B contracts collected"
 )
