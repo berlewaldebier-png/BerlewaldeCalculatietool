@@ -383,6 +383,8 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Acceptance criteria:** one service can explain exactly which source produced each resolved value; current outputs match approved fixtures; no consumer or database authority has changed.
 - **Dependencies / complexity / risk / human confirmation:** RF-010A/RF-010B and RF-006; **medium complexity, medium risk**. Finance/data owner approves the result contract before RF-013A.
 
+**RF-011A implementation note (2026-07-20):** a pure, read-only resolver and reader port now expose the explicit operational-year candidate, first planning activation or approved rebaseline, canonical cost-row/component sources, per-channel sell-in/advice sources, Break-even plan identity, typed incomplete states and identifier-only shadow differences. Existing Quote, Advice and Break-even consumers remain untouched. The RF-010A synthetic fixture reveals that current Advice-price resolution omits `sku_id` and can therefore choose a broader margin while Quote uses a SKU-specific price; RF-011A reports `current_advice_omits_sku_price_scope` but does not correct it. See `18-active-commercial-context-resolver.md`. No schema, migration, API, persisted data or historical record changed.
+
 ### RF-011B — Separate read-only planning-cost and actual-LOT-cost resolvers
 
 - **Objective:** introduce explicit read-only services so planning and actual profitability cannot accidentally share an ambiguous “active cost” selector.

@@ -31,6 +31,7 @@
     "./quoteOptionOrdering.contracttest.ts",
     "./costpriceCalculationEngine.contracttest.ts",
     "./activeCommercialContextGolden.contracttest.ts",
+    "./activeCommercialContextResolver.contracttest.ts",
     "./yearTransitionSkuParity.contracttest.ts",
     "./yearTransitionSkuParity.ts",
     "./planningLotCostGolden.contracttest.ts",
@@ -43,6 +44,7 @@
     "../src/lib/quoteMix.ts"
     ,
     "../src/features/sku/centralSkuIndex.ts",
+    "../src/features/commercial-context/activeCommercialContextResolver.ts",
     "../src/components/offerte-samenstellen/dataSources.ts",
     "../src/components/offerte-samenstellen/sellInResolver.ts",
     "../src/components/offerte-samenstellen/quoteUtils.ts",
