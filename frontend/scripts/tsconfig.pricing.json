@@ -30,6 +30,7 @@
     "./activationUniqueness.contracttest.ts",
     "./quoteOptionOrdering.contracttest.ts",
     "./costpriceCalculationEngine.contracttest.ts",
+    "./activeCommercialContextGolden.contracttest.ts",
     "../src/lib/pricingEngine.ts",
     "../src/lib/costpriceCalculationEngine.ts",
     "../src/lib/quoteBuilderGuards.ts",
@@ -43,6 +44,11 @@
     "../src/components/offerte-samenstellen/sellInResolver.ts",
     "../src/components/offerte-samenstellen/quoteUtils.ts",
     "../src/components/offerte-samenstellen/types.ts",
-    "../src/lib/productFacts.ts"
+    "../src/lib/productFacts.ts",
+    "../src/components/adviesprijzen/adviesprijzenDerivations.ts",
+    "../src/components/adviesprijzen/adviesprijzenUtils.ts",
+    "../src/components/break-even/breakEvenUtils.ts",
+    "../src/lib/packagingConfig.ts",
+    "../src/lib/skuLabels.ts"
   ]
 }

@@ -318,6 +318,8 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Acceptance criteria:** finance/product approves the baseline meaning of cost price, selling price and advice price per context; all current outputs are reproducible; no source switch has occurred.
 - **Dependencies / complexity / risk / human confirmation:** RF-004/RF-006; **medium/large complexity, high financial risk**. Mandatory finance/product approval, including confirmation of whether unchanged selling prices were intentionally selected.
 
+**RF-010A implementation note (2026-07-20):** use a committed synthetic, development-shaped full-value fixture for CI and a committed hash-only manifest for the real development baseline. The local raw capture includes source identifiers, component breakdowns and final numbers but is piped directly through the fingerprint runner and is never committed. This preserves exact per-SKU/workflow parity without publishing commercial prices. The read-only capture currently records 35 activation/version/SKU combinations without a canonical cost row or matching stored result-snapshot row, 77 central 2026 rows versus 54 quote/break-even-ready rows, and 940 of 1,782 persisted 2026 actual order/invoice snapshots marked `missing_cost`. These are existing-state observations, not fixes; their intendedness and LOT-resolution cause must be decided through RF-010B before RF-011A/RF-011B. Detailed evidence and the approval checklist are in `15-active-commercial-context-golden-snapshot.md`.
+
 ### RF-010B — Planning-cost anchor versus actual LOT-cost golden snapshot
 
 - **Objective:** freeze the approved distinction between stable planning cost and realized LOT cost before centralizing any cost resolver or changing the data model.

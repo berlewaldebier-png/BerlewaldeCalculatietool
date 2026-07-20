@@ -1,0 +1,4517 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "RF-010A-private-commercial-context-fingerprints",
+  "baselineCommit": "e055fd2e5b544616ce790e3ea1e999706e2b47f0",
+  "capturedAt": "2026-07-20",
+  "source": {
+    "classification": "read-only-development-fingerprint",
+    "rawIdentifiersStored": false,
+    "financialValuesStored": false,
+    "hash": "SHA-256 of canonical pseudonymized workflow output"
+  },
+  "approval": {
+    "status": "pending-human-approval",
+    "approvedBy": null,
+    "approvedAt": null
+  },
+  "audit": {
+    "years": [
+      2025,
+      2026
+    ],
+    "counts": {
+      "skus": 83,
+      "articles": 61,
+      "beers": 16,
+      "costVersions": 57,
+      "costLines": 170,
+      "activationsByYear": {
+        "2025": 66,
+        "2026": 77
+      },
+      "sellingRowsByYear": {
+        "2025": 55,
+        "2026": 57
+      },
+      "adviceRowsByYear": {
+        "2025": 0,
+        "2026": 4
+      },
+      "historicalQuotes": 1,
+      "activePlans": 2,
+      "historicalActualSnapshotsByYear": {
+        "2025": 4350,
+        "2026": 1782
+      },
+      "historicalActualMissingCostByYear": {
+        "2025": 0,
+        "2026": 940
+      }
+    },
+    "activationDuplicateKeyCount": 0,
+    "activationUnknownSkuCount": 0,
+    "activationUnknownVersionCount": 0,
+    "activationWithoutCanonicalCostLineCount": 35,
+    "activationWithoutAnyCostRepresentationCount": 35
+  },
+  "fingerprints": {
+    "years": [
+      {
+        "year": 2025,
+        "centralSkuContext": [
+          {
+            "key": "sku-001",
+            "fingerprint": "cf5920c477206b041e9fcc2ab477a5dbfcb7cf5641a864c4811cdeb0e446f96f"
+          },
+          {
+            "key": "sku-002",
+            "fingerprint": "3ab2cad20e702228ab631f30293b3c3d72959b7c97a106f74aa4b493829bd8e4"
+          },
+          {
+            "key": "sku-005",
+            "fingerprint": "1a2034b9b3e14c487620a206112e75fbf2807758cda3dc7f59fd2fcdd456874e"
+          },
+          {
+            "key": "sku-006",
+            "fingerprint": "5e4696d72ef959a4bbaa7f5c883fc0dbb93d34554d3c260d64b526ba69bbaeae"
+          },
+          {
+            "key": "sku-007",
+            "fingerprint": "001120a9f7f48443eeae1fddc86217ca0872516cd5409ea62dde14ab85183421"
+          },
+          {
+            "key": "sku-008",
+            "fingerprint": "30dbfcd5fbe3de2fae707ae75275c7d9c36731beb3cb21448cb282d687476f5e"
+          },
+          {
+            "key": "sku-009",
+            "fingerprint": "fc6841f8fd188e24e52f2dffbcfdc01e58890965a64264530f04e830495a238a"
+          },
+          {
+            "key": "sku-010",
+            "fingerprint": "f3cdb63e633fb5077b50d6590a6767efd80816ebb0c17c4b2aade38bd2849247"
+          },
+          {
+            "key": "sku-011",
+            "fingerprint": "1e9e79e5c7169ed1795ac373627ec94ec55c81ba2e222fb6de5cfc023aaaa50f"
+          },
+          {
+            "key": "sku-012",
+            "fingerprint": "342af408690355d180dbe1fda3bda2c7973c1beb9476d0759eeb615a0858d1e1"
+          },
+          {
+            "key": "sku-013",
+            "fingerprint": "17169c1dbe4b1bff1392bf43497f55700622c6f1fd5af407205234a21e186a0d"
+          },
+          {
+            "key": "sku-014",
+            "fingerprint": "f2b7de2b0cf86e1acb7b624c1a8d5a8ac58bbc9c0fcb6d0b72f8a47ff7430f7c"
+          },
+          {
+            "key": "sku-015",
+            "fingerprint": "d8aa27207551560652b3d15b9bdb8234edafa9bc06b8d327143762db7db5aaf6"
+          },
+          {
+            "key": "sku-016",
+            "fingerprint": "01f76ecff4274df327da61460f73bf2451d333c32bd0df81f47e3e5bf5ffa04c"
+          },
+          {
+            "key": "sku-017",
+            "fingerprint": "89763e9892877e85208d27d1a6339ba303ab6317e41f87a438e1068a2c083cdb"
+          },
+          {
+            "key": "sku-018",
+            "fingerprint": "95c0e48607507323da9752c35d0183a569eb602513f9488e259133c7f40d3986"
+          },
+          {
+            "key": "sku-019",
+            "fingerprint": "39e5a30d4892aed1af7d56e5e9d6ce2b41c6353c264f9d5b01a1e5722b86a4c4"
+          },
+          {
+            "key": "sku-020",
+            "fingerprint": "7d886d9db7de3acdbab4d81c4ccf4a6c4e255d80a0cbb623a47a8f3a08c4ff53"
+          },
+          {
+            "key": "sku-021",
+            "fingerprint": "8fc62380401d93144e237e901c954f199c92bd513fbcb34608a1a169047a6d05"
+          },
+          {
+            "key": "sku-022",
+            "fingerprint": "cf8b8e4652ffdcb4376b3c5a81986ca0c125fcc38f092ce0fe99ccbb4e95f0b3"
+          },
+          {
+            "key": "sku-023",
+            "fingerprint": "8112405b89ab57aae4cdb5339800d7330db9734fc4dab23cda5460629a6e887c"
+          },
+          {
+            "key": "sku-024",
+            "fingerprint": "692bb851bcb4674f6a6a0a4c03ff5f9d22a57e5ed728a47bfd8c00e3ab665467"
+          },
+          {
+            "key": "sku-025",
+            "fingerprint": "a4fae0b255a00458470acb3ba3a96d098817c11478eed822d27a962dab3a73d8"
+          },
+          {
+            "key": "sku-026",
+            "fingerprint": "61baf9203d78108ea16dde992243fd7e7e94b9ee58309a0fb7244ce4a2d7880c"
+          },
+          {
+            "key": "sku-027",
+            "fingerprint": "fa19bb531bbd254b21d0ebc92f969ee714f10968b2fe674a3f6b7b14b773fd77"
+          },
+          {
+            "key": "sku-028",
+            "fingerprint": "76f5f1edb7908d8f756973ca993c1a9678b0a0afac9f9888e08ea2453e9a9ab6"
+          },
+          {
+            "key": "sku-029",
+            "fingerprint": "fedf484ccf1d7614b8a183ccdb29e6ca0dbae99f27221335a09920785cd9c06f"
+          },
+          {
+            "key": "sku-030",
+            "fingerprint": "ffb399396d6b5e13d9319c437840032c9b1f0a25ea563c6a50d898defb1e57e2"
+          },
+          {
+            "key": "sku-031",
+            "fingerprint": "c793bdc8b9a6becffe8149220aa9437a42c21e2f75f5e1675750fd398ba77213"
+          },
+          {
+            "key": "sku-032",
+            "fingerprint": "292e1b6b1bd224c1ae02263c2eb1d56199f63c005cf04cd50d10d9b099c55d30"
+          },
+          {
+            "key": "sku-033",
+            "fingerprint": "905076d71497f7c295727a36d9035d7e80bda7250d0ac511831b01c24e6769cd"
+          },
+          {
+            "key": "sku-034",
+            "fingerprint": "5da35430512cc3eeab3f1ed7df10fe5f9a9dd3e7a13c87afab21d9120a09b25c"
+          },
+          {
+            "key": "sku-035",
+            "fingerprint": "a986e72756ddc895d63651a5373a99b567c7a3c27ccc1cb57d7927b8a5a2e290"
+          },
+          {
+            "key": "sku-038",
+            "fingerprint": "0c0ecf7329194c83965b390aa179d9fac2a32936712dabcbf9480ceb4d38d6e4"
+          },
+          {
+            "key": "sku-039",
+            "fingerprint": "2de011c84e7141ef5575dd8f54a69d1183b1e8ca9005e506deab53b391aa95e9"
+          },
+          {
+            "key": "sku-040",
+            "fingerprint": "401838057a6c57e79311c6b8722be2e647b401b600edb1867415209f7f0af5e6"
+          },
+          {
+            "key": "sku-041",
+            "fingerprint": "7e64d4564f5f5a5e3492df6aa3b8dd12a98308bce7116dd4075ab6b8e49e8f10"
+          },
+          {
+            "key": "sku-042",
+            "fingerprint": "38e9eb2ea640857e248af85d8af522d94c5d4b4d8fac73ea660e7a07ae5970e1"
+          },
+          {
+            "key": "sku-043",
+            "fingerprint": "8bf873d8b8740ef855c416c3e57744971e01ff2e26cff6bd24ed6186ad7589ed"
+          },
+          {
+            "key": "sku-044",
+            "fingerprint": "c67d78ddf6467af3a25177fae70eb40afffb0c69a32c41a47936b3bde13210c8"
+          },
+          {
+            "key": "sku-045",
+            "fingerprint": "aecd28d1d677011318733ad19ba8d4df11bc274d4429d54fe0ed933ab6efcef9"
+          },
+          {
+            "key": "sku-046",
+            "fingerprint": "439acf87110a6375fefdc3a17adbe9167a25a86cff4f1bf218da7662c9593380"
+          },
+          {
+            "key": "sku-047",
+            "fingerprint": "c9323985a4a95efddd498b2ffc0a707588b31887ce4d7289b0b22c0a6b55d28a"
+          },
+          {
+            "key": "sku-048",
+            "fingerprint": "117b7a9fdbc1c305c9cd9928a61253f00cca05977619fbf3e11d340f69281436"
+          },
+          {
+            "key": "sku-049",
+            "fingerprint": "e2078a9df3e1e8f824374586a236b74f1237ac05fa87d185b5da57edc952099d"
+          },
+          {
+            "key": "sku-050",
+            "fingerprint": "b616a1313b80c027234c2989e9dc65650f02f9664027e3f22509942d07a5d630"
+          },
+          {
+            "key": "sku-051",
+            "fingerprint": "c15408627453fc26ddd192512557958c8176f373bd6aea45be1d6b0aca574b4e"
+          },
+          {
+            "key": "sku-053",
+            "fingerprint": "9e0b4fcc40a4dc46815eb1b802e6a0970527c62c98ceaf1aaf454074f7e507ef"
+          },
+          {
+            "key": "sku-054",
+            "fingerprint": "76eedcedd59684bdd15ee9e73bf6ad9f999bba33ef53d76bc8b3649173df6bbe"
+          },
+          {
+            "key": "sku-055",
+            "fingerprint": "27d607b2b89c3afcc75ad3fcda941b8d445c69aa86ce1fd73b529f0aa44292b8"
+          },
+          {
+            "key": "sku-056",
+            "fingerprint": "16b2ce889ac8572a807937ba29c369e83bfc7a701c7157b0d3e8a2bced925371"
+          },
+          {
+            "key": "sku-057",
+            "fingerprint": "037b998e52f18d01c4f47d5e8acd4bcdf3280d8fcc74e680b98484e7afa78e59"
+          },
+          {
+            "key": "sku-058",
+            "fingerprint": "bc1af9ffe7351d4b6899d9b148748a7669c1da0145139d9187fbab243bd9f6a3"
+          },
+          {
+            "key": "sku-059",
+            "fingerprint": "b4e6e58a3528add705bd32ad8b908714120fb730b691b023c455065ebc4aca2a"
+          },
+          {
+            "key": "sku-060",
+            "fingerprint": "de32c364a07e72ad73e72feeb3570762fd83467e74b0155a7db77d0ba73fa3ea"
+          },
+          {
+            "key": "sku-061",
+            "fingerprint": "40b9cac0735f6f4e225efd9934d0bf58eda7c2129bafc6666dcf72707cf2334a"
+          },
+          {
+            "key": "sku-062",
+            "fingerprint": "c42004adc1758e1f93b76e45c710622b3667d332d628f5dfafb8322d25de3c80"
+          },
+          {
+            "key": "sku-063",
+            "fingerprint": "071b92bdf21836a594dcee9fc742d20c459f26c3486d4840a253c2464bc6c77a"
+          },
+          {
+            "key": "sku-064",
+            "fingerprint": "94c64adabec28c3cb371a7843897dc208afedcdd9eb95eb5b6c9937b9676513a"
+          },
+          {
+            "key": "sku-065",
+            "fingerprint": "cf37e65f908eb97d92be2673366ee467e977af22874b895866b49444dacd253a"
+          },
+          {
+            "key": "sku-066",
+            "fingerprint": "808d64da2b27ae49fb36af80a1452b2a70acd7896d2416319e6adb8b4ac52d9c"
+          },
+          {
+            "key": "sku-067",
+            "fingerprint": "d52bece46f79dc5e9fcf77d3cdedaead860c4acf1d1b2f4efbfebd33ab275e14"
+          },
+          {
+            "key": "sku-068",
+            "fingerprint": "de9b88a449a84e517422c17c9fa3794bb1e20c14d75453c4ccef34ee58d5022f"
+          },
+          {
+            "key": "sku-069",
+            "fingerprint": "29563b7b0683f987b600a5fdd58a12296c0a947511f3aad05821c07f253cdcc8"
+          },
+          {
+            "key": "sku-070",
+            "fingerprint": "e4f18b4781d667de17209681b127b91560f08f3a7879f0c727a38bda2243e80b"
+          },
+          {
+            "key": "sku-071",
+            "fingerprint": "bafd00f8bfc14f95300739bdbcafa48405bbd7fc0da16a7d3ec5eb29877dec73"
+          },
+          {
+            "key": "sku-072",
+            "fingerprint": "856b7b241aa9a1fe97e2b850263e716ff369299eb354e5f911712d2d456ff695"
+          },
+          {
+            "key": "sku-073",
+            "fingerprint": "f3c00425792784bec9e15234e1de2bde867af6b6e75407d9464baa68922f131a"
+          },
+          {
+            "key": "sku-074",
+            "fingerprint": "ceb223cc3fd096cf3e120010c27e0f19a4322f83d5592efc41f91a783dc43e96"
+          },
+          {
+            "key": "sku-075",
+            "fingerprint": "7803492569a9810320299ad50ea36c4ac5cad7e742bafc10b4c8c9ff1065ee96"
+          },
+          {
+            "key": "sku-078",
+            "fingerprint": "8ca3231c9f791f5fc36e613861b6bfea39b8265280490b7e170714a46ecae5fc"
+          },
+          {
+            "key": "sku-079",
+            "fingerprint": "c4585aec72fbf361f662f67f3515ca84764690bd3ddf45152fbe2419ae38fe9f"
+          }
+        ],
+        "newQuoteContext": [
+          {
+            "channel": "Horeca",
+            "warnings": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "options": [
+              {
+                "key": "sku:sku-001",
+                "fingerprint": "d53bccb08cc815df9900ae8ee461c634c0420ba98798f80d01ccb3eadc8e8710"
+              },
+              {
+                "key": "sku:sku-002",
+                "fingerprint": "4de8ce2e925e7b03bd54fd70ebe2202c2c0c4ea9e3b264f908f2e07298f0c0d7"
+              },
+              {
+                "key": "sku:sku-005",
+                "fingerprint": "ae6a84ad8504c306895d734808c6eb23f13a992eec53f0a91e81f3baf4caa8f8"
+              },
+              {
+                "key": "sku:sku-006",
+                "fingerprint": "2f00a396032e9cec94572a3b9d33554c43379719005e3aa8108b7d32b4af90a5"
+              },
+              {
+                "key": "sku:sku-007",
+                "fingerprint": "c903013a536309a81aad2dfa1597758a4d9bb41ca8d790e4e343898b7b7370e9"
+              },
+              {
+                "key": "sku:sku-008",
+                "fingerprint": "264adc920842f6b2cab90b200c326643d0adc3b3bb2d796c60281fca66c09343"
+              },
+              {
+                "key": "sku:sku-009",
+                "fingerprint": "4f59709ca3d523a789d0079b50209e5f4bf381bdcd9a6ebf7055cce308bbe919"
+              },
+              {
+                "key": "sku:sku-010",
+                "fingerprint": "653395bc40ba8c7b03ce316c9fee297719dc088920e6bdb84675085348b15d33"
+              },
+              {
+                "key": "sku:sku-011",
+                "fingerprint": "3590206b470a7647117c0f0a5d681fe3ab8a290c7c779b5bac121cc6552690c8"
+              },
+              {
+                "key": "sku:sku-014",
+                "fingerprint": "a48716b6c8eaf4c30c6f2a1cdc01471a0b5ac075c7e0c33c55f63994bd13e6cc"
+              },
+              {
+                "key": "sku:sku-015",
+                "fingerprint": "b76b4928c6fd000f420056f4ed4a85f1bed7c6016357ee414e6c26be9c4b9608"
+              },
+              {
+                "key": "sku:sku-016",
+                "fingerprint": "46502ee5863900d3c6d20fb4c1b893e4ed7ef26eafc715a714d3572462eed4f5"
+              },
+              {
+                "key": "sku:sku-017",
+                "fingerprint": "1df7fb91074471aed6adcf7ce8607a9a74c396646ec386bc6839952e97729fe0"
+              },
+              {
+                "key": "sku:sku-018",
+                "fingerprint": "ce331f8dff61d17a7de08eb0020b8698d121457a9c68369366db4b2cb328412d"
+              },
+              {
+                "key": "sku:sku-019",
+                "fingerprint": "e946d643e9b459ff8910460cf2c48b3df9b6ab4fc0eb8ad2a8fbcaaa46c19c70"
+              },
+              {
+                "key": "sku:sku-020",
+                "fingerprint": "2d9d8567af086c2ea24d4faa023c0d33d21e7320e8042a186cf18e39f929b442"
+              },
+              {
+                "key": "sku:sku-021",
+                "fingerprint": "c8344f610346b56134fd7edfa188bfda10000b32fb60392f216d4cb458ccff7b"
+              },
+              {
+                "key": "sku:sku-022",
+                "fingerprint": "26044cff218ba1dde73bba141d3dc0c629ef40a6aa0482c7aba21ae514f9fde1"
+              },
+              {
+                "key": "sku:sku-023",
+                "fingerprint": "baab7d17190d00b575881ffbe9fe92cedcac0280d9c9ac623a5d48e2ddf2f685"
+              },
+              {
+                "key": "sku:sku-024",
+                "fingerprint": "177553184ec78df224749fdee9505fbc3925ffac6fa052e6153ba01b8d87d48c"
+              },
+              {
+                "key": "sku:sku-026",
+                "fingerprint": "a88fd9c65026d228e33922255c6ef2b47add514a132bad6e7f9890a5c95b42a4"
+              },
+              {
+                "key": "sku:sku-027",
+                "fingerprint": "3046e284c15496ddc0e3f031c18487135eece0b7aa8abd41cdc179980fa05972"
+              },
+              {
+                "key": "sku:sku-028",
+                "fingerprint": "59a3482a81b62ac2675fc91003d87eb2ab03a2607d194aea17e98be78d4f17a1"
+              },
+              {
+                "key": "sku:sku-029",
+                "fingerprint": "5dd1ef0465ba286d4ee585ef0369b3bbbfeb165b9d01a077e11df59ca2a77dea"
+              },
+              {
+                "key": "sku:sku-030",
+                "fingerprint": "c84740263aee259ed32e52c45f75562ee6504260b097279c2c6fed733226cdf0"
+              },
+              {
+                "key": "sku:sku-031",
+                "fingerprint": "ee0561693b06e5b48f3a157e8011a27eeab31be1d4921eb5d906aa53467ea261"
+              },
+              {
+                "key": "sku:sku-032",
+                "fingerprint": "c6c39622be1490d922c7030a1dc5901a1d33ad7bca39ebdaee25815f4c4e00cf"
+              },
+              {
+                "key": "sku:sku-033",
+                "fingerprint": "840d8b4507cb578fd7c32621bc3664e8c2a58f287f740764493a412f4f7da382"
+              },
+              {
+                "key": "sku:sku-034",
+                "fingerprint": "16a5d4b063b22b7cd7921d236f2b8282108fce42c16bc3c635eaa5e4f1bf174f"
+              },
+              {
+                "key": "sku:sku-035",
+                "fingerprint": "f628b92be5fbfe6a1b5e34805e78da4c5730c5054814b86270f037916e90fa21"
+              },
+              {
+                "key": "sku:sku-039",
+                "fingerprint": "ffb4798084028977987f62ad60edaae8c5e2e44f393f83cdaa067b69f78d6bfe"
+              },
+              {
+                "key": "sku:sku-040",
+                "fingerprint": "b5bce55f55a7593d6ae56c8d27de2ce056cabeb3dd3549f69caa1040529200dc"
+              },
+              {
+                "key": "sku:sku-041",
+                "fingerprint": "c2a8c80463bd5838dc52ed330bbbfb7cb48c9b12a814c5b3f99d2cd270c6c766"
+              },
+              {
+                "key": "sku:sku-042",
+                "fingerprint": "2d1411bf39726647fbbca89e0cd2c3ed7980afbae5614d39cb3af52c1a79f088"
+              },
+              {
+                "key": "sku:sku-043",
+                "fingerprint": "4d31d90b3dbd84e0b1acd34b24ba1f78028743be3de77d635c56a3440c35b30e"
+              },
+              {
+                "key": "sku:sku-044",
+                "fingerprint": "d70b625671b34b37ece0c2f30e5e49b50efa33bc6d97dbdc3e61e47b14237d18"
+              },
+              {
+                "key": "sku:sku-045",
+                "fingerprint": "c3c7f5c455d2f7b5d529564954b8a82541b73fffa418259056293230871ae083"
+              },
+              {
+                "key": "sku:sku-046",
+                "fingerprint": "df9d2770ec4ef639cfba5af297e7e4b3caeafb757bd2807cb80172772f605dc3"
+              },
+              {
+                "key": "sku:sku-047",
+                "fingerprint": "c0eaf02ed419eda75ff8c8df1071143301d804089269089065e0f4d9420b002a"
+              },
+              {
+                "key": "sku:sku-048",
+                "fingerprint": "c3d9cc5b8ee4c89fd3a5ebe292d12a41526071c9fb46d3e9569822cb1e2d426b"
+              },
+              {
+                "key": "sku:sku-049",
+                "fingerprint": "bd2bc03e06c3b91e664dad5fac8ee15307b6debdbd7fe3b650a1f893bd4e72ae"
+              },
+              {
+                "key": "sku:sku-050",
+                "fingerprint": "01825e4c5b1102e9b22959a49776ddb431530e272f9ad191a3e7c59a81759bde"
+              },
+              {
+                "key": "sku:sku-051",
+                "fingerprint": "9e27c8369c2ba3beba4a2892d88ab85ed9aa1f5248e63c71bd409943b85805c9"
+              },
+              {
+                "key": "sku:sku-053",
+                "fingerprint": "5e4be3324ecf614b5504b4af359c78b15b09b01517be8c9e0a002cd5934bb208"
+              },
+              {
+                "key": "sku:sku-054",
+                "fingerprint": "1eca800bb992f596beb4afdbd027794ede1a63f9a8b68e3cfb8c891cef664124"
+              },
+              {
+                "key": "sku:sku-055",
+                "fingerprint": "d98a1b38f8ea3f2d196849eca32bd45a7a7bc4e97c5a10da60978d6545e485e9"
+              },
+              {
+                "key": "sku:sku-056",
+                "fingerprint": "41258dc01ce95335a3c4e30ce6e7931cc709ec906197950b49afc6bec05e8dfa"
+              },
+              {
+                "key": "sku:sku-057",
+                "fingerprint": "39255e090962c0770787c212a770bd67bf21123aa98cc13ad2b440131a76fd1e"
+              },
+              {
+                "key": "sku:sku-058",
+                "fingerprint": "24a031ae1e2332c0f8ea37998e46166ea6199666169125f90c68bed596deb5c5"
+              },
+              {
+                "key": "sku:sku-059",
+                "fingerprint": "a0e8a835c684725562234f3b541057b31e9b626f92c8fe6c6e3d085264be5c24"
+              },
+              {
+                "key": "sku:sku-060",
+                "fingerprint": "238b91e356ab724e2dcf381004499570fbf0367170e878ea2ce78da481df8bfb"
+              },
+              {
+                "key": "sku:sku-061",
+                "fingerprint": "09ed84714044d4017179ca43461e878b15f2ae2963cc9d6d56c6362cefa1680d"
+              },
+              {
+                "key": "sku:sku-062",
+                "fingerprint": "5e01c7ee622fbdfacf472c0a8008715aebf1154e43e757e36cb64d5025ed3a31"
+              },
+              {
+                "key": "sku:sku-063",
+                "fingerprint": "8b5ca972ef7f1955dbfd84eff4f0454ac509eff82ac3e3e119efbed0e58fe5e3"
+              },
+              {
+                "key": "sku:sku-064",
+                "fingerprint": "3a60e09d4d18a734e1d0be30f22b6b5624c7b0441ef7687ed050d2b71ab89a28"
+              },
+              {
+                "key": "sku:sku-065",
+                "fingerprint": "4b4dadb7a751cc01b39d080bec031e731210a507be3753cf834074c5acc44658"
+              },
+              {
+                "key": "sku:sku-066",
+                "fingerprint": "03bd9f7484641eb87edc1d7428b4280a1394c9dc3f43f5dc400cd742a2035588"
+              },
+              {
+                "key": "sku:sku-067",
+                "fingerprint": "859a29b55cd59fb93178055844ba5fa34cf6d2885ea42ede924f827506196545"
+              },
+              {
+                "key": "sku:sku-068",
+                "fingerprint": "89aa7cf2cb9a3d8f9d351530443806366553dea87c4cbb2800285f95c5b60b85"
+              },
+              {
+                "key": "sku:sku-069",
+                "fingerprint": "080e0e9cc04c87a34877f5f4b2d335dded04af3f7438d2769ad5a61ff9cb9a0e"
+              },
+              {
+                "key": "sku:sku-071",
+                "fingerprint": "d6344e69b3ef825ee29dc98e544df97da373c239e4a2859721207e7683cefc9d"
+              },
+              {
+                "key": "sku:sku-072",
+                "fingerprint": "23614c083745ae698f60a92740337976dacbbe1c782d7fca55bc5206a9bf4fbe"
+              },
+              {
+                "key": "sku:sku-073",
+                "fingerprint": "f61b755f1a72b16a5306bab9ce2fdfcfdb838010741fc8239d4159a788cac750"
+              },
+              {
+                "key": "sku:sku-074",
+                "fingerprint": "82684c4982bcd2c91b6650e2e3d56876915de988ac110ab2e9de1b64cb3cf1e7"
+              },
+              {
+                "key": "sku:sku-075",
+                "fingerprint": "84df509e672895a8eba5d53fb96e6d98f3d21ab1e161d0992b500ca408ef7595"
+              },
+              {
+                "key": "sku:sku-078",
+                "fingerprint": "b9678910a71557444218a2c7e95525366dce9fbdc020bc5f0351e00650939686"
+              }
+            ]
+          },
+          {
+            "channel": "Retail",
+            "warnings": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "options": [
+              {
+                "key": "sku:sku-001",
+                "fingerprint": "d53bccb08cc815df9900ae8ee461c634c0420ba98798f80d01ccb3eadc8e8710"
+              },
+              {
+                "key": "sku:sku-002",
+                "fingerprint": "4de8ce2e925e7b03bd54fd70ebe2202c2c0c4ea9e3b264f908f2e07298f0c0d7"
+              },
+              {
+                "key": "sku:sku-005",
+                "fingerprint": "ae6a84ad8504c306895d734808c6eb23f13a992eec53f0a91e81f3baf4caa8f8"
+              },
+              {
+                "key": "sku:sku-006",
+                "fingerprint": "2f00a396032e9cec94572a3b9d33554c43379719005e3aa8108b7d32b4af90a5"
+              },
+              {
+                "key": "sku:sku-007",
+                "fingerprint": "c903013a536309a81aad2dfa1597758a4d9bb41ca8d790e4e343898b7b7370e9"
+              },
+              {
+                "key": "sku:sku-008",
+                "fingerprint": "264adc920842f6b2cab90b200c326643d0adc3b3bb2d796c60281fca66c09343"
+              },
+              {
+                "key": "sku:sku-009",
+                "fingerprint": "eb22942375d33c6cea50d09d023c5b5433be5ea5069fb62e95d06377c3357ee1"
+              },
+              {
+                "key": "sku:sku-010",
+                "fingerprint": "653395bc40ba8c7b03ce316c9fee297719dc088920e6bdb84675085348b15d33"
+              },
+              {
+                "key": "sku:sku-011",
+                "fingerprint": "c78ab0883d54206da7bcf8089c1fe09fdb47688083d8c51168cf478e309346b5"
+              },
+              {
+                "key": "sku:sku-014",
+                "fingerprint": "a48716b6c8eaf4c30c6f2a1cdc01471a0b5ac075c7e0c33c55f63994bd13e6cc"
+              },
+              {
+                "key": "sku:sku-015",
+                "fingerprint": "b76b4928c6fd000f420056f4ed4a85f1bed7c6016357ee414e6c26be9c4b9608"
+              },
+              {
+                "key": "sku:sku-016",
+                "fingerprint": "46502ee5863900d3c6d20fb4c1b893e4ed7ef26eafc715a714d3572462eed4f5"
+              },
+              {
+                "key": "sku:sku-017",
+                "fingerprint": "230fbc6ce1f5c297b377ae96b988fe5d83f1af57f133b0e142fefe9d62819b00"
+              },
+              {
+                "key": "sku:sku-018",
+                "fingerprint": "8eab2c9d0b04f27d919043f7b9ed8e2edf0ec7dc9840684cb471ababf29a2554"
+              },
+              {
+                "key": "sku:sku-019",
+                "fingerprint": "fdcbd36e599862d84fe5b0b2442522ab5d758173071d35575b3bb873f7a2dc30"
+              },
+              {
+                "key": "sku:sku-020",
+                "fingerprint": "2d9d8567af086c2ea24d4faa023c0d33d21e7320e8042a186cf18e39f929b442"
+              },
+              {
+                "key": "sku:sku-021",
+                "fingerprint": "c8344f610346b56134fd7edfa188bfda10000b32fb60392f216d4cb458ccff7b"
+              },
+              {
+                "key": "sku:sku-022",
+                "fingerprint": "26044cff218ba1dde73bba141d3dc0c629ef40a6aa0482c7aba21ae514f9fde1"
+              },
+              {
+                "key": "sku:sku-023",
+                "fingerprint": "baab7d17190d00b575881ffbe9fe92cedcac0280d9c9ac623a5d48e2ddf2f685"
+              },
+              {
+                "key": "sku:sku-024",
+                "fingerprint": "177553184ec78df224749fdee9505fbc3925ffac6fa052e6153ba01b8d87d48c"
+              },
+              {
+                "key": "sku:sku-026",
+                "fingerprint": "a88fd9c65026d228e33922255c6ef2b47add514a132bad6e7f9890a5c95b42a4"
+              },
+              {
+                "key": "sku:sku-027",
+                "fingerprint": "3046e284c15496ddc0e3f031c18487135eece0b7aa8abd41cdc179980fa05972"
+              },
+              {
+                "key": "sku:sku-028",
+                "fingerprint": "59a3482a81b62ac2675fc91003d87eb2ab03a2607d194aea17e98be78d4f17a1"
+              },
+              {
+                "key": "sku:sku-029",
+                "fingerprint": "5dd1ef0465ba286d4ee585ef0369b3bbbfeb165b9d01a077e11df59ca2a77dea"
+              },
+              {
+                "key": "sku:sku-030",
+                "fingerprint": "c84740263aee259ed32e52c45f75562ee6504260b097279c2c6fed733226cdf0"
+              },
+              {
+                "key": "sku:sku-031",
+                "fingerprint": "ee0561693b06e5b48f3a157e8011a27eeab31be1d4921eb5d906aa53467ea261"
+              },
+              {
+                "key": "sku:sku-032",
+                "fingerprint": "c6c39622be1490d922c7030a1dc5901a1d33ad7bca39ebdaee25815f4c4e00cf"
+              },
+              {
+                "key": "sku:sku-033",
+                "fingerprint": "840d8b4507cb578fd7c32621bc3664e8c2a58f287f740764493a412f4f7da382"
+              },
+              {
+                "key": "sku:sku-034",
+                "fingerprint": "16a5d4b063b22b7cd7921d236f2b8282108fce42c16bc3c635eaa5e4f1bf174f"
+              },
+              {
+                "key": "sku:sku-035",
+                "fingerprint": "877f9e80e4f70869847c8a7b5c2d1f8298d9c6456913801abfd547599eb2d442"
+              },
+              {
+                "key": "sku:sku-039",
+                "fingerprint": "ffb4798084028977987f62ad60edaae8c5e2e44f393f83cdaa067b69f78d6bfe"
+              },
+              {
+                "key": "sku:sku-040",
+                "fingerprint": "b5bce55f55a7593d6ae56c8d27de2ce056cabeb3dd3549f69caa1040529200dc"
+              },
+              {
+                "key": "sku:sku-041",
+                "fingerprint": "c2a8c80463bd5838dc52ed330bbbfb7cb48c9b12a814c5b3f99d2cd270c6c766"
+              },
+              {
+                "key": "sku:sku-042",
+                "fingerprint": "2d1411bf39726647fbbca89e0cd2c3ed7980afbae5614d39cb3af52c1a79f088"
+              },
+              {
+                "key": "sku:sku-043",
+                "fingerprint": "4d31d90b3dbd84e0b1acd34b24ba1f78028743be3de77d635c56a3440c35b30e"
+              },
+              {
+                "key": "sku:sku-044",
+                "fingerprint": "34fad3bf13e8e6824139bf8006819d9abad3a23c383d6ff8290a7cfdf2336be4"
+              },
+              {
+                "key": "sku:sku-045",
+                "fingerprint": "c3c7f5c455d2f7b5d529564954b8a82541b73fffa418259056293230871ae083"
+              },
+              {
+                "key": "sku:sku-046",
+                "fingerprint": "9f416f82f0746cc0f6e19a027160f26ee89ef7c26beca25c88e91eff69967b96"
+              },
+              {
+                "key": "sku:sku-047",
+                "fingerprint": "c0eaf02ed419eda75ff8c8df1071143301d804089269089065e0f4d9420b002a"
+              },
+              {
+                "key": "sku:sku-048",
+                "fingerprint": "c89d0cd84fac7597be9161d872938520994e708d8f53549062a3debea6133bd0"
+              },
+              {
+                "key": "sku:sku-049",
+                "fingerprint": "bd2bc03e06c3b91e664dad5fac8ee15307b6debdbd7fe3b650a1f893bd4e72ae"
+              },
+              {
+                "key": "sku:sku-050",
+                "fingerprint": "24e53907aa286c01e4776e24e7a4071a30998bfb3223f5e279d1957b9dfd03fe"
+              },
+              {
+                "key": "sku:sku-051",
+                "fingerprint": "b1138db95461d750ff6e0d2b122d08e004b9ffda36de5d51ffa654382183511e"
+              },
+              {
+                "key": "sku:sku-053",
+                "fingerprint": "5e4be3324ecf614b5504b4af359c78b15b09b01517be8c9e0a002cd5934bb208"
+              },
+              {
+                "key": "sku:sku-054",
+                "fingerprint": "063d0fe7bc42526716ba667c28f2a4d09adb96192e3fffdaced2c8f02b90d5b7"
+              },
+              {
+                "key": "sku:sku-055",
+                "fingerprint": "1fa3b7b230c043fbcb2a5eea77c3a93aad78ba33c0fb20fe09040ef53f1dbd9c"
+              },
+              {
+                "key": "sku:sku-056",
+                "fingerprint": "c1df69cd52447cd279536ff51bd3f37b91469dacb68d59b042ce307b22ccaa04"
+              },
+              {
+                "key": "sku:sku-057",
+                "fingerprint": "b23df88c953bc7226c394eeb606d4052488ade8be0ecffb681903926c855c287"
+              },
+              {
+                "key": "sku:sku-058",
+                "fingerprint": "57014d014149b83df729557187ea361cc13816564b3bf267e2ad0063f1d6527e"
+              },
+              {
+                "key": "sku:sku-059",
+                "fingerprint": "752c2dd1951dc47c6007a42b339d569386543968b59fa0fefcbcf35f0f90c683"
+              },
+              {
+                "key": "sku:sku-060",
+                "fingerprint": "238b91e356ab724e2dcf381004499570fbf0367170e878ea2ce78da481df8bfb"
+              },
+              {
+                "key": "sku:sku-061",
+                "fingerprint": "08d210da5f1db654b85994ef3c9948e85cd3a2aab05b1ea12eafb95465d93c57"
+              },
+              {
+                "key": "sku:sku-062",
+                "fingerprint": "5e01c7ee622fbdfacf472c0a8008715aebf1154e43e757e36cb64d5025ed3a31"
+              },
+              {
+                "key": "sku:sku-063",
+                "fingerprint": "8e385294e4bfa4cdc6674f18ed2ef884bc39f38d802fe2a89d8725b084c645cd"
+              },
+              {
+                "key": "sku:sku-064",
+                "fingerprint": "2c1803daff2142deb936c7592928c624b2ccb3b6aa6d51a95238124dce15cd7b"
+              },
+              {
+                "key": "sku:sku-065",
+                "fingerprint": "4b4dadb7a751cc01b39d080bec031e731210a507be3753cf834074c5acc44658"
+              },
+              {
+                "key": "sku:sku-066",
+                "fingerprint": "03bd9f7484641eb87edc1d7428b4280a1394c9dc3f43f5dc400cd742a2035588"
+              },
+              {
+                "key": "sku:sku-067",
+                "fingerprint": "1ebe6901a3df865dbd39d3319c04d181559984cb6a649d088c4a7277e6d208e4"
+              },
+              {
+                "key": "sku:sku-068",
+                "fingerprint": "2f947986a1929f3bf0cb8fb49db8103bb0f52ac7b92e0fcc0c31a6c7280017b9"
+              },
+              {
+                "key": "sku:sku-069",
+                "fingerprint": "edc667b58ed7e78cbc293371c404e857553f0a151a23c1dff1cadf2023e01787"
+              },
+              {
+                "key": "sku:sku-071",
+                "fingerprint": "d6344e69b3ef825ee29dc98e544df97da373c239e4a2859721207e7683cefc9d"
+              },
+              {
+                "key": "sku:sku-072",
+                "fingerprint": "23614c083745ae698f60a92740337976dacbbe1c782d7fca55bc5206a9bf4fbe"
+              },
+              {
+                "key": "sku:sku-073",
+                "fingerprint": "f61b755f1a72b16a5306bab9ce2fdfcfdb838010741fc8239d4159a788cac750"
+              },
+              {
+                "key": "sku:sku-074",
+                "fingerprint": "82684c4982bcd2c91b6650e2e3d56876915de988ac110ab2e9de1b64cb3cf1e7"
+              },
+              {
+                "key": "sku:sku-075",
+                "fingerprint": "84df509e672895a8eba5d53fb96e6d98f3d21ab1e161d0992b500ca408ef7595"
+              },
+              {
+                "key": "sku:sku-078",
+                "fingerprint": "b9678910a71557444218a2c7e95525366dce9fbdc020bc5f0351e00650939686"
+              }
+            ]
+          }
+        ],
+        "advicePriceContext": [],
+        "breakEvenPlanningContext": [
+          {
+            "key": "sku:sku-001",
+            "fingerprint": "51b82ab80cdcbc1148b5b6ff3cf146a90b903a9fed5af51c4d33c6b78827f906"
+          },
+          {
+            "key": "sku:sku-002",
+            "fingerprint": "b0be29c0f840a841acd6a56dfb90f3d2baed724c8ff3e1fc2ca8447baf9511b7"
+          },
+          {
+            "key": "sku:sku-005",
+            "fingerprint": "940a0eb808b7112680c81d1722fa210c6176950bac176ad600253328692a78f2"
+          },
+          {
+            "key": "sku:sku-006",
+            "fingerprint": "b2ff07b6e50293c39473027410f9e53aba6b76f281adeef2a0d36ecb49ba9ee2"
+          },
+          {
+            "key": "sku:sku-007",
+            "fingerprint": "e1b27a9745e4b5c48862a76206c82c5a3373a4d209eb293edbb3eab8d61de527"
+          },
+          {
+            "key": "sku:sku-008",
+            "fingerprint": "6455041f1a8f1e0bde007f3b0227f67cf595ac60445ce9ca411d5a1b0a81e820"
+          },
+          {
+            "key": "sku:sku-009",
+            "fingerprint": "b109b6bbdf46cccefbbe331af5a8b77aca878070fb1b204f3e8422a91ff2d4a8"
+          },
+          {
+            "key": "sku:sku-010",
+            "fingerprint": "01ba727bd90342d921e0f748139d0bd7b3ce3d060353006f6c2fe77510504e0b"
+          },
+          {
+            "key": "sku:sku-011",
+            "fingerprint": "a0a14cebf21440b8445fea51c84ecbabf965cfc3d5bc061031e9fce97c6b44c6"
+          },
+          {
+            "key": "sku:sku-014",
+            "fingerprint": "f8956e7e4b6714c6b97b4e3257e9d4d7db5750fc419b5f43a9e4e6a8cc261297"
+          },
+          {
+            "key": "sku:sku-015",
+            "fingerprint": "41b1730a9bc6f04e8417a0dd933af9344a1ad9e24b7cea009012a66a69a22a33"
+          },
+          {
+            "key": "sku:sku-016",
+            "fingerprint": "712bf47740ec1ea157e60f3309a127c2f809a6424470f05ab0cd2ca319150850"
+          },
+          {
+            "key": "sku:sku-017",
+            "fingerprint": "e4238eb986b00de245fb598ec90fcb667d449f02064ecb648810e24b0bcac266"
+          },
+          {
+            "key": "sku:sku-018",
+            "fingerprint": "52ca92a49158756d84ba39585fd6eb35aee90eda3d4559a7430fd50de50d0d35"
+          },
+          {
+            "key": "sku:sku-019",
+            "fingerprint": "4c987bbdd5b84a081daa2e0074542096b27811a34adba3eeb112c70cf219083d"
+          },
+          {
+            "key": "sku:sku-020",
+            "fingerprint": "9a931b0cd56b22bf40f11b54b840758a51c739dc7507da253de7944860274f57"
+          },
+          {
+            "key": "sku:sku-021",
+            "fingerprint": "b4e2ebc5753195f8821408525c377d036d8afab37bf4ac52e8096c3147b5a426"
+          },
+          {
+            "key": "sku:sku-022",
+            "fingerprint": "68ad24617637224dc771e091bce08d720f15809ab19ee0bec912521aa8a3abb6"
+          },
+          {
+            "key": "sku:sku-023",
+            "fingerprint": "afdfdec8e47f7271487835e7468462bb349b662ebed7524a716e6d28c66edc03"
+          },
+          {
+            "key": "sku:sku-024",
+            "fingerprint": "9044e56f5f13816d7057f4bbdc84f41275e0939dc173a7925d8953a44840d8cb"
+          },
+          {
+            "key": "sku:sku-026",
+            "fingerprint": "77c9c0ad7e9dad278bd0b3b07c664aeb7343adaae860210547fd47514578f2d8"
+          },
+          {
+            "key": "sku:sku-027",
+            "fingerprint": "bbd4262728ebd4719e268e7c3ed1ed474f73528785ac3f6d606bc76641caacc0"
+          },
+          {
+            "key": "sku:sku-028",
+            "fingerprint": "975dc34b8a48b45923c0e94d8b3075c1b0e328aca84d3352f2de7c8380329ac7"
+          },
+          {
+            "key": "sku:sku-029",
+            "fingerprint": "a72db8af8a2eb7d49f2b3270a20a290b0b24dba9b41e147caabdf0fa2a09931c"
+          },
+          {
+            "key": "sku:sku-030",
+            "fingerprint": "d4aced38900bbb4f32f55616e4337c05dee94fd97014a51cac2d6c6afe5f773a"
+          },
+          {
+            "key": "sku:sku-031",
+            "fingerprint": "97f1a93fea5dc41d51885624afecf81d800eae25c7042f5b29cd4ccc5c655429"
+          },
+          {
+            "key": "sku:sku-032",
+            "fingerprint": "9e002f75173c0cb50e20c8813c7cc7b223834ac89eea0e26f4e3237c8da36c35"
+          },
+          {
+            "key": "sku:sku-033",
+            "fingerprint": "07a3689ddb28f5fdb736ee46cc6e3782970874f86961d674476d600dd4f7bac9"
+          },
+          {
+            "key": "sku:sku-034",
+            "fingerprint": "bc6bb85ab196f292f804a2876a6ece51f3d786ad58642343e75a1ead30f456fc"
+          },
+          {
+            "key": "sku:sku-035",
+            "fingerprint": "379efa6aaf8293ffabe082bf75df5061f98c1c682f46890b92496a0587153ca9"
+          },
+          {
+            "key": "sku:sku-039",
+            "fingerprint": "a7d7c833f84f0c675cd9f8f5b69ebebb7fb507ce588a5509296e0fae8eb28368"
+          },
+          {
+            "key": "sku:sku-040",
+            "fingerprint": "af1172df7acd95f15dec8952307cb19b9871c3d9f02182323e846e0fff5d4006"
+          },
+          {
+            "key": "sku:sku-041",
+            "fingerprint": "835cad7196a1ac8cda01bc4754c647f0d71b9ef2204295eaa6544c19918fb1a2"
+          },
+          {
+            "key": "sku:sku-042",
+            "fingerprint": "c70860baaf7242e0a7c71d197760b63d902fa1c2be3720f9a5c48c76b6ac265a"
+          },
+          {
+            "key": "sku:sku-043",
+            "fingerprint": "c7e9337af042cd7ea3997362f31f26ee795bcb36a8bff132aca9dcc4687227db"
+          },
+          {
+            "key": "sku:sku-044",
+            "fingerprint": "eb189a440ba61c088553733fb8aa693486a1a0c2fd3ecd5436199b0f71d5082b"
+          },
+          {
+            "key": "sku:sku-045",
+            "fingerprint": "8caf709ccb6e1f19f9a431a0ef7a241e4f486d20719c236763d8aa065e22ce17"
+          },
+          {
+            "key": "sku:sku-046",
+            "fingerprint": "a08d04036714c900182fbcc7d2cda5c990b8929aef4087ea6b2a699748616b0a"
+          },
+          {
+            "key": "sku:sku-047",
+            "fingerprint": "95ebf514dc59b3239433dabc03751f8690b737f0a85fbaf5b723d578c3f783e8"
+          },
+          {
+            "key": "sku:sku-048",
+            "fingerprint": "710239bb1f642a7c3718a6d4bff42c39fb3688ed2a99a413f6303609e37e2233"
+          },
+          {
+            "key": "sku:sku-049",
+            "fingerprint": "1b71745f5ba4421cbb6e13e4f18619086ac9df4409ae128dd44eb695159e2942"
+          },
+          {
+            "key": "sku:sku-050",
+            "fingerprint": "134f3783b09fea3e8b7c73a619bfe21f304dbb9036de1d9837ee4a10c4e71285"
+          },
+          {
+            "key": "sku:sku-051",
+            "fingerprint": "47fd462a926f68cf4f755111ca37b8dbd88e2e4496395b787a3926c880dca319"
+          },
+          {
+            "key": "sku:sku-053",
+            "fingerprint": "9202822301e1ce62890ccf3b9c0ccd1bc96123315970034b77a0c71ec11cadf2"
+          },
+          {
+            "key": "sku:sku-054",
+            "fingerprint": "4d66ec9c36a21a73c900c23d97768dc79065e2fdd2c86be2bba6254e51ea19e0"
+          },
+          {
+            "key": "sku:sku-055",
+            "fingerprint": "a17d78aa7f7cdb4b523d091eeec6a34e529aeef6741a22d807d9f945151955d0"
+          },
+          {
+            "key": "sku:sku-056",
+            "fingerprint": "743f5fbb072c4d02fad5dd801c2eb32360286a371fbc9122f9d0075be8174272"
+          },
+          {
+            "key": "sku:sku-057",
+            "fingerprint": "f07c2c2cac8aefa4884033c793af453a4761b9b0633a49b827e652a6dfc7fa15"
+          },
+          {
+            "key": "sku:sku-058",
+            "fingerprint": "8db764c52e8b77321bca02f09a132868a1448275bbb40cfe5bee4e4732bf376f"
+          },
+          {
+            "key": "sku:sku-059",
+            "fingerprint": "b1d692a4b63bae7e7371dfac34e701f6f20718e361d2abaecc1801a4e15816f8"
+          },
+          {
+            "key": "sku:sku-060",
+            "fingerprint": "150c339b435fbb0af635fd45aa1e308ef8f0a3068318484b8d9f888aeddfab00"
+          },
+          {
+            "key": "sku:sku-061",
+            "fingerprint": "2b6e5af42a1594a9ae9b371c76268c06555d78c6edab7f162bb6e22d7ae644f8"
+          },
+          {
+            "key": "sku:sku-062",
+            "fingerprint": "f6df2d531eba41ecf1fbee7048ddf481d54fc27b0cef2ca92e167934fa569eab"
+          },
+          {
+            "key": "sku:sku-063",
+            "fingerprint": "3ebb4fbd0e4257c3504c6e558a81cc2cf8cd5c49b39d887d933e4cb5f726f9b2"
+          },
+          {
+            "key": "sku:sku-064",
+            "fingerprint": "e77c4a5964e3e7588fcc3873bc0a38c4197e3f6b1b46bd95837af43f79b7dff8"
+          },
+          {
+            "key": "sku:sku-065",
+            "fingerprint": "9a3c1063ce2ccec584c05381f012a3cc7273022bb197bff65b494e64db0f34b6"
+          },
+          {
+            "key": "sku:sku-066",
+            "fingerprint": "7cddba7fdfcb98ffdbf50883dd5dbf71f285971345765a46ea1cf1f4e0323930"
+          },
+          {
+            "key": "sku:sku-067",
+            "fingerprint": "3d15743dc4d5b0c380b13b313b4e4e926cf81767075d09ad23043fd367d8d436"
+          },
+          {
+            "key": "sku:sku-068",
+            "fingerprint": "cfe2eba67d059335a7c6a014e940be9dfbe4e5deb1f3e1357c6e3156d44d76f6"
+          },
+          {
+            "key": "sku:sku-069",
+            "fingerprint": "7810890dff8b3821f1caa70e4a81a54d12da30da32d0b78f117a8d72414b7b9f"
+          },
+          {
+            "key": "sku:sku-071",
+            "fingerprint": "b6c9aec20c873b8c17aded1d9d445acc78e243910a87f488a98fd45331b22d45"
+          },
+          {
+            "key": "sku:sku-072",
+            "fingerprint": "e6467dc36408e10d539923ae40b608af6184cd19e6713aabefb6238880422a2f"
+          },
+          {
+            "key": "sku:sku-073",
+            "fingerprint": "6a858b886c27321e56cc438df1a2479225276f8fcfb081fdc869a5693a840470"
+          },
+          {
+            "key": "sku:sku-074",
+            "fingerprint": "641333f7b7b54eabaf232c2f241570449ddaea3a94a5613a415f5e655dd0eb6b"
+          },
+          {
+            "key": "sku:sku-075",
+            "fingerprint": "8b86fdc20b593aa64a990b8dad459cbfe75b6a1105bd7b0a909068e71950b5c9"
+          },
+          {
+            "key": "sku:sku-078",
+            "fingerprint": "627775a0ae4c956a3d8c93c9f05800edebec0d36cfa505c84681bd803b7152c5"
+          }
+        ],
+        "discrepancies": {
+          "quoteCostOrSellInCount": 0,
+          "breakEvenCostCount": 0,
+          "fingerprint": "5d09d703453930d652a1a3cd3f07656131203a76028d671dd76f98aba004be58"
+        },
+        "wholeYear": "70d1071ca85f4f315a5b8a4a4c528996eb2aad1bbbd4cf9caaaf4a8b1ce3f561"
+      },
+      {
+        "year": 2026,
+        "centralSkuContext": [
+          {
+            "key": "sku-001",
+            "fingerprint": "f43a088e5e5a31fcb96dfdbf3f8311fdc5cb06c4726a4c37da2c37fb078997f5"
+          },
+          {
+            "key": "sku-002",
+            "fingerprint": "8e801d4c108ab4c93285102885df2a0776f55b1c4fb6efc7c88469257260de50"
+          },
+          {
+            "key": "sku-005",
+            "fingerprint": "12c74c3038456355891517dd7bb0408ead0634475b1e05bb1ca8e7d9d6bccfb6"
+          },
+          {
+            "key": "sku-006",
+            "fingerprint": "6855317e167ba8525507162399c8e3684793f8929c84a9c27dd7f36a6615ca9a"
+          },
+          {
+            "key": "sku-007",
+            "fingerprint": "f0c38794a4cdd5b345925c263c67750078fc76491507d950f4f1f2d9f461a17a"
+          },
+          {
+            "key": "sku-008",
+            "fingerprint": "30d6585667cff06328b9d7342819ed0d58aba2c9a4289d04f027e9f3b7141436"
+          },
+          {
+            "key": "sku-009",
+            "fingerprint": "dbbd7945bced385047241c9bad546ec7cf2cf553675207d5ae388a814acdfebf"
+          },
+          {
+            "key": "sku-010",
+            "fingerprint": "efcf96c223eec4c08db2190094c5aa75a59568e10445bbc9fcff1558762c7969"
+          },
+          {
+            "key": "sku-011",
+            "fingerprint": "7d6e42c4354e979d41ade12d843c2e1c1d85348c4187e1046b23c1d38d370fcc"
+          },
+          {
+            "key": "sku-012",
+            "fingerprint": "0a00487848dc7b4ebaf56c77cb8feb8982f9593fd4008123735812fa7e4ea619"
+          },
+          {
+            "key": "sku-013",
+            "fingerprint": "8a0ad932ecc54388ef56e5969a35bb3a2ef9a12181fd608600c9de2090ebe4df"
+          },
+          {
+            "key": "sku-014",
+            "fingerprint": "7fb9dd454f0209538627f8ab1ba8c3c53a8f7b0f51a40a2792687eb41364d0ca"
+          },
+          {
+            "key": "sku-015",
+            "fingerprint": "e7dd5a848e1ac912f1d682e69e9d48c2a7d259ec25994c3387e9cf7b7fd18038"
+          },
+          {
+            "key": "sku-016",
+            "fingerprint": "a40f156fa686311addf088a9bfc1c83ac94808155e460cc2221d0d908b324ce7"
+          },
+          {
+            "key": "sku-017",
+            "fingerprint": "3af7f168aac304b9f04776db347e03571aa4c2f500307b9b8e96be2029431dc9"
+          },
+          {
+            "key": "sku-018",
+            "fingerprint": "35ca9aab7f24c2aec34283a4b1977987fd5bd940601be4d3bd9badb75f29eb3e"
+          },
+          {
+            "key": "sku-019",
+            "fingerprint": "323d4c1626131c21e54ffaea8226c9c4c78936e42578f8ea4cf10194cfbecd09"
+          },
+          {
+            "key": "sku-020",
+            "fingerprint": "48ccc7f9cd0337cdeb8ab2cebf39496a0ca6ad6abea3695b256f4b41b1ed4eaa"
+          },
+          {
+            "key": "sku-021",
+            "fingerprint": "f3b73d4375ee2864d56bd5a4905831c5f814d0caadacfc9d02ce4886d1458bd6"
+          },
+          {
+            "key": "sku-022",
+            "fingerprint": "db3a6caecde4e3b52ce3617564ea5365d7f5795f9ed7ba45aa25f112201e2ba3"
+          },
+          {
+            "key": "sku-023",
+            "fingerprint": "4edbbea31a833fd2a107aa8090a3f9df4facc773fb3db3b08f579c36e1324469"
+          },
+          {
+            "key": "sku-024",
+            "fingerprint": "0fec6a75f3f5814697d675bd3fc902c3e39cd9389bba6128e2305d9e18dfacef"
+          },
+          {
+            "key": "sku-025",
+            "fingerprint": "01e9d20c0a9bd4be8a05a628217f0406e91e79464d6bd55d906c06fe99de8991"
+          },
+          {
+            "key": "sku-026",
+            "fingerprint": "775d5304ec469f4a30482e0811b7ab21455cc3937fa26c0ccc373d669314df0e"
+          },
+          {
+            "key": "sku-027",
+            "fingerprint": "50a4546cb95b609f7f52a27657e9d198c7011843c16a7a5f0b3075665f7b485d"
+          },
+          {
+            "key": "sku-028",
+            "fingerprint": "96259268910a08ea1705f7796fc855ffb76fdb5be425391a0ffb12e78138aa72"
+          },
+          {
+            "key": "sku-029",
+            "fingerprint": "144232d716cc5b21f8a1e8b8c5a29c666ccd076f3659d93a2840692ec5c384d2"
+          },
+          {
+            "key": "sku-030",
+            "fingerprint": "ad5eb428ed1adb8d5bdf473743e0ddb37d8c47f371644f444179fd8be3ae31a4"
+          },
+          {
+            "key": "sku-031",
+            "fingerprint": "e76f55a248bdfae4eabcaf07668c5e4f8a8e502ac06daa0701da64b1a570467d"
+          },
+          {
+            "key": "sku-032",
+            "fingerprint": "721a0e46e243c42e620f9a3df7ec5a8757063dab6789e8f82030ed93a9b6a221"
+          },
+          {
+            "key": "sku-033",
+            "fingerprint": "3f5ec777189b39bd440ad03f87443810fa9b6a323fda6268fab83e2564102bda"
+          },
+          {
+            "key": "sku-034",
+            "fingerprint": "8f10ccda146250128abeb69c9ae305bfbaa1849737d07e8789261ffeac5dfefe"
+          },
+          {
+            "key": "sku-035",
+            "fingerprint": "75745558d11f9b938e89985e2386a96af9574b5c866070281f08157f2aa3d0e4"
+          },
+          {
+            "key": "sku-036",
+            "fingerprint": "6e75f4eaee7a6442030cc86a73875bbd56e52abf01596d624c63b467e69c6949"
+          },
+          {
+            "key": "sku-037",
+            "fingerprint": "667bb185b093c78f4c08b37ab9b526bed37f84f3a82666a2dd58069571aa1f7e"
+          },
+          {
+            "key": "sku-038",
+            "fingerprint": "0b0c177ed06c33d683a2b2d7383dbaddd9b074d373d029b454a6465f556c6036"
+          },
+          {
+            "key": "sku-039",
+            "fingerprint": "005aa3c3d8c2085a1b0c2b5dd4b5a7794698f5e76dc8d6f991e17ba6c88582e1"
+          },
+          {
+            "key": "sku-040",
+            "fingerprint": "d5f79c2bf524c1378cdb6f55fbf76ebc3c1ed029d1fd69eec4f919f8aea77fff"
+          },
+          {
+            "key": "sku-041",
+            "fingerprint": "f5c4837f104d126fdbd2228f4bcfc695a97708c4f834328f90020166eeca1dab"
+          },
+          {
+            "key": "sku-042",
+            "fingerprint": "98bc33077f448b9cce1bbe39ee45dbac7f20074df8aa7d818991021441591453"
+          },
+          {
+            "key": "sku-043",
+            "fingerprint": "21161cb46648b9f3cad99741bf5fd7fb5b4f99af1f7a7a40a067a5e9447668f9"
+          },
+          {
+            "key": "sku-044",
+            "fingerprint": "52b68fb586d59f6393d8e0c6a36e4092cd8fd148553e6de0d48631f915a62d39"
+          },
+          {
+            "key": "sku-045",
+            "fingerprint": "888b74f4e23eacbdecd5e9aca5deb089caeb8ff29b762164cd18a402d75fe3bf"
+          },
+          {
+            "key": "sku-046",
+            "fingerprint": "6b8b77bd19d123a3d98b5ad02ccd065f4dd606d2f1e1a03019a24cb3a3567388"
+          },
+          {
+            "key": "sku-047",
+            "fingerprint": "9ec8600c0550e6cf6697e87181f7304f13cc77f2b0517c4bcdb07003b9b7abc8"
+          },
+          {
+            "key": "sku-048",
+            "fingerprint": "31a92edc2800334b4c8d20f57e56f1660d928d0ca00b4fef2c4c80d75a4dcbc7"
+          },
+          {
+            "key": "sku-049",
+            "fingerprint": "bcf37db5b551b963beafe13c6adbd28a790099c2ff0f93de53f977dc729f6c0b"
+          },
+          {
+            "key": "sku-050",
+            "fingerprint": "0b5c8a12fb081cf76238b2bfa2f861213ceb63ed8657b5e8e43df2aa7275662e"
+          },
+          {
+            "key": "sku-051",
+            "fingerprint": "f336b75ee543d9bc06ef08a87b90c741dca8abd8692fac5237a09e9825ce3431"
+          },
+          {
+            "key": "sku-052",
+            "fingerprint": "4f50b69dd0a75678558f7c9a76914d72165604f4d939ad6a5701d38e15e3ee3a"
+          },
+          {
+            "key": "sku-053",
+            "fingerprint": "0287952f6a90a82e2231b356ce2c16603adde2458d85d525110ea586b9d4c7fb"
+          },
+          {
+            "key": "sku-054",
+            "fingerprint": "7887e273f8626a1da2826e8bb91c8f6bd4a803133be822de3816aff03aba9913"
+          },
+          {
+            "key": "sku-055",
+            "fingerprint": "6607bb31d05094316cad586981886ba2876b1fcccaedaf287a873bc3ad991d43"
+          },
+          {
+            "key": "sku-056",
+            "fingerprint": "fec2792b721c0d52f251f003e1011e5a5a7465ba61fc67c92df382aca26bd1eb"
+          },
+          {
+            "key": "sku-057",
+            "fingerprint": "7179a7ee2922ada8acc9434c5fbe33f269001e57deccd6d4988d0d6ad1a2ecc7"
+          },
+          {
+            "key": "sku-058",
+            "fingerprint": "b749938b4fef7d176de403d82821b943387cc093e908eda4d2a51dedd83f7ee2"
+          },
+          {
+            "key": "sku-059",
+            "fingerprint": "f254b802799988c949968b5b4b0ddb2c36b3766ea6e7e1c0fbe4b4fa0ca7bb97"
+          },
+          {
+            "key": "sku-060",
+            "fingerprint": "dfab66e83f410f73acd9bbe8f9c991ad0b7f496a5b90dc79b8740102dea5c5c0"
+          },
+          {
+            "key": "sku-061",
+            "fingerprint": "d7b1ce83c2326c3b890d20fc77c5d30a3f0925ae5abea813b69b009cb9168ee7"
+          },
+          {
+            "key": "sku-062",
+            "fingerprint": "efe36cba52d3b3d487fca62e5377aa9f89df3f32c6e35177ae8a9e25ef4bedae"
+          },
+          {
+            "key": "sku-063",
+            "fingerprint": "deb1438e127f7625ac83c8245e8174e57011429025bfc19eb1378b4bb9ff46db"
+          },
+          {
+            "key": "sku-064",
+            "fingerprint": "f4f4da8af506414da7187d0cdd18feb932f6d7b5cd31f0f57002b8abacc97172"
+          },
+          {
+            "key": "sku-065",
+            "fingerprint": "870379f66a207c4b6930a1959f64b7472335b15ed3ac8f08b9d65350390d2f7e"
+          },
+          {
+            "key": "sku-066",
+            "fingerprint": "5694c0b5fbde77f13b072c239f39fdbec5c41efb65edd4e21c9c89a60a1f9721"
+          },
+          {
+            "key": "sku-067",
+            "fingerprint": "23675f8d41e4f749b465ee6f32596f82c579cb346c61c5a945440aae4789aa89"
+          },
+          {
+            "key": "sku-068",
+            "fingerprint": "b008fb14a6a64971c2896ba4060b4ae68ab4e585ca1c42463ea65cdd3cfa2b46"
+          },
+          {
+            "key": "sku-069",
+            "fingerprint": "5bfbdac994dd97b52904c884641c45a454f33c6ddd8b11d44dcf339e16f1f981"
+          },
+          {
+            "key": "sku-070",
+            "fingerprint": "646769f3aeb84f1131308f2379a336b6a15f84ea4b18c735b89b46e0cc8d2123"
+          },
+          {
+            "key": "sku-071",
+            "fingerprint": "b6f48de20bfbc7116aaafadaebf5c08a87abab86324a09a44d772daf0e3a7cc2"
+          },
+          {
+            "key": "sku-072",
+            "fingerprint": "0884b83d9fd86803b4750288ab661a1906d8a10c1fb27be29534cc6dbc0b2be4"
+          },
+          {
+            "key": "sku-073",
+            "fingerprint": "65af541ebbbf0a32ed5043ea21f1b9cc0cd590dd1d9aa92be80a37071b47e939"
+          },
+          {
+            "key": "sku-074",
+            "fingerprint": "8b65e91798f61a96c23bd0cea1cacdb6dffff1e93ad5465d03a3f653e33517c3"
+          },
+          {
+            "key": "sku-075",
+            "fingerprint": "91b37b61a7a09df233e54cc2943b6e95c14ad496c9275457244d0f9138c3254d"
+          },
+          {
+            "key": "sku-078",
+            "fingerprint": "a0096bc784632ac2499929420e84d9ba60395f29ed0f2194ff4029b2c8888dbc"
+          },
+          {
+            "key": "sku-079",
+            "fingerprint": "5c7ebdfa6673a31343a8030a90ebc027efafcc83f0bc8c8cc802dfb2c1b1f96f"
+          },
+          {
+            "key": "sku-080",
+            "fingerprint": "242544c1bf4a5d81656b684a575408c008165071e06ae1c4d2077ee9eab95f41"
+          },
+          {
+            "key": "sku-081",
+            "fingerprint": "696803abc607b106a6a8ff6e928c7ee8d283edafd7a439285690147061c341db"
+          }
+        ],
+        "newQuoteContext": [
+          {
+            "channel": "Horeca",
+            "warnings": "c3e55724d913c245e9e3bcf84c180fc4962ed74ea597df95517a2e57d5d0639a",
+            "options": [
+              {
+                "key": "sku:sku-001",
+                "fingerprint": "a41a2b436a14975b3d9d70b47204b6679ff9f89a6ad7452e288be261befafb1e"
+              },
+              {
+                "key": "sku:sku-006",
+                "fingerprint": "8982dada11f70938d04cabc5bfb093fba50e22e79da14d8221a545f798e933ad"
+              },
+              {
+                "key": "sku:sku-007",
+                "fingerprint": "fd741aeeeda9c084f3c6e91dc1c9828e442cb61e4e245d8aff74b7142e985f85"
+              },
+              {
+                "key": "sku:sku-008",
+                "fingerprint": "0ac87b9ac74e488b403a2ebe99d954a5b422dafa0c5062cd2c3556ab52bee633"
+              },
+              {
+                "key": "sku:sku-009",
+                "fingerprint": "11eaa60d6b0bc991f42f4ba83850edb86589747a1e6a48016d880d6a6552db4b"
+              },
+              {
+                "key": "sku:sku-010",
+                "fingerprint": "1b08a2520c54a1e01a3a707a136a19e22584a1e21eeb7e1340b79516d3921e9d"
+              },
+              {
+                "key": "sku:sku-011",
+                "fingerprint": "ec8ce1d7d456cf984d47f960e7c4e50b125eac6fa7931109351e6145cfebffa8"
+              },
+              {
+                "key": "sku:sku-012",
+                "fingerprint": "24d3c399782fc674569b907055d61d8e101db7a26ad1d419baae34cbd332ca94"
+              },
+              {
+                "key": "sku:sku-014",
+                "fingerprint": "515eb84575c28c2dba091631a6d3befc16ef9f0217d728309f46385072f1a7cb"
+              },
+              {
+                "key": "sku:sku-017",
+                "fingerprint": "ea6110cc5f23daaf3c0ddd7786adb309cb620704ec6b3ec74cc94d00c559ed57"
+              },
+              {
+                "key": "sku:sku-018",
+                "fingerprint": "dcd6b4a93d6d100904772c209c360baa2f20494e4f59a752e5602f78f08104c0"
+              },
+              {
+                "key": "sku:sku-019",
+                "fingerprint": "3415f5f7103a6858f6854d09447f5c8cf32e8d7f557386a7615d6a575917ce44"
+              },
+              {
+                "key": "sku:sku-020",
+                "fingerprint": "96949378992ad3f7a3fc7d0464e1b5a294ec743b206e7b1bb2028ef908e4820a"
+              },
+              {
+                "key": "sku:sku-022",
+                "fingerprint": "47e271c3b0ba3f64b4748a2eac42fafb3e2fd31d445f232ca44b772cbe7ad1a2"
+              },
+              {
+                "key": "sku:sku-025",
+                "fingerprint": "e0c688cdd9437eff8bab1c05a9faa76262e6eb85cac4aac0fa23b29e9a6e414e"
+              },
+              {
+                "key": "sku:sku-026",
+                "fingerprint": "96fa4a1f641aa94cd5f479b0228092166fb5fd14fd4a78649d4d4a0e771ed88d"
+              },
+              {
+                "key": "sku:sku-029",
+                "fingerprint": "5097e9482fa8595fd3d103707c1711f3c1ba813e9cb9f5055eedfd32a68bbb28"
+              },
+              {
+                "key": "sku:sku-032",
+                "fingerprint": "268fab1d1d4c13a99e6f72d0029f83780c1a758266deaaa7d3028891e17676b4"
+              },
+              {
+                "key": "sku:sku-033",
+                "fingerprint": "94f0b94dabe6b0b6ef451ce88e345cf69053657603ad23659849eb318b5f25ed"
+              },
+              {
+                "key": "sku:sku-034",
+                "fingerprint": "7046be3a66165bde642fc04276e98cca9cd33ae3ddb7d44ce5e8cc7902d6c012"
+              },
+              {
+                "key": "sku:sku-035",
+                "fingerprint": "6c7c26be3f56f6166de3eaf4d734f4ad55040589078446054ab8cf07139f7b14"
+              },
+              {
+                "key": "sku:sku-036",
+                "fingerprint": "04580e2c39625f24a5f0f2a6a8ad66eded98b771da267dd79754e9f7936e2db7"
+              },
+              {
+                "key": "sku:sku-037",
+                "fingerprint": "473aca7b4dbf36bfcef8e8c3a5a820875c4a21c48a51690a67745612191c63f4"
+              },
+              {
+                "key": "sku:sku-038",
+                "fingerprint": "d2dc61db044e046797ce5812251fb53dc96e3e970aa50f09cd4e91b79459106c"
+              },
+              {
+                "key": "sku:sku-044",
+                "fingerprint": "77cd0297b9c4526d59a76e5864c74b62e02a5f0bffb6c0d550a58178fef148e5"
+              },
+              {
+                "key": "sku:sku-045",
+                "fingerprint": "2954dbccebca3f7364f6af831c0e52fe03427edeebd1e2e4a25b58332498228d"
+              },
+              {
+                "key": "sku:sku-046",
+                "fingerprint": "14d6f14e255d03ee5920fe75ea87d87a2388552ff5f40745aa381eb285d9267b"
+              },
+              {
+                "key": "sku:sku-047",
+                "fingerprint": "de13fd5bdd398b6af24b870a6df8fdde56977f5e35da77bf94363a5f86d7a8b4"
+              },
+              {
+                "key": "sku:sku-048",
+                "fingerprint": "4fad00f98ce276c0842ed248be7b8aae9235cc5d9bc9095e17c33e3be28ceb35"
+              },
+              {
+                "key": "sku:sku-049",
+                "fingerprint": "c3e41fd6479c61e00385f381421778a98dd5aa1ef231c9cbacceb95355783080"
+              },
+              {
+                "key": "sku:sku-050",
+                "fingerprint": "3801ab6e13d3680dc5f54a3f68c02f0dee56fe4a2f62260dd5a941d9068d788b"
+              },
+              {
+                "key": "sku:sku-051",
+                "fingerprint": "ed86bbba1fa9446cce2a7c8834047fcf3f5ad8417950e2c9d86d591d591bcd1a"
+              },
+              {
+                "key": "sku:sku-052",
+                "fingerprint": "7d69ba3d4d1fdb1d0038b92f262658c140d296297de4e60af94563fc68d1d1a7"
+              },
+              {
+                "key": "sku:sku-053",
+                "fingerprint": "c1d1477eaf693418529dae163cb3f77b751cb3634ae7be4bda7a8de844691c1d"
+              },
+              {
+                "key": "sku:sku-054",
+                "fingerprint": "9b5abae0203ad2f38dcf384ef7e5551d328e2c55299f63cb8914d618aac90883"
+              },
+              {
+                "key": "sku:sku-055",
+                "fingerprint": "1cbeca9bc3612a002b7029e144bf2566104bd3507339e20cef3a1bd7bfb82fb3"
+              },
+              {
+                "key": "sku:sku-056",
+                "fingerprint": "92ffa0e08f51147bc22e2e95563d73861f044fe591592e4d46be707489ed2b07"
+              },
+              {
+                "key": "sku:sku-057",
+                "fingerprint": "9750da19db0d766317dd13ffb015cb30908e105b28f046b4005c29893a0c6130"
+              },
+              {
+                "key": "sku:sku-058",
+                "fingerprint": "f6e41b068967a56ee7641d1555fc7bcc06e86253c96fbefc85c048a7fd22008d"
+              },
+              {
+                "key": "sku:sku-059",
+                "fingerprint": "50cf430a73e6e45d4484758af5676e57b635af5ec4e2ad6f6721bad193d3de4b"
+              },
+              {
+                "key": "sku:sku-060",
+                "fingerprint": "0b6da69cabdafa0ff4505cb6d593dbea222681881910fb9a36d479f9f993ea3c"
+              },
+              {
+                "key": "sku:sku-061",
+                "fingerprint": "081472e1816966fa80aeb0c210acc6ed756b58e513a432ed4580420835f03fe9"
+              },
+              {
+                "key": "sku:sku-062",
+                "fingerprint": "1eb1f8e48fbcc4954e742e963beb5787cf20a9322e497f5f5164443fc586ae2e"
+              },
+              {
+                "key": "sku:sku-063",
+                "fingerprint": "7d130239cb8e66543babd4b736ad5e1c8346526523123713f89dd87b533016a1"
+              },
+              {
+                "key": "sku:sku-064",
+                "fingerprint": "04afc4e6426df7194e44d3d5f1ad8094c387fa556686ac7eb5a06de577dd84d0"
+              },
+              {
+                "key": "sku:sku-065",
+                "fingerprint": "9d2b48a6e4032c7e412309124d4267ffaefa0e141e749d57e1bc1f06e0979f02"
+              },
+              {
+                "key": "sku:sku-066",
+                "fingerprint": "49e5bdc796cf526aff58bca538c0cf479e2c1bb1e68771eff3883c47ca2137c7"
+              },
+              {
+                "key": "sku:sku-067",
+                "fingerprint": "56133591ed4628c65542a9be958c4b3d42a19ea236463147f828859869f5cfc3"
+              },
+              {
+                "key": "sku:sku-068",
+                "fingerprint": "56de7d21c1923ad9f09918f8363e2ffd374ed3c7e170644c3e99a97be06450ce"
+              },
+              {
+                "key": "sku:sku-069",
+                "fingerprint": "958d516c769e2c3f7239dabbf1e820d184c7c1ba6ab0d70099780f1bdbda9f01"
+              },
+              {
+                "key": "sku:sku-070",
+                "fingerprint": "a6abdf49da4e799f3f79f8ef13502fda73b4e2edb58ca08a344ff7c351a7159b"
+              },
+              {
+                "key": "sku:sku-079",
+                "fingerprint": "b501467f5eaee26be47c644820c5fc0507a5e58d7561ae6abbd84bf61fb6977a"
+              },
+              {
+                "key": "sku:sku-080",
+                "fingerprint": "3f234f6a6a9b55c97f031066908856df82b5775b09ecec43158027787c8bc610"
+              },
+              {
+                "key": "sku:sku-081",
+                "fingerprint": "959c670a6c06bc281c84ea96f5c84d46ecccf7bbd6563646d050e849a7d7521e"
+              }
+            ]
+          },
+          {
+            "channel": "Retail",
+            "warnings": "c3e55724d913c245e9e3bcf84c180fc4962ed74ea597df95517a2e57d5d0639a",
+            "options": [
+              {
+                "key": "sku:sku-001",
+                "fingerprint": "a41a2b436a14975b3d9d70b47204b6679ff9f89a6ad7452e288be261befafb1e"
+              },
+              {
+                "key": "sku:sku-006",
+                "fingerprint": "8982dada11f70938d04cabc5bfb093fba50e22e79da14d8221a545f798e933ad"
+              },
+              {
+                "key": "sku:sku-007",
+                "fingerprint": "fd741aeeeda9c084f3c6e91dc1c9828e442cb61e4e245d8aff74b7142e985f85"
+              },
+              {
+                "key": "sku:sku-008",
+                "fingerprint": "0ac87b9ac74e488b403a2ebe99d954a5b422dafa0c5062cd2c3556ab52bee633"
+              },
+              {
+                "key": "sku:sku-009",
+                "fingerprint": "c7f5d2b7d8f00bef17aebbcdd5c671fe1de5324fbf901a716b5d5886a53bd483"
+              },
+              {
+                "key": "sku:sku-010",
+                "fingerprint": "1b08a2520c54a1e01a3a707a136a19e22584a1e21eeb7e1340b79516d3921e9d"
+              },
+              {
+                "key": "sku:sku-011",
+                "fingerprint": "91e77ea6c7c3fc0c9ecf9937fc458e5e183dccf47d8a2afe71f229122683dd39"
+              },
+              {
+                "key": "sku:sku-012",
+                "fingerprint": "3dcd6f3a8c57b7bc66f1958d572d33d5d802084d3737b3c4a3c4147c01c1db85"
+              },
+              {
+                "key": "sku:sku-014",
+                "fingerprint": "515eb84575c28c2dba091631a6d3befc16ef9f0217d728309f46385072f1a7cb"
+              },
+              {
+                "key": "sku:sku-017",
+                "fingerprint": "114652685a507f466fe159623bcb5b25e5ad574ca095ac3540841b8cabbf0148"
+              },
+              {
+                "key": "sku:sku-018",
+                "fingerprint": "b50ee8820e7ec8c65b42cebd5b57d9e036df214082f08b7af2122008dcc7e84d"
+              },
+              {
+                "key": "sku:sku-019",
+                "fingerprint": "103694874d43f6196b8cb58849423f13566ba08aa208d97cb598ffd18504f49c"
+              },
+              {
+                "key": "sku:sku-020",
+                "fingerprint": "96949378992ad3f7a3fc7d0464e1b5a294ec743b206e7b1bb2028ef908e4820a"
+              },
+              {
+                "key": "sku:sku-022",
+                "fingerprint": "47e271c3b0ba3f64b4748a2eac42fafb3e2fd31d445f232ca44b772cbe7ad1a2"
+              },
+              {
+                "key": "sku:sku-025",
+                "fingerprint": "2361a381818c43208ab2fc35d47b446a7fc5fb840c9406a31f5c8a13fc2c9cb5"
+              },
+              {
+                "key": "sku:sku-026",
+                "fingerprint": "96fa4a1f641aa94cd5f479b0228092166fb5fd14fd4a78649d4d4a0e771ed88d"
+              },
+              {
+                "key": "sku:sku-029",
+                "fingerprint": "5097e9482fa8595fd3d103707c1711f3c1ba813e9cb9f5055eedfd32a68bbb28"
+              },
+              {
+                "key": "sku:sku-032",
+                "fingerprint": "268fab1d1d4c13a99e6f72d0029f83780c1a758266deaaa7d3028891e17676b4"
+              },
+              {
+                "key": "sku:sku-033",
+                "fingerprint": "94f0b94dabe6b0b6ef451ce88e345cf69053657603ad23659849eb318b5f25ed"
+              },
+              {
+                "key": "sku:sku-034",
+                "fingerprint": "7046be3a66165bde642fc04276e98cca9cd33ae3ddb7d44ce5e8cc7902d6c012"
+              },
+              {
+                "key": "sku:sku-035",
+                "fingerprint": "e4af158e7660f04f57596d1dad4723fa47e3584e39f03c3aac3302abe2713b34"
+              },
+              {
+                "key": "sku:sku-036",
+                "fingerprint": "482dd66a8991902dfe28d51f4aa3059086e1d21fc37ba82d6faae9ec32d9d6e1"
+              },
+              {
+                "key": "sku:sku-037",
+                "fingerprint": "06e2c8f657fe059e641d24f0b60150ee6fec33feae5a1caa4dabded6b04edd41"
+              },
+              {
+                "key": "sku:sku-038",
+                "fingerprint": "17d490d4974a5e0628008cd4435b3ba6b85bcd98504000731c4a873887c3cdbf"
+              },
+              {
+                "key": "sku:sku-044",
+                "fingerprint": "8af3c3ec8bc0c9fed943d65385e400159390e5e17029332441b39a868b054287"
+              },
+              {
+                "key": "sku:sku-045",
+                "fingerprint": "2954dbccebca3f7364f6af831c0e52fe03427edeebd1e2e4a25b58332498228d"
+              },
+              {
+                "key": "sku:sku-046",
+                "fingerprint": "f8fda44378ee9f0a01802a36af2429390e3b23f6bfe72019cc4795d959462dab"
+              },
+              {
+                "key": "sku:sku-047",
+                "fingerprint": "de13fd5bdd398b6af24b870a6df8fdde56977f5e35da77bf94363a5f86d7a8b4"
+              },
+              {
+                "key": "sku:sku-048",
+                "fingerprint": "2e1c434521d9616257204a3468430c0e3437f513c436295be84f7fefc9f4af39"
+              },
+              {
+                "key": "sku:sku-049",
+                "fingerprint": "c3e41fd6479c61e00385f381421778a98dd5aa1ef231c9cbacceb95355783080"
+              },
+              {
+                "key": "sku:sku-050",
+                "fingerprint": "3801ab6e13d3680dc5f54a3f68c02f0dee56fe4a2f62260dd5a941d9068d788b"
+              },
+              {
+                "key": "sku:sku-051",
+                "fingerprint": "f59451cb46cce44f79a0374bdc4d14cb2777aca2c4958a117c936eb686e98889"
+              },
+              {
+                "key": "sku:sku-052",
+                "fingerprint": "9402691c481f6296dfc9fa82cecf1237611bcbcdb55412187aca747f546fecff"
+              },
+              {
+                "key": "sku:sku-053",
+                "fingerprint": "c1d1477eaf693418529dae163cb3f77b751cb3634ae7be4bda7a8de844691c1d"
+              },
+              {
+                "key": "sku:sku-054",
+                "fingerprint": "4514ef8ac0f9d9231f265f3f92bd9421b7aca99249bd9fa38df3e63d86e71371"
+              },
+              {
+                "key": "sku:sku-055",
+                "fingerprint": "7cc7a716b544f6f75d1854b483240906b8f4fdf979eed8a84f653482f7aaf635"
+              },
+              {
+                "key": "sku:sku-056",
+                "fingerprint": "0aba26716b767b2a3a1cc06e6834629bd061f94cd08c9346ef75a91a348ceb31"
+              },
+              {
+                "key": "sku:sku-057",
+                "fingerprint": "66acda4248744e52022b66f603c896edb693e33b8d82b97dd71770d7f10f1c54"
+              },
+              {
+                "key": "sku:sku-058",
+                "fingerprint": "f6e41b068967a56ee7641d1555fc7bcc06e86253c96fbefc85c048a7fd22008d"
+              },
+              {
+                "key": "sku:sku-059",
+                "fingerprint": "a3d60d97a5c3f025f4e022dce986d0f4fff2b2f3c3d8e6d659dfa8762c8eb40e"
+              },
+              {
+                "key": "sku:sku-060",
+                "fingerprint": "0b6da69cabdafa0ff4505cb6d593dbea222681881910fb9a36d479f9f993ea3c"
+              },
+              {
+                "key": "sku:sku-061",
+                "fingerprint": "ffc205c836b0655d874ec55b26f5dd00821a623ab74b81c53b4241983fec4c6e"
+              },
+              {
+                "key": "sku:sku-062",
+                "fingerprint": "1eb1f8e48fbcc4954e742e963beb5787cf20a9322e497f5f5164443fc586ae2e"
+              },
+              {
+                "key": "sku:sku-063",
+                "fingerprint": "d99019b44c48b449e95764288a28c843f6b436a73cefda1571d15a906e7c07ab"
+              },
+              {
+                "key": "sku:sku-064",
+                "fingerprint": "c2a086bd623ab7cdd4b3e732127cd20a7bc1d3e541d1c4f1fefa65cd34502b3f"
+              },
+              {
+                "key": "sku:sku-065",
+                "fingerprint": "9d2b48a6e4032c7e412309124d4267ffaefa0e141e749d57e1bc1f06e0979f02"
+              },
+              {
+                "key": "sku:sku-066",
+                "fingerprint": "49e5bdc796cf526aff58bca538c0cf479e2c1bb1e68771eff3883c47ca2137c7"
+              },
+              {
+                "key": "sku:sku-067",
+                "fingerprint": "3c316084f804174b1d04b225aa465a987397abe3f685fad51c8946062b8b6d01"
+              },
+              {
+                "key": "sku:sku-068",
+                "fingerprint": "81f1f917f6018856647ba63cbc5320a7a799afb81c98e055a4fa614face55264"
+              },
+              {
+                "key": "sku:sku-069",
+                "fingerprint": "907089f1dd51680b0df90bc959a1bfdec26f25c0c1fc6f54d82f5b8b8c50663b"
+              },
+              {
+                "key": "sku:sku-070",
+                "fingerprint": "4d54440bbdb081b1f53f0ef97f8dd3a8f18b49d3ad3825fcb8ae8e7d63332efc"
+              },
+              {
+                "key": "sku:sku-079",
+                "fingerprint": "b501467f5eaee26be47c644820c5fc0507a5e58d7561ae6abbd84bf61fb6977a"
+              },
+              {
+                "key": "sku:sku-080",
+                "fingerprint": "3870fb6d7efc3f95a1b9dac37d27365279139d4a996ef7189c4c16d12c8570b1"
+              },
+              {
+                "key": "sku:sku-081",
+                "fingerprint": "08ff30b4a3341436ef7f1c086219b1c8257c5a59d562caa5804723f7af2b75ee"
+              }
+            ]
+          }
+        ],
+        "advicePriceContext": [
+          {
+            "key": "horeca:sku-001",
+            "fingerprint": "64f1f5e3839f994fcb9a2037b30fef3d63bf4a5ddb5acc7825eec5fa4db46fbe"
+          },
+          {
+            "key": "horeca:sku-006",
+            "fingerprint": "e64264f0b72abf4bfb86af79f966c11dc87307b6aafbc2056318354c6b4cb732"
+          },
+          {
+            "key": "horeca:sku-007",
+            "fingerprint": "759256eaabe16f17918e4d52cc5602aae24d7b5aa5a275e5df2e4c2276df2fd0"
+          },
+          {
+            "key": "horeca:sku-008",
+            "fingerprint": "988ec3f78920455e8312449746312664eaa235b239bb74f5a2bce671eff30ef4"
+          },
+          {
+            "key": "horeca:sku-009",
+            "fingerprint": "503a4f68d91847f03e7ae56816b1fc2fd82396c3548e143f0866b604f3bdea6f"
+          },
+          {
+            "key": "horeca:sku-010",
+            "fingerprint": "4c5f6e57132dd5208e175cb03e35871d88de8c3ad0f4fdadb79548e16670d736"
+          },
+          {
+            "key": "horeca:sku-011",
+            "fingerprint": "4bbc7f6a0998515f6575e9a6db859f2555eecf4c6a36d7754a57f6cf496eaeac"
+          },
+          {
+            "key": "horeca:sku-012",
+            "fingerprint": "22668ba7b2e093655efbb02db75dcc284b194ae696ab1ac2f45925bf49aa549f"
+          },
+          {
+            "key": "horeca:sku-013",
+            "fingerprint": "13fcfb622bdc13d1724aa7572f2702a0a7818baac51ef9e9df873bb72ab3038c"
+          },
+          {
+            "key": "horeca:sku-014",
+            "fingerprint": "24031299761dd9edcc05f9b0ed9bf780195a332ba643ca6026958247a5858abf"
+          },
+          {
+            "key": "horeca:sku-017",
+            "fingerprint": "453c45245a116943051a68bf645c04caae5520ac2a79855e55d11a4211a586fd"
+          },
+          {
+            "key": "horeca:sku-018",
+            "fingerprint": "f39cc550e4f785447f44f39bce68235578ae7dd0680940d876bcb77039be8d9d"
+          },
+          {
+            "key": "horeca:sku-019",
+            "fingerprint": "2fe02eb70919b7a3a1964cd8262ff92307aede07168c2a36b44f6472091023cc"
+          },
+          {
+            "key": "horeca:sku-020",
+            "fingerprint": "7db933ff2199b5eeec5c4171736500b159e6021d6e2771581cc15a34615ad04b"
+          },
+          {
+            "key": "horeca:sku-022",
+            "fingerprint": "631a8f24211f0e20bdcf03a2e96713442b7730aad9c806e936e96ea12bbae898"
+          },
+          {
+            "key": "horeca:sku-025",
+            "fingerprint": "c8b60cb0e4590bc799b4d4fa35cd2970dd536c2ef8a71dc25ddab0f603673ce8"
+          },
+          {
+            "key": "horeca:sku-026",
+            "fingerprint": "2b9e7d287939fbda383a2837406e31acf5b4ae74b34f5f812c5abe8fc71c7e66"
+          },
+          {
+            "key": "horeca:sku-029",
+            "fingerprint": "2743d0d1428f6aa04622e0340c2300bf1ca88cd6515256177e792fd402f63f9d"
+          },
+          {
+            "key": "horeca:sku-032",
+            "fingerprint": "6a53a563ff4b80a49f7a65a73d3e434c9c5b342406aa448e975ecef78c6ff73e"
+          },
+          {
+            "key": "horeca:sku-033",
+            "fingerprint": "c60d05caaeb603611992c93ae86c1d2b43e6f5c45021ea2fd38abcb4af4b8b4c"
+          },
+          {
+            "key": "horeca:sku-034",
+            "fingerprint": "099bfa5453a21bb6df47dfed6b4793687b1c0ec0b31b90bedefbec64ccdb7e8d"
+          },
+          {
+            "key": "horeca:sku-035",
+            "fingerprint": "b294fdf5f51b83f204188d17c78ca400ecf0ebaafd1693b73c9076647847de4b"
+          },
+          {
+            "key": "horeca:sku-036",
+            "fingerprint": "392a54f7180e9dd240b6c4be096c5389e0b5120180e8369094fe62db45022242"
+          },
+          {
+            "key": "horeca:sku-037",
+            "fingerprint": "d9d452d48b6814600395bcc8055fd182375c806bc13071448594e98a8d82f0f8"
+          },
+          {
+            "key": "horeca:sku-038",
+            "fingerprint": "19e0e757804cfa902d5beff8370662ba06eb6d9fd5070dd6017e19c711b9418c"
+          },
+          {
+            "key": "horeca:sku-044",
+            "fingerprint": "a06a1e6c5b14ee49b335d0645c6d7b0aa634267a9016eeb4330d79cda59509d0"
+          },
+          {
+            "key": "horeca:sku-045",
+            "fingerprint": "348169520370b31b89ffe3cd579cb70e1a2886b5645284a1bfcbe7aef7514406"
+          },
+          {
+            "key": "horeca:sku-046",
+            "fingerprint": "a8090302660c4ede827e9d81c33b138423230f71e4e625b19f44370b6d3990e0"
+          },
+          {
+            "key": "horeca:sku-047",
+            "fingerprint": "978d613ed69e584a4a82bedb18381dd386652b9d5dc6aa3ca31c662dcce42dc6"
+          },
+          {
+            "key": "horeca:sku-048",
+            "fingerprint": "5a9dc6260677a446663e80afb98b16f9f752df5cda1aad2a7777375a2d55503c"
+          },
+          {
+            "key": "horeca:sku-049",
+            "fingerprint": "b2226d99b7efa4e4ed1956ac3ed834eeeda77dbfb7539a0a438395a6e3f551a4"
+          },
+          {
+            "key": "horeca:sku-050",
+            "fingerprint": "43db80a4c501386b5db1defb4793fe41832e884c37dae8302e8d6709c73177ba"
+          },
+          {
+            "key": "horeca:sku-051",
+            "fingerprint": "f3444d7a51b33b6fc649b1afd509aece6beed2a820d372dabebae8708f4b5ba4"
+          },
+          {
+            "key": "horeca:sku-052",
+            "fingerprint": "0bf9e2faecdc5466b59b42fd6175534c432ec5c2fa61cab9195f369ffbdf2070"
+          },
+          {
+            "key": "horeca:sku-053",
+            "fingerprint": "bee6dd7f5a2933c4be0ef61d71d0a77b38e1addcf498855e742f832618844725"
+          },
+          {
+            "key": "horeca:sku-054",
+            "fingerprint": "2517ec54431056a2d0f1fba88ddad048066910f62ceba147d8f3aaade0290634"
+          },
+          {
+            "key": "horeca:sku-055",
+            "fingerprint": "0525d68e4ba2fb53af0ccf6815fef8aab36b3c3da08ba9dfb90ffb0c4256b2da"
+          },
+          {
+            "key": "horeca:sku-056",
+            "fingerprint": "9a5fb88489d002fcd3a19ee3e87e0ad8b97317ad3b3ae4718a39c63541f3b045"
+          },
+          {
+            "key": "horeca:sku-057",
+            "fingerprint": "441da508883fb436a37b9957db4b0cfd6afd045045d2ba84e2f26e8a6b6898df"
+          },
+          {
+            "key": "horeca:sku-058",
+            "fingerprint": "d15554419e4ebb960c6f382963bfd3196263edaa6435d74947a6c6765c0d091f"
+          },
+          {
+            "key": "horeca:sku-059",
+            "fingerprint": "37d435b2fa8b4964558601e16fb28bc527c45ae29aa43a1a63a1703a0a9b31a5"
+          },
+          {
+            "key": "horeca:sku-060",
+            "fingerprint": "50862fb53ed1840d080137d2ba8ca1ae9af867006660a308d4f68c0e77c866ab"
+          },
+          {
+            "key": "horeca:sku-061",
+            "fingerprint": "47ba94b10e5adfefb726ce54b848ec08096d568de39311411b0e01ee58df154c"
+          },
+          {
+            "key": "horeca:sku-062",
+            "fingerprint": "309aee50d398e1724a25a0222a0b8b52a3215e4c7dd2d66f1731bbad68615976"
+          },
+          {
+            "key": "horeca:sku-063",
+            "fingerprint": "e0874791c5262508ab8e725a288f5ab34c743455d06208c547083f9bd8f22872"
+          },
+          {
+            "key": "horeca:sku-064",
+            "fingerprint": "c0f6b9a99d8eb91420230dbacb1508988e1b1878fb033d3fa8507d3c8ef33069"
+          },
+          {
+            "key": "horeca:sku-065",
+            "fingerprint": "0fb6acf8db79fcb9af5f67fb6b6d7d4776344f8b9162be6a4a562723b9ff54f9"
+          },
+          {
+            "key": "horeca:sku-066",
+            "fingerprint": "5ef2f9d41a3ae19dddd1d0c39388bd808774260f25a67b83b5b30fd4386bc440"
+          },
+          {
+            "key": "horeca:sku-067",
+            "fingerprint": "d54e4582f14542e053db6f9b73730211efbf89bfde59d8b02d65388a22f44555"
+          },
+          {
+            "key": "horeca:sku-068",
+            "fingerprint": "641e91cd55412171820f6e4b9121e6507f2223eea54d65d4343dfaca4375814f"
+          },
+          {
+            "key": "horeca:sku-069",
+            "fingerprint": "3c9af4b4c660d887165472a6eb3e1786aee758a9bd93eb04d3d56ddd6eda8a88"
+          },
+          {
+            "key": "horeca:sku-070",
+            "fingerprint": "ee9004ceed946e4076cdfdbcfa4634475bbd8f22d49d9f642e0cdea049be248f"
+          },
+          {
+            "key": "horeca:sku-079",
+            "fingerprint": "5aa65b7bb7717fc3f8b24668564237e8c7711d007b00f39ca7ac31e2d527a593"
+          },
+          {
+            "key": "horeca:sku-080",
+            "fingerprint": "f4673d170e7ee2175590d35d1940a61bfd97be13ceb0a236674a5f963c8f3458"
+          },
+          {
+            "key": "horeca:sku-081",
+            "fingerprint": "470aa8ae2ddf0d2f75817d3cbe41cc342384572cfcb1c183092ddf53e9ce1b80"
+          },
+          {
+            "key": "retail:sku-001",
+            "fingerprint": "3826c525f6c4b5b69bea7d4b5e605bc939cdddeff6c699742b4160ae805d280b"
+          },
+          {
+            "key": "retail:sku-006",
+            "fingerprint": "a38a20fc0991d211186f622eb6b5391d167e1ebaf80b58b61034e6e3d5675556"
+          },
+          {
+            "key": "retail:sku-007",
+            "fingerprint": "31ada90a8350496e3b8aa52e9676f3676fe91fe8539087e3a1a413faeb8c6f4f"
+          },
+          {
+            "key": "retail:sku-008",
+            "fingerprint": "c1de294e5271504a214b1af1fdf679b42d545babe084243b7a28319ba26e3bec"
+          },
+          {
+            "key": "retail:sku-009",
+            "fingerprint": "4894e6210666e8067d162ddf30f7892d179d4a21d60a9bca76cc630df5f60e17"
+          },
+          {
+            "key": "retail:sku-010",
+            "fingerprint": "9c025ebbcd3f1fcc69aed8a176fc8327062f2321304af85a71ffa2ba3af7af1f"
+          },
+          {
+            "key": "retail:sku-011",
+            "fingerprint": "03afc72bd8eaacc3f889e66100d69efd16e81ca838e3616f89778631ca108fbe"
+          },
+          {
+            "key": "retail:sku-012",
+            "fingerprint": "46f20656b7cfb42e5e11ab789b1215cbec1c81afad63b891c80d51516a651a1a"
+          },
+          {
+            "key": "retail:sku-013",
+            "fingerprint": "1ee3ef2371b774f69ed12eef74a7c9586e8190296adb3566d726a99cc5cb19fd"
+          },
+          {
+            "key": "retail:sku-014",
+            "fingerprint": "5d05caa3f767ca63ac9e848c2b1e872f11882008d99b8838da2b44557d47c03b"
+          },
+          {
+            "key": "retail:sku-017",
+            "fingerprint": "ba5f10eeaf012e694dd553887ce45f5c429a02dbce5aa9d5bfdfe468133c534d"
+          },
+          {
+            "key": "retail:sku-018",
+            "fingerprint": "3ce4dc288cd005e1d60977f8b9d596ef4c20a60b557a0d212972c6489e252a8e"
+          },
+          {
+            "key": "retail:sku-019",
+            "fingerprint": "87b496d924b7a47995cc6460e9ba96a388865916145f66c1292cd23864f89da7"
+          },
+          {
+            "key": "retail:sku-020",
+            "fingerprint": "728a30cda80980cc1e83797063d71744782e15d5be997b6c1ab476727864ada0"
+          },
+          {
+            "key": "retail:sku-022",
+            "fingerprint": "fae11124baa9149ba56f139fa0f62522aa772bb8c81b56351738caf09d81cfa0"
+          },
+          {
+            "key": "retail:sku-025",
+            "fingerprint": "6233c3eebea4c7c068c94ed5e328247ed6d6121367a6e128d52982bf120ae4a9"
+          },
+          {
+            "key": "retail:sku-026",
+            "fingerprint": "123f95438230b4be5bec27e4beb1502d055b70b04ffe61fb6d7817f32c9d69c1"
+          },
+          {
+            "key": "retail:sku-029",
+            "fingerprint": "99a703c9c829395a782698404cefd3831b9a655e9dd8dea773df6ebee9123b68"
+          },
+          {
+            "key": "retail:sku-032",
+            "fingerprint": "9199f9529bd227342e9feed4d68e9cb53732149e38bb581311eb1e60b1308a75"
+          },
+          {
+            "key": "retail:sku-033",
+            "fingerprint": "48ffd4f44ace74f432b6d1d6e89707d6f84908a816852ee2e413344fc56843b7"
+          },
+          {
+            "key": "retail:sku-034",
+            "fingerprint": "c57695b484595b638b39aa47acf0f2c8d8584ef605ad3daf8333d9612302d7a6"
+          },
+          {
+            "key": "retail:sku-035",
+            "fingerprint": "4f6c6b2adeae847c09618408e5d9801c2c3768e277ed56b43782eb162395b5ce"
+          },
+          {
+            "key": "retail:sku-036",
+            "fingerprint": "719a72fc0c15164e910a234ed75987cec459ed58ec517568f5a9c016e8ce633e"
+          },
+          {
+            "key": "retail:sku-037",
+            "fingerprint": "76376918df3f3b38ce920ecceb4903fd31a63bfc0f23c912e23516942c7dbca1"
+          },
+          {
+            "key": "retail:sku-038",
+            "fingerprint": "a56c4144d0dec1295028d5cdc60e0e49bf7474bb8dc18318295d4594770d5812"
+          },
+          {
+            "key": "retail:sku-044",
+            "fingerprint": "dedea7489f773c2a030a161dcc61ae3e7be5bb94c08c8e73f7965d8543850615"
+          },
+          {
+            "key": "retail:sku-045",
+            "fingerprint": "b95d701a1fd9ba68a0031977f3472fa3d7001648ec8cddb83febf63023b46830"
+          },
+          {
+            "key": "retail:sku-046",
+            "fingerprint": "64e2a6efbcd7835dcb3bea14a6a0ccc2e6ad7509c611fb8f70a9451d7973bcda"
+          },
+          {
+            "key": "retail:sku-047",
+            "fingerprint": "050e16d749dbdebb54fac35df593091499175c158924069b5834c52f6a31b4b9"
+          },
+          {
+            "key": "retail:sku-048",
+            "fingerprint": "f9a0d00e8180aab437f2eeecdd484814a0dd9d4dcf403739e9808767a55c8e46"
+          },
+          {
+            "key": "retail:sku-049",
+            "fingerprint": "784fad19fac333ae3f4c543d433143da0b858d39d9faed6985d8e18fbbb0caca"
+          },
+          {
+            "key": "retail:sku-050",
+            "fingerprint": "b79e5fb0daf001ba5190978fb6c367d19105c2782bb8c13d8c812917b15394c6"
+          },
+          {
+            "key": "retail:sku-051",
+            "fingerprint": "933b80ca3ac5fb617d39e37bac233de2c1119f8a6774cba631c53f44dc243406"
+          },
+          {
+            "key": "retail:sku-052",
+            "fingerprint": "572e0332addd109ece9fe8d1008dee278ccfe794e43aad0ad3d4f3f6174c4b9a"
+          },
+          {
+            "key": "retail:sku-053",
+            "fingerprint": "b44450e219ff3d3ff47c34369909359f000a5eecab46507f340650c36c9bd848"
+          },
+          {
+            "key": "retail:sku-054",
+            "fingerprint": "c312d0915e1dbcdfc08dfc1e9471a421abbdaeb297db09c19cfec0b6339ffdde"
+          },
+          {
+            "key": "retail:sku-055",
+            "fingerprint": "6bcc5846eb205670a32f83758ae8c987a480c4917d444b0a7b8669b05a222115"
+          },
+          {
+            "key": "retail:sku-056",
+            "fingerprint": "7e541aa0df018bab822972da732b7dbd927f003f08b7c49e34cf5ce4d3be092c"
+          },
+          {
+            "key": "retail:sku-057",
+            "fingerprint": "7ce4aacac9c77c1c2a8a9b17dfbfcf271a7e6a89b9d1553f083aaebf2084a578"
+          },
+          {
+            "key": "retail:sku-058",
+            "fingerprint": "6ec0bc33896dbbc8df1baa29aa9ddd706a6e388a1df9e64da08ada14c0c30ad8"
+          },
+          {
+            "key": "retail:sku-059",
+            "fingerprint": "66c0a093eac485f8825c2e26914058afe6a20db516965b310c30daeea9950ed8"
+          },
+          {
+            "key": "retail:sku-060",
+            "fingerprint": "0bab7a9b196c79800038168fe796ef1ff55451468e349f85fe979966cbbd42de"
+          },
+          {
+            "key": "retail:sku-061",
+            "fingerprint": "edcc64adb4e9ca588ed380e699edb8fb3b971b602bdc01a8683745e39d734fcd"
+          },
+          {
+            "key": "retail:sku-062",
+            "fingerprint": "00defebf9b15afe849eb8f2a4b683d71732053e3c59665ec330464be3eaf45fb"
+          },
+          {
+            "key": "retail:sku-063",
+            "fingerprint": "01dc11d76b29f67c2aa06dd06504cc09d43bb2b4d0367783ef14dfab7b7de008"
+          },
+          {
+            "key": "retail:sku-064",
+            "fingerprint": "56cc6ea77ca8e1edb7211804ceefd41dabecb7d8c4dfb2af6dccaa759009d984"
+          },
+          {
+            "key": "retail:sku-065",
+            "fingerprint": "682dcc5422fe9bac7220de1d7d41888c16fc0ac542ebbf61eae80715e3d1e81d"
+          },
+          {
+            "key": "retail:sku-066",
+            "fingerprint": "1570f5e6e8fa8561b3d055c40158585fb61982b45838ebbe2ce1c632a47e7cb4"
+          },
+          {
+            "key": "retail:sku-067",
+            "fingerprint": "9c7446102d491ab797bcc3cb14793d1ac1f79cf14b4abb97612e283aa2cf2fa5"
+          },
+          {
+            "key": "retail:sku-068",
+            "fingerprint": "4353e1aeaa95ed7e564bf3ceefd4cd7d62971256ff6d5da2aa553105d91fbf9f"
+          },
+          {
+            "key": "retail:sku-069",
+            "fingerprint": "ad2efb4f6b560db4f8fed5f184f795150165ffc50af3d1335b2f8ae86e3b8955"
+          },
+          {
+            "key": "retail:sku-070",
+            "fingerprint": "030dc9c244fbce3ec04cbe224ab84049d13b2d94dbd79c6c72fa35a55e9abf53"
+          },
+          {
+            "key": "retail:sku-079",
+            "fingerprint": "a4578403b8bf1864aca1108c27fafdb0f99e947256326d7d8fba6893487f9b31"
+          },
+          {
+            "key": "retail:sku-080",
+            "fingerprint": "668d16f1bab07854e95d524e1ef161f4878224c1d7cfd0295e2d3202ff040068"
+          },
+          {
+            "key": "retail:sku-081",
+            "fingerprint": "fece45ec1ae82680afb6c034ff343051c833ecfc9b1561f68d85faf50ad4e207"
+          },
+          {
+            "key": "slijterij:sku-001",
+            "fingerprint": "9ae8e7a00208eece9f5a9df79d2a549a36cb9e39794cdd6166c9e43892d8c0b3"
+          },
+          {
+            "key": "slijterij:sku-006",
+            "fingerprint": "0997d0bac41f5062e77bacabd0f23f7ee830a1580b57c166692b088d514acc8f"
+          },
+          {
+            "key": "slijterij:sku-007",
+            "fingerprint": "3ab19163cde9e8fa406436ad5d3d405c2435ad3d9194168bde2d709468bd5884"
+          },
+          {
+            "key": "slijterij:sku-008",
+            "fingerprint": "3070edf9ad5b5b4d85a91bebab1c07f4573a1f3fd0c076dd57beed66e9b458fb"
+          },
+          {
+            "key": "slijterij:sku-009",
+            "fingerprint": "a159fce6d6a6874eb8a2f0a80d976d3593e945ccf5f3f99301f5f44b5efea10e"
+          },
+          {
+            "key": "slijterij:sku-010",
+            "fingerprint": "9885fd0ae8850ed0e434a89ef4be7c2929ddfc0fea0791bfa81ac98a5c7fa681"
+          },
+          {
+            "key": "slijterij:sku-011",
+            "fingerprint": "ec5f28fff9802381c29fb126ade07ba932f0899e41e0925abc2dace4ff6e0325"
+          },
+          {
+            "key": "slijterij:sku-012",
+            "fingerprint": "8ff77a24587a44f71309983127b2d179af566fdb2ff45cbddc3db5096445b9e0"
+          },
+          {
+            "key": "slijterij:sku-013",
+            "fingerprint": "0b92ac9c8b908244f2b6a376dec8e5196ee6da9eaec70a9f3d541991669db4d2"
+          },
+          {
+            "key": "slijterij:sku-014",
+            "fingerprint": "172c3f126a9768a6a4a9c04599a3580a65608b943fd58f06e54feaf695780778"
+          },
+          {
+            "key": "slijterij:sku-017",
+            "fingerprint": "3ed89e96fe034412b4c0be9526d53fe4a386cbdaf9f74ff57b8cd2e5bacec4a7"
+          },
+          {
+            "key": "slijterij:sku-018",
+            "fingerprint": "7440b89e9978a34cf4fa773932de6b422d9ccd1c38773bb4533a164121af9fa5"
+          },
+          {
+            "key": "slijterij:sku-019",
+            "fingerprint": "d6967a88132402bfda3d627e85758f115897fbf9ed8aac9661076a1599b1a7ce"
+          },
+          {
+            "key": "slijterij:sku-020",
+            "fingerprint": "856ae8ac12562919c0a5ad0a3e783c17f0f9d4fa96fc7c1a8ae25a5ebf3e65f2"
+          },
+          {
+            "key": "slijterij:sku-022",
+            "fingerprint": "9f9a5b3a4e67c5a952e2236ad8819e4c6d18089ea982c229c09e44aa1ba36990"
+          },
+          {
+            "key": "slijterij:sku-025",
+            "fingerprint": "e14b37cdbef31bedf58c470a7d66693d5ed9672a11784a6a38606efecebb2fcc"
+          },
+          {
+            "key": "slijterij:sku-026",
+            "fingerprint": "282e13e6d2f6c8c96453be9b97b0f08db4bf6e618a035864513fbc42968c52c7"
+          },
+          {
+            "key": "slijterij:sku-029",
+            "fingerprint": "dafd0314c991147ad3952079e35ec9be5ae0cf31d07ccb7d2fa65f0aaf29d5f0"
+          },
+          {
+            "key": "slijterij:sku-032",
+            "fingerprint": "f9b143dc2a9fecb1e451d815371d217de37ca0e75bf848cf9b4f3dacb6ed5814"
+          },
+          {
+            "key": "slijterij:sku-033",
+            "fingerprint": "7655a6ad05a3b9f389d37642843f8a553be85f66fa796d565b806e006faf873c"
+          },
+          {
+            "key": "slijterij:sku-034",
+            "fingerprint": "c823f6495473749d4f2b9fbeddac3080cfff10692f1a3acc9e80a433629cbda4"
+          },
+          {
+            "key": "slijterij:sku-035",
+            "fingerprint": "4271cbe0d86c0808b90af8542934cd1cf8b094df4615c6f46f7a246d4e0b4f07"
+          },
+          {
+            "key": "slijterij:sku-036",
+            "fingerprint": "cae441a120af441a7da34d931673b50898b1bdd874d1988b92060e5f8494fd6c"
+          },
+          {
+            "key": "slijterij:sku-037",
+            "fingerprint": "288afda0d40d873856724e88d03b7c0478b363a02c443ef0093bf035c400fe18"
+          },
+          {
+            "key": "slijterij:sku-038",
+            "fingerprint": "69a9c1d1d610fbb10b20a0dd00a522a98410c3d63eb893a0a4ada16ab1d71af4"
+          },
+          {
+            "key": "slijterij:sku-044",
+            "fingerprint": "8618972962a50f64280ebf4617bec2fa860e56e573eccb28f40bd3516f9949ae"
+          },
+          {
+            "key": "slijterij:sku-045",
+            "fingerprint": "abfa122edcfa91f68a0f638c5522d858acff6a909529921db6d4446497c9200d"
+          },
+          {
+            "key": "slijterij:sku-046",
+            "fingerprint": "581d0dd1f41a53b529ce6c0ab25de5dbea995a0e3f5bf6d4211149004e17b3d0"
+          },
+          {
+            "key": "slijterij:sku-047",
+            "fingerprint": "915f18a27f7b8fd8803a05b1b841128dc2e096ac34de37118e751fcac22ce46f"
+          },
+          {
+            "key": "slijterij:sku-048",
+            "fingerprint": "0789469360e7c802fd901e06403b05a855b54e91ae0d30f4f415e39c55103d1f"
+          },
+          {
+            "key": "slijterij:sku-049",
+            "fingerprint": "eab15a0218af37d058f611592a67ccd92d7fbce191ba7404b0daf7e963ac10e9"
+          },
+          {
+            "key": "slijterij:sku-050",
+            "fingerprint": "198bb40f851effc9e0c265b98b846ab2043e7da9c65d8ce26b98bf49322bcdc5"
+          },
+          {
+            "key": "slijterij:sku-051",
+            "fingerprint": "3c46bd9d1f73285435063936128cecb3947d7556c8bb29e60b8d951c81c9197f"
+          },
+          {
+            "key": "slijterij:sku-052",
+            "fingerprint": "9b9696342ef60bd495ad78e2759caf37d066c5874618bde4b88e2e3846defdf0"
+          },
+          {
+            "key": "slijterij:sku-053",
+            "fingerprint": "755286dd86e657b375fc8be040e3ea55a9ed504feb2383465a381ef557c77f3f"
+          },
+          {
+            "key": "slijterij:sku-054",
+            "fingerprint": "6e1cb4bc859b2edbfa602daeca977dffe989fb168324a92a61c8e2936f57339f"
+          },
+          {
+            "key": "slijterij:sku-055",
+            "fingerprint": "e7d87f21ec5bcd4e00797aab98c0f9c683a0e14bf28d7b60b3a130d649078e6f"
+          },
+          {
+            "key": "slijterij:sku-056",
+            "fingerprint": "17a1ef557e4b1ab339de1019aa4a7b9cf9ea6e7738cb4c8fb67d69271c626e83"
+          },
+          {
+            "key": "slijterij:sku-057",
+            "fingerprint": "ce2679dbb79c7b61ebc45a60affbfad9ef864287994419fa7ea744dfc8e57c93"
+          },
+          {
+            "key": "slijterij:sku-058",
+            "fingerprint": "b398c59d8b20aad60ba6f7e388f722d9bb2f18f0b85c65d638b7fc095ab11f3f"
+          },
+          {
+            "key": "slijterij:sku-059",
+            "fingerprint": "12042c2083d55e2e385f8d161614416cf9e5903356e399c74e11644991a88269"
+          },
+          {
+            "key": "slijterij:sku-060",
+            "fingerprint": "721ce796fe6c5519eebd0c2b1bdaff0723b6e0ff71e46393fb79dba7eb461db0"
+          },
+          {
+            "key": "slijterij:sku-061",
+            "fingerprint": "aad0299ed10a9e7f5eeff432fb1324df3a05e40ebb9ca1fd0b1d05ed7c33759f"
+          },
+          {
+            "key": "slijterij:sku-062",
+            "fingerprint": "5bcddc302eaaa73d67772d7e86615f95768d25b076c14422ddf96aa4df63bb37"
+          },
+          {
+            "key": "slijterij:sku-063",
+            "fingerprint": "1bfb1ab437620c4ddcc397805d04d6eb126179de8e9b5998ba699104496c21e9"
+          },
+          {
+            "key": "slijterij:sku-064",
+            "fingerprint": "d34c31b47cb7fed84f89df02e95b05575a180ae4bd36ee42005e5d04ef18b514"
+          },
+          {
+            "key": "slijterij:sku-065",
+            "fingerprint": "8342df0f7300e5f156bc0ce8a3609bc4bd69e0dd3f5fdb22df171d45401bb945"
+          },
+          {
+            "key": "slijterij:sku-066",
+            "fingerprint": "e74031b4ca657fe0f689d8347ed6d9712b5c0e46b72f793cda1711a969d5293f"
+          },
+          {
+            "key": "slijterij:sku-067",
+            "fingerprint": "9d88b40fd032351a2ba84a2601522ba788a613f9580d87e5ca49491ce0bf8737"
+          },
+          {
+            "key": "slijterij:sku-068",
+            "fingerprint": "cc5fe6a55abc454d54a69e51c06b7eac08177214694b40f06b8baaf2ad456623"
+          },
+          {
+            "key": "slijterij:sku-069",
+            "fingerprint": "7a58886ee4269f830776d2629d8388a1602ade40f8ec32075aa4431317eae666"
+          },
+          {
+            "key": "slijterij:sku-070",
+            "fingerprint": "ca8e18ac5fb638371456c79a3c25bd965d618649b18bc0c6ca02b7cf35c6e2c4"
+          },
+          {
+            "key": "slijterij:sku-079",
+            "fingerprint": "184df3b749a850f88cc4b17cfb12e73431c7dbaff59dac9aff178f378fd07ea5"
+          },
+          {
+            "key": "slijterij:sku-080",
+            "fingerprint": "bb4be9171cd2a2c137cf420af9e0bb4dfef54e636a78178b47e0f685d3b27357"
+          },
+          {
+            "key": "slijterij:sku-081",
+            "fingerprint": "65dce897f817a6f053fc874c38076455ee83f731650ceb8434d3b708f6dc220e"
+          },
+          {
+            "key": "zakelijk:sku-001",
+            "fingerprint": "4e0f950f93bcaed49b90bd589ed6e72e52520ddf6162d6a779e14fe247573706"
+          },
+          {
+            "key": "zakelijk:sku-006",
+            "fingerprint": "b6babc79df28b9e85f28a9d297ecd16f63036fbe5b5f1e101bfcfa8a29ee9a40"
+          },
+          {
+            "key": "zakelijk:sku-007",
+            "fingerprint": "d46e69ccbe901fa632323350e0b5f31217019bd534da2b17db5afc4bd9e77a8b"
+          },
+          {
+            "key": "zakelijk:sku-008",
+            "fingerprint": "45290f470e457d9931a675cf5afce671d302adec2776f68352e4725754378aaf"
+          },
+          {
+            "key": "zakelijk:sku-009",
+            "fingerprint": "2dcbeecc6931321ee294f6bc7405647196954cec7a86fae32235322d1d6d5ddc"
+          },
+          {
+            "key": "zakelijk:sku-010",
+            "fingerprint": "143da7991648f6dcbb1aa5cc55f4b5409be69f37aba92af8710170e69d6611c2"
+          },
+          {
+            "key": "zakelijk:sku-011",
+            "fingerprint": "1f89ee8c774869b54e11087063a85fb6efb0adce8a2929e8dc0563d2dbddf894"
+          },
+          {
+            "key": "zakelijk:sku-012",
+            "fingerprint": "b73aad5090fe41af9f46a7cebae9606490d2dacea58fce0a4562ef64a3bfdd7e"
+          },
+          {
+            "key": "zakelijk:sku-013",
+            "fingerprint": "644037f1cb79e3b95e56efead15e616c510e830754b0ffc1262c49d44dbec1e5"
+          },
+          {
+            "key": "zakelijk:sku-014",
+            "fingerprint": "181dd863ae04a5689a5066362efc315d459f88770a71c11e2fe3a8d4dc562b1c"
+          },
+          {
+            "key": "zakelijk:sku-017",
+            "fingerprint": "27264cabe3618deae6ef833a0c2ef9ef484469dac247548a44cc73732fab88ed"
+          },
+          {
+            "key": "zakelijk:sku-018",
+            "fingerprint": "e1c4801625b11e14f420b49b4385b70dc638e44b81003c4b67e2fcdf49975068"
+          },
+          {
+            "key": "zakelijk:sku-019",
+            "fingerprint": "c2e3b2734b674dea0164d885777c8eec018d6494af78efee07b9997fabdbb5f3"
+          },
+          {
+            "key": "zakelijk:sku-020",
+            "fingerprint": "d13ef0b91d1c50acf08dd90c141418fa984f8ee591b2e555b4e611724ae576ab"
+          },
+          {
+            "key": "zakelijk:sku-022",
+            "fingerprint": "190dff0f5394292b822a92e835a60a65738e3fc6dc1ab5026e94dd635e4c7608"
+          },
+          {
+            "key": "zakelijk:sku-025",
+            "fingerprint": "d509976dcd1017f4171a39b8a472d5533e07aa3ab3c87d764a102d6e5f5fce13"
+          },
+          {
+            "key": "zakelijk:sku-026",
+            "fingerprint": "98289cf65e2fc217262f564def2cf9bcd124048a83865eb69cdd2cb7b649260e"
+          },
+          {
+            "key": "zakelijk:sku-029",
+            "fingerprint": "f95e8ad88541fa37abbe336a44f22ce4234141122e3b6313190b53f898baf86a"
+          },
+          {
+            "key": "zakelijk:sku-032",
+            "fingerprint": "3b5f31f6ee469137b2bdb462fdf48bdd6cf14969378872825c21cf050c7ea493"
+          },
+          {
+            "key": "zakelijk:sku-033",
+            "fingerprint": "77f358a87ac4ad42f6fef312401d253ca4a9ca925964047d5684cd118bf8a60c"
+          },
+          {
+            "key": "zakelijk:sku-034",
+            "fingerprint": "b20711a68facb40d70b525ef8f251ab69a61cb146a91b6d3efb95cba7b0f86c6"
+          },
+          {
+            "key": "zakelijk:sku-035",
+            "fingerprint": "e2d189a688100bbf026113bb653d9b016279716d1f89d9dd083a2bee1d6c2c62"
+          },
+          {
+            "key": "zakelijk:sku-036",
+            "fingerprint": "f3489e21142b717571dc5c6247ea7786c3a988ab02ff7a8d38769304a0c8dd64"
+          },
+          {
+            "key": "zakelijk:sku-037",
+            "fingerprint": "952e07db3f5febed0de71839d7dba838b3f6cdc32baefcf3dd6f24d1c542e198"
+          },
+          {
+            "key": "zakelijk:sku-038",
+            "fingerprint": "b230d58186796d82bbc507620cb7a4ccd26445a796737b2c0c6a437ee659f986"
+          },
+          {
+            "key": "zakelijk:sku-044",
+            "fingerprint": "f3116178c51474e8d2950ba7f4d7e70fd1e1fe0d62fe1d8f80387d4a21e2077f"
+          },
+          {
+            "key": "zakelijk:sku-045",
+            "fingerprint": "61ac7604e39a7c5e23a5a497a088f3bd07b10f225c3d5f447d8adc40c71cbba1"
+          },
+          {
+            "key": "zakelijk:sku-046",
+            "fingerprint": "4cd279c649b12b6ddd7e96a823f0aa814535edb4904d89265d933f0a65645f54"
+          },
+          {
+            "key": "zakelijk:sku-047",
+            "fingerprint": "0d2bed19e60704aa24eae5c1b677f08648dd79a1f5b50cd23c132e6bb95bf77d"
+          },
+          {
+            "key": "zakelijk:sku-048",
+            "fingerprint": "ca8a8268b6cab68842585823dcac42224caae00330d9cc373d8b6b5a7dc2fd9e"
+          },
+          {
+            "key": "zakelijk:sku-049",
+            "fingerprint": "88d9228caea8b30952d1c49507f3c6af976760d3fea7f6be600e2f48409f22f1"
+          },
+          {
+            "key": "zakelijk:sku-050",
+            "fingerprint": "f6216e79b360e1644d78417f00f3b3196669cc799fe499f1bb0b069d2486f98d"
+          },
+          {
+            "key": "zakelijk:sku-051",
+            "fingerprint": "e01ada53acd947865160832e66837051f59393e7697cd37899f749a898bdf6f4"
+          },
+          {
+            "key": "zakelijk:sku-052",
+            "fingerprint": "b644f90b77e051d42e45b1355c69618482495e29082038082a17a46188d1afd9"
+          },
+          {
+            "key": "zakelijk:sku-053",
+            "fingerprint": "dd896d059734d5865a8ddb2b2af267b050da9cb577140eb12618b1db4de3937f"
+          },
+          {
+            "key": "zakelijk:sku-054",
+            "fingerprint": "dc0e9d0ee089cd19cba97a92d932a812d70d3b0d7bdb80ecd4d7dc3d33c4d3f1"
+          },
+          {
+            "key": "zakelijk:sku-055",
+            "fingerprint": "8c1f04aabec260b92d6d2d0a6a1abfe774d94282325f316980e48226736e3290"
+          },
+          {
+            "key": "zakelijk:sku-056",
+            "fingerprint": "36b1b222b9df4f04ccd69dd5d8253f81045394f51e9983a89ed1ba02ace856eb"
+          },
+          {
+            "key": "zakelijk:sku-057",
+            "fingerprint": "35ac8666791b53832a4a4aca48967aa69813adb7435d31aa268af93690a0252f"
+          },
+          {
+            "key": "zakelijk:sku-058",
+            "fingerprint": "b1ba4a23f386144065d327e9edac0030e53ce14a87529f04adc0aef9fdde94eb"
+          },
+          {
+            "key": "zakelijk:sku-059",
+            "fingerprint": "6c7fb89b759b908948c13970ea19bc7bfc7153f0a6d1238b0fee93e3b31c9baa"
+          },
+          {
+            "key": "zakelijk:sku-060",
+            "fingerprint": "b683b8ff6e1e20d14e66a19ab2288ead1817199bd3ae16174b16dd60c928cf6e"
+          },
+          {
+            "key": "zakelijk:sku-061",
+            "fingerprint": "4a00f1caa0394796de1e127e5973ab59a7c833817bf916a7bcaaec8aa57768c6"
+          },
+          {
+            "key": "zakelijk:sku-062",
+            "fingerprint": "ad19e632348864618ff61ce5f02a64e343ddf6e542968904672906cba95281c6"
+          },
+          {
+            "key": "zakelijk:sku-063",
+            "fingerprint": "c560d0f313506e4a809250f2ac0355e74abceb2f2b9624a4fbfc63b4e659d483"
+          },
+          {
+            "key": "zakelijk:sku-064",
+            "fingerprint": "b77ade0b783ba68f1ffa7097b1e85e8168fe66bd7bbe2b20654cfadd8c3eda63"
+          },
+          {
+            "key": "zakelijk:sku-065",
+            "fingerprint": "7312118bd89643beb1785359d99c82683ac942bfce0028345f060b794960ec04"
+          },
+          {
+            "key": "zakelijk:sku-066",
+            "fingerprint": "2494583e95d1908c833d02e0412507ea0614c75b7ab48599a1ba7e712e2bf406"
+          },
+          {
+            "key": "zakelijk:sku-067",
+            "fingerprint": "55913228abedcde6ea60d752740b3c718dae6d52859880da2b4b32e703644e1c"
+          },
+          {
+            "key": "zakelijk:sku-068",
+            "fingerprint": "86acf90706708cbb5cd3fd7e375f86024be3b84b422643e5ff42d14c8b64973d"
+          },
+          {
+            "key": "zakelijk:sku-069",
+            "fingerprint": "4a5ee6ac5cd3d99cebbca4268768b20d10d11486dbd48cb378dcf13d383eec99"
+          },
+          {
+            "key": "zakelijk:sku-070",
+            "fingerprint": "5405628f7c51dcc1a73eb3c8a5b700eb9c054528be964c53cedc8aed1dc70445"
+          },
+          {
+            "key": "zakelijk:sku-079",
+            "fingerprint": "a810721b6ea0dd5656867f4cc1e05ad4bb2e9a477b35c38f3086d1d06ef4c157"
+          },
+          {
+            "key": "zakelijk:sku-080",
+            "fingerprint": "436bd870ffb6bae09968ef3d2a2938a59a57f157fab22e550d6dbe6328955d25"
+          },
+          {
+            "key": "zakelijk:sku-081",
+            "fingerprint": "3b3b6e7c44591a6555d613cf931a6045cd324ea872c8997c1715e74e688a3867"
+          }
+        ],
+        "breakEvenPlanningContext": [
+          {
+            "key": "sku:sku-001",
+            "fingerprint": "5696c4ce083d11c164f9343c1a5168f2ee9459ca7c55b2f77d62a5c36eba5cb2"
+          },
+          {
+            "key": "sku:sku-006",
+            "fingerprint": "08bb92d53309b096a9c0dcb0c21792f8379c0b153dc5815541fc4ecb86ccee9d"
+          },
+          {
+            "key": "sku:sku-007",
+            "fingerprint": "6953b07c01cd314fc91aaa516f38b2323a904c0ddefc00d9a03aaa2c86df876c"
+          },
+          {
+            "key": "sku:sku-008",
+            "fingerprint": "0549ade96208804be097efe4721295df7520cd474583115cb9d8733846e2d02a"
+          },
+          {
+            "key": "sku:sku-009",
+            "fingerprint": "e233bcd07ca80419ca7fadff9e52e12609a762b428ca63551e3186d5ab91596b"
+          },
+          {
+            "key": "sku:sku-010",
+            "fingerprint": "2f969a02b05cfce668bc507513447b1f3c93c262eb158993357a96672faf57a4"
+          },
+          {
+            "key": "sku:sku-011",
+            "fingerprint": "44a739e1f1fdf27e991ffb18d9ffc944762deddf002a3d67ca93af24659d4cdb"
+          },
+          {
+            "key": "sku:sku-012",
+            "fingerprint": "91f57010f3af00461c3134c45b5412a4186dd70b88eeb00e10aa84145a2489a2"
+          },
+          {
+            "key": "sku:sku-014",
+            "fingerprint": "6ba942c3d5682e06e08b3e1a58396d34803e7a051fd4d6f31a76b21544c4dad2"
+          },
+          {
+            "key": "sku:sku-017",
+            "fingerprint": "fc6389ec03b0eefffcd352ef67257e47a57c3fa89e712b911bd709d8274e7583"
+          },
+          {
+            "key": "sku:sku-018",
+            "fingerprint": "61c12abcd1767451ff3bf55877d0892ce240c0b37f48b0a54677e9791bb8f04f"
+          },
+          {
+            "key": "sku:sku-019",
+            "fingerprint": "ccd89f9eb909866ddd0ee80de4e23dbe012d78d2046bb11db2876c9b77eb9c9d"
+          },
+          {
+            "key": "sku:sku-020",
+            "fingerprint": "39a33a86160182b48c2eb5610f3444df171d650b1fc26208c589d6c3c2635411"
+          },
+          {
+            "key": "sku:sku-022",
+            "fingerprint": "1cd9e225dc8929f1c8dad61d54d6a7a162d67742e7cea959c09da714fb441fc5"
+          },
+          {
+            "key": "sku:sku-025",
+            "fingerprint": "dc8588b56df82d86e5e794a8d8fccf5a3b04973fd962ced7ac6c120c30d28426"
+          },
+          {
+            "key": "sku:sku-026",
+            "fingerprint": "a13fe3388041e7c3b309af05278a1b435bc1b7bb242b0583b0e2361641d85f08"
+          },
+          {
+            "key": "sku:sku-029",
+            "fingerprint": "34df3415392b2abbbf04dbab0c5fad4aab9ed2eb3dd33bdba3b3bfad94757f73"
+          },
+          {
+            "key": "sku:sku-032",
+            "fingerprint": "709becfbad4638a9360a8a670498a262a60cfcae96b7861a93006b63fc07b2a0"
+          },
+          {
+            "key": "sku:sku-033",
+            "fingerprint": "108ff865749a374e4de55dc69e8a154121472af9797d2f09260c1328cd5ee5ab"
+          },
+          {
+            "key": "sku:sku-034",
+            "fingerprint": "c2d06d919a422c084dd03d02d6eeda46af99d050cc6ff861dc7c3de11c530c51"
+          },
+          {
+            "key": "sku:sku-035",
+            "fingerprint": "89ef5123a1ae8ee1151dca6f0a55d87d5d92fa098878d900d2462c509c728f56"
+          },
+          {
+            "key": "sku:sku-036",
+            "fingerprint": "6eb24e1df3da2ea9372b1f8d0cd02b8bc7f073058b0e0d9a7d568d3376ee25bc"
+          },
+          {
+            "key": "sku:sku-037",
+            "fingerprint": "259aeceeab36e8081e256f4466d951046fe0f4b63a15f81d1e5d934367a4fa76"
+          },
+          {
+            "key": "sku:sku-038",
+            "fingerprint": "9767b158e5dac9ff4beb922cb6dcd4876158c08b31f57bc4e00f6f584e4be220"
+          },
+          {
+            "key": "sku:sku-044",
+            "fingerprint": "32374f3a87d55d85bb271d21f93fc9e3ecc892b2a2fad7a94f4d3e7746027696"
+          },
+          {
+            "key": "sku:sku-045",
+            "fingerprint": "9e417c80a40c9b4b15722837517ddb6f9315129160f267987f9632e714ca6ded"
+          },
+          {
+            "key": "sku:sku-046",
+            "fingerprint": "b58e2f94638ae367427258530ca4317742f438746c10598d4e77e356547024a1"
+          },
+          {
+            "key": "sku:sku-047",
+            "fingerprint": "890a3aced8f44c193470525413a7d3ab004a182f25b8e6149231cafb27e9f425"
+          },
+          {
+            "key": "sku:sku-048",
+            "fingerprint": "18d21bad06c1a53f13ae398bc4aea366952cd363a55ade8b2d74019f16e6b766"
+          },
+          {
+            "key": "sku:sku-049",
+            "fingerprint": "8ea054fdab40ff4424821fa705f83ef32dc6afbc4e9ad1a98c1f879b3c23dbd5"
+          },
+          {
+            "key": "sku:sku-050",
+            "fingerprint": "980a3b3238d7f370e1101d8a0c7496f1c4263559b5ca88e945f80f2c90f203fb"
+          },
+          {
+            "key": "sku:sku-051",
+            "fingerprint": "f937419b15db0b50d8ff42f51129841a7ffc5ba5cc4c58e43fd05eb2aab145d7"
+          },
+          {
+            "key": "sku:sku-052",
+            "fingerprint": "8cd6958b62676ff3b293734662eaf42be84a808695cc69f913f19bae2c1021cc"
+          },
+          {
+            "key": "sku:sku-053",
+            "fingerprint": "a65d0d2f44319498e55146455ad4a4e4632b395148cc1f0b5edbddcb2de19ac0"
+          },
+          {
+            "key": "sku:sku-054",
+            "fingerprint": "570fa42638d5f76ad0aef4e7e0b9cd2b25aa0eb3daa80e3ac22c0b23846dd858"
+          },
+          {
+            "key": "sku:sku-055",
+            "fingerprint": "10018f89044af7514d0b5e61e858ff85b38d496f07f79108d74dcba6bfbc4e31"
+          },
+          {
+            "key": "sku:sku-056",
+            "fingerprint": "02eff9b9ee4ead76cf07cb92167e5348e7151ed6b519ca2c6e52074ce96c7de7"
+          },
+          {
+            "key": "sku:sku-057",
+            "fingerprint": "2ff8dab4469f1bfa4b55d00f25b63ac39d1e7913e4750c23c19f32ba6b5a959f"
+          },
+          {
+            "key": "sku:sku-058",
+            "fingerprint": "d26e6cbcce532e9c574474ddf0d056e05820c1a16dd05d2c120e3d43cac3943a"
+          },
+          {
+            "key": "sku:sku-059",
+            "fingerprint": "33379305bde34519c7a2c34d2bf427998a0a762f0378ac47df532e4e687c812d"
+          },
+          {
+            "key": "sku:sku-060",
+            "fingerprint": "a0302c2341e706afa849beb56a49010f085a1fe2eb489e12e7238afe8c5be893"
+          },
+          {
+            "key": "sku:sku-061",
+            "fingerprint": "1a9b6793f4b2892fd969a6f93a050b3630ad4089fd1576c01f76a12abea2e062"
+          },
+          {
+            "key": "sku:sku-062",
+            "fingerprint": "1aec74408b89713f916a9844050a5a680992891f4a7e79a9a544372788465de3"
+          },
+          {
+            "key": "sku:sku-063",
+            "fingerprint": "fde0a8c81eab61a84fc6664fd15e140b2ea4ece0045ceb97c82c71b03bbebec6"
+          },
+          {
+            "key": "sku:sku-064",
+            "fingerprint": "ca53d909e8778a3e14230918a3714aa10e5b17c601c7da6f2ad005b8b9d7fa58"
+          },
+          {
+            "key": "sku:sku-065",
+            "fingerprint": "62b8f12fb4382188e043a234f30e0b2c4155713f92204134cd4c608fe2adccc9"
+          },
+          {
+            "key": "sku:sku-066",
+            "fingerprint": "d8b37d5cb17db1907cc347bd1dcde65c026cdc599ec90493baafbd6182a3aa75"
+          },
+          {
+            "key": "sku:sku-067",
+            "fingerprint": "96024bebad799db31e095d91fef494e43fce75166de0b1f07b3f3d0de46f666c"
+          },
+          {
+            "key": "sku:sku-068",
+            "fingerprint": "07e60b22abf1f1c2954ebe810f720d8682f17c0179b5a0fb5680d96d8dbdbb28"
+          },
+          {
+            "key": "sku:sku-069",
+            "fingerprint": "3b1eed65a3bee6702442f01f94a9ab1899bedc6a1d5413008ba7b77736ab7be9"
+          },
+          {
+            "key": "sku:sku-070",
+            "fingerprint": "aa62ae6a67e267193985c0a6555a7ea0c54ff58b373e6b2ea4d7ddfed3ae2c50"
+          },
+          {
+            "key": "sku:sku-079",
+            "fingerprint": "17e051c06c725bec93ba89f34336d3c0ab919675f1796fe4cc3e2984253b3cd2"
+          },
+          {
+            "key": "sku:sku-080",
+            "fingerprint": "6ca9f2891da817aae04bcfc9632cf2110e9f63e44d76c7aec7c88723ae5b943c"
+          },
+          {
+            "key": "sku:sku-081",
+            "fingerprint": "151d7e02ea357f42c582818d180a4bf78a8b2e4a19d1ae82c0d0ea16c065ccbc"
+          }
+        ],
+        "discrepancies": {
+          "quoteCostOrSellInCount": 0,
+          "breakEvenCostCount": 0,
+          "fingerprint": "5d09d703453930d652a1a3cd3f07656131203a76028d671dd76f98aba004be58"
+        },
+        "wholeYear": "472aba94ae04f05ba9521ccbc93c76bb39be417bcf3c45ef29070a9948b43440"
+      }
+    ],
+    "historicalQuotes": [
+      {
+        "key": "quote-001",
+        "fingerprint": "ce609042a6a1e3812c83844b8ece11132601a8d113d33bb7366cf0c91a280d86"
+      }
+    ],
+    "historicalActualSnapshots": [
+      {
+        "key": "2025:invoice:sku-001",
+        "count": 66,
+        "missingCostCount": 0,
+        "fingerprint": "708b050eb44c14f9538dbd71cfa76ef31615d30776c0d376024c02241d250374"
+      },
+      {
+        "key": "2025:invoice:sku-002",
+        "count": 55,
+        "missingCostCount": 0,
+        "fingerprint": "0d613463e9d7140a7fb6114972cdb9600ae608580d3879515a5e3f65e2034a26"
+      },
+      {
+        "key": "2025:invoice:sku-003",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "d70909516032412b88c0416f4956af4aa0b91a173b548f54c0e421118df6a426"
+      },
+      {
+        "key": "2025:invoice:sku-004",
+        "count": 19,
+        "missingCostCount": 0,
+        "fingerprint": "c6c0c4d90b53840e216af3d244cf156c2ccdedfa7699e032df0ca25f7c68d29b"
+      },
+      {
+        "key": "2025:invoice:sku-005",
+        "count": 17,
+        "missingCostCount": 0,
+        "fingerprint": "6ab56ebaca98011ea17f02df5ecf2b411bbb681e51bac7998a1ff16925100465"
+      },
+      {
+        "key": "2025:invoice:sku-006",
+        "count": 24,
+        "missingCostCount": 0,
+        "fingerprint": "d208c295cc7b05845eeec4807515445d02d4c365bc367533d59c7cf4ac2de31a"
+      },
+      {
+        "key": "2025:invoice:sku-007",
+        "count": 8,
+        "missingCostCount": 0,
+        "fingerprint": "fccd87bd66d6016507e7d0f93a894cf0b9355e4b7b5734a39232cfa4b5c264fe"
+      },
+      {
+        "key": "2025:invoice:sku-008",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "bd5d8bb2d772df0ee390f6f619d8781c70968e7a7e742371ddd9b5c800bb5677"
+      },
+      {
+        "key": "2025:invoice:sku-010",
+        "count": 24,
+        "missingCostCount": 0,
+        "fingerprint": "169589ae07166c94c4b3b02f60b46c2b8d106209e97e30dd0f17cc4d500f2a01"
+      },
+      {
+        "key": "2025:invoice:sku-011",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "75a041ab04ba1f4bc3461795a6c2b38e3136a988eb654e832a8ed9d5cf5e44cd"
+      },
+      {
+        "key": "2025:invoice:sku-013",
+        "count": 16,
+        "missingCostCount": 0,
+        "fingerprint": "41f5ed859dcf325cf1236f722c875c203290855110e3a371a3f097a0fc8d64fd"
+      },
+      {
+        "key": "2025:invoice:sku-014",
+        "count": 41,
+        "missingCostCount": 0,
+        "fingerprint": "776550155344933bf15ad582b5e1f175991ed20115b63520c9a856450071e8f1"
+      },
+      {
+        "key": "2025:invoice:sku-015",
+        "count": 27,
+        "missingCostCount": 0,
+        "fingerprint": "22a04e05cf4734d7cb5b4954cd72d5992a103d13032174ffecfa84db0ffa47ea"
+      },
+      {
+        "key": "2025:invoice:sku-016",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "32433d57b8161f1316ba026d7be8629b3720460d3c17378ba8b64b356e23a6c7"
+      },
+      {
+        "key": "2025:invoice:sku-019",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "3df5814fce569d5d7f7c1286bbaa98ced4f26f59e72f7328f3b3f354ab5fc72f"
+      },
+      {
+        "key": "2025:invoice:sku-020",
+        "count": 18,
+        "missingCostCount": 0,
+        "fingerprint": "0c94b6684dae69b209de04588cf85c37b245a7691bcbfec0abb04e7d0e0a6711"
+      },
+      {
+        "key": "2025:invoice:sku-021",
+        "count": 21,
+        "missingCostCount": 0,
+        "fingerprint": "f82f23cadc23336d19caabc988f110aa59e8e420269b41a19efcab68a7ca63ed"
+      },
+      {
+        "key": "2025:invoice:sku-022",
+        "count": 157,
+        "missingCostCount": 0,
+        "fingerprint": "80c30dec21e8ba231375a04b447828910adac1674e358c5c22c19b139ae16c58"
+      },
+      {
+        "key": "2025:invoice:sku-023",
+        "count": 46,
+        "missingCostCount": 0,
+        "fingerprint": "f7d887c0b0fa27a1993ea10101ef165f3cfc748be0eb6fc1366ce13243fdf3ce"
+      },
+      {
+        "key": "2025:invoice:sku-024",
+        "count": 9,
+        "missingCostCount": 0,
+        "fingerprint": "e08ed0dd71572f0f0db604cff7bc36d37dee5723acdd91a27ccd6726a74147a4"
+      },
+      {
+        "key": "2025:invoice:sku-025",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "8b699f6a6bb876e00ec5a40e02a3c38e2262711ae05ef90c8ed16f99646a4303"
+      },
+      {
+        "key": "2025:invoice:sku-026",
+        "count": 192,
+        "missingCostCount": 0,
+        "fingerprint": "714a5393c35ef9589c90f48686cc44cdf95bcb21b23a4947b266dba09117c7f5"
+      },
+      {
+        "key": "2025:invoice:sku-027",
+        "count": 77,
+        "missingCostCount": 0,
+        "fingerprint": "fc2a0fcdd112ac44f3af19dc80c1d425a0ad326c92bf708f9af3a2c68b3cd6fe"
+      },
+      {
+        "key": "2025:invoice:sku-028",
+        "count": 38,
+        "missingCostCount": 0,
+        "fingerprint": "412212f0f11284a967f178f70f3586e437e9598ed5de118604c50c62b6db76b0"
+      },
+      {
+        "key": "2025:invoice:sku-029",
+        "count": 32,
+        "missingCostCount": 0,
+        "fingerprint": "e10c414243e6b12c906ee9a77b49364e1a0f45e8c4bdc616d56675db47cd5407"
+      },
+      {
+        "key": "2025:invoice:sku-030",
+        "count": 23,
+        "missingCostCount": 0,
+        "fingerprint": "a898ceac08e9d3758584c81a3a4f285b74e3ca54a8a68ceb9ffb097a3d2f882e"
+      },
+      {
+        "key": "2025:invoice:sku-031",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "a4890ae418aaf5905b78167c0739205bf11d582d25570d497fd1fc5a0b77a0d5"
+      },
+      {
+        "key": "2025:invoice:sku-032",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "0473a4f8324714933ef390600ddca58f224dab47c2b3fd7ab8e6cf0af8667069"
+      },
+      {
+        "key": "2025:invoice:sku-034",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "6e4299eeb8fef58c5d538128eb5994ea8082fe24c980cd44e55ce4bb8e495d6f"
+      },
+      {
+        "key": "2025:invoice:sku-035",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "e64f39e2c99da30e968ea5c134c84172e7009780bf62ddb9d9f78ee29b1d6831"
+      },
+      {
+        "key": "2025:invoice:sku-038",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "5d78ba82b687e536e64987d3c35c24ace9c17214ce15c44fe1ea175686c71ae7"
+      },
+      {
+        "key": "2025:invoice:sku-039",
+        "count": 205,
+        "missingCostCount": 0,
+        "fingerprint": "18524b0a01bfc5a6eb9df5bc28a405e4b99a9722013553c7a05e814f8d4dd352"
+      },
+      {
+        "key": "2025:invoice:sku-040",
+        "count": 66,
+        "missingCostCount": 0,
+        "fingerprint": "73c5cc9a81855456be27670f49aa71f8ed59c821da4a3e5c81627544a5650ba3"
+      },
+      {
+        "key": "2025:invoice:sku-041",
+        "count": 56,
+        "missingCostCount": 0,
+        "fingerprint": "99d95afe922b45c674ada3e41998f69fde0ac67913f337cf03359e93f1d124ab"
+      },
+      {
+        "key": "2025:invoice:sku-042",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "a9e947ef84a68a8e80f0179f157d6f6ebfa44c53160ce5f8c08ca0cabfb21be8"
+      },
+      {
+        "key": "2025:invoice:sku-043",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "5ebdab070510bc992cc051fe8d5ab8c5b163f34264e33db7a377f17179f5e8e4"
+      },
+      {
+        "key": "2025:invoice:sku-044",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "2ab56baa9ddde88ec48f0b9b810c43040dfa443d643e15c7843af4bdd7668325"
+      },
+      {
+        "key": "2025:invoice:sku-046",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "5f4d4677317f437e4bce84317bd920ecebf9acf653a94700953565ce4131ae48"
+      },
+      {
+        "key": "2025:invoice:sku-048",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "b8d94dbc515a7a4a7f1675a0ae15063737e309adacc5836fd22bd1c18347bba5"
+      },
+      {
+        "key": "2025:invoice:sku-049",
+        "count": 38,
+        "missingCostCount": 0,
+        "fingerprint": "1f680c7dad6af56b354d9115e1784a144ae4c3bf082c846b665515814e126984"
+      },
+      {
+        "key": "2025:invoice:sku-051",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "802e87372848e7bcb489b2d23046ed74ed43974340c0e8911468bc78111a8955"
+      },
+      {
+        "key": "2025:invoice:sku-054",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "c1d61c3762fd9db603faaf0f5a6310654eb110850bf2dec03df8f6f3f83c33ad"
+      },
+      {
+        "key": "2025:invoice:sku-056",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "0d66105b195a691c252d32af8cbf0564c9d862f5c3f8d29775b3605697a676bf"
+      },
+      {
+        "key": "2025:invoice:sku-057",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "625c45fa6e1b7768ad6f8f174107e3c6d37a545c72e28520322476d4346baff7"
+      },
+      {
+        "key": "2025:invoice:sku-059",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "b0a33aaf8c966210accfb3bcec503482c6893dc86f145a2677814c798ad42486"
+      },
+      {
+        "key": "2025:invoice:sku-061",
+        "count": 7,
+        "missingCostCount": 0,
+        "fingerprint": "18541d12f0a49c7dc77ae30275ad55d423c1f3c04286c75b87bb79072d724a34"
+      },
+      {
+        "key": "2025:invoice:sku-063",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "54e09e3468f10bbe6b69eabdc34b35932e0240aa73df6f1fc440b2b9e16a5899"
+      },
+      {
+        "key": "2025:invoice:sku-065",
+        "count": 90,
+        "missingCostCount": 0,
+        "fingerprint": "d04fa20ed3a24dfda8d9c806cbea7d3525c196fa0d94832837e9173e5dd58814"
+      },
+      {
+        "key": "2025:invoice:sku-066",
+        "count": 64,
+        "missingCostCount": 0,
+        "fingerprint": "6980b28d13a38f505a721bff2e1cd8c352fa578ddd13e0c87490c120a36ee44c"
+      },
+      {
+        "key": "2025:invoice:sku-067",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "c294d7aafe264f73983e886e6a9ebaa80bef1b94291a926f3c73dc4b3535d0fc"
+      },
+      {
+        "key": "2025:invoice:sku-068",
+        "count": 8,
+        "missingCostCount": 0,
+        "fingerprint": "bc16f928bf6b4480cea740a78ead93039b4f3eff3cac1ef4d9b7817b5bf5a743"
+      },
+      {
+        "key": "2025:invoice:sku-069",
+        "count": 12,
+        "missingCostCount": 0,
+        "fingerprint": "0f1c3c2f48a30a7ef484b0fe6abaf3e312329aafadd79fb934c09d1629235e8d"
+      },
+      {
+        "key": "2025:invoice:sku-071",
+        "count": 64,
+        "missingCostCount": 0,
+        "fingerprint": "b6cdf5f010ac734d8bed583f8f0384bbf41e4f72f285947a9735cfbba3f978d4"
+      },
+      {
+        "key": "2025:invoice:sku-072",
+        "count": 43,
+        "missingCostCount": 0,
+        "fingerprint": "263f201ab5de939107649ba4e6f54b0efec1d02f020a5a2f88a19976f407d783"
+      },
+      {
+        "key": "2025:invoice:sku-073",
+        "count": 31,
+        "missingCostCount": 0,
+        "fingerprint": "5f0cfe9049a8eec902e4c70828d32509c82ccff85e3c8411b85519ab8307634f"
+      },
+      {
+        "key": "2025:invoice:sku-074",
+        "count": 171,
+        "missingCostCount": 0,
+        "fingerprint": "49bf2b2188fc3b9fadf8be8a8c5cdbf836447e2051010edfdca997687720579d"
+      },
+      {
+        "key": "2025:invoice:sku-075",
+        "count": 58,
+        "missingCostCount": 0,
+        "fingerprint": "ef78500b0399be298f0007ab1c58765598b699dc5d6df49ec39234910e6cdfeb"
+      },
+      {
+        "key": "2025:invoice:sku-076",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "47e324874232371f9ca8467bceffaac5eb8b47bb4bd30637142c87929850eab8"
+      },
+      {
+        "key": "2025:invoice:sku-077",
+        "count": 14,
+        "missingCostCount": 0,
+        "fingerprint": "e655a0977426814d4cc55505b9b252f628a5c1c0af172ee42230c972d120cac4"
+      },
+      {
+        "key": "2025:invoice:sku-078",
+        "count": 39,
+        "missingCostCount": 0,
+        "fingerprint": "dee97e0a734ef778ae1eb0ff51dbd77a7465199defc4f3ea2efbe012a855aa90"
+      },
+      {
+        "key": "2025:invoice:sku-079",
+        "count": 10,
+        "missingCostCount": 0,
+        "fingerprint": "c6f33560525b5f4499edb9f810bb9ebe79713db630d338886b8c6b15ca429f58"
+      },
+      {
+        "key": "2025:invoice:sku-080",
+        "count": 16,
+        "missingCostCount": 0,
+        "fingerprint": "b219ea5b511e23dd230380dc05053d2c7b9ad683ae3d389921db9fcc65743c5d"
+      },
+      {
+        "key": "2025:invoice:sku-081",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "aacf6dcd0ba08c15d751c11edf118b4c68cb32089adee8d116b3db13e596f1f5"
+      },
+      {
+        "key": "2025:invoice:sku-082",
+        "count": 30,
+        "missingCostCount": 0,
+        "fingerprint": "64a3f0944683c38c8e5d0959e58b88d299327b3fad7599251bcb0f03c1bcc35a"
+      },
+      {
+        "key": "2025:invoice:unmapped",
+        "count": 136,
+        "missingCostCount": 0,
+        "fingerprint": "38c5e62cc9ec05c658bcb01e4eafd6824669d77fc9bd1dacafe40c10b691941e"
+      },
+      {
+        "key": "2025:order:sku-001",
+        "count": 66,
+        "missingCostCount": 0,
+        "fingerprint": "27726bfd0e7078c0adfca9e02624ee206e2e154674fcf671057413354a4fda5f"
+      },
+      {
+        "key": "2025:order:sku-002",
+        "count": 55,
+        "missingCostCount": 0,
+        "fingerprint": "639c0e4b5a36a025b023053d37f39d7e9a9650a1627ba8afd0e11910901e5a76"
+      },
+      {
+        "key": "2025:order:sku-003",
+        "count": 12,
+        "missingCostCount": 0,
+        "fingerprint": "b476aa0f76cb3029a829534529e901f7f8351e329c61c8661970c0cc8e67b91a"
+      },
+      {
+        "key": "2025:order:sku-004",
+        "count": 19,
+        "missingCostCount": 0,
+        "fingerprint": "ccf0569add9e0de7ab639a8819c4fae568853309181940209427df75e2cfb1cc"
+      },
+      {
+        "key": "2025:order:sku-005",
+        "count": 16,
+        "missingCostCount": 0,
+        "fingerprint": "3146f20ff4150ae9fb226eed4194c9a07fde237d847833147460d8269a6d008d"
+      },
+      {
+        "key": "2025:order:sku-006",
+        "count": 24,
+        "missingCostCount": 0,
+        "fingerprint": "fcd34a35ce9a0e9eb161d8ff53e5bdceaf13b2fb676badb1147b3dafd04b9a7d"
+      },
+      {
+        "key": "2025:order:sku-007",
+        "count": 8,
+        "missingCostCount": 0,
+        "fingerprint": "a5d740ab3ed74fde4e5c0cb30ba4fef045935b6708ee9244885e3fd3097e49db"
+      },
+      {
+        "key": "2025:order:sku-008",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "b5f8c76c9c0efbce50507ad4e423c61932421e39a89d4f91eae44c2e6418386e"
+      },
+      {
+        "key": "2025:order:sku-010",
+        "count": 24,
+        "missingCostCount": 0,
+        "fingerprint": "294baa99af486cff47b85ba5f383e7100ad62e7468f1b701d327c811e1e2f911"
+      },
+      {
+        "key": "2025:order:sku-011",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "b34d4da93d756fd3f045bbf054a8f40a293964383420e7676afbcea451b8278d"
+      },
+      {
+        "key": "2025:order:sku-013",
+        "count": 16,
+        "missingCostCount": 0,
+        "fingerprint": "5f5b758c90c3bcdd06872dde51749dfad457f8c49412c1972552abe23a67db82"
+      },
+      {
+        "key": "2025:order:sku-014",
+        "count": 41,
+        "missingCostCount": 0,
+        "fingerprint": "210376d957827f40cd5bab688e35c2e644913b4e8c3c298cd9db764c0192eb61"
+      },
+      {
+        "key": "2025:order:sku-015",
+        "count": 28,
+        "missingCostCount": 0,
+        "fingerprint": "6260dfcc4cbee378c0fb4096665cff7b222e039e4ede911447ea22fc00de4afb"
+      },
+      {
+        "key": "2025:order:sku-016",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "5c098e5fbb5df730e0502b40d696d76db401fdd18ba788aed3f84ba0d64ff309"
+      },
+      {
+        "key": "2025:order:sku-019",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "c6bd75ec3dc1786b40ccac7527135789de37968ded1861a77bb789a74e07ad8e"
+      },
+      {
+        "key": "2025:order:sku-020",
+        "count": 18,
+        "missingCostCount": 0,
+        "fingerprint": "a2c56c274ed95b1394577f0f5d9ac2c8a4d64087ec95810a79c563259dce3b90"
+      },
+      {
+        "key": "2025:order:sku-021",
+        "count": 21,
+        "missingCostCount": 0,
+        "fingerprint": "f041d07f945e461f8ee168f7106873cfb1526ef0647b5bd41323d7943896a578"
+      },
+      {
+        "key": "2025:order:sku-022",
+        "count": 158,
+        "missingCostCount": 0,
+        "fingerprint": "8be36f124c458ca640bfa256cb528c3c32cc74785c8189956e226a1db2735f65"
+      },
+      {
+        "key": "2025:order:sku-023",
+        "count": 46,
+        "missingCostCount": 0,
+        "fingerprint": "b3671a6065d63dc6d0649423aa296ce77a46a32242fb62919357498c39d61157"
+      },
+      {
+        "key": "2025:order:sku-024",
+        "count": 9,
+        "missingCostCount": 0,
+        "fingerprint": "95c6af1449146ba91dce072199e9ea215b4c2c430b91fec93dc2b9bc6e0a5d08"
+      },
+      {
+        "key": "2025:order:sku-025",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "ebbdddb381ec0e6ed1b19956ec3fe758556dcecf5527150219ee5a4439e9e884"
+      },
+      {
+        "key": "2025:order:sku-026",
+        "count": 194,
+        "missingCostCount": 0,
+        "fingerprint": "629abea02528383346f4a739e02394c99f944a89acd6929ba022e5416aa1b72e"
+      },
+      {
+        "key": "2025:order:sku-027",
+        "count": 77,
+        "missingCostCount": 0,
+        "fingerprint": "ed29138a4799a2e3d81e284b35377051efee62814e6c5923a33662041a3d5ba9"
+      },
+      {
+        "key": "2025:order:sku-028",
+        "count": 38,
+        "missingCostCount": 0,
+        "fingerprint": "4c5fa6e2b798986f506ddd20c478c4ecadb7647298158477e8f22624c8216257"
+      },
+      {
+        "key": "2025:order:sku-029",
+        "count": 32,
+        "missingCostCount": 0,
+        "fingerprint": "9671c16e42ea6a8d7f0a485a1d2bb5d8baaa96d37c9931d5641dac101dcc012d"
+      },
+      {
+        "key": "2025:order:sku-030",
+        "count": 23,
+        "missingCostCount": 0,
+        "fingerprint": "186d9831dbc126b8ae4bdb80207ba86c52ec6670a3af98faffba0b7ee4fd9cad"
+      },
+      {
+        "key": "2025:order:sku-031",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "21e9bca7ce66a9b51ea3ba5ad402f4113adbf89a72efbdbb92a708ea32d49405"
+      },
+      {
+        "key": "2025:order:sku-032",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "33c59288512dbbb00fc0c1fde5b85ed466e73c3b0cf9a7215e36fa57f709ceb6"
+      },
+      {
+        "key": "2025:order:sku-034",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "aa2ad01cac6a8bf92bc563cb364d77a76c03a3a10e9a54aa06c5efe69a56debc"
+      },
+      {
+        "key": "2025:order:sku-035",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "606bd3259f7e05d59cd59cffe18f68dec3becc27e10ea0da1b2b91459e40a957"
+      },
+      {
+        "key": "2025:order:sku-038",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "364a3934f480f384a0672e7734adff3bb0373b51fe3ce8935dc336dae7d89f5f"
+      },
+      {
+        "key": "2025:order:sku-039",
+        "count": 207,
+        "missingCostCount": 0,
+        "fingerprint": "4be30ee8748e4d9aa6facd1985e2f18e95a50fe316fac745f5d7e36f893712f2"
+      },
+      {
+        "key": "2025:order:sku-040",
+        "count": 66,
+        "missingCostCount": 0,
+        "fingerprint": "93916cd6b09dbd92258cda162e13b44c2a3fda11c1eccb6e14855243f857ec8a"
+      },
+      {
+        "key": "2025:order:sku-041",
+        "count": 54,
+        "missingCostCount": 0,
+        "fingerprint": "ca3d280ff71761b30f7e5b62eb698f19336e10895ce1aa61e8aa598a6781c646"
+      },
+      {
+        "key": "2025:order:sku-042",
+        "count": 12,
+        "missingCostCount": 0,
+        "fingerprint": "ffce774beac29ac944cc1a3389cdb99a11ef9e44e5a7bec6f76684fe176b9e92"
+      },
+      {
+        "key": "2025:order:sku-043",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "5fe1d08be30c2b9dd8ccb49ceb2a694f13f70c13fe5308be3b56b486c31b0b05"
+      },
+      {
+        "key": "2025:order:sku-044",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "f4d566146ca27c404e0df355ad78c334b411ba075912570e4013baa369754361"
+      },
+      {
+        "key": "2025:order:sku-046",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "0ba2207e2975ead528523bc555df4079fb0f62892a03f93bb1204769a402f393"
+      },
+      {
+        "key": "2025:order:sku-048",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "9ab83fc77a1fbf4f3a48258431b5bb2417dbfe9c72826386048b787f1eb1e949"
+      },
+      {
+        "key": "2025:order:sku-049",
+        "count": 38,
+        "missingCostCount": 0,
+        "fingerprint": "3c774429d6268b1fe9f6b62a63ded7f71aa1c381db669f8d9b9a39c4130706ae"
+      },
+      {
+        "key": "2025:order:sku-051",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "3b22c4b5244b14a9ae405b1be63d332e4a622b76c3be86942b08089339b29168"
+      },
+      {
+        "key": "2025:order:sku-054",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "5f50a7949586f129ff22cfc098398b98958d1a4346b4b0048b1c239527f454d0"
+      },
+      {
+        "key": "2025:order:sku-056",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "cd16eff17f6b6b8420cf4441b0015deea9ae04f5d55e97d70d644b0d44e638b0"
+      },
+      {
+        "key": "2025:order:sku-057",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "0d3ea8844ddf6c045d184f9ae148739548ddcdb2267d584b6837460568fb54a5"
+      },
+      {
+        "key": "2025:order:sku-059",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "f930a9869fdeb180f652c258361df20f50ca86709157599c6ba2607dc0e974af"
+      },
+      {
+        "key": "2025:order:sku-061",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "85e7efad485640a9a572ba7fa53bc20eb2bc62321e0adb9dad4170ac7c65b295"
+      },
+      {
+        "key": "2025:order:sku-063",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "42d6e3c0916a70726b8496682758eb10c840a86007fa29ae477e8364bc874296"
+      },
+      {
+        "key": "2025:order:sku-065",
+        "count": 91,
+        "missingCostCount": 0,
+        "fingerprint": "37a7001ba81cb03694bd04a8d4cbb69038eab77fe3539f06ea2a6d94f92d166d"
+      },
+      {
+        "key": "2025:order:sku-066",
+        "count": 65,
+        "missingCostCount": 0,
+        "fingerprint": "d02ff93b6bd29eca66e9984d53f6eabdaa3fdf013be3792d93c302edc6fd0084"
+      },
+      {
+        "key": "2025:order:sku-067",
+        "count": 3,
+        "missingCostCount": 0,
+        "fingerprint": "07e4a033f3aac86bc6841a61352c30c6733a6dad16a041f648f6c12951a86aff"
+      },
+      {
+        "key": "2025:order:sku-068",
+        "count": 8,
+        "missingCostCount": 0,
+        "fingerprint": "b5eadb8a9ab3536645b7ed0e152717b1b83cda8df5d1f09f605c66ddf25dbd74"
+      },
+      {
+        "key": "2025:order:sku-069",
+        "count": 12,
+        "missingCostCount": 0,
+        "fingerprint": "1c7605111b8e1ad923357e97a68757e71c068ccccb5e9025a7ba97a69211c57c"
+      },
+      {
+        "key": "2025:order:sku-071",
+        "count": 65,
+        "missingCostCount": 0,
+        "fingerprint": "865a9ff8d94f4419d502e8b17307c03ac189dbd3a529df76331f86a6b5e3369c"
+      },
+      {
+        "key": "2025:order:sku-072",
+        "count": 43,
+        "missingCostCount": 0,
+        "fingerprint": "43bdcb61489cf63816789f46bdf7fb1181c01995e1b347c1b957cc12cb7e92e5"
+      },
+      {
+        "key": "2025:order:sku-073",
+        "count": 31,
+        "missingCostCount": 0,
+        "fingerprint": "db787e8d1f1185455d3146a4ed40f33f6be87a20e4c6c6f7c2f13335c368961f"
+      },
+      {
+        "key": "2025:order:sku-074",
+        "count": 173,
+        "missingCostCount": 0,
+        "fingerprint": "dcfb2f01806aa5b2c0fa5ef10e83e509124ec041ef2a6372d8771a620b4cac96"
+      },
+      {
+        "key": "2025:order:sku-075",
+        "count": 58,
+        "missingCostCount": 0,
+        "fingerprint": "ba983296c34ca766cc53f5f7b2c4172d9e17e81ea9e355b234d081c6a8a30f15"
+      },
+      {
+        "key": "2025:order:sku-076",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "824b7031951df01070455b367999e1da73225d137ab9d692cae29fd45b5915f7"
+      },
+      {
+        "key": "2025:order:sku-077",
+        "count": 14,
+        "missingCostCount": 0,
+        "fingerprint": "286341e0c05e2bc7147119af4a9cc9cde6c9fcb737029cd4182e870d579c6852"
+      },
+      {
+        "key": "2025:order:sku-078",
+        "count": 39,
+        "missingCostCount": 0,
+        "fingerprint": "95faca56991e7a2923c500bbc2eec828532c515721652fb0e6b822ca7acc53c4"
+      },
+      {
+        "key": "2025:order:sku-079",
+        "count": 10,
+        "missingCostCount": 0,
+        "fingerprint": "aa064fe6bcae724273cc45b5ce6487f87c421c15b61f8cfff2c7cc863185ec73"
+      },
+      {
+        "key": "2025:order:sku-080",
+        "count": 14,
+        "missingCostCount": 0,
+        "fingerprint": "4c9ed51b25230e2398a4995ac84ceaacf8a71438fed9894b3f1b03c41326a9cf"
+      },
+      {
+        "key": "2025:order:sku-081",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "3277b2b278986693a91c8be3f13bdeee79a1f6e237201618e7425a4e7905ad5c"
+      },
+      {
+        "key": "2025:order:sku-082",
+        "count": 30,
+        "missingCostCount": 0,
+        "fingerprint": "302d051c454147740cf5c73b4d06bac0b889d3e38d28de9ee83076341308131c"
+      },
+      {
+        "key": "2025:order:unmapped",
+        "count": 107,
+        "missingCostCount": 0,
+        "fingerprint": "5c2774c18200b373f142d837d5ac746514ca0c0a0de6fff834108089bdcaccb8"
+      },
+      {
+        "key": "2026:invoice:sku-001",
+        "count": 40,
+        "missingCostCount": 0,
+        "fingerprint": "1198b7f10efd1de94c7d22d3789d9a92976af95478405aba4a03104022163f1e"
+      },
+      {
+        "key": "2026:invoice:sku-002",
+        "count": 23,
+        "missingCostCount": 23,
+        "fingerprint": "fef019604a62bb436fa3d8fb6ea1304aef8f4f59f1eaf592bdf5f8f5c2f66d4e"
+      },
+      {
+        "key": "2026:invoice:sku-003",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "5a844562baf325af9b6ddf32fbbdc899cdcf6e31d262e99186ca12d3bf426550"
+      },
+      {
+        "key": "2026:invoice:sku-004",
+        "count": 3,
+        "missingCostCount": 3,
+        "fingerprint": "7b32238f9bbe20e04110db98981341c6b35d4c88406bae74cb9cb7c0ac932d1f"
+      },
+      {
+        "key": "2026:invoice:sku-005",
+        "count": 5,
+        "missingCostCount": 5,
+        "fingerprint": "e2b4502dd16bbf079b4df42987345b7450280e3ea2e5a3fcc3cda7b6964f04ec"
+      },
+      {
+        "key": "2026:invoice:sku-006",
+        "count": 9,
+        "missingCostCount": 0,
+        "fingerprint": "13e1ac04ef8558b969c3426f3d56d659d5056dbd2084dab97b1d7e230eb551db"
+      },
+      {
+        "key": "2026:invoice:sku-007",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "f47417526254c4d07a0987ac8fa34dcd37ba49772e61a903dd3967ce09811131"
+      },
+      {
+        "key": "2026:invoice:sku-008",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "30f9f6f564297ea1d437360defe0421657d8717fe30aca1d81804c18c09e04dc"
+      },
+      {
+        "key": "2026:invoice:sku-009",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "aa340d5386b07175856868284b3fa9fa03e20be48355c4a5de603b3c9c9c44d0"
+      },
+      {
+        "key": "2026:invoice:sku-010",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "0d136f914af8910965ecfbfad5388b9144c8977b962bf959e76d5a5d8e99defa"
+      },
+      {
+        "key": "2026:invoice:sku-011",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "38495e81a8fcbf26e633c17f2b1fa5d7ee10b58274a5934143980e59e84e06aa"
+      },
+      {
+        "key": "2026:invoice:sku-014",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "54e6377787b5dd50ae83e37de85272c3eedf163e056e51f7db18ff6824025f7e"
+      },
+      {
+        "key": "2026:invoice:sku-015",
+        "count": 4,
+        "missingCostCount": 4,
+        "fingerprint": "974bf5764696e9cec6e19738302e425ddcf9219957e95a892056a6c9456b4e9f"
+      },
+      {
+        "key": "2026:invoice:sku-020",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "b34dcd57a35ed049af6805337c0b277bea1c16212fbe532211ffdda89a0c7269"
+      },
+      {
+        "key": "2026:invoice:sku-021",
+        "count": 9,
+        "missingCostCount": 9,
+        "fingerprint": "f5a96cc53ef92634e71e8010cc387cba274071041a2ea1c611195f7c2cad2560"
+      },
+      {
+        "key": "2026:invoice:sku-022",
+        "count": 70,
+        "missingCostCount": 0,
+        "fingerprint": "941ac24c904757c347e359e7622ce63c4301d44d292d0db0e35a60a4d7e63fc9"
+      },
+      {
+        "key": "2026:invoice:sku-023",
+        "count": 19,
+        "missingCostCount": 19,
+        "fingerprint": "18737937266155e88afb1df28cf60697a43bacea3136024e371eb2f0082baae0"
+      },
+      {
+        "key": "2026:invoice:sku-026",
+        "count": 78,
+        "missingCostCount": 0,
+        "fingerprint": "f46abb3e941e55370cac506a67c28814c38c26c4b9316fe2c565b7be91a9cfa9"
+      },
+      {
+        "key": "2026:invoice:sku-027",
+        "count": 24,
+        "missingCostCount": 24,
+        "fingerprint": "a3164f825bdcbf6de73f13597859b8ee69cd175a651aff94e2cf6e60f4fd7e10"
+      },
+      {
+        "key": "2026:invoice:sku-028",
+        "count": 14,
+        "missingCostCount": 14,
+        "fingerprint": "682e3c438c72a68818e9c35978977c222e156f0caf1e68fd865109fefb32a373"
+      },
+      {
+        "key": "2026:invoice:sku-029",
+        "count": 20,
+        "missingCostCount": 0,
+        "fingerprint": "148c62769e39f68ccd2b71f13703e5082624fb99672b6b56ef849599f9c8d174"
+      },
+      {
+        "key": "2026:invoice:sku-030",
+        "count": 19,
+        "missingCostCount": 19,
+        "fingerprint": "c66b8532ede81a929e253cf8cb0d71907b2d93ac4b3ac3f36c6bb41622574aca"
+      },
+      {
+        "key": "2026:invoice:sku-036",
+        "count": 20,
+        "missingCostCount": 0,
+        "fingerprint": "7256432b29a0cf45dd462293b3f08157a95080ef02a2ba98d27d6e65f25ede7e"
+      },
+      {
+        "key": "2026:invoice:sku-037",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "6ce5dab70000f7eaa382fbddc6b12dab52df67ed89ff1007089ea8a3fca13bd4"
+      },
+      {
+        "key": "2026:invoice:sku-038",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "1f04f7de161df784cdd7e8b7f208734a70cf70bdfce7df56d50c9d7ca0ba7cfa"
+      },
+      {
+        "key": "2026:invoice:sku-039",
+        "count": 98,
+        "missingCostCount": 98,
+        "fingerprint": "e6291323f503ba7f111ab030f385355503850e06d0fc636b1848a2ac6163b3c0"
+      },
+      {
+        "key": "2026:invoice:sku-040",
+        "count": 24,
+        "missingCostCount": 24,
+        "fingerprint": "25c81cb7e133375a5e1e28d4579f1f03d3b2a1283fae8f9844769b3db8801a3f"
+      },
+      {
+        "key": "2026:invoice:sku-041",
+        "count": 34,
+        "missingCostCount": 34,
+        "fingerprint": "3792edd0eee35b4a54dc2de7cae193db91de819bcb9a999c56b38a5a255baae1"
+      },
+      {
+        "key": "2026:invoice:sku-042",
+        "count": 17,
+        "missingCostCount": 17,
+        "fingerprint": "89d075aebfb377d958c36a9c67bc2146943b663e2cb27e44c2bda4e104b48a67"
+      },
+      {
+        "key": "2026:invoice:sku-043",
+        "count": 8,
+        "missingCostCount": 8,
+        "fingerprint": "cf0caad6550cd13433a13a16b10fc7f7e90fd9d3c99d18fd5662f32064529290"
+      },
+      {
+        "key": "2026:invoice:sku-045",
+        "count": 6,
+        "missingCostCount": 6,
+        "fingerprint": "9c2b4f36a08947b95f3ecbfcfa36a1cf0f9193e8b53f58f5147aa348ed9a6eb5"
+      },
+      {
+        "key": "2026:invoice:sku-046",
+        "count": 2,
+        "missingCostCount": 2,
+        "fingerprint": "d6fdb562fe4969678cf85e07662ed2673cc94f3060c6621a84c833b84ae64e66"
+      },
+      {
+        "key": "2026:invoice:sku-047",
+        "count": 4,
+        "missingCostCount": 4,
+        "fingerprint": "00250d8cc4cb407880a058ec430ad0fc6ebe9bab710944e8b5131d1c72f442c7"
+      },
+      {
+        "key": "2026:invoice:sku-049",
+        "count": 14,
+        "missingCostCount": 0,
+        "fingerprint": "8018618c202c9cf5953f5ac2776f7b721ea3efff38a630357471abf5cca7dbfc"
+      },
+      {
+        "key": "2026:invoice:sku-050",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "20c48ee9bfe5821e18ac493475e375c98f615798cb6d17c2e8e8b34bfa4d87bd"
+      },
+      {
+        "key": "2026:invoice:sku-052",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "95b48581e5b63415b06dfe4ffa806a1ad8e6def200cfb46f6951382d7e0a16e5"
+      },
+      {
+        "key": "2026:invoice:sku-053",
+        "count": 5,
+        "missingCostCount": 5,
+        "fingerprint": "64a37c0addfad65f406574b7d2aedba78039d7a4880bc446beef7bf28f5ff788"
+      },
+      {
+        "key": "2026:invoice:sku-054",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "bde4c36db762aeb171cc21c8f785291de4643705b91b7eb28d4de3e2c2d5cbd6"
+      },
+      {
+        "key": "2026:invoice:sku-058",
+        "count": 7,
+        "missingCostCount": 7,
+        "fingerprint": "1365468a45402419a76d993a2edc219ad8e8112d45bc0c9ef6a0da79d74f36b8"
+      },
+      {
+        "key": "2026:invoice:sku-059",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "cfa1514a302cb0fc741231e01b972bb7bd3cb7ef10c950dfb918f87a3a831974"
+      },
+      {
+        "key": "2026:invoice:sku-060",
+        "count": 5,
+        "missingCostCount": 5,
+        "fingerprint": "a998733c152273ccd898b7b71ab9a877894748f3868248693f58d21e9992b4b9"
+      },
+      {
+        "key": "2026:invoice:sku-062",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "680db8071df411c5f149386b481a49ec74cffb4bf91897ecab92786fc6019afd"
+      },
+      {
+        "key": "2026:invoice:sku-063",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "01a920af19ca6da68bc812dee5a1d8588af2ac0c0ebc215582ddccd03f8401e8"
+      },
+      {
+        "key": "2026:invoice:sku-065",
+        "count": 38,
+        "missingCostCount": 0,
+        "fingerprint": "18a78d8742c085e4d48a536d7578b29525a6afb2ffd3740a87f74886a68b38b0"
+      },
+      {
+        "key": "2026:invoice:sku-066",
+        "count": 28,
+        "missingCostCount": 0,
+        "fingerprint": "5140bac7fc4db5a4ec31d7c39d01bdab1c4c2eb67dca66c66263c096bc4edbc3"
+      },
+      {
+        "key": "2026:invoice:sku-069",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "aa6397bba7938115bf592b1e158e70205b7781c62322fbae6c3b17f1cba17851"
+      },
+      {
+        "key": "2026:invoice:sku-071",
+        "count": 3,
+        "missingCostCount": 3,
+        "fingerprint": "9bbdb8093ce8448848906f0961099b1586bda8f566fa4fb352b7387ba5415e5e"
+      },
+      {
+        "key": "2026:invoice:sku-072",
+        "count": 20,
+        "missingCostCount": 20,
+        "fingerprint": "232b2e72d315e8380774af13eae13aefb32bc329487ed1f1a8c7689df79af892"
+      },
+      {
+        "key": "2026:invoice:sku-073",
+        "count": 3,
+        "missingCostCount": 3,
+        "fingerprint": "1801387ea45ddf7b78bbc4a67566233538580fca3adb0c61f351bd199bd32876"
+      },
+      {
+        "key": "2026:invoice:sku-074",
+        "count": 66,
+        "missingCostCount": 66,
+        "fingerprint": "589189872ed9ce85f12817109f9213f431ef51bb22726cb2359ede7bcac426f9"
+      },
+      {
+        "key": "2026:invoice:sku-075",
+        "count": 21,
+        "missingCostCount": 21,
+        "fingerprint": "28c91518c268e8d1c5f792ec96e5d12d677cf032178ae99d4047dee12c309495"
+      },
+      {
+        "key": "2026:invoice:sku-078",
+        "count": 25,
+        "missingCostCount": 25,
+        "fingerprint": "8f110924fb702a923fbc38d0fa7cffc9a6ff69835b623a4b9625a39169a981f1"
+      },
+      {
+        "key": "2026:invoice:sku-079",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "78cdc0f3939302b5a85fddd0c5900261c4082140854ca3a852705431163dfc41"
+      },
+      {
+        "key": "2026:invoice:sku-080",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "7b07c4a18dc65d5f0093d3eb4e7390810ecd88fc7fc301d1f7a00219c9782d5a"
+      },
+      {
+        "key": "2026:invoice:sku-082",
+        "count": 15,
+        "missingCostCount": 0,
+        "fingerprint": "1d33974c0ccd0f744a5f038bf8bc8237d8ecf4203efe2c7a981e23c61351957f"
+      },
+      {
+        "key": "2026:invoice:sku-083",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "74f28364b66bafcd9fb6aa469bc0ad4cbb731b316255e3d5e27133f917a02ba1"
+      },
+      {
+        "key": "2026:invoice:unmapped",
+        "count": 30,
+        "missingCostCount": 0,
+        "fingerprint": "bcc2e3de6f0def590fb626a55d1803d697abecc1a1cc1e04fcf14b20577f9032"
+      },
+      {
+        "key": "2026:order:sku-001",
+        "count": 40,
+        "missingCostCount": 0,
+        "fingerprint": "6ec8b1b36bff3d2f3e02e2a0aae0cacc868cda112f5a0f49e24af67c88607e1d"
+      },
+      {
+        "key": "2026:order:sku-002",
+        "count": 23,
+        "missingCostCount": 23,
+        "fingerprint": "de3a06ff567fd78fc9dec5d6b4766d43928ddd60100c463a0028a59156cb2b6d"
+      },
+      {
+        "key": "2026:order:sku-003",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "8a9e7c2f45821f176c78ab29d9afecb6ede8e1394e05e2000786d394ab486154"
+      },
+      {
+        "key": "2026:order:sku-004",
+        "count": 3,
+        "missingCostCount": 3,
+        "fingerprint": "5397ed0c9e0be3d97dd22722a437a2990ab50d2857724e9038c8625a370dccca"
+      },
+      {
+        "key": "2026:order:sku-005",
+        "count": 5,
+        "missingCostCount": 5,
+        "fingerprint": "b256b3e9cdc09d0aa15bae143da3ed4915228d0df8752447492894b10b78df07"
+      },
+      {
+        "key": "2026:order:sku-006",
+        "count": 9,
+        "missingCostCount": 0,
+        "fingerprint": "24690ffbd857c1cac6f1fd61593c4a24d875b1bc403ad166ccba0882129b1124"
+      },
+      {
+        "key": "2026:order:sku-007",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "0ae4609eee8376339eb1d17a7a799dd77fd4932972168afcce87ad70ea471d70"
+      },
+      {
+        "key": "2026:order:sku-008",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "2cd5d43668e5fa950bd568300da7dbd70e4e762fb7f7bb5e7eda646b4a4544e3"
+      },
+      {
+        "key": "2026:order:sku-009",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "d576cd3d53b7521468dff2dbe0f6ee871e9473b47323af7680494d576f056191"
+      },
+      {
+        "key": "2026:order:sku-010",
+        "count": 4,
+        "missingCostCount": 0,
+        "fingerprint": "2cf0c5f8517bf425c17bd5b05b09a113744bc8abc2b108ad19f12c0d4a34a5e2"
+      },
+      {
+        "key": "2026:order:sku-011",
+        "count": 1,
+        "missingCostCount": 0,
+        "fingerprint": "69b413c58637a811882c9e0288aee0d18c3a971503e43a4973b7c6be424a975a"
+      },
+      {
+        "key": "2026:order:sku-014",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "7eaa246ddc5171cf2ac8109d071db39a655518f73e726dc15f4f748c1a8e9d20"
+      },
+      {
+        "key": "2026:order:sku-015",
+        "count": 4,
+        "missingCostCount": 4,
+        "fingerprint": "3dbf3a4df4edc0e71a97a0474ed764217b8f4e8478237c26afc96a11f03906c4"
+      },
+      {
+        "key": "2026:order:sku-020",
+        "count": 11,
+        "missingCostCount": 0,
+        "fingerprint": "8ee83e9b49caf42e1290d2b079f6042de5903cb87a99ea95db8dbe02f08c5162"
+      },
+      {
+        "key": "2026:order:sku-021",
+        "count": 9,
+        "missingCostCount": 9,
+        "fingerprint": "3562c1aa36a8d341d35a4b7487e357138102bf601066e13c6b22a36f1563ec76"
+      },
+      {
+        "key": "2026:order:sku-022",
+        "count": 69,
+        "missingCostCount": 0,
+        "fingerprint": "9b850e2b0c754bd13d77f307dba6259189888ddba462c4603db584cf67118ab4"
+      },
+      {
+        "key": "2026:order:sku-023",
+        "count": 19,
+        "missingCostCount": 19,
+        "fingerprint": "fe5a250ab0c9119769b2ceec5857097e28a53bc7e4ada1100882e37246b9e25b"
+      },
+      {
+        "key": "2026:order:sku-026",
+        "count": 76,
+        "missingCostCount": 0,
+        "fingerprint": "0cf479d6051589e68685a05082f335973f0dab9f32a7e13e0af12e6a3a611c94"
+      },
+      {
+        "key": "2026:order:sku-027",
+        "count": 24,
+        "missingCostCount": 24,
+        "fingerprint": "083fdc7cd97b93bc7c3d7bf74f072ced7f7de31600a8e92ce22d7a9ba9f77130"
+      },
+      {
+        "key": "2026:order:sku-028",
+        "count": 14,
+        "missingCostCount": 14,
+        "fingerprint": "48bb3a41a3d9ea5ae7e2050de78c8554cfa2aaffcebb348f33f28c63060ceb96"
+      },
+      {
+        "key": "2026:order:sku-029",
+        "count": 20,
+        "missingCostCount": 0,
+        "fingerprint": "0b443b42c76702bb0ad3125aa0722a651d5cb8c7809866cec4afb4861f61cd07"
+      },
+      {
+        "key": "2026:order:sku-030",
+        "count": 19,
+        "missingCostCount": 19,
+        "fingerprint": "e73e3ec682b8530ff37718da881e32001689aa918175f26749b870dc6ee2fa95"
+      },
+      {
+        "key": "2026:order:sku-036",
+        "count": 21,
+        "missingCostCount": 0,
+        "fingerprint": "fa70c27a746f64545289f998009a0e9a7c2e00c3b09d61efb9c9912ae02ee266"
+      },
+      {
+        "key": "2026:order:sku-037",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "5310a0610676ed87bf11611ec647a9908da3d424e1cd989a0ed24995d432432a"
+      },
+      {
+        "key": "2026:order:sku-038",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "fe77a5410c14a47dfebbbf7cae698dfbbe2503810320de9b0f9f87185e72d395"
+      },
+      {
+        "key": "2026:order:sku-039",
+        "count": 97,
+        "missingCostCount": 97,
+        "fingerprint": "4eb4b48574622bccda2deaa2f586e7be3414132643d9b7e874328d339840f295"
+      },
+      {
+        "key": "2026:order:sku-040",
+        "count": 24,
+        "missingCostCount": 24,
+        "fingerprint": "c9fea773bd1522a5983a4e60883f1ffa090a90b0b76232beda838d7fe5b91d6c"
+      },
+      {
+        "key": "2026:order:sku-041",
+        "count": 33,
+        "missingCostCount": 33,
+        "fingerprint": "cdca82c4558e635cf77cba193bbf6fc6e06214d29ce861b2be673214bb8265a1"
+      },
+      {
+        "key": "2026:order:sku-042",
+        "count": 16,
+        "missingCostCount": 16,
+        "fingerprint": "5ee149bf81bf49e5a9feb72dc696a0e95787358a97cf5b3988dc138502cf1996"
+      },
+      {
+        "key": "2026:order:sku-043",
+        "count": 8,
+        "missingCostCount": 8,
+        "fingerprint": "35e4576ee7a4ba957da6000bce73069035bb53b71742f1882f77dda18bdd2562"
+      },
+      {
+        "key": "2026:order:sku-045",
+        "count": 6,
+        "missingCostCount": 6,
+        "fingerprint": "06f8290d15370c4affeee9ee5df6ee7ae239fcc43db923b7089f4a05f5f8c48b"
+      },
+      {
+        "key": "2026:order:sku-046",
+        "count": 2,
+        "missingCostCount": 2,
+        "fingerprint": "ceb6a4d3295888592042eff7c52864b92e01a8e2f43ab99119abe1d7036537f6"
+      },
+      {
+        "key": "2026:order:sku-047",
+        "count": 4,
+        "missingCostCount": 4,
+        "fingerprint": "08bd20f5d74ec568c87507d8cf53fff92030675d39c75bb525501d490a963363"
+      },
+      {
+        "key": "2026:order:sku-049",
+        "count": 14,
+        "missingCostCount": 0,
+        "fingerprint": "08fc6fbdcb96ba3ff0c8ed30a04ba35b855af27c933421ddec34cf0bb50390df"
+      },
+      {
+        "key": "2026:order:sku-050",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "c8a112ba388b0dc359af294258f8fe9be8941c7537106b0ead8862658640bd1e"
+      },
+      {
+        "key": "2026:order:sku-052",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "7c73becb9393bc096a8248f97ca2f23f7cc17c218faceb7af0bc8cfe7393160b"
+      },
+      {
+        "key": "2026:order:sku-053",
+        "count": 5,
+        "missingCostCount": 5,
+        "fingerprint": "fe437c3683506cfeb66df6a731aa8d7f989e76882ba2886611c97ccfd02e316d"
+      },
+      {
+        "key": "2026:order:sku-054",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "f3a397237a7c253d285cd254e0ea0c98d26f414f92506bd9a4715d4872090692"
+      },
+      {
+        "key": "2026:order:sku-058",
+        "count": 7,
+        "missingCostCount": 7,
+        "fingerprint": "c6f094211f078d6fe7fcc708fe76301bdc684ef557c9b88b7b62d3c01d8b18f8"
+      },
+      {
+        "key": "2026:order:sku-059",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "adaa0bf59ba7fb38269c4c0b3ba6b7953b94913741f2266ac60d6afe837ebdb2"
+      },
+      {
+        "key": "2026:order:sku-060",
+        "count": 5,
+        "missingCostCount": 5,
+        "fingerprint": "9ea3c8ca238d59873c152e232f26dc9b4c56701766e8487afedd19149f62f3d7"
+      },
+      {
+        "key": "2026:order:sku-062",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "08897b48d9fe37bebe22af626480607c9786a4bcbc65027da4ae25ff9ba0889b"
+      },
+      {
+        "key": "2026:order:sku-063",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "e257275a59cc2ee130486cf32ba612648bd6027a7ab6066433ff9117b0981ca3"
+      },
+      {
+        "key": "2026:order:sku-065",
+        "count": 37,
+        "missingCostCount": 0,
+        "fingerprint": "ebe9cd8ef1850150ea31bae69504cff5ef0c736a470c8aa752dda364e86142d5"
+      },
+      {
+        "key": "2026:order:sku-066",
+        "count": 27,
+        "missingCostCount": 0,
+        "fingerprint": "eb6e604510806d48f34eb79376c6bd0b85cc54753933227fe1c70307c3ce4a4d"
+      },
+      {
+        "key": "2026:order:sku-069",
+        "count": 2,
+        "missingCostCount": 0,
+        "fingerprint": "3a508fd02c9a73e2299cab72e5bfaa3c07b3d9ee11fbe6b7db1d892907ba6d18"
+      },
+      {
+        "key": "2026:order:sku-071",
+        "count": 2,
+        "missingCostCount": 2,
+        "fingerprint": "276f2d235f99744703bd8910b813f85b528d530c4ed93c355e8214940686b083"
+      },
+      {
+        "key": "2026:order:sku-072",
+        "count": 20,
+        "missingCostCount": 20,
+        "fingerprint": "3962d8f1281b1e7c6aed6e57fde02ec88918098c49f78015a580f28c43c40666"
+      },
+      {
+        "key": "2026:order:sku-073",
+        "count": 3,
+        "missingCostCount": 3,
+        "fingerprint": "48cee6a88062072f70c8ebdb98db3f000b387be4d873491f2aa75ced8cbfd77a"
+      },
+      {
+        "key": "2026:order:sku-074",
+        "count": 64,
+        "missingCostCount": 64,
+        "fingerprint": "c3baaca19c356863474181be5ead08e6c3ad18bef51ef3130f7019b5766d521a"
+      },
+      {
+        "key": "2026:order:sku-075",
+        "count": 22,
+        "missingCostCount": 22,
+        "fingerprint": "ea6708e7ea2c0186c11b4eb8fb3d2d0cc017c470dc3fac53d40fd812c9c708eb"
+      },
+      {
+        "key": "2026:order:sku-078",
+        "count": 26,
+        "missingCostCount": 26,
+        "fingerprint": "7cbe408cfc45861ed7f8b0aa23700d25b22f1be6cc12f1440674704693a8ac4f"
+      },
+      {
+        "key": "2026:order:sku-079",
+        "count": 6,
+        "missingCostCount": 0,
+        "fingerprint": "dcfea2ca4c93559044519cf9751a67707da48fdfb45f4d261fad2b8833218562"
+      },
+      {
+        "key": "2026:order:sku-080",
+        "count": 5,
+        "missingCostCount": 0,
+        "fingerprint": "7808cabc9f2feebab4aec0453c32cd514030bc9277209cb810fc1340bd09ca4c"
+      },
+      {
+        "key": "2026:order:sku-082",
+        "count": 15,
+        "missingCostCount": 0,
+        "fingerprint": "f538f321840a77a0f02728ef25f2de60ea2ebd01eec56088121904384474b54f"
+      },
+      {
+        "key": "2026:order:sku-083",
+        "count": 1,
+        "missingCostCount": 1,
+        "fingerprint": "31f40a5dd05c477f5670e8c852e04fa5a6a594f1865a831fbd5cc044c7807528"
+      },
+      {
+        "key": "2026:order:unmapped",
+        "count": 33,
+        "missingCostCount": 0,
+        "fingerprint": "19ea0d0346b1c3104b3243ce344a4237decfe19f54ef18eb36bfb78d3f7c5c04"
+      }
+    ],
+    "activeBreakEvenPlans": [
+      {
+        "key": "plan-001",
+        "fingerprint": "179f4e612b477e6dd2dbe5f7826a414327b69584faf0ca74f48caaa6725b1e5a"
+      },
+      {
+        "key": "plan-002",
+        "fingerprint": "9e1c7575a86482b7e1316fa2c31b3655eed396de3c0a05d27da4e7ffa566a892"
+      }
+    ],
+    "wholeContext": "2a7522682e6d2f807d0a1abca26786f7f47331ef6ea3cde7a0b228da11a70ec8"
+  }
+}
