@@ -355,6 +355,8 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Acceptance criteria:** finance/product confirms that Break-even and new Price proposals select the same first planning anchor; later same-SKU LOT costs remain visible to Omzet en Marge without changing planning; new SKUs receive independent anchors; every current deviation is classified and unknown deviations block RF-011B.
 - **Dependencies / complexity / risk / human confirmation:** RF-007B/RF-004/RF-006; **medium/large complexity, high financial risk**. Mandatory finance/product approval. RF-010 is incomplete until RF-010B passes.
 
+**Implementation record (2026-07-20):** RF-010B now has executable synthetic Quote, Break-even and Omzet en Marge cases plus a guarded read-only development fingerprint baseline; see `17-planning-lot-cost-golden-snapshot.md`. No application source-selection, calculation, schema or persisted data changed. The current readers' latest-activation behavior and exact-LOT precedence are frozen. The development audit records 11 ambiguous exact LOT keys, 500 explicit LOT fallbacks and 940 missing-cost snapshots. Missing/unknown/ambiguous LOT policy and explicit-rebaseline authority remain mandatory human decisions before RF-011B may become an approved resolver contract.
+
 ## RF-011 — Extract one service/storage boundary while preserving public facades
 
 - **Objective / findings:** reduce ARCH-003/004/006/008, CODE-001/008 and DATA-006–008/013 coupling through one workflow seam.

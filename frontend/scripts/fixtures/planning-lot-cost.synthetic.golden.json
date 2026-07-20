@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "RF-010B-planning-lot-cost-synthetic",
+  "baselineCommit": "f875427aa4706964d10742cb0ac2094c2d135ce3",
+  "capturedAt": "2026-07-20",
+  "source": { "classification": "synthetic", "commercialValues": "non-production" },
+  "approval": { "status": "pending-human-approval", "approvedBy": null, "approvedAt": null },
+  "input": {
+    "channels": [{ "code": "horeca", "default_marge_pct": 40 }],
+    "beers": [{ "id": "beer-purchased", "biernaam": "Synthetic Purchased Beer", "btw_tarief": "21%" }],
+    "skus": [{ "id": "sku-case-24", "kind": "beer_format", "beer_id": "beer-purchased", "format_article_id": "fmt-case-24", "name": "Synthetic Beer - Case 24", "active": true }],
+    "articles": [{ "id": "fmt-case-24", "kind": "format", "name": "Case 24", "uom": "stuk", "content_liter": 7.92, "active": true }],
+    "versions": [
+      { "id": "version-jan", "jaar": 2026, "status": "definitief", "versie_nummer": 1, "lot_exact_key": "LOTJAN", "inkoop": { "lotnummer": "LOT-JAN" }, "basisgegevens": { "btw_tarief": "21%" }, "cost_lines": [{ "sku_id": "sku-case-24", "product_id": "fmt-case-24", "inkoop": 10, "verpakkingskosten": 1, "indirecte_kosten": 2, "accijns": 1, "kostprijs": 14 }] },
+      { "id": "version-may", "jaar": 2026, "status": "definitief", "versie_nummer": 2, "lot_exact_key": "LOTMAY", "inkoop": { "lotnummer": "LOT-MAY" }, "basisgegevens": { "btw_tarief": "21%" }, "cost_lines": [{ "sku_id": "sku-case-24", "product_id": "fmt-case-24", "inkoop": 12, "verpakkingskosten": 1.5, "indirecte_kosten": 2.5, "accijns": 1, "kostprijs": 17 }] },
+      { "id": "version-ambiguous-a", "jaar": 2026, "status": "definitief", "versie_nummer": 3, "lot_exact_key": "DUPLOT", "inkoop": { "lotnummer": "DUP-LOT" }, "cost_lines": [{ "sku_id": "sku-case-24", "kostprijs": 18 }] },
+      { "id": "version-ambiguous-b", "jaar": 2026, "status": "definitief", "versie_nummer": 4, "lot_exact_key": "DUPLOT", "inkoop": { "lotnummer": "DUP-LOT" }, "cost_lines": [{ "sku_id": "sku-case-24", "kostprijs": 19 }] },
+      { "id": "version-new-format", "jaar": 2026, "status": "definitief", "versie_nummer": 1, "lot_exact_key": "LOTFUST", "inkoop": { "lotnummer": "LOT-FUST" }, "cost_lines": [{ "sku_id": "sku-fust", "kostprijs": 52 }] },
+      { "id": "version-own-first", "jaar": 2026, "status": "definitief", "versie_nummer": 1, "lot_exact_key": "BREW001", "invoer": { "inkoop": { "lotnummer": "BREW-001" } }, "cost_lines": [{ "sku_id": "sku-own-case", "kostprijs": 21 }] },
+      { "id": "version-own-later", "jaar": 2026, "status": "definitief", "versie_nummer": 2, "lot_exact_key": "BREW002", "invoer": { "inkoop": { "lotnummer": "BREW-002" } }, "cost_lines": [{ "sku_id": "sku-own-case", "kostprijs": 23 }] },
+      { "id": "version-next-year", "jaar": 2027, "status": "definitief", "versie_nummer": 1, "lot_exact_key": "", "cost_lines": [{ "sku_id": "sku-case-24", "kostprijs": 15 }] },
+      { "id": "version-rebaseline-first", "jaar": 2026, "status": "definitief", "versie_nummer": 1, "lot_exact_key": "", "cost_lines": [{ "sku_id": "sku-rebaseline", "kostprijs": 30 }] },
+      { "id": "version-rebaseline-approved", "jaar": 2026, "status": "definitief", "versie_nummer": 2, "lot_exact_key": "", "cost_lines": [{ "sku_id": "sku-rebaseline", "kostprijs": 31 }] }
+    ],
+    "activations": [
+      { "id": "act-jan", "sku_id": "sku-case-24", "jaar": 2026, "kostprijsversie_id": "version-jan", "effectief_vanaf": "2026-01-10T00:00:00Z", "effectief_tot": "2026-05-10T00:00:00Z" },
+      { "id": "act-may", "sku_id": "sku-case-24", "jaar": 2026, "kostprijsversie_id": "version-may", "effectief_vanaf": "2026-05-10T00:00:00Z", "effectief_tot": "" },
+      { "id": "act-new-format", "sku_id": "sku-fust", "jaar": 2026, "kostprijsversie_id": "version-new-format", "effectief_vanaf": "2026-05-20T00:00:00Z", "effectief_tot": "" },
+      { "id": "act-own-first", "sku_id": "sku-own-case", "jaar": 2026, "kostprijsversie_id": "version-own-first", "effectief_vanaf": "2026-02-01T00:00:00Z", "effectief_tot": "2026-06-01T00:00:00Z" },
+      { "id": "act-own-later", "sku_id": "sku-own-case", "jaar": 2026, "kostprijsversie_id": "version-own-later", "effectief_vanaf": "2026-06-01T00:00:00Z", "effectief_tot": "" },
+      { "id": "act-next-year", "sku_id": "sku-case-24", "jaar": 2027, "kostprijsversie_id": "version-next-year", "effectief_vanaf": "2027-01-01T00:00:00Z", "effectief_tot": "" },
+      { "id": "act-rebase-first", "sku_id": "sku-rebaseline", "jaar": 2026, "kostprijsversie_id": "version-rebaseline-first", "effectief_vanaf": "2026-01-01T00:00:00Z", "effectief_tot": "2026-07-01T00:00:00Z" },
+      { "id": "act-rebase-approved", "sku_id": "sku-rebaseline", "jaar": 2026, "kostprijsversie_id": "version-rebaseline-approved", "effectief_vanaf": "2026-07-01T00:00:00Z", "effectief_tot": "" }
+    ],
+    "activationEvents": [
+      { "id": "evt-jan", "sku_id": "sku-case-24", "jaar": 2026, "kostprijsversie_id": "version-jan", "effectief_vanaf": "2026-01-10T00:00:00Z", "action": "activate", "metadata": {} },
+      { "id": "evt-may", "sku_id": "sku-case-24", "jaar": 2026, "kostprijsversie_id": "version-may", "effectief_vanaf": "2026-05-10T00:00:00Z", "action": "activate", "metadata": {} },
+      { "id": "evt-new-format", "sku_id": "sku-fust", "jaar": 2026, "kostprijsversie_id": "version-new-format", "effectief_vanaf": "2026-05-20T00:00:00Z", "action": "activate", "metadata": {} },
+      { "id": "evt-own-first", "sku_id": "sku-own-case", "jaar": 2026, "kostprijsversie_id": "version-own-first", "effectief_vanaf": "2026-02-01T00:00:00Z", "action": "activate", "metadata": {} },
+      { "id": "evt-own-later", "sku_id": "sku-own-case", "jaar": 2026, "kostprijsversie_id": "version-own-later", "effectief_vanaf": "2026-06-01T00:00:00Z", "action": "activate", "metadata": {} },
+      { "id": "evt-next-year", "sku_id": "sku-case-24", "jaar": 2027, "kostprijsversie_id": "version-next-year", "effectief_vanaf": "2027-01-01T00:00:00Z", "action": "activate", "metadata": {} },
+      { "id": "evt-rebase-first", "sku_id": "sku-rebaseline", "jaar": 2026, "kostprijsversie_id": "version-rebaseline-first", "effectief_vanaf": "2026-01-01T00:00:00Z", "action": "activate", "metadata": {} },
+      { "id": "evt-rebase-approved", "sku_id": "sku-rebaseline", "jaar": 2026, "kostprijsversie_id": "version-rebaseline-approved", "effectief_vanaf": "2026-07-01T00:00:00Z", "action": "explicit_rebaseline", "metadata": { "approved": true, "reason": "synthetic approval" } }
+    ],
+    "actualSnapshots": [
+      { "id": "snapshot-exact", "year": 2026, "sku_id": "sku-case-24", "lot_number": "LOTJAN", "kostprijsversie_id": "version-jan", "cost_source": "cost_version_lot", "cost_status": "resolved_lot_cost" },
+      { "id": "snapshot-missing-lot", "year": 2026, "sku_id": "sku-case-24", "lot_number": "", "kostprijsversie_id": "version-may", "cost_source": "baseline", "cost_status": "fallback_active_sku_cost" },
+      { "id": "snapshot-unknown-lot", "year": 2026, "sku_id": "sku-case-24", "lot_number": "UNKNOWN", "kostprijsversie_id": "version-may", "cost_source": "baseline", "cost_status": "lot_unmatched_fallback" }
+    ]
+  },
+  "historicalQuote": { "id": "quote-frozen", "year": 2026, "skuId": "sku-case-24", "costVersionId": "version-jan", "costPriceEx": 14 },
+  "expected": {
+    "approvedPurchasedPlanningVersion": "version-jan",
+    "observedNewQuoteVersion": "version-may",
+    "observedNewQuoteCost": 17,
+    "observedBreakEvenVersion": "version-may",
+    "exactJanuaryLotVersion": "version-jan",
+    "exactMayLotVersion": "version-may",
+    "missingLotFallbackVersion": "version-may",
+    "unknownLotFallbackStatus": "lot_unmatched_fallback",
+    "ambiguousLotObservedVersion": "version-ambiguous-b"
+  }
+}

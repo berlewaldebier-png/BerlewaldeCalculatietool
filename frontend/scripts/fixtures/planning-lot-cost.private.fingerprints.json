@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "fixtureSet": "RF-010B-planning-lot-private-fingerprints",
+  "baselineCommit": "f875427aa4706964d10742cb0ac2094c2d135ce3",
+  "capturedAt": "2026-07-20",
+  "source": {
+    "environment": "private-development",
+    "identifiers": "pseudonymous in-memory only",
+    "commercialValues": "not committed",
+    "committedValues": "aggregate reason counts and SHA-256 fingerprints only"
+  },
+  "approval": {
+    "status": "pending-human-approval",
+    "approvedBy": null,
+    "approvedAt": null
+  },
+  "audit": {
+    "counts": {
+      "planningAnchors": 143,
+      "activationRows": 143,
+      "activationEvents": 146,
+      "skuYearsWithMultipleActivationRows": 0,
+      "skuYearsWithMultipleActivationEvents": 3,
+      "skuYearsWithMultipleEventVersions": 0,
+      "anchorsWithActivationHistoryEvidence": 143,
+      "anchorsWithoutActivationHistoryEvidence": 0,
+      "planningDeviations": 0,
+      "exactLotAmbiguities": 11,
+      "actualSnapshots": 6132,
+      "actualLotFallbackSnapshots": 500,
+      "actualPlanningBaselineSnapshots": 680,
+      "actualMissingCostSnapshots": 940
+    },
+    "actualSnapshotStatusCounts": {
+      "fallback_active_sku_cost": 37,
+      "lot_unmatched_fallback": 463,
+      "missing_cost": 18,
+      "missing_lot_cost": 922,
+      "no_cost_required": 365,
+      "resolved": 66,
+      "resolved_active_sku_cost": 680,
+      "resolved_lot_alias": 799,
+      "resolved_lot_cost": 2717,
+      "resolved_sku_composition": 34,
+      "unmapped_sku": 31
+    },
+    "actualSnapshotSourceCounts": {
+      "baseline": 1180,
+      "cost_version_lot": 1807,
+      "cost_version_lot_alias": 799,
+      "lot": 910,
+      "no_cost_required": 365,
+      "packaging_component_price": 66,
+      "sku_composition": 34,
+      "unknown": 971
+    }
+  },
+  "fingerprints": {
+    "approvedPlanningAnchors": "sha256:aa834cdbf953a36e0be268da8469f610624af704a75ba7afdb0c2fb2a3c18ff5",
+    "observedLatestActivations": "sha256:293edef78680db8f9445dad30d475ace1ca084dcf36f45085f5c6a766291edbc",
+    "planningDeviations": "sha256:648c5e379df29cc01349081e4bdef1c6b22ff4659c382bcae155109905ad288f",
+    "exactLotAmbiguities": "sha256:dad4d9c88fbdf56f23a8c65a05632d7212abb5a161851d8a7def2181d3776f29",
+    "actualCostSelections": "sha256:396acd539e07d57562278908c41fb08c7fd19b6d70b4876614d80bda32b1ba16",
+    "report": "sha256:0427453f7b0897e609ce7034525145372de63790ff3129ff64c2f61901694fc2"
+  }
+}
