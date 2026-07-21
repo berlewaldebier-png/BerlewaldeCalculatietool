@@ -1,59 +1,17 @@
-import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
-import { PageShell } from "@/components/PageShell";
+import { SalesStrategyScreen } from "@/features/sales-strategy/SalesStrategyScreen";
+import {
+  buildSalesStrategyScreenModel,
+  SALES_STRATEGY_DATASET_KEYS,
+  type SalesStrategyDatasets,
+} from "@/features/sales-strategy/salesStrategyScreenModel";
 import { getBootstrap } from "@/lib/apiServer";
 
 export default async function VerkoopstrategiePage() {
-  const bootstrap = await getBootstrap(
-    [
-      "productie",
-      "verkoopprijzen",
-      "basisproducten",
-      "samengestelde-producten",
-      "bieren",
-      "skus",
-      "articles",
-      "bom-lines",
-      "berekeningen",
-      "channels",
-      "kostprijsproductactiveringen"
-    ],
+  const bootstrap = await getBootstrap<SalesStrategyDatasets>(
+    [...SALES_STRATEGY_DATASET_KEYS],
     true,
     "/verkoopstrategie"
   );
-  const navigation = bootstrap.navigation ?? [];
-  const verkoopprijzen = (bootstrap.datasets["verkoopprijzen"] as any[]) ?? [];
-  const productie = (bootstrap.datasets["productie"] as any) ?? {};
-  const basisproducten = (bootstrap.datasets["basisproducten"] as any[]) ?? [];
-  const samengesteldeProducten = (bootstrap.datasets["samengestelde-producten"] as any[]) ?? [];
-  const bieren = (bootstrap.datasets["bieren"] as any[]) ?? [];
-  const skus = (bootstrap.datasets["skus"] as any[]) ?? [];
-  const articles = (bootstrap.datasets["articles"] as any[]) ?? [];
-  const bomLines = (bootstrap.datasets["bom-lines"] as any[]) ?? [];
-  const berekeningen = (bootstrap.datasets["berekeningen"] as any[]) ?? [];
-  const channels = (bootstrap.datasets["channels"] as any[]) ?? [];
-  const kostprijsproductactiveringen = (bootstrap.datasets["kostprijsproductactiveringen"] as any[]) ?? [];
 
-  return (
-    <PageShell
-      title="Verkoopstrategie"
-      subtitle="Beheer per jaar de verkoopprijzen per verpakking. We sturen op opslag en verkoopprijs; marge wordt afgeleid."
-      activePath="/verkoopstrategie"
-      navigation={navigation}
-    >
-      <VerkoopstrategieWorkspace
-        endpoint="/data/verkoopprijzen"
-        verkoopprijzen={verkoopprijzen}
-        productie={productie}
-        basisproducten={basisproducten}
-        samengesteldeProducten={samengesteldeProducten}
-        bieren={bieren}
-        skus={skus}
-        articles={articles}
-        bomLines={bomLines}
-        berekeningen={berekeningen}
-        channels={channels}
-        kostprijsproductactiveringen={kostprijsproductactiveringen}
-      />
-    </PageShell>
-  );
+  return <SalesStrategyScreen model={buildSalesStrategyScreenModel(bootstrap)} />;
 }
