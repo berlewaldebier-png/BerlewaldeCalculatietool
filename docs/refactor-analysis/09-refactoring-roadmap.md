@@ -395,6 +395,8 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Acceptance criteria:** both resolvers explain their chosen source; shadow outputs match approved fixtures; planning and actual contexts cannot be confused by the type/API; no consumer or database authority has switched yet.
 - **Dependencies / complexity / risk / human confirmation:** RF-010B/RF-011A; **medium complexity, medium/high financial risk**. Finance/data owner approves before RF-013B or RF-012C consumer migration.
 
+**RF-011B implementation note (2026-07-21):** separate pure planning and actual-LOT resolvers now consume one read-only snapshot through a port without persistence methods. Planning selects the first approved SKU/year activation or an explicitly approved rebaseline; actuals require one exact LOT-linked cost version/row and never silently substitute planning cost. Maintained non-LOT cost-bearing, `no_cost_required` and ignored policies are distinct. Identifier/status-only shadow comparisons expose current latest-activation and LOT-fallback differences for Price proposal, Break-even and Omzet en Marge while all runtime consumers remain untouched. See `19-planning-actual-cost-resolvers.md`. No schema, migration, backfill, activation, historical record or stored calculation changed.
+
 ### RF-011C — Canonical read-only year-transition planner
 
 - **Objective:** introduce a pure application/domain planner that produces a target-year candidate manifest from canonical SKU, article/format, BOM, source cost row and approved year-input records. It must not consume React components, `ActiveCostRow`, grouped table rows or display labels as identity.

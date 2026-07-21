@@ -100,6 +100,19 @@ required_rf010b_contracts = {
     "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_ambiguous_exact_lot_is_silently_resolved_to_highest_version_today",
     "test_planning_lot_cost_golden.PlanningLotCostGoldenTests.test_reopened_historical_quote_keeps_its_saved_cost_reference",
 }
+required_rf011b_contracts = {
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_first_approved_activation_is_stable_planning_anchor",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_only_explicit_approved_rebaseline_replaces_first_anchor",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_textual_rebaseline_approval_is_not_treated_as_boolean_approval",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_exact_lot_wins_without_order_date_selection",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_explicit_canonical_cost_row_precedes_embedded_compatibility_row",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_sku_code_scoped_alias_is_projected_through_canonical_sku",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_direct_lot_record_without_canonical_lineage_is_visible_but_not_repriced",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_missing_unknown_near_and_ambiguous_lot_never_use_planning_fallback",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_lot_and_cost_requirement_are_independent_explicit_policies",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_shadow_exposes_current_planning_and_actual_fallback_differences",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_reader_is_called_once_and_resolver_is_read_only",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -113,6 +126,7 @@ missing = sorted(
         | required_rf010a_contracts
         | required_rf010c_contracts
         | required_rf010b_contracts
+        | required_rf011b_contracts
     ).difference(ids)
 )
 
@@ -123,5 +137,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C and RF-010B contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B and RF-011B contracts collected"
 )
