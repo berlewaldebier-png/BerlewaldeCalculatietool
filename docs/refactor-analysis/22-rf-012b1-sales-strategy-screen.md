@@ -68,3 +68,7 @@ The controller no longer contains presentation markup or local handlers/state th
 - At a temporary 390 × 844 viewport, the page had no horizontal body or main-content overflow.
 - Browser console verification found no errors.
 - The blocking RF-012B1 Playwright contract passed in both desktop and mobile Chromium projects (2/2).
+
+## Manual-acceptance correction
+
+Manual year switching exposed that a missing-year-strategy warning for 2025 could remain visible after selecting 2026. The controller now rebuilds a missing-strategy warning for the selected year, or removes a stale warning when that year already has a strategy. Current-year warnings, successful saves and year-independent save outcomes are retained. This changes no prices, rows, payloads or persisted data and is protected by the SCREEN-017 workflow contract.

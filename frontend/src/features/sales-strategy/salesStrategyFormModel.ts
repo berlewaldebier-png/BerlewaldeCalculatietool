@@ -21,6 +21,29 @@ export const SALES_STRATEGY_PENDING_STATUS: ActionStatusState = {
   message: "Verkoopstrategie wordt opgeslagen.",
 };
 
+const MISSING_YEAR_STRATEGY_STATUS = /^Jaarstrategie voor (\d+) ontbreekt\./;
+
+export function buildMissingSalesStrategyYearStatus(selectedYear: number): string {
+  return `Jaarstrategie voor ${selectedYear} ontbreekt. Defaults zijn klaar gezet; klik Opslaan om te bewaren.`;
+}
+
+export function hasSalesStrategyForYear(rows: GenericRecord[], selectedYear: number): boolean {
+  return rows.some(
+    (row) => row.record_type === "jaarstrategie" && Number(row.jaar ?? 0) === selectedYear
+  );
+}
+
+export function getSalesStrategyStatusForSelectedYear(
+  status: string,
+  selectedYear: number,
+  strategyMissing = false
+): string {
+  if (strategyMissing) return buildMissingSalesStrategyYearStatus(selectedYear);
+  const match = MISSING_YEAR_STRATEGY_STATUS.exec(status);
+  if (!match) return status;
+  return Number(match[1]) === selectedYear ? status : "";
+}
+
 export function getSalesStrategyActionStatus(status: string, isSaving: boolean): ActionStatusState | null {
   if (isSaving) return SALES_STRATEGY_PENDING_STATUS;
   if (!status) return null;

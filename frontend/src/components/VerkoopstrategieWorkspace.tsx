@@ -23,12 +23,15 @@ import {
 } from "@/components/verkoopstrategie/verkoopstrategieWorkspaceUtils";
 import { buildArticleLabelMap, buildProductSources } from "@/components/verkoopstrategie/verkoopstrategieWorkspaceDerivations";
 import {
+  buildMissingSalesStrategyYearStatus,
   buildSalesStrategySavePayload,
   buildStrategySkuLookups,
   filterAndGroupSalesStrategyRows,
   getDefaultSalesStrategyYear,
   getProductionYears,
+  getSalesStrategyStatusForSelectedYear,
   getSalesStrategyYearOptions,
+  hasSalesStrategyForYear,
   SALES_STRATEGY_DRAFT_SUCCESS,
   SALES_STRATEGY_SAVE_ERROR,
   SALES_STRATEGY_SERVER_SUCCESS,
@@ -181,6 +184,7 @@ export function VerkoopstrategieWorkspace({
   const isDirtyRef = useRef(false);
   const lastSyncedDraftSigRef = useRef("");
   const pendingServerSigRef = useRef("");
+  const savedYearStrategyYearsRef = useRef<Set<number>>(new Set());
   const [hasPendingServerUpdate, setHasPendingServerUpdate] = useState(false);
   const markDirty = () => {
     isDirtyRef.current = true;
@@ -241,6 +245,15 @@ export function VerkoopstrategieWorkspace({
     setSelectedYear(Math.max(...productieYears));
   }, [lockYear, productieYears, selectedYear]);
 
+  useEffect(() => {
+    const strategyMissing =
+      !hasSalesStrategyForYear(verkoopStrategyRows, effectiveSelectedYear) &&
+      !savedYearStrategyYearsRef.current.has(effectiveSelectedYear);
+    setStatus((current) =>
+      getSalesStrategyStatusForSelectedYear(current, effectiveSelectedYear, strategyMissing)
+    );
+  }, [effectiveSelectedYear, verkoopStrategyRows]);
+
   // Ensure there is exactly one year-defaults record for the selected year.
   useEffect(() => {
     if (!Number.isFinite(effectiveSelectedYear) || effectiveSelectedYear <= 0) return;
@@ -253,7 +266,7 @@ export function VerkoopstrategieWorkspace({
       return [...current, seeded];
     });
     // Make the behavior explicit: this is not a backend write until the user saves.
-    setStatus(`Jaarstrategie voor ${effectiveSelectedYear} ontbreekt. Defaults zijn klaar gezet; klik Opslaan om te bewaren.`);
+    setStatus(buildMissingSalesStrategyYearStatus(effectiveSelectedYear));
   }, [channelMasterDefaults, effectiveSelectedYear, yearStrategyRow]);
 
   const channelYearDefaults = useMemo(() => {
@@ -680,6 +693,7 @@ export function VerkoopstrategieWorkspace({
           pendingServerSigRef.current = "";
           setHasPendingServerUpdate(false);
           isDirtyRef.current = false;
+          savedYearStrategyYearsRef.current.add(effectiveSelectedYear);
           setStatus(SALES_STRATEGY_DRAFT_SUCCESS);
         }
       } else {
@@ -697,6 +711,7 @@ export function VerkoopstrategieWorkspace({
         }
         if (isMountedRef.current) {
           isDirtyRef.current = false;
+          savedYearStrategyYearsRef.current.add(effectiveSelectedYear);
           setStatus(SALES_STRATEGY_SERVER_SUCCESS);
         }
       }

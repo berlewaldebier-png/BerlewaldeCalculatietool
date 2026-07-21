@@ -78,7 +78,9 @@ function run() {
     getSalesStrategyActionStatus,
     getSalesStrategyListOpslag,
     getSalesStrategyListPrice,
+    getSalesStrategyStatusForSelectedYear,
     getSalesStrategyYearOptions,
+    hasSalesStrategyForYear,
     SALES_STRATEGY_DRAFT_SUCCESS,
     SALES_STRATEGY_PENDING_STATUS,
     SALES_STRATEGY_SAVE_ERROR,
@@ -177,6 +179,14 @@ function run() {
   assert(getSalesStrategyActionStatus(SALES_STRATEGY_SAVE_ERROR, false)?.kind === "error", "Failed save is no longer announced as an error.");
   assert(getSalesStrategyActionStatus("Jaarstrategie voor 2026 ontbreekt.", false)?.kind === "warning", "Missing year-strategy warning semantics changed.");
   assert(getSalesStrategyActionStatus("", false) === null, "Empty status no longer remains hidden.");
+  const missing2025Status = "Jaarstrategie voor 2025 ontbreekt. Defaults zijn klaar gezet; klik Opslaan om te bewaren.";
+  const missing2026Status = "Jaarstrategie voor 2026 ontbreekt. Defaults zijn klaar gezet; klik Opslaan om te bewaren.";
+  assert(hasSalesStrategyForYear([strategyRow({ record_type: "jaarstrategie", jaar: 2026 })], 2026), "Existing year strategy is no longer detected.");
+  assert(!hasSalesStrategyForYear([strategyRow({ record_type: "jaarstrategie", jaar: 2025 })], 2026), "A different year's strategy is treated as current.");
+  assert(getSalesStrategyStatusForSelectedYear(missing2025Status, 2025, true) === missing2025Status, "Current-year strategy warning is no longer retained.");
+  assert(getSalesStrategyStatusForSelectedYear(missing2025Status, 2026, false) === "", "Previous-year strategy warning remains visible after changing year.");
+  assert(getSalesStrategyStatusForSelectedYear(missing2025Status, 2026, true) === missing2026Status, "Missing strategy warning is not rebuilt for the newly selected year.");
+  assert(getSalesStrategyStatusForSelectedYear(SALES_STRATEGY_SERVER_SUCCESS, 2026) === SALES_STRATEGY_SERVER_SUCCESS, "Non-year-specific status feedback is cleared unexpectedly.");
 }
 
 try {
