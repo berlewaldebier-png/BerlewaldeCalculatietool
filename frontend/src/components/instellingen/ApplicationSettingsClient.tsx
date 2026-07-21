@@ -8,42 +8,32 @@ import {
   saveApplicationSettings,
   type ApplicationSettings
 } from "@/components/instellingen/applicationSettingsApi";
-import { ApiRequestError } from "@/lib/apiClient";
+import {
+  APPLICATION_SETTINGS_PENDING_STATUS,
+  APPLICATION_SETTINGS_SUCCESS_STATUS,
+  applicationSettingsSaveErrorStatus,
+  buildApplicationSettingsPayload,
+  createCompanySettingsDraft,
+} from "@/features/company-settings/companySettingsFormModel";
 
 export function ApplicationSettingsClient({ initial }: { initial: ApplicationSettings }) {
   const router = useRouter();
   const statusId = useId();
-  const [companyName, setCompanyName] = useState(initial.company_name || "Berlewalde Brouwerij");
-  const [supportEmail, setSupportEmail] = useState(initial.support_email || "info@berlewaldebier.nl");
+  const [draft, setDraft] = useState(() => createCompanySettingsDraft(initial));
   const [status, setStatus] = useState<ActionStatusState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   async function handleSave() {
     setIsSaving(true);
-    setStatus({ kind: "pending", message: "Bedrijfsinstellingen worden opgeslagen." });
+    setStatus(APPLICATION_SETTINGS_PENDING_STATUS);
     try {
-      const payload: ApplicationSettings = {
-        ...initial,
-        company_name: companyName.trim() || "Berlewalde Brouwerij",
-        currency: "EUR",
-        support_email: supportEmail.trim() || "info@berlewaldebier.nl",
-      };
+      const payload = buildApplicationSettingsPayload(initial, draft);
       await saveApplicationSettings(payload);
       window.dispatchEvent(new Event("calculatietool-settings-changed"));
-      setStatus({ kind: "success", message: "Bedrijfsinstellingen zijn opgeslagen." });
+      setStatus(APPLICATION_SETTINGS_SUCCESS_STATUS);
       router.refresh();
     } catch (error) {
-      const outcomeUncertain =
-        !(error instanceof ApiRequestError) || error.category !== "http" || error.status >= 500;
-      setStatus({
-        kind: "error",
-        message: outcomeUncertain
-          ? "Opslaan kon niet worden bevestigd."
-          : "Bedrijfsinstellingen zijn niet opgeslagen.",
-        guidance: outcomeUncertain
-          ? "De wijzigingen kunnen al zijn opgeslagen. Vernieuw de pagina om de actuele instellingen te controleren."
-          : "Controleer de bedrijfsgegevens en probeer opnieuw.",
-      });
+      setStatus(applicationSettingsSaveErrorStatus(error));
     } finally {
       setIsSaving(false);
     }
@@ -61,7 +51,10 @@ export function ApplicationSettingsClient({ initial }: { initial: ApplicationSet
       <div className="settings-form-grid">
         <label className="settings-field">
           <span>Bedrijfsnaam</span>
-          <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+          <input
+            value={draft.companyName}
+            onChange={(event) => setDraft((current) => ({ ...current, companyName: event.target.value }))}
+          />
         </label>
         <label className="settings-field">
           <span>Valuta</span>
@@ -69,7 +62,10 @@ export function ApplicationSettingsClient({ initial }: { initial: ApplicationSet
         </label>
         <label className="settings-field">
           <span>Support e-mail</span>
-          <input value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} />
+          <input
+            value={draft.supportEmail}
+            onChange={(event) => setDraft((current) => ({ ...current, supportEmail: event.target.value }))}
+          />
         </label>
       </div>
 
