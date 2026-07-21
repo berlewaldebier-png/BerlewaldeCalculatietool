@@ -448,6 +448,8 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Required protection:** RF-010 golden fixtures, RF-011 resolver shadow evidence, screen state/API/E2E tests and numeric before/after parity. No data migration, cross-screen rewrite or source-of-truth switch.
 - **Dependencies / complexity / risk / human confirmation:** RF-012A plus applicable RF-008–011; **medium/high financial regression risk**. Finance/product approval after each screen.
 
+**RF-012B1 implementation note (2026-07-21):** SCREEN-017 now has a thin server route, a typed bootstrap projection, a screen composition boundary, a client controller, a presentational workspace view and pure form/payload rules. The eleven bootstrap datasets, `/data/verkoopprijzen` endpoint, production-year selection, central-SKU/cost inputs, visible list-price/opslag calculations, SKU identity enrichment, passthrough records, legacy compatibility fields, save granularity and existing server/draft outcome text remain unchanged. Approved pending/success/warning/error and field/table/accordion semantics now wrap that behavior. A new SCREEN-017 workflow contract protects those boundaries. No price-source, active-context, calculation, API, database or persisted-data change is included; those remain RF-012C4/RF-013. See `22-rf-012b1-sales-strategy-screen.md`.
+
 ### RF-012C — Migrate active-commercial-context consumers separately
 
 - **RF-012C1 New quotations:** brand-new quotes read RF-013A’s active context and RF-013B’s planning-cost anchor; reopened quotes keep their persisted year/context and do not silently reprice. Preserve URLs, payload compatibility, draft/final status and all approved RF-010A/RF-010B numerical outputs.
