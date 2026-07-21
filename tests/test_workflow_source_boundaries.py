@@ -134,7 +134,16 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
             / "applicationSettingsApi.ts"
         )
         adapter_source = adapter_path.read_text(encoding="utf-8") if adapter_path.exists() else ""
+        form_model_source = (
+            PROJECT_ROOT
+            / "frontend"
+            / "src"
+            / "features"
+            / "company-settings"
+            / "companySettingsFormModel.ts"
+        ).read_text(encoding="utf-8")
         combined_api_source = "\n".join((header_source, settings_source, adapter_source))
+        combined_settings_source = "\n".join((settings_source, form_model_source))
 
         self.assertIn("/data/application-settings", combined_api_source)
         self.assertIn('cache: "no-store"', combined_api_source)
@@ -142,15 +151,15 @@ class FrontendWorkflowBoundaryTests(unittest.TestCase):
         self.assertIn('"Content-Type": "application/json"', combined_api_source)
         self.assertIn("body: JSON.stringify(payload)", combined_api_source)
 
-        self.assertIn('companyName.trim() || "Berlewalde Brouwerij"', settings_source)
-        self.assertIn('currency: "EUR"', settings_source)
+        self.assertIn('draft.companyName.trim() || DEFAULT_COMPANY_NAME', combined_settings_source)
+        self.assertIn('currency: "EUR"', combined_settings_source)
         self.assertIn(
-            'supportEmail.trim() || "info@berlewaldebier.nl"',
-            settings_source,
+            'draft.supportEmail.trim() || DEFAULT_SUPPORT_EMAIL',
+            combined_settings_source,
         )
         self.assertIn(
-            'setStatus({ kind: "success", message: "Bedrijfsinstellingen zijn opgeslagen." })',
-            settings_source,
+            'message: "Bedrijfsinstellingen zijn opgeslagen."',
+            combined_settings_source,
         )
         self.assertIn("<ActionStatus", settings_source)
         self.assertIn('new Event("calculatietool-settings-changed")', settings_source)

@@ -77,6 +77,9 @@ flowchart TD
     R9 --> R12
     R10 --> R12
     R11 --> R12
+    R12 --> R12A["RF-012A Company settings screen boundary"]
+    R12A --> R12B1["RF-012B1 Sales-strategy screen"]
+    R12B1 --> R12B2["RF-012B2 Recommended-price screen"]
     R3 --> R13["RF-013 Additive data-model improvements"]
     R6 --> R13
     R11A --> R13A["RF-013A Explicit active yearset authority"]
@@ -425,6 +428,25 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Rollout / rollback / observability:** one screen/stage per PR; route-level visual/E2E gates; compare API call sequence; rollback component delegation independently.
 - **Acceptance criteria:** reduced controller responsibilities/coupling with unchanged behavior; no new state framework without measured need; all screen dossier states/workflows covered.
 - **Dependencies / complexity / risk / human confirmation:** RF-008–011 as applicable; **medium per simple screen, large/high for 1/5 screens**. Product/design confirmation for shell/dialog/visible differences.
+
+### RF-012A — Company settings screen boundary
+
+- **Objective / classification:** use SCREEN-029 (`/instellingen/bedrijf`) as the first low-risk screen-level refactor. Make the route a thin entry point, move bootstrap normalization into a pure screen model and move form defaults/payload/status decisions into a pure form model. This is internal restructuring with unchanged behavior.
+- **Included / excluded:** include typed application-settings/tariff input, latest-tariff projection, presentational section composition, pure form draft/payload/error-state rules and characterization tests. Exclude copy, field order, defaults, currency policy, API path/method/body, save timing, navigation, permissions, tariff editing, CSS redesign, database/schema changes and new settings.
+- **Behaviour/contracts:** `/instellingen/bedrijf` still loads `application-settings` and `tarieven-heffingen` in one bootstrap request; newest positive tariff year remains the displayed summary; save remains one `PUT /data/application-settings`; unknown settings fields remain in the payload; blank company/e-mail values use the existing defaults; currency remains `EUR`; one save dispatches `calculatietool-settings-changed`, refreshes the route and exposes the same pending/success/error feedback.
+- **Required tests:** pure screen-model ordering/empty-state tests; form default/trim/unknown-field/error-classification tests; existing RF-009C pending/success/error accessibility checks; RF-009G tariff navigation/no-write check; workflow API contract, typecheck, lint and build.
+- **Data migration / rollout / rollback:** none. One branch/PR (`codex/rf-012a-company-settings-screen`); rollback restores the previous page/client composition without persisted-data work.
+- **Acceptance criteria:** the route owns only bootstrap acquisition; pure models are independently testable; the screen still renders the same sections/actions and emits the same request/event/status behavior; no financial, authentication or persistence behavior changes.
+- **Dependencies / complexity / risk / human confirmation:** RF-008/RF-009C/RF-009G/RF-011; **small/medium complexity, low runtime and data risk**. Product confirmation is limited to unchanged visible behavior.
+
+**RF-012A implementation note (2026-07-21):** SCREEN-029 now has a thin server route, a pure typed bootstrap projection, a presentational screen component and a pure form rules model. The existing API adapter remains the only transport boundary; one save still emits the existing event/status/refresh sequence. Contract tests protect tariff ordering, defaults, unknown-field preservation, the exact payload policy and known versus uncertain failure feedback. Desktop DOM/navigation and 390 px reflow were checked read-only against the local development server; no save was submitted and no persistent data changed. See `21-rf-012a-company-settings-screen.md`.
+
+### RF-012B — Sales and recommended-price screens, separately
+
+- **Sequence:** RF-012B1 refactors SCREEN-017 (`/verkoopstrategie`) and RF-012B2 separately refactors SCREEN-018 (`/adviesprijzen`). Each screen receives its own branch/PR; neither identifier authorizes implementing the other.
+- **Objective / boundaries:** extract screen-specific view/controller boundaries and adopt approved primitives while preserving every calculation, rounding rule, save granularity, price source, payload, permission and visible financial result. Active-commercial-context source changes remain RF-012C4 after RF-013A/RF-013B/RF-013C.
+- **Required protection:** RF-010 golden fixtures, RF-011 resolver shadow evidence, screen state/API/E2E tests and numeric before/after parity. No data migration, cross-screen rewrite or source-of-truth switch.
+- **Dependencies / complexity / risk / human confirmation:** RF-012A plus applicable RF-008–011; **medium/high financial regression risk**. Finance/product approval after each screen.
 
 ### RF-012C — Migrate active-commercial-context consumers separately
 
