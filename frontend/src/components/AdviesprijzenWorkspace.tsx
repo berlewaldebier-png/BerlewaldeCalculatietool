@@ -1,23 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  calcAdviesprijsInclBtwRange,
-  fromInclBtw,
-  round2,
-  toInclBtw
-} from "@/lib/pricingEngine";
-import { clampNumber, money, parseBtwPct } from "@/components/adviesprijzen/adviesprijzenUtils";
-import { VatDisplayToggle, type VatDisplayMode } from "@/components/ui/VatDisplayToggle";
-import {
-  buildSellInLookup,
-  resolveSellInPriceEx,
-} from "@/components/offerte-samenstellen/sellInResolver";
-import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
-import { apiRequestTextClient } from "@/lib/apiClient";
-import { reconcileDatasetItems } from "@/lib/datasetItems";
+
+import type { VatDisplayMode } from "@/components/ui/VatDisplayToggle";
 import {
   buildAdviesOpslagByChannel,
+  buildAdviesprijzenSavePayload,
   buildChannelDefaultOpslag,
   buildProductCostRows,
   buildProductionYears,
@@ -25,129 +13,112 @@ import {
   buildYearRows,
   normalizeAdviesprijsRows,
   normalizeChannels,
-  buildAdviesprijzenSavePayload,
+  type AdviesprijsRow,
+  type Channel,
+  type ProductCostRow,
 } from "@/components/adviesprijzen/adviesprijzenDerivations";
+import { parseBtwPct } from "@/components/adviesprijzen/adviesprijzenUtils";
+import {
+  buildSellInLookup,
+  resolveSellInPriceEx,
+} from "@/components/offerte-samenstellen/sellInResolver";
+import {
+  buildRecommendedPriceDisplayRow,
+  getDefaultRecommendedPriceYear,
+  RECOMMENDED_PRICE_SAVE_ERROR,
+  RECOMMENDED_PRICE_SAVE_SUCCESS,
+} from "@/features/recommended-price/recommendedPriceFormModel";
+import {
+  RecommendedPriceWorkspaceView,
+  type RecommendedPriceChannelGroup,
+} from "@/features/recommended-price/RecommendedPriceWorkspaceView";
+import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
+import { reconcileDatasetItems } from "@/lib/datasetItems";
 
-const API_BASE_URL = "/api";
+type GenericRecord = Record<string, unknown>;
+type ProductieMap = Record<string, unknown>;
 
-type Channel = {
-  code: string;
-  naam: string;
-  actief: boolean;
-  volgorde: number;
-  default_marge_pct: number;
-};
-
-type AdviesprijsRow = {
-  id: string;
-  jaar: number;
-  channel_code: string;
-  opslag_pct: number;
-};
-
-type ProductieMap = Record<string, any>;
-
-type VerkoopprijzenRow = Record<string, unknown>;
-type KostprijsversieRow = Record<string, unknown>;
-type KostprijsActivationRow = Record<string, unknown>;
-type BierRow = Record<string, unknown>;
-type SkuRow = Record<string, unknown>;
-type ArticleRow = Record<string, unknown>;
-type PackagingComponentRow = Record<string, unknown>;
-type PackagingComponentPriceVersionRow = Record<string, unknown>;
-
-type ProductCostRow = {
-  skuId: string;
-  bierId: string;
-  biernaam: string;
-  btwPct: number;
-  kostprijsversieId: string;
-  productId: string;
-  productType: "basis" | "samengesteld" | "catalog";
-  verpakking: string;
-  kostprijsEx: number;
-};
-
-export function AdviesprijzenWorkspace(props: {
-  initialChannels: any[];
-  initialAdviesprijzen: any[];
+export type AdviesprijzenWorkspaceProps = {
+  initialChannels: GenericRecord[];
+  initialAdviesprijzen: GenericRecord[];
   initialProductie: ProductieMap;
-  initialVerkoopprijzen: VerkoopprijzenRow[];
-  initialBieren: BierRow[];
-  initialSkus: SkuRow[];
-  initialArticles: ArticleRow[];
-  initialKostprijsversies: KostprijsversieRow[];
-  initialKostprijsproductactiveringen: KostprijsActivationRow[];
-  initialPackagingComponents: PackagingComponentRow[];
-  initialPackagingComponentPriceVersions: PackagingComponentPriceVersionRow[];
-}) {
+  initialVerkoopprijzen: GenericRecord[];
+  initialBieren: GenericRecord[];
+  initialSkus: GenericRecord[];
+  initialArticles: GenericRecord[];
+  initialKostprijsversies: GenericRecord[];
+  initialKostprijsproductactiveringen: GenericRecord[];
+  initialPackagingComponents: GenericRecord[];
+  initialPackagingComponentPriceVersions: GenericRecord[];
+};
+
+export function AdviesprijzenWorkspace(props: AdviesprijzenWorkspaceProps) {
   const [vatDisplay, setVatDisplay] = useState<VatDisplayMode>("excl");
-  const channels = useMemo<Channel[]>(() => {
-    return normalizeChannels(props.initialChannels);
-  }, [props.initialChannels]);
+  const channels = useMemo(() => normalizeChannels(props.initialChannels), [props.initialChannels]);
+  const [rows, setRows] = useState<AdviesprijsRow[]>(() => normalizeAdviesprijsRows(props.initialAdviesprijzen));
 
-  const [rows, setRows] = useState<AdviesprijsRow[]>(() => {
-    return normalizeAdviesprijsRows(props.initialAdviesprijzen);
-  });
-
-  const productionYears = useMemo(() => {
-    return buildProductionYears(props.initialProductie ?? {});
-  }, [props.initialProductie]);
-
-  const years = useMemo(() => {
-    return buildYears(productionYears, rows);
-  }, [productionYears, rows]);
-
-  const [selectedYear, setSelectedYear] = useState<number>(() => years[years.length - 1] ?? new Date().getFullYear());
-  const [status, setStatus] = useState<string>("");
+  const productionYears = useMemo(
+    () => buildProductionYears(props.initialProductie ?? {}),
+    [props.initialProductie]
+  );
+  const years = useMemo(() => buildYears(productionYears, rows), [productionYears, rows]);
+  const [selectedYear, setSelectedYear] = useState<number>(() =>
+    getDefaultRecommendedPriceYear(years, new Date().getFullYear())
+  );
+  const [status, setStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  const activeChannels = useMemo(() => channels.filter((c) => c.actief), [channels]);
-  const channelCodes = useMemo(() => activeChannels.map((c) => c.code), [activeChannels]);
-  const [openChannelCodes, setOpenChannelCodes] = useState<string[]>(() => activeChannels.map((c) => c.code));
+  const activeChannels = useMemo(() => channels.filter((channel) => channel.actief), [channels]);
+  const channelCodes = useMemo(() => activeChannels.map((channel) => channel.code), [activeChannels]);
+  const [openChannelCodes, setOpenChannelCodes] = useState<string[]>(() => activeChannels.map((channel) => channel.code));
 
-  const adviesOpslagByChannel = useMemo(() => {
-    return buildAdviesOpslagByChannel(rows, selectedYear);
-  }, [rows, selectedYear]);
-
-  const verkoopprijzenRows = useMemo(() => (Array.isArray(props.initialVerkoopprijzen) ? props.initialVerkoopprijzen : []), [props.initialVerkoopprijzen]);
-  const kostprijsversies = useMemo(() => (Array.isArray(props.initialKostprijsversies) ? props.initialKostprijsversies : []), [props.initialKostprijsversies]);
-  const activations = useMemo(() => (Array.isArray(props.initialKostprijsproductactiveringen) ? props.initialKostprijsproductactiveringen : []), [props.initialKostprijsproductactiveringen]);
-  const bieren = useMemo(() => (Array.isArray(props.initialBieren) ? props.initialBieren : []), [props.initialBieren]);
-  const skus = useMemo(() => (Array.isArray(props.initialSkus) ? props.initialSkus : []), [props.initialSkus]);
-  const articles = useMemo(() => (Array.isArray(props.initialArticles) ? props.initialArticles : []), [props.initialArticles]);
-  const packagingComponents = useMemo(
-    () => (Array.isArray(props.initialPackagingComponents) ? props.initialPackagingComponents : []),
-    [props.initialPackagingComponents]
+  const adviesOpslagByChannel = useMemo(
+    () => buildAdviesOpslagByChannel(rows, selectedYear),
+    [rows, selectedYear]
   );
-  const packagingComponentPriceVersions = useMemo(
-    () =>
-      (Array.isArray(props.initialPackagingComponentPriceVersions)
-        ? props.initialPackagingComponentPriceVersions
-        : []),
-    [props.initialPackagingComponentPriceVersions]
+  const verkoopprijzenRows = useMemo(
+    () => Array.isArray(props.initialVerkoopprijzen) ? props.initialVerkoopprijzen : [],
+    [props.initialVerkoopprijzen]
+  );
+  const kostprijsversies = useMemo(
+    () => Array.isArray(props.initialKostprijsversies) ? props.initialKostprijsversies : [],
+    [props.initialKostprijsversies]
+  );
+  const activations = useMemo(
+    () => Array.isArray(props.initialKostprijsproductactiveringen) ? props.initialKostprijsproductactiveringen : [],
+    [props.initialKostprijsproductactiveringen]
+  );
+  const bieren = useMemo(
+    () => Array.isArray(props.initialBieren) ? props.initialBieren : [],
+    [props.initialBieren]
+  );
+  const skus = useMemo(
+    () => Array.isArray(props.initialSkus) ? props.initialSkus : [],
+    [props.initialSkus]
+  );
+  const articles = useMemo(
+    () => Array.isArray(props.initialArticles) ? props.initialArticles : [],
+    [props.initialArticles]
   );
 
   const beerById = useMemo(() => {
     const map = new Map<string, { biernaam: string; btwPct: number }>();
     bieren.forEach((row) => {
-      if (!row || typeof row !== "object") return;
-      const id = String((row as any).id ?? "");
+      const id = String(row?.id ?? "");
       if (!id) return;
-      const biernaam = String((row as any).biernaam ?? (row as any).naam ?? "");
-      const btwPct = parseBtwPct((row as any).btw_tarief ?? (row as any).btw ?? "");
-      map.set(id, { biernaam, btwPct });
+      map.set(id, {
+        biernaam: String(row?.biernaam ?? row?.naam ?? ""),
+        btwPct: parseBtwPct(row?.btw_tarief ?? row?.btw ?? ""),
+      });
     });
     return map;
   }, [bieren]);
 
   const skuById = useMemo(() => {
-    const map = new Map<string, SkuRow>();
+    const map = new Map<string, GenericRecord>();
     skus.forEach((row) => {
-      if (!row || typeof row !== "object") return;
-      const id = String((row as any).id ?? "").trim();
-      if (!id) return;
-      map.set(id, row);
+      const id = String(row?.id ?? "").trim();
+      if (id) map.set(id, row);
     });
     return map;
   }, [skus]);
@@ -155,71 +126,16 @@ export function AdviesprijzenWorkspace(props: {
   const articleNameById = useMemo(() => {
     const map = new Map<string, string>();
     articles.forEach((row) => {
-      if (!row || typeof row !== "object") return;
-      const id = String((row as any).id ?? "").trim();
+      const id = String(row?.id ?? "").trim();
       if (!id) return;
-      map.set(id, String((row as any).name ?? (row as any).naam ?? id).trim() || id);
+      map.set(id, String(row?.name ?? row?.naam ?? id).trim() || id);
     });
     return map;
   }, [articles]);
 
-  const packagingComponentNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    packagingComponents.forEach((row) => {
-      if (!row || typeof row !== "object") return;
-      const id = String((row as any).id ?? "");
-      if (!id) return;
-      map.set(id, String((row as any).omschrijving ?? (row as any).name ?? id));
-    });
-    return map;
-  }, [packagingComponents]);
-
-  const activePackagingComponentPriceById = useMemo(() => {
-    const map = new Map<string, number>();
-    packagingComponentPriceVersions.forEach((row) => {
-      if (!row || typeof row !== "object") return;
-      const jaar = Number((row as any).jaar ?? 0);
-      if (jaar !== selectedYear) return;
-      const id = String((row as any).verpakkingsonderdeel_id ?? (row as any).packaging_component_id ?? "");
-      if (!id) return;
-      const isActief = Boolean((row as any).is_actief ?? (row as any).is_active ?? false);
-      if (!isActief) return;
-      map.set(id, Number((row as any).prijs_per_stuk ?? 0) || 0);
-    });
-    return map;
-  }, [packagingComponentPriceVersions, selectedYear]);
-
-  const kostprijsversieById = useMemo(() => {
-    const map = new Map<string, KostprijsversieRow>();
-    kostprijsversies.forEach((row) => {
-      const id = String((row as any).id ?? "");
-      if (!id) return;
-      map.set(id, row);
-    });
-    return map;
-  }, [kostprijsversies]);
-
-  const activeActivationsForYear = useMemo(() => {
-    return activations.filter((row) => {
-      if (!row || typeof row !== "object") return false;
-      const y = Number((row as any).jaar ?? 0);
-      if (y !== selectedYear) return false;
-      const tot = String((row as any).effectief_tot ?? "");
-      return !tot;
-    });
-  }, [activations, selectedYear]);
-
-  function scoreActivation(act: any) {
-    const tsRaw = String(act?.effectief_vanaf ?? "") || String(act?.updated_at ?? "") || String(act?.created_at ?? "");
-    if (!tsRaw) return 0;
-    const dt = new Date(tsRaw);
-    const t = dt.getTime();
-    return Number.isNaN(t) ? 0 : t;
-  }
-
   const centralSkuIndex = useCentralSkuIndex({
     year: selectedYear,
-    channels: Array.isArray(props.initialChannels) ? props.initialChannels : [],
+    channels: props.initialChannels,
     verkoopprijzen: verkoopprijzenRows,
     skus,
     articles,
@@ -228,273 +144,107 @@ export function AdviesprijzenWorkspace(props: {
   });
 
   const productCostRows = useMemo<ProductCostRow[]>(() => {
-    // Phase 6.2: adviesprijzen volgt dezelfde centrale verkoopbare lijst als offertes/verkoopstrategie.
-    // We tonen alleen `cost_plus` items met actieve kostprijs; diensten (manual_rate) horen niet in adviesopslag.
+    // Keep the existing RF-010/RF-011 source path unchanged in RF-012B2.
     return buildProductCostRows({
-      centralRows: centralSkuIndex.rows as any,
-      skuById: skuById as any,
-      beerById: beerById as any,
-      articleNameById: articleNameById as any,
-    }) as any;
-  }, [
-    props.initialChannels,
-    centralSkuIndex.rows,
-    beerById,
-    skuById,
-    articleNameById,
-    selectedYear,
-    verkoopprijzenRows,
-  ]);
+      centralRows: centralSkuIndex.rows,
+      skuById,
+      beerById,
+      articleNameById,
+    });
+  }, [centralSkuIndex.rows, skuById, beerById, articleNameById]);
 
   const sellInLookup = useMemo(
     () => buildSellInLookup(verkoopprijzenRows, selectedYear),
     [verkoopprijzenRows, selectedYear]
   );
+  const channelDefaultOpslag = useMemo(
+    () => buildChannelDefaultOpslag(activeChannels),
+    [activeChannels]
+  );
+  const yearRows = useMemo(
+    () => buildYearRows({ rows, selectedYear, activeChannels }),
+    [rows, selectedYear, activeChannels]
+  );
 
-  const channelDefaultOpslag = useMemo(() => {
-    return buildChannelDefaultOpslag(activeChannels);
-  }, [activeChannels]);
+  const channelGroups = useMemo<RecommendedPriceChannelGroup[]>(() => {
+    return activeChannels.map((channel) => {
+      const adviesOpslag = adviesOpslagByChannel.get(channel.code) ?? 0;
+      return {
+        channel,
+        adviesOpslag,
+        rows: productCostRows.map((row) => {
+          const { sellInEx } = resolveSellInPriceEx({
+            bierId: row.bierId,
+            productId: row.productId,
+            costPriceEx: row.kostprijsEx,
+            channelCode: channel.code,
+            lookup: sellInLookup,
+            channelDefaultOpslag,
+          });
+          return buildRecommendedPriceDisplayRow({ row, sellInEx, adviesOpslagPct: adviesOpslag, vatDisplay });
+        }),
+      };
+    });
+  }, [activeChannels, adviesOpslagByChannel, channelDefaultOpslag, productCostRows, sellInLookup, vatDisplay]);
 
-  function getSellInPriceEx(row: ProductCostRow, channelCode: string) {
-    return resolveSellInPriceEx({
-      bierId: row.bierId,
-      productId: row.productId,
-      costPriceEx: row.kostprijsEx,
-      channelCode,
-      lookup: sellInLookup,
-      channelDefaultOpslag,
+  function updateMarkup(channel: Channel, row: AdviesprijsRow, nextValue: number) {
+    setRows((current) => {
+      const other = current.filter(
+        (item) => !(Number(item.jaar ?? 0) === selectedYear && item.channel_code === channel.code)
+      );
+      return [
+        ...other,
+        {
+          id: row.id,
+          jaar: selectedYear,
+          channel_code: channel.code,
+          opslag_pct: nextValue,
+        },
+      ];
     });
   }
 
-  const yearRows = useMemo(() => {
-    return buildYearRows({ rows, selectedYear, activeChannels });
-  }, [rows, selectedYear, activeChannels]);
+  function toggleChannel(code: string, nextOpen: boolean) {
+    setOpenChannelCodes((current) => {
+      const exists = current.includes(code);
+      if (nextOpen && !exists) return [...current, code];
+      if (!nextOpen && exists) return current.filter((currentCode) => currentCode !== code);
+      return current;
+    });
+  }
 
   async function save() {
     setIsSaving(true);
     setStatus("");
     try {
       const next = buildAdviesprijzenSavePayload({ rows, selectedYear, yearRows });
-
       await reconcileDatasetItems("adviesprijzen", next);
       setRows(next);
-      setStatus("Opgeslagen.");
+      setStatus(RECOMMENDED_PRICE_SAVE_SUCCESS);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Opslaan mislukt.");
+      setStatus(error instanceof Error ? error.message : RECOMMENDED_PRICE_SAVE_ERROR);
     } finally {
       setIsSaving(false);
     }
   }
 
-  if (years.length === 0) {
-    return (
-      <div className="module-card">
-        <div className="module-card-title">Adviesprijzen</div>
-        <div className="module-card-text">Nog geen productiejaar gevonden. Maak eerst een productiejaar aan.</div>
-      </div>
-    );
-  }
-
   return (
-    <section>
-      {status ? (
-        <div className="editor-status" style={{ marginBottom: 14 }}>
-          {status}
-        </div>
-      ) : null}
-
-      <div className="module-card compact-card" style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div className="module-card-title">Adviesopslag per kanaal</div>
-            <div className="module-card-text">Deze opslag gebruiken we om adviesprijzen (sell-out) af te leiden.</div>
-          </div>
-          <label className="nested-field" style={{ minWidth: 160 }}>
-            <span>Jaar</span>
-            <select
-              className="dataset-input"
-              value={String(selectedYear)}
-              onChange={(event) => setSelectedYear(Number(event.target.value))}
-              disabled={isSaving}
-            >
-              {years.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </div>
-
-      <div className="editor-actions" style={{ marginBottom: 14 }}>
-        <div className="editor-actions-group">
-          <VatDisplayToggle value={vatDisplay} onChange={setVatDisplay} disabled={isSaving} />
-        </div>
-        <div className="editor-actions-group" />
-      </div>
-
-      <div className="dataset-editor-scroll">
-        <table className="dataset-editor-table">
-          <thead>
-            <tr>
-              <th style={{ width: "260px" }}>Kanaal</th>
-              <th style={{ width: "220px" }}>Opslag (%)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {yearRows.map(({ channel, row }) => (
-              <tr key={channel.code}>
-                <td>
-                  <strong>{channel.naam}</strong>
-                  <div className="muted">{channel.code}</div>
-                </td>
-                <td>
-                  <input
-                    className="dataset-input"
-                    type="number"
-                    value={String(row.opslag_pct ?? 0)}
-                    onChange={(event) => {
-                      const nextValue = Number(event.target.value);
-                      setRows((current) => {
-                        const other = current.filter(
-                          (item) => !(Number(item.jaar ?? 0) === selectedYear && item.channel_code === channel.code)
-                        );
-                        return [
-                          ...other,
-                          {
-                            id: row.id,
-                            jaar: selectedYear,
-                            channel_code: channel.code,
-                            opslag_pct: Number.isFinite(nextValue) ? nextValue : 0
-                          }
-                        ];
-                      });
-                    }}
-                    disabled={isSaving}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="editor-actions" style={{ marginTop: "0.85rem" }}>
-        <div className="editor-actions-group">
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() => setOpenChannelCodes(channelCodes)}
-            disabled={isSaving}
-          >
-            Alles uitklappen
-          </button>
-          <button
-            type="button"
-            className="editor-button editor-button-secondary"
-            onClick={() => setOpenChannelCodes([])}
-            disabled={isSaving}
-          >
-            Alles inklappen
-          </button>
-        </div>
-        <div className="editor-actions-group" />
-      </div>
-
-      <div style={{ marginTop: "1rem" }}>
-        {activeChannels.map((channel) => {
-          const code = channel.code;
-          const open = openChannelCodes.includes(code);
-          const adviesOpslag = adviesOpslagByChannel.get(code) ?? 0;
-          return (
-            <details
-              key={code}
-              open={open}
-              className="module-card compact-card"
-              style={{ marginBottom: "0.9rem" }}
-              onToggle={(event) => {
-                const nextOpen = (event.currentTarget as HTMLDetailsElement).open;
-                setOpenChannelCodes((current) => {
-                  const exists = current.includes(code);
-                  if (nextOpen && !exists) return [...current, code];
-                  if (!nextOpen && exists) return current.filter((c) => c !== code);
-                  return current;
-                });
-              }}
-            >
-              <summary className="module-card-title" style={{ cursor: "pointer", display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <span>{channel.naam}</span>
-                <span className="muted">Opslag: {round2(adviesOpslag).toLocaleString("nl-NL")}%</span>
-              </summary>
-              <div className="module-card-text" style={{ marginTop: "0.4rem" }}>
-                Read-only overzicht: berekeningen blijven op excl. BTW; de weergave kan wisselen.
-              </div>
-
-              <div className="data-table" style={{ marginTop: "0.8rem" }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: "220px" }}>Bier</th>
-                      <th style={{ width: "200px" }}>Product</th>
-                      <th style={{ width: "160px" }}>Kostprijs ({vatDisplay === "incl" ? "incl" : "ex"})</th>
-                      <th style={{ width: "160px" }}>Verkoopprijs ({vatDisplay === "incl" ? "incl" : "ex"})</th>
-                      <th style={{ width: "240px" }}>Adviesprijs ({vatDisplay === "incl" ? "incl" : "ex"})</th>
-                      <th style={{ width: "140px" }}>Opslag</th>
-                      <th style={{ width: "140px" }}>Marge klant</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {productCostRows.map((row) => {
-                      const { sellInEx } = getSellInPriceEx(row, code);
-                      const btwPct = Number.isFinite(row.btwPct) ? row.btwPct : 0;
-                      const { min: adviesMinIncl, max: adviesMaxIncl, margeKlantPct } = calcAdviesprijsInclBtwRange({
-                        kostprijsEx: row.kostprijsEx,
-                        sellInEx,
-                        adviesOpslagPct: adviesOpslag,
-                        btwPct
-                      });
-
-                      const kostprijsShown =
-                        vatDisplay === "incl" ? toInclBtw(row.kostprijsEx, btwPct) : row.kostprijsEx;
-                      const sellInShown = vatDisplay === "incl" ? toInclBtw(sellInEx, btwPct) : sellInEx;
-                      const adviesMinShown = vatDisplay === "incl" ? adviesMinIncl : fromInclBtw(adviesMinIncl, btwPct);
-                      const adviesMaxShown = vatDisplay === "incl" ? adviesMaxIncl : fromInclBtw(adviesMaxIncl, btwPct);
-                      return (
-                        <tr key={`${code}:${row.bierId}:${row.productType}:${row.productId}:${row.verpakking}`}>
-                          <td>
-                            <strong>{row.biernaam}</strong>
-                            <div className="muted">{row.productType}</div>
-                          </td>
-                          <td>{row.verpakking}</td>
-                          <td>{money(kostprijsShown)}</td>
-                          <td>{money(sellInShown)}</td>
-                          <td>
-                            {money(adviesMinShown)} - {money(adviesMaxShown)}
-                            <div className="muted">BTW {round2(btwPct)}% (afronding 5 cent incl, naar beneden)</div>
-                          </td>
-                          <td>{round2(adviesOpslag).toLocaleString("nl-NL")}%</td>
-                          <td>{round2(margeKlantPct).toLocaleString("nl-NL")}%</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          );
-        })}
-      </div>
-
-      <div className="editor-actions wizard-footer-actions">
-        <div className="editor-actions-group" />
-        <div className="editor-actions-group">
-          <button type="button" className="editor-button" onClick={() => void save()} disabled={isSaving}>
-            Opslaan
-          </button>
-        </div>
-      </div>
-    </section>
+    <RecommendedPriceWorkspaceView
+      years={years}
+      selectedYear={selectedYear}
+      vatDisplay={vatDisplay}
+      yearRows={yearRows}
+      channelCodes={channelCodes}
+      openChannelCodes={openChannelCodes}
+      channelGroups={channelGroups}
+      status={status}
+      isSaving={isSaving}
+      onYearChange={setSelectedYear}
+      onVatDisplayChange={setVatDisplay}
+      onMarkupChange={updateMarkup}
+      onSetOpenChannelCodes={setOpenChannelCodes}
+      onToggleChannel={toggleChannel}
+      onSave={save}
+    />
   );
 }
-
