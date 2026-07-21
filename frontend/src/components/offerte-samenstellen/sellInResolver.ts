@@ -33,7 +33,15 @@ function getChannelOpslag(
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function getChannelSellInPriceOverride(
+function getChannelOpslagWithKey(
+  row: GenericRecord | null | undefined,
+  channelCode: string
+) {
+  const value = getChannelOpslag(row, channelCode);
+  return value === null ? null : { value, key: channelCode };
+}
+
+function getChannelSellInPriceOverrideWithKey(
   row: GenericRecord | null | undefined,
   channelCode: string
 ) {
@@ -41,8 +49,14 @@ function getChannelSellInPriceOverride(
   const prices = normalizeChannelMap(
     (row as any).sell_in_prices ?? (row as any).kanaalprijzen ?? {}
   );
-  const value = prices[channelCode] ?? prices.list;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  const channelValue = prices[channelCode];
+  if (typeof channelValue === "number" && Number.isFinite(channelValue)) {
+    return { value: channelValue, key: channelCode };
+  }
+  const listValue = prices.list;
+  return typeof listValue === "number" && Number.isFinite(listValue)
+    ? { value: listValue, key: "list" }
+    : null;
 }
 
 export type SellInLookup = {
@@ -52,6 +66,24 @@ export type SellInLookup = {
   packagingOverrideBySkuId: Map<string, GenericRecord>;
   productOverrideByScope: Map<string, GenericRecord>;
   productOverrideBySkuId: Map<string, GenericRecord>;
+};
+
+export type SellInResolutionSourceScope =
+  | "sku_product"
+  | "beer_product"
+  | "sku_packaging"
+  | "product_packaging"
+  | "year_strategy"
+  | "channel_default";
+
+export type SellInResolution = {
+  sellInEx: number;
+  opslagPct: number;
+  source: "prijs" | "opslag";
+  sourceRecordId: string;
+  sourceScope: SellInResolutionSourceScope;
+  sourceKey: string;
+  resolvedYear: number;
 };
 
 function initLookup(resolvedYear: number): SellInLookup {
@@ -129,8 +161,13 @@ export function buildSellInLookupWithFallback(
 }
 
 // Backward compatible default: allow fallback up to 3 years.
-export function buildSellInLookup(verkoopprijzenRows: GenericRecord[], year: number): SellInLookup {
-  return buildSellInLookupWithFallback(verkoopprijzenRows, year, { maxLookbackYears: 3 });
+export function buildSellInLookup(
+  verkoopprijzenRows: GenericRecord[],
+  year: number
+): SellInLookup {
+  return buildSellInLookupWithFallback(verkoopprijzenRows, year, {
+    maxLookbackYears: 3,
+  });
 }
 
 export function buildChannelDefaultOpslagMap(channels: GenericRecord[]) {
@@ -158,44 +195,93 @@ export function resolveSellInPriceEx(params: {
   channelCode: string;
   lookup: SellInLookup;
   channelDefaultOpslag: Map<string, number>;
-}) {
+}): SellInResolution {
   const skuId = String(params.skuId ?? "").trim();
-  const skuOverride = skuId ? params.lookup.productOverrideBySkuId.get(skuId) ?? null : null;
-  const productOverride =
-    skuOverride ??
-    (params.lookup.productOverrideByScope.get(
-      `${params.bierId}:${params.productId}`
-    ) ?? null);
-  const packagingOverride =
-    (skuId ? params.lookup.packagingOverrideBySkuId.get(skuId) ?? null : null) ??
-    params.lookup.packagingOverrideByProduct.get(params.productId) ??
+  const skuProductOverride = skuId
+    ? params.lookup.productOverrideBySkuId.get(skuId) ?? null
+    : null;
+  const beerProductOverride =
+    params.lookup.productOverrideByScope.get(`${params.bierId}:${params.productId}`) ??
     null;
+  const skuPackagingOverride = skuId
+    ? params.lookup.packagingOverrideBySkuId.get(skuId) ?? null
+    : null;
+  const productPackagingOverride =
+    params.lookup.packagingOverrideByProduct.get(params.productId) ?? null;
+  const productOverride = skuProductOverride ?? beerProductOverride;
+  const productScope: SellInResolutionSourceScope = skuProductOverride
+    ? "sku_product"
+    : "beer_product";
+  const packagingOverride = skuPackagingOverride ?? productPackagingOverride;
+  const packagingScope: SellInResolutionSourceScope = skuPackagingOverride
+    ? "sku_packaging"
+    : "product_packaging";
 
-  const priceOverride =
-    getChannelSellInPriceOverride(productOverride, params.channelCode) ??
-    getChannelSellInPriceOverride(packagingOverride, params.channelCode);
+  const productPrice = getChannelSellInPriceOverrideWithKey(
+    productOverride,
+    params.channelCode
+  );
+  const packagingPrice = getChannelSellInPriceOverrideWithKey(
+    packagingOverride,
+    params.channelCode
+  );
+  const priceOverride = productPrice ?? packagingPrice;
 
   if (priceOverride !== null) {
+    const sourceRow = productPrice ? productOverride : packagingOverride;
     return {
-      sellInEx: priceOverride,
+      sellInEx: priceOverride.value,
       opslagPct:
         params.costPriceEx > 0
-          ? ((priceOverride / params.costPriceEx) - 1) * 100
+          ? (priceOverride.value / params.costPriceEx - 1) * 100
           : 0,
-      source: "prijs" as const,
+      source: "prijs",
+      sourceRecordId: String((sourceRow as any)?.id ?? "").trim(),
+      sourceScope: productPrice ? productScope : packagingScope,
+      sourceKey: priceOverride.key,
+      resolvedYear: params.lookup.resolvedYear,
     };
   }
 
-  const opslagPct =
-    getChannelOpslag(productOverride, params.channelCode) ??
-    getChannelOpslag(packagingOverride, params.channelCode) ??
-    getChannelOpslag(params.lookup.yearStrategy, params.channelCode) ??
-    params.channelDefaultOpslag.get(params.channelCode) ??
-    0;
+  const productMargin = getChannelOpslagWithKey(productOverride, params.channelCode);
+  const packagingMargin = getChannelOpslagWithKey(
+    packagingOverride,
+    params.channelCode
+  );
+  const strategyMargin = getChannelOpslagWithKey(
+    params.lookup.yearStrategy,
+    params.channelCode
+  );
+  const defaultMargin = params.channelDefaultOpslag.get(params.channelCode);
+  const margin =
+    productMargin ??
+    packagingMargin ??
+    strategyMargin ??
+    (typeof defaultMargin === "number" && Number.isFinite(defaultMargin)
+      ? { value: defaultMargin, key: params.channelCode }
+      : { value: 0, key: params.channelCode });
+  const sourceRow = productMargin
+    ? productOverride
+    : packagingMargin
+      ? packagingOverride
+      : strategyMargin
+        ? params.lookup.yearStrategy
+        : null;
+  const sourceScope: SellInResolutionSourceScope = productMargin
+    ? productScope
+    : packagingMargin
+      ? packagingScope
+      : strategyMargin
+        ? "year_strategy"
+        : "channel_default";
 
   return {
-    sellInEx: calcSellInExFromOpslagPct(params.costPriceEx, opslagPct),
-    opslagPct,
-    source: "opslag" as const,
+    sellInEx: calcSellInExFromOpslagPct(params.costPriceEx, margin.value),
+    opslagPct: margin.value,
+    source: "opslag",
+    sourceRecordId: String((sourceRow as any)?.id ?? "").trim(),
+    sourceScope,
+    sourceKey: margin.key,
+    resolvedYear: params.lookup.resolvedYear,
   };
 }
