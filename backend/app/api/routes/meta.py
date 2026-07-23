@@ -19,6 +19,8 @@ from app.domain import seed_bundle_service
 from app.domain import douano_sync_storage
 from app.domain import production_storage
 from app.domain import company_distance_storage
+from app.domain import commercial_yearset_service
+from app.domain import commercial_yearset_storage
 from app.domain import setup_service
 from app.domain import product_model_storage
 from app.domain import douano_margin_service
@@ -31,6 +33,11 @@ from app.schemas.kostprijs_activation import (
     UpsertKostprijsActivatieDraftRequest,
 )
 from app.schemas.navigation import DashboardSummary, NavigationItem
+from app.schemas.commercial_yearsets import (
+    CommercialYearsetActivationRequest,
+    CommercialYearsetBackfillRequest,
+    CommercialYearsetRollbackRequest,
+)
 
 
 router = APIRouter(prefix="/meta", tags=["meta"], dependencies=[Depends(require_user)])
@@ -3117,7 +3124,96 @@ def get_yearsets(_: dict = Depends(require_admin)) -> dict[str, Any]:
                 continue
     production_years = sorted(set(production_years))
     last_year = max(production_years) if production_years else 0
-    return {"drafts": drafts, "production_years": production_years, "last_year": last_year}
+    return {
+        "drafts": drafts,
+        "production_years": production_years,
+        "last_year": last_year,
+        "commercial_authority": commercial_yearset_service.authority_overview(
+            fallback_year=last_year
+        ),
+    }
+
+
+@router.get("/commercial-yearsets")
+def get_commercial_yearsets(
+    fallback_year: int = Query(
+        0,
+        ge=0,
+        description="Expliciet legacy fallbackjaar; 0 betekent geen fallback.",
+    ),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    return commercial_yearset_service.authority_overview(
+        fallback_year=int(fallback_year)
+    )
+
+
+@router.post("/commercial-yearsets/backfill")
+def post_commercial_yearset_backfill(
+    payload: CommercialYearsetBackfillRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return commercial_yearset_service.create_legacy_candidate(
+            operational_year=int(payload.operational_year),
+            source_year=int(payload.source_year),
+            actor=str(session.get("username", "") or ""),
+            dry_run=bool(payload.dry_run),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commercial-yearsets/{generation_id}/activate")
+def post_commercial_yearset_activate(
+    generation_id: str,
+    payload: CommercialYearsetActivationRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "generation": commercial_yearset_service.activate_candidate(
+                generation_id=str(generation_id),
+                actor=str(session.get("username", "") or ""),
+                expected_validation_hash=str(payload.expected_validation_hash),
+                expected_active_generation_id=payload.expected_active_generation_id,
+                reason=str(payload.reason or ""),
+                action="activate",
+            )
+        }
+    except commercial_yearset_storage.CommercialYearsetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except commercial_yearset_storage.CommercialYearsetBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commercial-yearsets/{generation_id}/rollback")
+def post_commercial_yearset_rollback(
+    generation_id: str,
+    payload: CommercialYearsetRollbackRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "generation": commercial_yearset_service.activate_candidate(
+                generation_id=str(generation_id),
+                actor=str(session.get("username", "") or ""),
+                expected_validation_hash=str(payload.expected_validation_hash),
+                expected_active_generation_id=str(
+                    payload.expected_active_generation_id
+                ),
+                reason=str(payload.reason),
+                action="rollback",
+            )
+        }
+    except commercial_yearset_storage.CommercialYearsetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except commercial_yearset_storage.CommercialYearsetBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/new-year-drafts-for-year")
@@ -3135,6 +3231,14 @@ def post_rollback_yearset(
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Rollback a committed yearset (latest production year) including cost versions/activations for that year."""
+    if commercial_yearset_storage.get_active_generation():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Destructieve legacy-rollback is geblokkeerd zodra een commerciële "
+                "jaarset actief is. Gebruik de generation-pointer rollback."
+            ),
+        )
     try:
         return dataset_store.rollback_yearset(year=int(year), dry_run=bool(dry_run))
     except ValueError as exc:
@@ -3176,6 +3280,14 @@ def post_rollback_year(
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:
     """Delete all data for a given year (admin-only)."""
+    if commercial_yearset_storage.get_active_generation():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Verwijderen van jaargegevens is geblokkeerd zodra een commerciële "
+                "jaarset actief is. Gebruik de generation-pointer rollback."
+            ),
+        )
     try:
         return dataset_store.rollback_year(year=int(year), dry_run=bool(dry_run))
     except ValueError as exc:

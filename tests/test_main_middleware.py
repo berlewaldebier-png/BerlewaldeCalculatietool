@@ -70,10 +70,14 @@ class MainMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         ), patch("app.main.postgres_storage.database_url", return_value="postgres://test"), patch(
             "app.main.db_pool.initialize_pool"
         ) as init_pool, patch("app.main.postgres_storage.ensure_schema") as ensure_schema:
-            startup_event()
+            with patch(
+                "app.main.commercial_yearset_storage.ensure_schema"
+            ) as ensure_commercial_schema:
+                startup_event()
 
         init_pool.assert_called_once_with("postgres://test", min_size=5, max_size=20)
         ensure_schema.assert_called_once()
+        ensure_commercial_schema.assert_called_once()
 
 
 if __name__ == "__main__":
