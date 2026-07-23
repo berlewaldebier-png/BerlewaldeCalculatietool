@@ -2,7 +2,7 @@ import { buildSellInLookup, resolveSellInPriceEx } from "@/components/offerte-sa
 import { clampNumber } from "@/components/adviesprijzen/adviesprijzenUtils";
 import { normalizeSkuLabel } from "@/lib/skuLabels";
 
-type Channel = {
+export type Channel = {
   code: string;
   naam: string;
   actief: boolean;
@@ -10,14 +10,14 @@ type Channel = {
   default_marge_pct: number;
 };
 
-type AdviesprijsRow = {
+export type AdviesprijsRow = {
   id: string;
   jaar: number;
   channel_code: string;
   opslag_pct: number;
 };
 
-type ProductCostRow = {
+export type ProductCostRow = {
   skuId: string;
   bierId: string;
   biernaam: string;
@@ -29,7 +29,7 @@ type ProductCostRow = {
   kostprijsEx: number;
 };
 
-type CentralSkuRow = {
+export type CentralSkuRow = {
   skuId: string;
   label: string;
   pricingMethod: string;
