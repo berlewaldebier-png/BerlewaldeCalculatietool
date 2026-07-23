@@ -113,6 +113,13 @@ required_rf011b_contracts = {
     "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_shadow_exposes_current_planning_and_actual_fallback_differences",
     "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_reader_is_called_once_and_resolver_is_read_only",
 }
+required_rf013p_contracts = {
+    "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_capture_enforces_read_only_transaction_before_querying",
+    "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_manifest_comparison_names_only_protected_sections",
+    "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_private_artifact_paths_cannot_escape_ignored_output_root",
+    "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_source_capture_rejects_production_and_unverified_hosts",
+    "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_pg_commands_do_not_embed_password_in_arguments",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -127,6 +134,7 @@ missing = sorted(
         | required_rf010c_contracts
         | required_rf010b_contracts
         | required_rf011b_contracts
+        | required_rf013p_contracts
     ).difference(ids)
 )
 
@@ -137,5 +145,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B and RF-011B contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B and RF-013P contracts collected"
 )

@@ -31,6 +31,7 @@ Repository validation after RF-006 added three approved roadmap refinements:
 2. **Active commercial context SSOT:** completing and activating a yearset must establish one explicit operational context for new work while historical records retain their original year and frozen sources.
 3. **Planning cost versus actual LOT cost:** the first planning activation for a SKU and planning year is the stable planning-cost anchor used by Break-even and new Price proposals. Later purchase or brew LOTs for the same SKU create actual cost versions but do not silently replace that planning anchor. A newly introduced SKU receives its own first planning anchor. Omzet en Marge resolves actual cost from the exact LOT when available.
 4. **Canonical year-transition SKU parity:** “Nieuw jaar voorbereiden” must carry the complete canonical source SKU set into a target-year candidate by stable `sku_id`, preserving Beer/format/composition identity while recalculating only named year-sensitive values. UI display rows are not a domain input. A candidate with a missing, duplicate, misclassified or non-ready required SKU must not become operational. Detailed evidence and the approved presentation/history outcome are in `16-year-transition-sku-parity-analysis.md`.
+5. **Canonical yearly planning-cost list:** “basisproduct/samengesteld/variant” describes product structure and is never a synonym for membership of the operational yearly list. Every concrete SKU in the active commercial generation occurs exactly once in the canonical planning list, regardless of structural type. Immutable cost-version rows own the financial components; a planning-cost anchor points to the one version used for new planning work. Later invoice/brew versions remain history/actual evidence and do not duplicate or silently replace that anchor.
 
 ### Required execution package for RF-010
 
@@ -82,6 +83,10 @@ flowchart TD
     R12B1 --> R12B2["RF-012B2 Recommended-price screen"]
     R3 --> R13["RF-013 Additive data-model improvements"]
     R6 --> R13
+    R10 --> R13P["RF-013P Protected data baseline"]
+    R11 --> R13P
+    R13P --> R13A
+    R13P --> R13B
     R11A --> R13A["RF-013A Explicit active yearset authority"]
     R11B --> R13B["RF-013B Canonical Beer/SKU planning-cost authority"]
     R11C --> R13C["RF-013C Additive yearset reconciliation"]
@@ -480,7 +485,7 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 ## RF-013 — Backward-compatible data-model improvements, one authority at a time
 
 - **Objective / findings:** implement approved outcomes for DATA-003–010/012–014 without destructive cleanup.
-- **Candidate order:** (1) quote expected-version/response adapter without migration; (2) read-only identity/classification/LOT divergence reports; (3) RF-013A explicit active-yearset authority after RF-011A/RF-011C; (4) RF-013B canonical Beer/SKU/planning-anchor authority after RF-011B; (5) additive revision/owner/identity/lineage/generation fields; (6) RF-013C deterministic candidate reconciliation/backfill; (7) dual read/write and shadow validation; (8) constraints/index validation after audits. Each is a separate PR/deployment.
+- **Required order:** (1) RF-013P protected read-only baseline and restore rehearsal; (2) RF-013A explicit active-yearset authority after RF-011A/RF-011C; (3) RF-013B canonical Beer/SKU/planning-anchor authority after RF-011B; (4) additive revision/owner/identity/lineage/generation fields within the named authority slice; (5) RF-013C deterministic candidate reconciliation/backfill; (6) dual read/write and shadow validation; (7) constraints/index validation after audits. RF-013P, RF-013A, RF-013B and RF-013C each use a separate branch/PR and approval gate.
 - **Included / excluded:** one entity/relationship per slice, compatibility adapters and reconciliation. Exclude field/table removal, reinterpretation of ambiguous history, blanket FK/cascade changes and quote legacy cleanup.
 - **Affected screens/workflows/modules:** entity-specific; quote, user, product, activation, classification, LOT, Douano or relationship paths, never all together.
 - **Behaviour/contracts:** old rows/payloads/URLs remain readable/writable; unknown fields preserved; current results stable; historical ambiguity remains represented.
@@ -489,6 +494,46 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Rollout / rollback / observability:** expand → backfill → dual → validate; feature flag/read fallback; metrics for old/new reads, divergence and constraint candidates; rollback application to compatibility path while additive columns remain.
 - **Acceptance criteria:** zero unaccounted row/hash differences, old and new versions interoperate, rollback rehearsed, no destructive SQL, production owner approves reconciliation.
 - **Dependencies / complexity / risk / human confirmation:** RF-003/006 and relevant RF-010/011; **large complexity, high data risk**. DBA/product/data/security approval depending entity.
+
+### Approved RF-013 authority model and terminology
+
+The target is one logical canonical planning-cost list, not a second physical copy of every monetary amount:
+
+```mermaid
+erDiagram
+    BEER_STYLE ||--o{ SKU : has
+    SKU ||--o{ COST_VERSION_SKU_ROW : has_history
+    COST_VERSION ||--o{ COST_VERSION_SKU_ROW : contains
+    COMMERCIAL_GENERATION ||--o{ GENERATION_SKU_ENTRY : contains_once
+    GENERATION_SKU_ENTRY }o--|| SKU : identifies
+    GENERATION_SKU_ENTRY }o--|| PLANNING_COST_ANCHOR : plans_with
+    PLANNING_COST_ANCHOR }o--|| COST_VERSION_SKU_ROW : points_to
+    LOT }o--|| COST_VERSION_SKU_ROW : actual_cost
+```
+
+- **Product structure:** a SKU is `basis`, `samengesteld`, an explicitly created sellable variant, article or service according to canonical SKU/BOM identity. A composed `Doos 24 × 33cl` remains composed even though it is part of the active yearly planning list.
+- **Cost-version authority:** immutable cost-version SKU rows own purchase, packaging, overhead/indirect, excise and total cost. Sources distinguish `initial_wizard`, `purchase_invoice`, `brew_moment`, `year_transition` and an explicitly approved rebaseline. “Variant cost price” is not used as a persistence term because sellable variants are a different domain concept.
+- **Planning authority:** one planning anchor exists for every `(commercial_generation_id, sku_id)` and points to one immutable cost-version SKU row. The first approved cost for a SKU in a planning year is the default anchor. A later invoice/brew for the same SKU creates another cost version but does not replace the anchor. A SKU introduced later receives its own first anchor.
+- **Logical current view:** `current_planning_costs` (service/read model or database view) joins the single active generation, generation SKU entry, SKU/Beer identity, planning anchor and immutable cost row. It returns every included SKU once; consumer screens do not rebuild this list from labels, UI groups or “basisproducten”.
+- **Actual authority:** exact SKU/LOT lineage selects the realized cost-version row for Omzet en Marge. Cost-bearing non-LOT lines follow the separately approved time-scoped policy and freeze the selected cost in the transaction snapshot. Missing/ambiguous required LOTs stay unresolved; `no_cost_required` and ignored lines remain distinct.
+- **Year transition:** closing a source generation freezes its membership, identity/composition fingerprint, planning source and commercial settings. The target candidate reuses every stable SKU identity once, creates new year-sensitive cost versions and new planning anchors, and records source-generation/year lineage. Source data is not rewritten.
+- **Advice/sales lineage:** channel markup, selling-price and advice-price settings belong to or explicitly reference a commercial generation. Copying 190% or any other value from a source year records the source generation; editing a target draft records the actor/time/reason. A bare year/channel value without provenance remains compatibility data until reconciled.
+- **Referential policy:** financial/history parents use `RESTRICT`/`NO ACTION`; no Beer, SKU, cost version, generation, LOT, quote or actual snapshot may disappear through a blanket cascade. Cascade is allowed only for owned draft/technical children whose parent deletion is itself safe and explicitly tested.
+
+### RF-013P — Protected data baseline and restore gate
+
+- **Objective / classification:** establish a reproducible, read-only, privacy-preserving baseline and prove recoverability before any RF-013 schema, backfill, dual write or authority switch. This is tooling/characterisation only.
+- **Protected scope:** all public PostgreSQL tables plus explicit critical coverage for Beer JSON compatibility data, SKUs, articles/formats, BOM/composition, product-family links, Douano mappings, cost versions/rows/components, activations/events, purchase/brew/LOT lineage, sales/advice pricing, new-year drafts/target rows, Plan/Forecast/year-close snapshots, quotes and persisted actual snapshots.
+- **Capture contract:** one `SET TRANSACTION READ ONLY` transaction records schema fingerprint, per-table row count and domain-separated SHA-256 content fingerprint, critical dataset fingerprints, per-year aggregate counts and orphan/duplicate/lineage reason counts. Raw IDs, names, LOTs, prices, payloads, credentials and commercial values are never written to Git or normal stdout.
+- **Backup/restore contract:** create a PostgreSQL custom-format backup outside Git, restore it only into a guard-approved loopback database named `calculatietool_test_*`, recapture the restored database, and require exact schema/table fingerprints. Missing PostgreSQL client tools, unsafe target, mismatched fingerprint or a backup outside the protected artifact location fails closed.
+- **Baseline artifacts:** only aggregate counts, reason counts, schema version and SHA-256 fingerprints may be committed. The private backup and any operator report containing identifiers remain under ignored `outputs/`.
+- **Included / excluded:** capture/compare tooling, guarded backup/restore rehearsal, synthetic unit tests, a runbook and the roadmap amendment. Exclude DDL, application `ensure_schema`, migrations, backfill, activation, consumer switching, data repair, deletion and raw commercial-data export.
+- **Required tests:** domain separation/determinism; volatile-order stability; read-only enforcement; absent/extra table reporting; no raw values in public manifest; comparison failure on one-row/one-schema change; production/remote/disallowed restore target rejection; custom backup/restore command construction; restored fingerprint parity.
+- **Commands not automatically executed:** a private development capture and backup/restore rehearsal require the local environment, PostgreSQL client binaries and the explicit acknowledgement flags. If unavailable, RF-013A is blocked until the operator runs the documented command successfully.
+- **Acceptance criteria:** current 2025/2026 and historical data has a private recoverable backup; strict baseline and restored fingerprints match; all known RF-010/RF-011 anomalies remain represented; no database/schema/application behavior changed; RF-013A/B receive an immutable pre-migration comparison point.
+- **Dependencies / complexity / risk / human confirmation:** RF-010A/RF-010B/RF-010C/RF-011A/RF-011B/RF-011C; **medium complexity, low runtime risk, high data significance**. Repository owner confirms backup location/retention and accepts the restore-rehearsal evidence before RF-013A.
+
+**RF-013P implementation note (2026-07-23):** the roadmap authority model, read-only all-table fingerprint capture, protected comparison, guarded `pg_dump`/`pg_restore` rehearsal, safety tests and runbook are implemented on the RF-013P branch. The private development capture was deterministic and confirmed 66/66 open activations with a matching canonical cost row in 2025 versus 42/77 in 2026; the 35 missing 2026 activation cost rows remain evidence for RF-013C, not repaired data. No orphan SKU/version references or duplicate open scopes were found. Portable PostgreSQL 17.10 tooling created a custom backup of the PostgreSQL 16.14 development source and restored it into an empty loopback-only PostgreSQL 17.10 database. The source remained unchanged during the backup and the restored fingerprint matched all 776 schema records, all 54 public tables, compatibility datasets, 2025/2026 aggregates and integrity controls. The disposable server was then stopped. RF-013A remains gated only on owner acceptance of this evidence and retention of the ignored private backup through RF-013 completion.
 
 ### RF-013A — Explicit active commercial yearset authority
 
