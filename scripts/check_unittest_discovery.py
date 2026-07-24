@@ -120,6 +120,19 @@ required_rf013p_contracts = {
     "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_source_capture_rejects_production_and_unverified_hosts",
     "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_pg_commands_do_not_embed_password_in_arguments",
 }
+required_rf013a_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_commercial_yearset_authority_routes_are_admin_only",
+    "test_commercial_yearset_authority.CommercialYearsetReadinessTests.test_complete_contract_is_ready_and_hash_is_deterministic",
+    "test_commercial_yearset_authority.CommercialYearsetReadinessTests.test_initial_forecast_must_be_an_exact_frozen_plan_copy",
+    "test_commercial_yearset_authority.CommercialYearsetReadinessTests.test_missing_cost_rows_and_plan_allocations_block_activation",
+    "test_commercial_yearset_authority.CommercialYearsetLegacyRollbackTests.test_active_authority_blocks_both_destructive_legacy_rollbacks",
+    "test_commercial_yearset_authority.CommercialYearsetPostgresTests.test_activation_and_rollback_only_move_the_pointer",
+    "test_commercial_yearset_authority.CommercialYearsetPostgresTests.test_blocked_candidate_cannot_replace_current_authority",
+    "test_commercial_yearset_authority.CommercialYearsetPostgresTests.test_candidate_creation_is_idempotent_and_additive",
+    "test_commercial_yearset_authority.CommercialYearsetPostgresTests.test_concurrent_compare_and_swap_allows_only_one_winner",
+    "test_commercial_yearset_authority.CommercialYearsetPostgresTests.test_fallback_is_explicit_until_an_authority_is_active",
+    "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_rf013a_additive_comparison_preserves_existing_state",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -135,6 +148,7 @@ missing = sorted(
         | required_rf010b_contracts
         | required_rf011b_contracts
         | required_rf013p_contracts
+        | required_rf013a_contracts
     ).difference(ids)
 )
 
@@ -145,5 +159,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B and RF-013P contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P and RF-013A contracts collected"
 )

@@ -147,6 +147,17 @@ class AuthRouteMatrixTests(unittest.TestCase):
         self.assertEqual(_static_access(_route(auth_router, "/auth/users", "POST")), "users:manage")
         self.assertEqual(_static_access(_route(auth_router, "/auth/users/{username}", "PUT")), "users:manage")
 
+    def test_commercial_yearset_authority_routes_are_admin_only(self) -> None:
+        routes = (
+            ("GET", "/meta/commercial-yearsets"),
+            ("POST", "/meta/commercial-yearsets/backfill"),
+            ("POST", "/meta/commercial-yearsets/{generation_id}/activate"),
+            ("POST", "/meta/commercial-yearsets/{generation_id}/rollback"),
+        )
+        for method, path in routes:
+            with self.subTest(method=method, path=path):
+                self.assertEqual(_static_access(_route(meta_router, path, method)), "admin")
+
     def test_complete_route_access_fingerprint_matches_rf_005_policy(self) -> None:
         manual_access = {
             ("POST", "/auth/change-password"): "manual-user-cookie",
@@ -164,8 +175,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 158, normalized)
-        self.assertEqual(digest, "5a3e86dc24bb6716d44576dd517b8a3915fa72c15ba96cd01bcb05f62e8e723c", normalized)
+        self.assertEqual(len(rows), 162, normalized)
+        self.assertEqual(digest, "afb4a0d4f46fdbf7d7d751533473c3527422714dcc2daea067dd51f26970220e", normalized)
 
 
 if __name__ == "__main__":

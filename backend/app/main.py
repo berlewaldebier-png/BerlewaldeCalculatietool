@@ -16,7 +16,7 @@ from app.api.routes.integrations import router as integrations_router
 from app.api.routes.meta import router as meta_router
 from app.api.routes.quotes import router as quotes_router
 from app.config_validation import validate_config, log_startup_info
-from app.domain import postgres_storage, db_pool
+from app.domain import commercial_yearset_storage, postgres_storage, db_pool
 from app.logging_config import setup_logging, get_logger
 from app.rate_limits import limiter
 
@@ -86,6 +86,7 @@ def startup_event():
 
             # Ensure base database schema is present before handling requests.
             postgres_storage.ensure_schema()
+            commercial_yearset_storage.ensure_schema()
             logger.info("PostgreSQL schema ensured successfully")
         
         logger.info("Application startup complete")

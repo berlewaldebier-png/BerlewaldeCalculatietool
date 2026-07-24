@@ -33,6 +33,10 @@ from scripts.rf013p_data_baseline import (  # noqa: E402
     normalize_years,
     validate_source_target,
 )
+from scripts.rf013a_rehearse_authority import (  # noqa: E402
+    ALLOWED_NEW_TABLES,
+    compare_additive_rehearsal,
+)
 
 
 class Rf013pDataBaselineTests(unittest.TestCase):
@@ -191,6 +195,72 @@ class Rf013pDataBaselineTests(unittest.TestCase):
                 )
         self.assertEqual(target.database, "calculatietool_test_rf013p")
         self.assertIn("calculatietool_test_rf013p", command)
+
+    def test_rf013a_additive_comparison_preserves_existing_state(self) -> None:
+        before = {
+            "tables": {"records": {"old": {"rows": 2, "fingerprint": "same"}}},
+            "appDatasets": {"fingerprint": "same"},
+            "perYear": {"2026": 2},
+            "integrity": {"orphans": 0},
+        }
+        after = {
+            "tables": {
+                "records": {
+                    "old": {"rows": 2, "fingerprint": "same"},
+                    "commercial_yearsets": {"rows": 1, "fingerprint": "new-a"},
+                    "commercial_yearset_events": {"rows": 1, "fingerprint": "new-b"},
+                }
+            },
+            "appDatasets": {"fingerprint": "same"},
+            "perYear": {"2026": 2},
+            "integrity": {"orphans": 0},
+        }
+        differences = compare_additive_rehearsal(
+            before,
+            after,
+            before_schema={"old": "schema-same"},
+            after_schema={
+                "old": "schema-same",
+                "commercial_yearsets": "schema-new-a",
+                "commercial_yearset_events": "schema-new-b",
+            },
+        )
+
+        self.assertEqual(differences, [])
+        self.assertEqual(
+            ALLOWED_NEW_TABLES,
+            {"commercial_yearset_events", "commercial_yearsets"},
+        )
+
+    def test_rf013a_additive_comparison_detects_old_table_change(self) -> None:
+        before = {
+            "tables": {"records": {"old": {"rows": 2, "fingerprint": "before"}}},
+            "appDatasets": {},
+            "perYear": {},
+            "integrity": {},
+        }
+        after = {
+            "tables": {
+                "records": {
+                    "old": {"rows": 2, "fingerprint": "after"},
+                    "commercial_yearsets": {},
+                    "commercial_yearset_events": {},
+                }
+            },
+            "appDatasets": {},
+            "perYear": {},
+            "integrity": {},
+        }
+
+        self.assertIn(
+            "preexisting_table_data",
+            compare_additive_rehearsal(
+                before,
+                after,
+                before_schema={"old": "before"},
+                after_schema={"old": "after"},
+            ),
+        )
 
 
 if __name__ == "__main__":
