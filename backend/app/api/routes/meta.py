@@ -21,6 +21,8 @@ from app.domain import production_storage
 from app.domain import company_distance_storage
 from app.domain import commercial_yearset_service
 from app.domain import commercial_yearset_storage
+from app.domain import cost_authority_service
+from app.domain import cost_authority_storage
 from app.domain import setup_service
 from app.domain import product_model_storage
 from app.domain import douano_margin_service
@@ -37,6 +39,11 @@ from app.schemas.commercial_yearsets import (
     CommercialYearsetActivationRequest,
     CommercialYearsetBackfillRequest,
     CommercialYearsetRollbackRequest,
+)
+from app.schemas.cost_authority import (
+    CostAuthorityBackfillRequest,
+    CostVersionBeerMappingApprovalRequest,
+    PlanningCostRebaselinePrepareRequest,
 )
 
 
@@ -3214,6 +3221,121 @@ def post_commercial_yearset_rollback(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/cost-authority")
+def get_cost_authority(_: dict = Depends(require_admin)) -> dict[str, Any]:
+    """Aggregate-only RF-013B state; no prices, names, LOTs or identifiers."""
+
+    return cost_authority_storage.authority_overview()
+
+
+@router.post("/cost-authority/backfill")
+def post_cost_authority_backfill(
+    payload: CostAuthorityBackfillRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return cost_authority_service.backfill_legacy_authority(
+            actor=str(session.get("username", "") or ""),
+            dry_run=bool(payload.dry_run),
+            expected_manifest_hash=str(payload.expected_manifest_hash or ""),
+        )
+    except cost_authority_storage.PlanningCostConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/cost-authority/mappings/{mapping_id}/approve-beer")
+def post_cost_authority_approve_beer_mapping(
+    mapping_id: str,
+    payload: CostVersionBeerMappingApprovalRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "mapping": cost_authority_storage.approve_cost_version_beer_mapping(
+                str(mapping_id),
+                canonical_beer_id=str(payload.canonical_beer_id),
+                expected_source_hash=str(payload.expected_source_hash),
+                review_reason=str(payload.review_reason),
+                actor=str(session.get("username", "") or ""),
+                actor_role=str(session.get("role", "") or ""),
+            )
+        }
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except cost_authority_storage.PlanningCostConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except cost_authority_storage.PlanningCostBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/planning-cost-rebaseline")
+def post_planning_cost_rebaseline_prepare(
+    payload: PlanningCostRebaselinePrepareRequest,
+    session: dict = Depends(require_cost_draft),
+) -> dict[str, Any]:
+    try:
+        return {
+            "request": cost_authority_storage.prepare_rebaseline(
+                sku_id=str(payload.sku_id),
+                planning_year=int(payload.planning_year),
+                cost_version_id=str(payload.cost_version_id),
+                reason=str(payload.reason),
+                actor=str(session.get("username", "") or ""),
+                actor_role=str(session.get("role", "") or ""),
+            )
+        }
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except cost_authority_storage.PlanningCostBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/planning-cost-rebaseline/{request_id}/approve")
+def post_planning_cost_rebaseline_approve(
+    request_id: str,
+    session: dict = Depends(require_cost_activation),
+) -> dict[str, Any]:
+    try:
+        return {
+            "request": cost_authority_storage.approve_rebaseline(
+                str(request_id),
+                actor=str(session.get("username", "") or ""),
+                actor_role=str(session.get("role", "") or ""),
+            )
+        }
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except cost_authority_storage.PlanningCostConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/planning-cost-rebaseline/{request_id}/execute")
+def post_planning_cost_rebaseline_execute(
+    request_id: str,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return {
+            "request": cost_authority_storage.execute_rebaseline(
+                str(request_id),
+                actor=str(session.get("username", "") or ""),
+                actor_role=str(session.get("role", "") or ""),
+            )
+        }
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except cost_authority_storage.PlanningCostConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except cost_authority_storage.PlanningCostBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/new-year-drafts-for-year")

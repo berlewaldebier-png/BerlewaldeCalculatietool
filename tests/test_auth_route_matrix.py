@@ -158,6 +158,28 @@ class AuthRouteMatrixTests(unittest.TestCase):
             with self.subTest(method=method, path=path):
                 self.assertEqual(_static_access(_route(meta_router, path, method)), "admin")
 
+    def test_cost_authority_routes_keep_prepare_approve_execute_separated(self) -> None:
+        expected = {
+            ("GET", "/meta/cost-authority"): "admin",
+            ("POST", "/meta/cost-authority/backfill"): "admin",
+            (
+                "POST",
+                "/meta/cost-authority/mappings/{mapping_id}/approve-beer",
+            ): "admin",
+            ("POST", "/meta/planning-cost-rebaseline"): "costs:draft",
+            (
+                "POST",
+                "/meta/planning-cost-rebaseline/{request_id}/approve",
+            ): "costs:activate",
+            (
+                "POST",
+                "/meta/planning-cost-rebaseline/{request_id}/execute",
+            ): "admin",
+        }
+        for (method, path), access in expected.items():
+            with self.subTest(method=method, path=path):
+                self.assertEqual(_static_access(_route(meta_router, path, method)), access)
+
     def test_complete_route_access_fingerprint_matches_rf_005_policy(self) -> None:
         manual_access = {
             ("POST", "/auth/change-password"): "manual-user-cookie",
@@ -175,8 +197,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 162, normalized)
-        self.assertEqual(digest, "afb4a0d4f46fdbf7d7d751533473c3527422714dcc2daea067dd51f26970220e", normalized)
+        self.assertEqual(len(rows), 168, normalized)
+        self.assertEqual(digest, "ce2a2559c8e6106ad385a55544d3b55dd24c8fc83ef76eec8e738f5675407106", normalized)
 
 
 if __name__ == "__main__":
