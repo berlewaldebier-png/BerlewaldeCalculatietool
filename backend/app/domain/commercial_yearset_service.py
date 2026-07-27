@@ -651,6 +651,18 @@ def activate_candidate(
         )
         if not generation:
             raise ValueError("Commerciële jaarset niet gevonden.")
+        # RF-013C candidates have a separate Management approval and
+        # manifest-CAS activation command. The legacy activation endpoint must
+        # not bypass that gate once a reconciliation exists for the year.
+        from app.domain import yearset_reconciliation_storage
+
+        if yearset_reconciliation_storage.has_run_for_year(
+            int(generation["operational_year"])
+        ):
+            raise commercial_yearset_storage.CommercialYearsetBlocked(
+                "Voor dit jaar bestaat een RF-013C-reconciliatie; gebruik de "
+                "goedgekeurde reconciliatie-activatie of rollback."
+            )
         report = build_readiness_report(
             operational_year=int(generation["operational_year"]),
             source_year=int(generation["source_year"]),

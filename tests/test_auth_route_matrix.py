@@ -180,6 +180,29 @@ class AuthRouteMatrixTests(unittest.TestCase):
             with self.subTest(method=method, path=path):
                 self.assertEqual(_static_access(_route(meta_router, path, method)), access)
 
+    def test_yearset_reconciliation_routes_keep_prepare_approve_execute_separated(
+        self,
+    ) -> None:
+        expected = {
+            ("GET", "/meta/commercial-yearsets/reconciliations"): "admin",
+            ("POST", "/meta/commercial-yearsets/reconcile"): "admin",
+            (
+                "POST",
+                "/meta/commercial-yearsets/reconciliations/{run_id}/approve",
+            ): "costs:activate",
+            (
+                "POST",
+                "/meta/commercial-yearsets/reconciliations/{run_id}/activate",
+            ): "admin",
+            (
+                "POST",
+                "/meta/commercial-yearsets/reconciliations/{run_id}/rollback",
+            ): "admin",
+        }
+        for (method, path), access in expected.items():
+            with self.subTest(method=method, path=path):
+                self.assertEqual(_static_access(_route(meta_router, path, method)), access)
+
     def test_complete_route_access_fingerprint_matches_rf_005_policy(self) -> None:
         manual_access = {
             ("POST", "/auth/change-password"): "manual-user-cookie",
@@ -197,8 +220,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 168, normalized)
-        self.assertEqual(digest, "ce2a2559c8e6106ad385a55544d3b55dd24c8fc83ef76eec8e738f5675407106", normalized)
+        self.assertEqual(len(rows), 173, normalized)
+        self.assertEqual(digest, "fcf68117cd57de7afd32eeba9acf6716405356702f865343e47e08fd831b2ce0", normalized)
 
 
 if __name__ == "__main__":
