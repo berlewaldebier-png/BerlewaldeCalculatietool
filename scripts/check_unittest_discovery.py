@@ -162,6 +162,13 @@ required_rf013c_contracts = {
     "test_yearset_reconciliation.YearsetReconciliationPostgresTests.test_ready_candidate_requires_management_then_admin_and_moves_one_pointer",
     "test_yearset_reconciliation.YearsetReconciliationPostgresTests.test_source_change_after_candidate_blocks_approval",
 }
+required_rf013c1_contracts = {
+    "test_rf013c_rehearsal.Rf013cRehearsalSafetyTests.test_blocker_worklist_requires_exact_known_gap_identities",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_blocker_worklist_names_exact_skus_without_exposing_amounts",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_global_blocker_occurrences_are_not_lost_from_the_worklist",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_review_projection_uses_a_read_only_transaction_without_schema_init",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_worklist_labels_do_not_change_candidate_identity",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -180,6 +187,7 @@ missing = sorted(
         | required_rf013a_contracts
         | required_rf013b_contracts
         | required_rf013c_contracts
+        | required_rf013c1_contracts
     ).difference(ids)
 )
 
@@ -190,5 +198,7 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, RF-013B and RF-013C contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
+    "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
+    "RF-013B, RF-013C and RF-013C1 contracts collected"
 )

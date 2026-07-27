@@ -3238,6 +3238,23 @@ def get_commercial_yearset_reconciliations(
     )
 
 
+@router.get("/commercial-yearsets/reconciliation-blockers")
+def get_commercial_yearset_reconciliation_blockers(
+    source_year: int = Query(..., ge=2000, le=2100),
+    target_year: int = Query(..., ge=2000, le=2100),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin-only, amount-free worklist for the current candidate blockers."""
+
+    try:
+        return yearset_reconciliation_service.review_current_blockers(
+            source_year=int(source_year),
+            target_year=int(target_year),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/commercial-yearsets/reconcile")
 def post_commercial_yearset_reconcile(
     payload: YearsetReconciliationRequest,

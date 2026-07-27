@@ -26,6 +26,7 @@ from app.domain import (
 
 
 PLANNER_VERSION = "rf-013c-v1"
+WORKLIST_VERSION = "rf-013c1-v1"
 _MONEY_TOLERANCE = Decimal("0.01")
 _LOCK_TABLES = (
     "advice_channel_pricing",
@@ -187,6 +188,223 @@ def _changed_fields(
 
 def _canonical_blockers(values: Iterable[str]) -> list[str]:
     return sorted({_text(value) for value in values if _text(value)})
+
+
+def _worklist_guidance(code: str, area: str) -> dict[str, str]:
+    known = {
+        "target_cost_input_missing": {
+            "owner": "cost_preparer",
+            "next_action": (
+                "Vul voor deze SKU de ontbrekende doeljaarkostprijs in via "
+                "Nieuw jaar voorbereiden; leid geen bedrag af uit een label."
+            ),
+        },
+        "target_sell_in_cost_unresolved": {
+            "owner": "cost_preparer",
+            "next_action": (
+                "Los eerst de kostprijsblokkade van deze SKU op; de sell-inregel "
+                "kan daarna opnieuw worden gevalideerd."
+            ),
+        },
+        "target_sell_in_non_positive": {
+            "owner": "sales_pricing_owner",
+            "next_action": (
+                "Controleer en bevestig een positieve doeljaar-sell-inprijs in "
+                "Verkoopstrategie."
+            ),
+        },
+        "target_sell_in_missing": {
+            "owner": "sales_pricing_owner",
+            "next_action": (
+                "Leg voor deze verkoopbare SKU een expliciete doeljaar-sell-inprijs "
+                "vast in Verkoopstrategie."
+            ),
+        },
+        "plan_revenue_missing": {
+            "owner": "management",
+            "next_action": (
+                "Vul en bevestig de doeljaaromzet in Nieuw jaar voorbereiden."
+            ),
+        },
+        "plan_contribution_missing": {
+            "owner": "management",
+            "next_action": (
+                "Vul en bevestig de doeljaarcontributie in Nieuw jaar voorbereiden."
+            ),
+        },
+        "plan_liters_missing": {
+            "owner": "management",
+            "next_action": (
+                "Vul en bevestig het doeljaarvolume in liters in Nieuw jaar "
+                "voorbereiden."
+            ),
+        },
+        "plan_units_missing": {
+            "owner": "management",
+            "next_action": (
+                "Vul en bevestig de doeljaareenheden in Nieuw jaar voorbereiden."
+            ),
+        },
+        "plan_period_allocation_missing": {
+            "owner": "management",
+            "next_action": (
+                "Verdeel het bevestigde jaarplan over perioden in Nieuw jaar "
+                "voorbereiden."
+            ),
+        },
+    }
+    return known.get(
+        code,
+        {
+            "owner": "administrator",
+            "next_action": (
+                f"Onderzoek blokkade '{code}' binnen '{area}' en bevestig de "
+                "bron voordat een nieuwe kandidaat wordt gemaakt."
+            ),
+        },
+    )
+
+
+def build_blocker_worklist(
+    plan: dict[str, Any], *, sku_labels: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Project candidate blockers without exposing commercial amounts."""
+
+    labels = {
+        _text(sku_id): _text(label)
+        for sku_id, label in (sku_labels or {}).items()
+        if _text(sku_id)
+    }
+    sku_entries = {
+        _text(row.get("sku_id")): row
+        for row in plan.get("sku_entries", [])
+        if isinstance(row, dict) and _text(row.get("sku_id"))
+    }
+    items: list[dict[str, Any]] = []
+    accounted: dict[str, int] = {}
+
+    def append_item(
+        *,
+        area: str,
+        code: str,
+        subject: dict[str, Any],
+        occurrence: int = 1,
+    ) -> None:
+        blocker_code = _text(code)
+        if not blocker_code:
+            return
+        guidance = _worklist_guidance(blocker_code, area)
+        identity = (
+            subject.get("sku_id")
+            or subject.get("channel_code")
+            or subject.get("source_plan_id")
+            or f"{plan.get('source_year')}:{plan.get('target_year')}"
+        )
+        items.append(
+            {
+                "id": _stable_id(
+                    "reconciliation-work-item",
+                    plan.get("manifest_hash"),
+                    area,
+                    blocker_code,
+                    identity,
+                    occurrence,
+                ),
+                "area": area,
+                "blocker_code": blocker_code,
+                "owner": guidance["owner"],
+                "next_action": guidance["next_action"],
+                "subject": subject,
+            }
+        )
+        accounted[blocker_code] = accounted.get(blocker_code, 0) + 1
+
+    def sku_subject(sku_id: str) -> dict[str, Any]:
+        entry = sku_entries.get(sku_id, {})
+        return {
+            "sku_id": sku_id,
+            "display_name": labels.get(sku_id) or sku_id,
+            "subject_type": _text(entry.get("subject_type")),
+            "subject_id": _text(entry.get("subject_id")),
+            "scope_classification": _text(entry.get("scope_classification")),
+            "sku_kind": _text(entry.get("sku_kind")),
+        }
+
+    for entry in plan.get("sku_entries", []):
+        if not isinstance(entry, dict):
+            continue
+        sku_id = _text(entry.get("sku_id"))
+        for code in entry.get("blocker_codes", []):
+            append_item(area="cost", code=code, subject=sku_subject(sku_id))
+
+    for entry in plan.get("price_entries", []):
+        if not isinstance(entry, dict):
+            continue
+        sku_id = _text(entry.get("sku_id"))
+        for code in entry.get("blocker_codes", []):
+            append_item(area="sell_in", code=code, subject=sku_subject(sku_id))
+
+    for entry in plan.get("channel_entries", []):
+        if not isinstance(entry, dict):
+            continue
+        for code in entry.get("blocker_codes", []):
+            append_item(
+                area="advice_channel",
+                code=code,
+                subject={"channel_code": _text(entry.get("channel_code"))},
+            )
+
+    plan_entry = plan.get("plan_entry", {})
+    if isinstance(plan_entry, dict):
+        for code in plan_entry.get("blocker_codes", []):
+            append_item(
+                area="plan",
+                code=code,
+                subject={
+                    "source_plan_id": _text(plan_entry.get("source_plan_id")),
+                    "target_year": int(plan.get("target_year", 0) or 0),
+                },
+            )
+
+    for code, raw_count in sorted(plan.get("blocker_counts", {}).items()):
+        remaining = int(raw_count or 0) - accounted.get(_text(code), 0)
+        for occurrence in range(1, max(remaining, 0) + 1):
+            append_item(
+                area="global",
+                code=_text(code),
+                occurrence=occurrence,
+                subject={
+                    "source_year": int(plan.get("source_year", 0) or 0),
+                    "target_year": int(plan.get("target_year", 0) or 0),
+                },
+            )
+
+    items.sort(
+        key=lambda item: (
+            item["area"],
+            item["blocker_code"],
+            _stable(item["subject"]),
+            item["id"],
+        )
+    )
+    area_counts: dict[str, int] = {}
+    for item in items:
+        area = _text(item.get("area"))
+        area_counts[area] = area_counts.get(area, 0) + 1
+    return {
+        "version": WORKLIST_VERSION,
+        "source_year": int(plan.get("source_year", 0) or 0),
+        "target_year": int(plan.get("target_year", 0) or 0),
+        "ready": bool(plan.get("ready")),
+        "manifest_hash": _text(plan.get("manifest_hash")),
+        "validation_hash": _text(plan.get("validation_hash")),
+        "summary": copy.deepcopy(plan.get("summary", {})),
+        "blocker_counts": copy.deepcopy(plan.get("blocker_counts", {})),
+        "area_counts": dict(sorted(area_counts.items())),
+        "work_items": items,
+        "consumer_mode": "compatibility_only",
+        "data_rewritten": False,
+    }
 
 
 def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -947,6 +1165,34 @@ def build_current_plan(
                 conn, source_year=int(source_year), target_year=int(target_year)
             )
         )
+
+
+def review_current_blockers(*, source_year: int, target_year: int) -> dict[str, Any]:
+    source = int(source_year or 0)
+    target = int(target_year or 0)
+    if source <= 0 or target <= source:
+        raise ValueError("Gebruik expliciet 0 < source_year < target_year.")
+    with postgres_storage.connect() as conn:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        with conn.transaction():
+            conn.execute(
+                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+            )
+            plan = build_reconciliation_plan(
+                read_reconciliation_snapshot(
+                    conn, source_year=source, target_year=target
+                )
+            )
+            sku_labels = {
+                _text(row[0]): _text(row[1])
+                for row in conn.execute(
+                    "SELECT id, name FROM skus ORDER BY id"
+                ).fetchall()
+            }
+            return build_blocker_worklist(plan, sku_labels=sku_labels)
 
 
 def _public_plan(plan: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:

@@ -4,7 +4,7 @@ import copy
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -338,6 +338,134 @@ class YearsetReconciliationPlanTests(unittest.TestCase):
 
         self.assertEqual(first["manifest_hash"], second["manifest_hash"])
         self.assertEqual(first["validation_hash"], second["validation_hash"])
+
+    def test_blocker_worklist_names_exact_skus_without_exposing_amounts(self) -> None:
+        snapshot = _snapshot()
+        snapshot["engine_batches"][0]["rows"] = [
+            row
+            for row in snapshot["engine_batches"][0]["rows"]
+            if row["sku_id"] != "sku-new"
+        ]
+        snapshot["target_prices"][0]["payload"]["sell_in_prices"]["list"] = "0"
+        snapshot["plan_rows"][0]["payload"] = {}
+        plan = yearset_reconciliation_service.build_reconciliation_plan(snapshot)
+
+        worklist = yearset_reconciliation_service.build_blocker_worklist(
+            plan,
+            sku_labels={
+                "sku-source": "Berlewalde Blond - Doos 24 x 33cl",
+                "sku-new": "Berlewalde Blond - Fles 33cl",
+            },
+        )
+
+        self.assertFalse(worklist["ready"])
+        self.assertFalse(worklist["data_rewritten"])
+        self.assertEqual(worklist["manifest_hash"], plan["manifest_hash"])
+        missing_cost = next(
+            row
+            for row in worklist["work_items"]
+            if row["blocker_code"] == "target_cost_input_missing"
+        )
+        self.assertEqual(missing_cost["area"], "cost")
+        self.assertEqual(missing_cost["subject"]["sku_id"], "sku-new")
+        self.assertEqual(
+            missing_cost["subject"]["display_name"],
+            "Berlewalde Blond - Fles 33cl",
+        )
+        self.assertEqual(missing_cost["owner"], "cost_preparer")
+        self.assertIn("plan", worklist["area_counts"])
+        self.assertIn("sell_in", worklist["area_counts"])
+
+        forbidden = {
+            "primary_cost",
+            "packaging_cost",
+            "overhead_cost",
+            "excise_cost",
+            "cost_price",
+            "list_price",
+            "advice_markup_pct",
+            "frozen_plan",
+            "initial_forecast",
+        }
+
+        def assert_amount_free(value: object) -> None:
+            if isinstance(value, dict):
+                self.assertTrue(forbidden.isdisjoint(value))
+                for child in value.values():
+                    assert_amount_free(child)
+            elif isinstance(value, list):
+                for child in value:
+                    assert_amount_free(child)
+
+        assert_amount_free(worklist)
+
+    def test_worklist_labels_do_not_change_candidate_identity(self) -> None:
+        plan = yearset_reconciliation_service.build_reconciliation_plan(_snapshot())
+
+        first = yearset_reconciliation_service.build_blocker_worklist(
+            plan, sku_labels={"sku-source": "Oude presentatienaam"}
+        )
+        second = yearset_reconciliation_service.build_blocker_worklist(
+            plan, sku_labels={"sku-source": "Nieuwe presentatienaam"}
+        )
+
+        self.assertEqual(first["manifest_hash"], second["manifest_hash"])
+        self.assertEqual(first["validation_hash"], second["validation_hash"])
+
+    def test_global_blocker_occurrences_are_not_lost_from_the_worklist(self) -> None:
+        snapshot = _snapshot()
+        snapshot["source_year_close_id"] = ""
+        plan = yearset_reconciliation_service.build_reconciliation_plan(snapshot)
+
+        worklist = yearset_reconciliation_service.build_blocker_worklist(plan)
+
+        global_rows = [
+            row
+            for row in worklist["work_items"]
+            if row["blocker_code"] == "source_year_close_missing"
+        ]
+        self.assertEqual(len(global_rows), 1)
+        self.assertEqual(global_rows[0]["area"], "global")
+
+    def test_review_projection_uses_a_read_only_transaction_without_schema_init(
+        self,
+    ) -> None:
+        connection = MagicMock()
+        connection.execute.side_effect = [
+            MagicMock(),
+            MagicMock(fetchall=MagicMock(return_value=[("sku-source", "Blond")])),
+        ]
+        connection_manager = MagicMock()
+        connection_manager.__enter__.return_value = connection
+        connection.transaction.return_value.__enter__.return_value = connection
+
+        with (
+            patch.object(
+                yearset_reconciliation_service.postgres_storage,
+                "connect",
+                return_value=connection_manager,
+            ),
+            patch.object(
+                yearset_reconciliation_service,
+                "read_reconciliation_snapshot",
+                return_value=_snapshot(),
+            ),
+            patch.object(
+                yearset_reconciliation_service,
+                "ensure_dependencies",
+            ) as ensure_dependencies,
+        ):
+            result = yearset_reconciliation_service.review_current_blockers(
+                source_year=2025,
+                target_year=2026,
+            )
+
+        ensure_dependencies.assert_not_called()
+        connection.execute.assert_any_call(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+        )
+        self.assertTrue(result["ready"])
+        self.assertFalse(result["data_rewritten"])
 
 
 @unittest.skipUnless(
