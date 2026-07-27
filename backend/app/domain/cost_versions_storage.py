@@ -795,6 +795,9 @@ def load_dataset(default_value: Any) -> Any:
 
 def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     ensure_schema()
+    from app.domain import cost_authority_storage
+
+    cost_authority_storage.ensure_schema()
     if not isinstance(data, list):
         raise ValueError("Ongeldig payload voor 'kostprijsversies': verwacht list.")
 
@@ -1162,6 +1165,16 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                         """,
                         row_params,
                     )
+                # RF-013B dual write: classify each version subject explicitly
+                # and add exact LOT lineage only when the version/SKU row is unique.
+                cost_authority_storage.sync_cost_version_authority(
+                    cur,
+                    [
+                        str(version.get("id", "") or "")
+                        for version in records
+                        if str(version.get("id", "") or "").strip()
+                    ],
+                )
             elif overwrite:
                 # Overwrite with an empty list means "clear all cost versions".
                 cur.execute("DELETE FROM cost_versions")

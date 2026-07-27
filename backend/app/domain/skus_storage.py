@@ -679,6 +679,9 @@ def load_dataset(default_value: Any) -> Any:
 
 def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
     ensure_schema()
+    from app.domain import cost_authority_storage
+
+    cost_authority_storage.ensure_schema()
     if not isinstance(data, list):
         raise ValueError("Ongeldig payload voor 'skus': verwacht list.")
     now = datetime.now(UTC)
@@ -759,6 +762,9 @@ def save_dataset(data: Any, *, overwrite: bool = True) -> bool:
                     """,
                     params,
                 )
+            # RF-013B dual write. Incomplete/unknown subjects are recorded in
+            # the new mapping manifest and never guessed from display names.
+            cost_authority_storage.sync_sku_subjects_from_rows(cur, rows)
         if not postgres_storage.in_transaction():
             conn.commit()
     return True

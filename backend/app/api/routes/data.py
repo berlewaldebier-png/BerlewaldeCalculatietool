@@ -130,7 +130,10 @@ def post_activate_kostprijsversie(
         effective_from = str(data.get("effective_from", "") or "").strip()
         activated = dataset_store.activate_cost_version(
             version_id,
-            context={"run_id": run_id},
+            context={
+                "run_id": run_id,
+                "actor": str(_.get("username", "") or ""),
+            },
             effective_from=effective_from,
         )
         if activated is None:
@@ -196,7 +199,10 @@ def post_activate_kostprijsversie_products(
         activated = dataset_store.activate_cost_version_products(
             version_id,
             [str(product_id or "") for product_id in product_ids if str(product_id or "").strip()],
-            context={"run_id": run_id},
+            context={
+                "run_id": run_id,
+                "actor": str(_.get("username", "") or ""),
+            },
         )
         
         if activated is None:

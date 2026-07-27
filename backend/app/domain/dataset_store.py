@@ -693,6 +693,11 @@ def save_dataset(name: str, data: Any) -> bool:
         saved = postgres_storage.save_dataset(name, payload)
         if saved:
             product_model_storage.sync_product_families_from_beers(payload)
+            # RF-013B dual write: retain `app_datasets.bieren` for compatibility
+            # while projecting stable IDs into the additive Beer authority.
+            from app.domain import cost_authority_storage
+
+            cost_authority_storage.sync_beers_from_legacy_rows(payload)
         return saved
     if name == "verkoopprijzen" and isinstance(data, list):
         payload = ensure_complete_verkoop_records(

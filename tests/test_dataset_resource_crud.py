@@ -87,6 +87,7 @@ class DatasetResourceCrudTests(unittest.TestCase):
             {"id": "beer-create", "biernaam": "Saison", "stijl": "Saison", "active": True},
         ]
         synced_payloads: list[list[dict[str, object]]] = []
+        authority_payloads: list[list[dict[str, object]]] = []
 
         def fake_load(_: str, __: object) -> list[dict[str, object]]:
             return deepcopy(state)
@@ -98,6 +99,9 @@ class DatasetResourceCrudTests(unittest.TestCase):
 
         def fake_sync(rows: list[dict[str, object]]) -> None:
             synced_payloads.append(deepcopy(rows))
+
+        def fake_authority_sync(rows: list[dict[str, object]]) -> None:
+            authority_payloads.append(deepcopy(rows))
 
         with patch.dict("os.environ", {"CALCULATIETOOL_ENV": "production"}), patch.object(
             dataset_store, "require_postgres", return_value=None
@@ -111,6 +115,9 @@ class DatasetResourceCrudTests(unittest.TestCase):
             dataset_store.product_model_storage,
             "sync_product_families_from_beers",
             side_effect=fake_sync,
+        ), patch(
+            "app.domain.cost_authority_storage.sync_beers_from_legacy_rows",
+            side_effect=fake_authority_sync,
         ):
             self.assertTrue(api_utils._production_bulk_put_disabled("bieren"))
             listed = dataset_store.list_dataset_items("bieren")
@@ -131,6 +138,7 @@ class DatasetResourceCrudTests(unittest.TestCase):
         self.assertEqual(state, requested)
         self.assertGreater(len(synced_payloads), 0)
         self.assertEqual(synced_payloads[-1], requested)
+        self.assertEqual(authority_payloads[-1], requested)
 
 
 if __name__ == "__main__":

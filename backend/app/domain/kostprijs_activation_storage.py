@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 from threading import Lock
 from typing import Any
 from uuid import uuid4
@@ -263,6 +264,9 @@ def activate_activations(
 ) -> bool:
     """Activation semantics: close current active row per (sku,year) and open a new one."""
     ensure_schema()
+    from app.domain import cost_authority_storage
+
+    cost_authority_storage.ensure_schema()
     normalized = [normalize_activation_record(row) for row in rows if isinstance(row, dict)]
     for row in normalized:
         if not row["sku_id"] or int(row["jaar"]) <= 0 or not row["kostprijsversie_id"]:
@@ -326,6 +330,7 @@ def activate_activations(
                 previous_version_id = str(active_rows[0][1] or "") if active_rows else ""
 
                 effectief_vanaf = row.get("effectief_vanaf") or now
+                activation_id = str(uuid4())
                 cur.execute(
                     """
                     INSERT INTO kostprijs_sku_activations (
@@ -334,7 +339,7 @@ def activate_activations(
                     VALUES (%s, %s, %s, %s, %s, NULL, %s, %s)
                     """,
                     (
-                        str(uuid4()),
+                        activation_id,
                         sku_id,
                         jaar,
                         new_version_id,
@@ -343,6 +348,20 @@ def activate_activations(
                         now,
                     ),
                 )
+
+                planning_anchor_status = "existing_history"
+                if not active_rows:
+                    planning_anchor_status = (
+                        cost_authority_storage.register_first_activation_anchor(
+                            cur,
+                            sku_id=sku_id,
+                            planning_year=jaar,
+                            activation_id=activation_id,
+                            cost_version_id=new_version_id,
+                            effective_at=str(effectief_vanaf or ""),
+                            actor=str(ctx.actor or ""),
+                        )
+                    )
 
                 cur.execute(
                     """
@@ -372,7 +391,13 @@ def activate_activations(
                         previous_version_id,
                         new_version_id,
                         effectief_vanaf or None,
-                        "{}",
+                        json.dumps(
+                            {
+                                "planning_anchor_dual_write": planning_anchor_status,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
                     ),
                 )
         if not postgres_storage.in_transaction():

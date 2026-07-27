@@ -133,6 +133,18 @@ required_rf013a_contracts = {
     "test_commercial_yearset_authority.CommercialYearsetPostgresTests.test_fallback_is_explicit_until_an_authority_is_active",
     "test_rf013p_data_baseline.Rf013pDataBaselineTests.test_rf013a_additive_comparison_preserves_existing_state",
 }
+required_rf013b_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_cost_authority_routes_keep_prepare_approve_execute_separated",
+    "test_cost_authority.CostAuthorityPlanTests.test_article_service_and_bundle_use_explicit_subject_types",
+    "test_cost_authority.CostAuthorityPlanTests.test_direct_lot_cost_without_version_row_lineage_stays_blocked",
+    "test_cost_authority.CostAuthorityPlanTests.test_duplicate_name_reference_is_ambiguous_and_never_merged",
+    "test_cost_authority.CostAuthorityPlanTests.test_plan_keeps_first_activation_and_exact_lots_separate",
+    "test_cost_authority.CostAuthorityPostgresTests.test_ambiguous_legacy_beer_mapping_requires_reviewed_admin_choice",
+    "test_cost_authority.CostAuthorityPostgresTests.test_backfill_is_idempotent_and_does_not_change_legacy_tables",
+    "test_cost_authority.CostAuthorityPostgresTests.test_first_new_activation_anchors_but_later_activation_does_not_replace",
+    "test_cost_authority.CostAuthorityPostgresTests.test_rebaseline_requires_brewer_management_and_admin_in_order",
+    "test_rf013b_rehearsal.Rf013bRehearsalSafetyTests.test_only_exact_authority_tables_may_be_added",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -149,6 +161,7 @@ missing = sorted(
         | required_rf011b_contracts
         | required_rf013p_contracts
         | required_rf013a_contracts
+        | required_rf013b_contracts
     ).difference(ids)
 )
 
@@ -159,5 +172,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P and RF-013A contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A and RF-013B contracts collected"
 )

@@ -90,8 +90,8 @@ def inventory_fingerprint(records: list[str]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-EXPECTED_DDL_COUNT = 237
-EXPECTED_DDL_FINGERPRINT = "e63c6e4173485378e867a4350489354088dca667029fb204a50ed72c5f8d2922"
+EXPECTED_DDL_COUNT = 253
+EXPECTED_DDL_FINGERPRINT = "7aeb11a38a06ef1b28ef17593258373536324db6386f3bf171d686304ced824b"
 EXPECTED_OWNER_COUNTS: dict[str, int] = {
     "backend/app/api/routes/meta.py:post_dev_hard_reset": 1,
     "backend/app/domain/adviesprijzen_storage.py:ensure_schema": 1,
@@ -102,6 +102,7 @@ EXPECTED_OWNER_COUNTS: dict[str, int] = {
     "backend/app/domain/commercial_yearset_storage.py:ensure_schema": 7,
     "backend/app/domain/company_distance_storage.py:ensure_schema": 2,
     "backend/app/domain/correction_run_storage.py:ensure_schema": 3,
+    "backend/app/domain/cost_authority_storage.py:ensure_schema": 16,
     "backend/app/domain/cost_versions_storage.py:ensure_schema": 22,
     "backend/app/domain/dataset_store.py:validate_phase_g_constraints": 1,
     "backend/app/domain/douano_margin_snapshot_storage.py:ensure_schema": 3,
