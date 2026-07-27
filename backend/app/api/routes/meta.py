@@ -21,6 +21,8 @@ from app.domain import production_storage
 from app.domain import company_distance_storage
 from app.domain import commercial_yearset_service
 from app.domain import commercial_yearset_storage
+from app.domain import yearset_reconciliation_service
+from app.domain import yearset_reconciliation_storage
 from app.domain import cost_authority_service
 from app.domain import cost_authority_storage
 from app.domain import setup_service
@@ -39,6 +41,9 @@ from app.schemas.commercial_yearsets import (
     CommercialYearsetActivationRequest,
     CommercialYearsetBackfillRequest,
     CommercialYearsetRollbackRequest,
+    YearsetReconciliationActivationRequest,
+    YearsetReconciliationApprovalRequest,
+    YearsetReconciliationRequest,
 )
 from app.schemas.cost_authority import (
     CostAuthorityBackfillRequest,
@@ -3215,6 +3220,120 @@ def post_commercial_yearset_rollback(
                 action="rollback",
             )
         }
+    except commercial_yearset_storage.CommercialYearsetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except commercial_yearset_storage.CommercialYearsetBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/commercial-yearsets/reconciliations")
+def get_commercial_yearset_reconciliations(
+    target_year: int = Query(0, ge=0, le=2100),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    return yearset_reconciliation_service.aggregate_overview(
+        target_year=int(target_year)
+    )
+
+
+@router.post("/commercial-yearsets/reconcile")
+def post_commercial_yearset_reconcile(
+    payload: YearsetReconciliationRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return yearset_reconciliation_service.reconcile(
+            source_year=int(payload.source_year),
+            target_year=int(payload.target_year),
+            actor=str(session.get("username", "") or ""),
+            dry_run=bool(payload.dry_run),
+            expected_manifest_hash=str(payload.expected_manifest_hash or ""),
+        )
+    except yearset_reconciliation_storage.YearsetReconciliationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commercial-yearsets/reconciliations/{run_id}/approve")
+def post_commercial_yearset_reconciliation_approve(
+    run_id: str,
+    payload: YearsetReconciliationApprovalRequest,
+    session: dict = Depends(require_cost_activation),
+) -> dict[str, Any]:
+    try:
+        return {
+            "run": yearset_reconciliation_service.approve(
+                str(run_id),
+                expected_manifest_hash=str(payload.expected_manifest_hash),
+                actor=str(session.get("username", "") or ""),
+                actor_role=str(session.get("role", "") or ""),
+                reason=str(payload.reason),
+            )
+        }
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except yearset_reconciliation_storage.YearsetReconciliationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except yearset_reconciliation_storage.YearsetReconciliationBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commercial-yearsets/reconciliations/{run_id}/activate")
+def post_commercial_yearset_reconciliation_activate(
+    run_id: str,
+    payload: YearsetReconciliationActivationRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return yearset_reconciliation_service.activate(
+            str(run_id),
+            expected_manifest_hash=str(payload.expected_manifest_hash),
+            expected_active_generation_id=payload.expected_active_generation_id,
+            actor=str(session.get("username", "") or ""),
+            actor_role=str(session.get("role", "") or ""),
+            reason=str(payload.reason),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except yearset_reconciliation_storage.YearsetReconciliationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except yearset_reconciliation_storage.YearsetReconciliationBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except commercial_yearset_storage.CommercialYearsetConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except commercial_yearset_storage.CommercialYearsetBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commercial-yearsets/reconciliations/{run_id}/rollback")
+def post_commercial_yearset_reconciliation_rollback(
+    run_id: str,
+    payload: YearsetReconciliationActivationRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    try:
+        return yearset_reconciliation_service.activate(
+            str(run_id),
+            expected_manifest_hash=str(payload.expected_manifest_hash),
+            expected_active_generation_id=payload.expected_active_generation_id,
+            actor=str(session.get("username", "") or ""),
+            actor_role=str(session.get("role", "") or ""),
+            reason=str(payload.reason),
+            action="rollback",
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except yearset_reconciliation_storage.YearsetReconciliationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except yearset_reconciliation_storage.YearsetReconciliationBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except commercial_yearset_storage.CommercialYearsetConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except commercial_yearset_storage.CommercialYearsetBlocked as exc:

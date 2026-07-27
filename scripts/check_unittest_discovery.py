@@ -145,6 +145,23 @@ required_rf013b_contracts = {
     "test_cost_authority.CostAuthorityPostgresTests.test_rebaseline_requires_brewer_management_and_admin_in_order",
     "test_rf013b_rehearsal.Rf013bRehearsalSafetyTests.test_only_exact_authority_tables_may_be_added",
 }
+required_rf013c_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_yearset_reconciliation_routes_keep_prepare_approve_execute_separated",
+    "test_main_middleware.MainMiddlewareTests.test_startup_event_ensures_postgres_schema",
+    "test_rf013c_rehearsal.Rf013cRehearsalSafetyTests.test_only_exact_six_reconciliation_tables_are_added_by_rf013c",
+    "test_rf013c_rehearsal.Rf013cRehearsalSafetyTests.test_restored_characterization_requires_exact_known_gaps",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_catalog_reference_does_not_require_a_positive_cost",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_complete_manifest_is_ready_and_preserves_one_row_per_stable_sku",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_conflicting_financial_rows_for_one_sku_block_the_candidate",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_identical_ui_fanout_rows_collapse_without_using_labels_as_identity",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_initial_forecast_is_an_exact_detached_copy_of_the_frozen_plan",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_manifest_hash_is_stable_when_input_row_order_changes",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_multiple_closed_source_snapshots_block_deterministic_lineage",
+    "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_required_cost_without_target_input_is_visible_and_blocks_activation",
+    "test_yearset_reconciliation.YearsetReconciliationPostgresTests.test_failed_candidate_stage_rolls_back_the_generation_and_run",
+    "test_yearset_reconciliation.YearsetReconciliationPostgresTests.test_ready_candidate_requires_management_then_admin_and_moves_one_pointer",
+    "test_yearset_reconciliation.YearsetReconciliationPostgresTests.test_source_change_after_candidate_blocks_approval",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -162,6 +179,7 @@ missing = sorted(
         | required_rf013p_contracts
         | required_rf013a_contracts
         | required_rf013b_contracts
+        | required_rf013c_contracts
     ).difference(ids)
 )
 
@@ -172,5 +190,5 @@ if missing:
 
 print(
     f"unittest discovery: {len(ids)} tests; "
-    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A and RF-013B contracts collected"
+    "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, RF-013B and RF-013C contracts collected"
 )
