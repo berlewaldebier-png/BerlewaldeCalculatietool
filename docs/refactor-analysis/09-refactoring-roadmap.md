@@ -591,7 +591,7 @@ A fresh RF-013P restore retained exact fingerprints for all 54 pre-existing tabl
 - **Rollout / rollback / observability:** separate branch/PR `codex/rf-013c1-blocker-worklist`; existing UI and consumers remain unchanged. Rollback removes the route/projection only and never touches candidate or historical tables.
 - **Acceptance criteria:** the worklist identifies all current blockers without showing financial values; exact protected state remains unchanged; readiness stays blocked; active generation remains zero.
 - **Next dependency:** RF-013C2 must inspect the authoritative lineage available for each of these seven cost inputs and the existing Plan source. It may classify an input as automatically reproducible only when the existing approved rule and exact source IDs prove it. Ambiguous or genuinely absent financial values require explicit human confirmation; no amount may be guessed. RF-012C/RF-012D remain blocked until a rebuilt RF-013C candidate has zero blockers and is approved/activated.
-- **Dependencies / complexity / risk / human confirmation:** RF-013P/RF-013A/RF-013B/RF-013C; **small complexity, low runtime risk, high data significance**. Administrator reviews the identities; product/finance confirmation remains mandatory before RF-013C2 may write any corrective input.
+- **Dependencies / complexity / risk / human confirmation:** RF-013P/RF-013A/RF-013B/RF-013C; **small complexity, low runtime risk, high data significance**. Administrator reviews the identities; product/finance confirmation remains mandatory before any later slice may write a corrective input.
 
 ### RF-013C2 — Read-only blocker-lineage classification
 
