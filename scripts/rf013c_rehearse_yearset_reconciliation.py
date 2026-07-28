@@ -66,6 +66,29 @@ EXPECTED_RESTORED_BLOCKERS = {
     "target_sell_in_cost_unresolved": 4,
     "target_sell_in_non_positive": 1,
 }
+EXPECTED_RF013C1_AREA_COUNTS = {
+    "cost": 7,
+    "plan": 5,
+    "sell_in": 5,
+}
+EXPECTED_RF013C1_COST_SKU_IDS = {
+    "sku-080354e8-b262-48a3-8a11-fa0158227265-fmt-fmt-doos-6-75cl",
+    "sku-080354e8-b262-48a3-8a11-fa0158227265-fmt-fmt-fles-75cl",
+    "sku-f0805dd9-37e9-4330-8432-a03471816080-fmt-fmt-doos-6-75cl",
+    "sku-f0805dd9-37e9-4330-8432-a03471816080-fmt-fmt-fles-75cl",
+    "sku-bundle-berlewalde-het-juweel-doos-12-33cl",
+    "sku-b32e6422-40b2-43c8-ad20-ce46a97ed572-fmt-doos-24-33cl",
+    "sku-b32e6422-40b2-43c8-ad20-ce46a97ed572-fmt-fles-33cl",
+}
+EXPECTED_RF013C1_COST_DEPENDENT_PRICE_SKU_IDS = {
+    "sku-080354e8-b262-48a3-8a11-fa0158227265-fmt-fmt-doos-6-75cl",
+    "sku-080354e8-b262-48a3-8a11-fa0158227265-fmt-fmt-fles-75cl",
+    "sku-f0805dd9-37e9-4330-8432-a03471816080-fmt-fmt-doos-6-75cl",
+    "sku-f0805dd9-37e9-4330-8432-a03471816080-fmt-fmt-fles-75cl",
+}
+EXPECTED_RF013C1_NON_POSITIVE_SELL_IN_SKU_ID = (
+    "sku-13a6eb1f-92de-4d84-bef6-b035c81b2cf8"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -112,6 +135,53 @@ def validate_restored_result(result: dict[str, Any]) -> list[str]:
         differences.append("consumer_mode")
     if bool(result.get("data_rewritten")):
         differences.append("data_rewritten")
+    return differences
+
+
+def validate_blocker_worklist(result: dict[str, Any]) -> list[str]:
+    differences: list[str] = []
+    if str(result.get("version") or "") != "rf-013c1-v1":
+        differences.append("worklist_version")
+    if bool(result.get("ready")):
+        differences.append("worklist_unexpected_ready")
+    if dict(result.get("blocker_counts") or {}) != EXPECTED_RESTORED_BLOCKERS:
+        differences.append("worklist_blocker_counts")
+    if dict(result.get("area_counts") or {}) != EXPECTED_RF013C1_AREA_COUNTS:
+        differences.append("worklist_area_counts")
+    if str(result.get("consumer_mode") or "") != "compatibility_only":
+        differences.append("worklist_consumer_mode")
+    if bool(result.get("data_rewritten")):
+        differences.append("worklist_data_rewritten")
+
+    rows = [
+        row for row in result.get("work_items", []) if isinstance(row, dict)
+    ]
+    if len(rows) != sum(EXPECTED_RF013C1_AREA_COUNTS.values()):
+        differences.append("worklist_item_count")
+    cost_sku_ids = {
+        str((row.get("subject") or {}).get("sku_id") or "")
+        for row in rows
+        if row.get("blocker_code") == "target_cost_input_missing"
+    }
+    if cost_sku_ids != EXPECTED_RF013C1_COST_SKU_IDS:
+        differences.append("worklist_cost_sku_ids")
+    cost_dependent_price_sku_ids = {
+        str((row.get("subject") or {}).get("sku_id") or "")
+        for row in rows
+        if row.get("blocker_code") == "target_sell_in_cost_unresolved"
+    }
+    if (
+        cost_dependent_price_sku_ids
+        != EXPECTED_RF013C1_COST_DEPENDENT_PRICE_SKU_IDS
+    ):
+        differences.append("worklist_cost_dependent_price_sku_ids")
+    non_positive_sku_ids = {
+        str((row.get("subject") or {}).get("sku_id") or "")
+        for row in rows
+        if row.get("blocker_code") == "target_sell_in_non_positive"
+    }
+    if non_positive_sku_ids != {EXPECTED_RF013C1_NON_POSITIVE_SELL_IN_SKU_ID}:
+        differences.append("worklist_non_positive_sell_in_sku_id")
     return differences
 
 
@@ -228,6 +298,17 @@ def main() -> None:
     else:
         raise SystemExit("Blocked RF-013C candidate was unexpectedly approved.")
 
+    worklist = yearset_reconciliation_service.review_current_blockers(
+        source_year=args.source_year,
+        target_year=args.target_year,
+    )
+    worklist_differences = validate_blocker_worklist(worklist)
+    if worklist_differences:
+        raise SystemExit(
+            "RF-013C1 worklist changed unexpectedly: "
+            + ", ".join(worklist_differences)
+        )
+
     after = capture_from_connection_info(database_url, years=years)
     after_schema = _schema_by_table(database_url)
     differences = compare_additive_rehearsal(
@@ -261,6 +342,13 @@ def main() -> None:
         "manifestHash": str(first_dry_run["manifest_hash"]),
         "summary": dict(first_dry_run["summary"]),
         "blockerCounts": dict(first_dry_run["blocker_counts"]),
+        "amountFreeBlockerWorklist": {
+            "version": str(worklist["version"]),
+            "areaCounts": dict(worklist["area_counts"]),
+            "itemCount": len(worklist["work_items"]),
+            "exactGapIdentitiesConfirmed": True,
+            "dataRewritten": bool(worklist["data_rewritten"]),
+        },
         "candidate": {
             "generationId": str(applied["generation"]["id"]),
             "runId": str(applied["run"]["id"]),
