@@ -21,6 +21,8 @@ from app.domain import (
     postgres_storage,
     sales_pricing_storage,
     skus_storage,
+    yearset_recovery_projection,
+    yearset_recovery_storage,
     yearset_reconciliation_storage,
 )
 
@@ -42,6 +44,7 @@ _LOCK_TABLES = (
     "planning_cost_anchors",
     "sales_pricing_records",
     "skus",
+    "commercial_yearset_recovery_inputs",
     "year_close_snapshots",
 )
 
@@ -407,14 +410,23 @@ def build_blocker_worklist(
     }
 
 
-def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
+def _build_reconciliation_plan_core(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Build one immutable candidate from stable IDs; labels never establish identity."""
 
     source_year = int(snapshot.get("source_year", 0) or 0)
     target_year = int(snapshot.get("target_year", 0) or 0)
-    global_blockers: list[str] = []
+    global_blockers: list[str] = [
+        _text(value)
+        for value in snapshot.get("recovery_blockers", [])
+        if _text(value)
+    ]
     if source_year <= 0 or target_year <= source_year:
         global_blockers.append("invalid_year_transition")
+    excluded_sku_ids = {
+        _text(value)
+        for value in snapshot.get("excluded_sku_ids", [])
+        if _text(value)
+    }
 
     skus = {
         _text(row.get("id")): row
@@ -440,7 +452,9 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
     target_prices_by_sku = _unique_rows_by_sku(
         snapshot.get("target_prices", []), "target_pricing_duplicate", global_blockers
     )
-    price_sku_ids = set(source_prices_by_sku) | set(target_prices_by_sku)
+    price_sku_ids = (
+        set(source_prices_by_sku) | set(target_prices_by_sku)
+    ) - excluded_sku_ids
 
     engine_batches = [
         row
@@ -472,7 +486,7 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
     active_sku_ids = sorted(
         sku_id
         for sku_id, row in skus.items()
-        if _truthy(row.get("active"), True)
+        if _truthy(row.get("active"), True) and sku_id not in excluded_sku_ids
     )
     if not active_sku_ids:
         global_blockers.append("canonical_sku_scope_missing")
@@ -495,6 +509,7 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
             "channels": snapshot.get("channels", []),
             "advice_rows": snapshot.get("advice_rows", []),
             "plan_rows": snapshot.get("plan_rows", []),
+            "recovery_metadata": snapshot.get("recovery_metadata", {}),
         },
         "target-input",
     )
@@ -540,6 +555,7 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
         if not subject:
             blockers.append("canonical_sku_subject_missing")
         target_input = engine_by_sku.get(sku_id)
+        recovery_authority = _payload((target_input or {}).get("recovery_authority"))
         target_components = (
             _components_from_engine(target_input) if target_input else None
         )
@@ -576,8 +592,15 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
         liters = _decimal(sku.get("content_liter"))
         if cost_required and _text((subject or {}).get("subject_type")) == "beer" and liters <= 0:
             blockers.append("target_liters_missing")
-        source_components = _components_from_anchor(anchor)
-        source_hash = _hash(anchor or {"sku_id": sku_id}, "source-cost")
+        source_components = (
+            target_components
+            if recovery_authority
+            else _components_from_anchor(anchor)
+        )
+        source_hash = _hash(
+            recovery_authority or anchor or {"sku_id": sku_id},
+            "source-cost",
+        )
         target_hash = _hash(
             _engine_financial_signature(target_input)
             if target_input
@@ -600,7 +623,9 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
             else "blocked"
         )
         provenance = (
-            "recalculated_from_source_year"
+            "recovered_from_exact_target_anchor"
+            if recovery_authority
+            else "recalculated_from_source_year"
             if anchor
             else "introduced_in_target_year"
             if has_target_activation
@@ -639,11 +664,18 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "mapping_fingerprint": _hash(
                     mappings_by_sku.get(sku_id, []), "external-mapping"
                 ),
-                "source_anchor_id": _text((anchor or {}).get("anchor_id")),
-                "source_cost_version_id": _text(
-                    (anchor or {}).get("cost_version_id")
+                "source_anchor_id": _text(
+                    recovery_authority.get("anchor_id")
+                    or (anchor or {}).get("anchor_id")
                 ),
-                "source_cost_row_id": _text((anchor or {}).get("cost_row_id")),
+                "source_cost_version_id": _text(
+                    recovery_authority.get("cost_version_id")
+                    or (anchor or {}).get("cost_version_id")
+                ),
+                "source_cost_row_id": _text(
+                    recovery_authority.get("cost_row_id")
+                    or (anchor or {}).get("cost_row_id")
+                ),
                 "reserved_target_version_id": _stable_id(
                     "candidate-cost-version", seed
                 ),
@@ -655,7 +687,13 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
                 )
                 or "unresolved",
                 "provenance_kind": provenance,
-                "provenance_source_year": source_year if anchor else target_year,
+                "provenance_source_year": (
+                    target_year
+                    if recovery_authority
+                    else source_year
+                    if anchor
+                    else target_year
+                ),
                 "target_components": target_components,
                 "liters_per_unit": liters if liters > 0 else None,
                 "cost_required": cost_required,
@@ -856,6 +894,9 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
         "plan_entry": plan_entry,
         "blocker_counts": blocker_counts,
         "summary": summary,
+        "recovery_metadata": copy.deepcopy(
+            snapshot.get("recovery_metadata", {})
+        ),
     }
     manifest_hash = _hash(manifest_payload, "candidate-manifest")
     validation = {
@@ -889,6 +930,24 @@ def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
         "validation_hash": validation_hash,
         "ready": not blocker_counts,
     }
+
+
+def build_reconciliation_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Apply an approved recovery input before building the canonical candidate."""
+
+    recovery = snapshot.get("approved_recovery_input")
+    if not isinstance(recovery, dict) or not recovery:
+        return _build_reconciliation_plan_core(snapshot)
+
+    base_snapshot = copy.deepcopy(snapshot)
+    base_snapshot.pop("approved_recovery_input", None)
+    base_plan = _build_reconciliation_plan_core(base_snapshot)
+    recovered_snapshot = yearset_recovery_projection.apply_recovery_input(
+        base_snapshot,
+        recovery,
+        base_manifest_hash=_text(base_plan.get("manifest_hash")),
+    )
+    return _build_reconciliation_plan_core(recovered_snapshot)
 
 
 def _group_rows(rows: Iterable[Any], field: str) -> dict[str, list[dict[str, Any]]]:
@@ -929,6 +988,7 @@ def ensure_dependencies() -> None:
     cost_authority_storage.ensure_schema()
     commercial_yearset_storage.ensure_schema()
     yearset_reconciliation_storage.ensure_schema()
+    yearset_recovery_storage.ensure_schema()
 
 
 def _lock_snapshot(conn: Any) -> None:
@@ -1022,6 +1082,41 @@ def read_reconciliation_snapshot(
             (int(target_year),),
         ).fetchall()
     ]
+    target_authorities = []
+    for row in conn.execute(
+        """
+        SELECT a.id, a.sku_id, a.activation_id, a.cost_version_id,
+               a.cost_row_id, r.inkoop, r.verpakkingskosten,
+               r.indirecte_kosten, r.accijns, r.kostprijs
+        FROM planning_cost_anchors a
+        JOIN kostprijs_sku_activations k
+          ON k.id = a.activation_id
+         AND k.sku_id = a.sku_id
+         AND k.kostprijsversie_id = a.cost_version_id
+         AND k.jaar = a.planning_year
+         AND k.effectief_tot IS NULL
+        JOIN cost_version_sku_rows r ON r.id = a.cost_row_id
+        WHERE a.planning_year = %s
+        ORDER BY a.sku_id, a.id
+        """,
+        (int(target_year),),
+    ).fetchall():
+        authority = {
+            "anchor_id": _text(row[0]),
+            "sku_id": _text(row[1]),
+            "activation_id": _text(row[2]),
+            "cost_version_id": _text(row[3]),
+            "cost_row_id": _text(row[4]),
+            "primary": _plain_decimal(row[5]),
+            "packaging": _plain_decimal(row[6]),
+            "overhead": _plain_decimal(row[7]),
+            "excise": _plain_decimal(row[8]),
+            "cost_price": _plain_decimal(row[9]),
+        }
+        authority["authority_hash"] = _hash(
+            authority, "exact-target-authority"
+        )
+        target_authorities.append(authority)
 
     def pricing(year: int) -> list[dict[str, Any]]:
         return [
@@ -1115,11 +1210,14 @@ def read_reconciliation_snapshot(
             (int(target_year),),
         ).fetchall()
     ]
-    year_close_ids = [
-        _text(row[0])
+    source_year_closes = [
+        {
+            "id": _text(row[0]),
+            "payload": _payload(row[1]),
+        }
         for row in conn.execute(
         """
-        SELECT id
+        SELECT id, payload
         FROM year_close_snapshots
         WHERE jaar = %s AND status = 'closed'
         ORDER BY created_at, id
@@ -1127,6 +1225,45 @@ def read_reconciliation_snapshot(
         (int(source_year),),
         ).fetchall()
     ]
+    year_close_ids = [_text(row.get("id")) for row in source_year_closes]
+    target_production_row = conn.execute(
+        """
+        SELECT normal_inkoop_l, normal_productie_l, normal_contract_brew_l,
+               normal_shipments, normal_orderlines, normal_sales_l, sales_l,
+               hoeveelheid_inkoop_l, hoeveelheid_productie_l,
+               realised_inkoop_l, realised_productie_l, realised_sales_l,
+               batchgrootte_eigen_productie_l
+        FROM production_years
+        WHERE jaar = %s
+        """,
+        (int(target_year),),
+    ).fetchone()
+    target_production = (
+        {
+            "normal_inkoop_l": _plain_decimal(target_production_row[0]),
+            "normal_productie_l": _plain_decimal(target_production_row[1]),
+            "normal_contract_brew_l": _plain_decimal(target_production_row[2]),
+            "normal_shipments": _plain_decimal(target_production_row[3]),
+            "normal_orderlines": _plain_decimal(target_production_row[4]),
+            "normal_sales_l": _plain_decimal(target_production_row[5]),
+            "sales_l": _plain_decimal(target_production_row[6]),
+            "hoeveelheid_inkoop_l": _plain_decimal(target_production_row[7]),
+            "hoeveelheid_productie_l": _plain_decimal(target_production_row[8]),
+            "realised_inkoop_l": _plain_decimal(target_production_row[9]),
+            "realised_productie_l": _plain_decimal(target_production_row[10]),
+            "realised_sales_l": _plain_decimal(target_production_row[11]),
+            "batchgrootte_eigen_productie_l": _plain_decimal(
+                target_production_row[12]
+            ),
+        }
+        if target_production_row
+        else {}
+    )
+    approved_recovery_input = yearset_recovery_storage.get_approved_input(
+        source_year=int(source_year),
+        target_year=int(target_year),
+        connection=conn,
+    )
     return {
         "source_year": int(source_year),
         "target_year": int(target_year),
@@ -1134,6 +1271,7 @@ def read_reconciliation_snapshot(
         "subjects": subjects,
         "source_anchors": source_anchors,
         "target_activation_sku_ids": target_activation_sku_ids,
+        "target_authorities": target_authorities,
         "source_prices": pricing(source_year),
         "target_prices": pricing(target_year),
         "engine_batches": _array(app_rows.get("kostprijs-target-engine-rows")),
@@ -1143,6 +1281,9 @@ def read_reconciliation_snapshot(
         "bom_lines": bom_lines,
         "mappings": mappings,
         "source_year_close_ids": year_close_ids,
+        "source_year_closes": source_year_closes,
+        "target_production": target_production,
+        "approved_recovery_input": approved_recovery_input,
     }
 
 
@@ -1196,6 +1337,7 @@ def review_current_blockers(*, source_year: int, target_year: int) -> dict[str, 
 
 
 def _public_plan(plan: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+    recovery_metadata = copy.deepcopy(plan.get("recovery_metadata", {}))
     return {
         "version": PLANNER_VERSION,
         "dry_run": bool(dry_run),
@@ -1206,6 +1348,10 @@ def _public_plan(plan: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
         "target_input_hash": _text(plan.get("target_input_hash")),
         "summary": plan.get("summary", {}),
         "blocker_counts": plan.get("blocker_counts", {}),
+        "recovery_metadata": recovery_metadata,
+        "legacy_target_untouched": bool(
+            recovery_metadata.get("legacy_target_untouched")
+        ),
         "consumer_mode": "compatibility_only",
         "data_rewritten": False,
     }
