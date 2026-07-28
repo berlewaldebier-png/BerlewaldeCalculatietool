@@ -89,6 +89,22 @@ EXPECTED_RF013C1_COST_DEPENDENT_PRICE_SKU_IDS = {
 EXPECTED_RF013C1_NON_POSITIVE_SELL_IN_SKU_ID = (
     "sku-13a6eb1f-92de-4d84-bef6-b035c81b2cf8"
 )
+EXPECTED_RF013C2_SUMMARY = {
+    "cost_blockers": 7,
+    "cost_automatically_reproducible": 3,
+    "cost_human_decision_required": 4,
+    "sell_in_dependencies": 4,
+    "pricing_policy_decisions": 1,
+    "plan_input_blockers": 5,
+}
+EXPECTED_RF013C2_REPRODUCIBLE_COST_SKU_IDS = {
+    "sku-bundle-berlewalde-het-juweel-doos-12-33cl",
+    "sku-b32e6422-40b2-43c8-ad20-ce46a97ed572-fmt-doos-24-33cl",
+    "sku-b32e6422-40b2-43c8-ad20-ce46a97ed572-fmt-fles-33cl",
+}
+EXPECTED_RF013C2_HUMAN_COST_SKU_IDS = (
+    EXPECTED_RF013C1_COST_SKU_IDS - EXPECTED_RF013C2_REPRODUCIBLE_COST_SKU_IDS
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -185,6 +201,57 @@ def validate_blocker_worklist(result: dict[str, Any]) -> list[str]:
     return differences
 
 
+def validate_lineage_review(result: dict[str, Any]) -> list[str]:
+    differences: list[str] = []
+    if str(result.get("version") or "") != "rf-013c2-v1":
+        differences.append("lineage_version")
+    if dict(result.get("summary") or {}) != EXPECTED_RF013C2_SUMMARY:
+        differences.append("lineage_summary")
+    if bool(result.get("ready_for_reconciliation_rebuild")):
+        differences.append("lineage_unexpected_ready")
+    if bool(result.get("write_authorized")):
+        differences.append("lineage_write_authorized")
+    if str(result.get("consumer_mode") or "") != "compatibility_only":
+        differences.append("lineage_consumer_mode")
+    if bool(result.get("data_rewritten")):
+        differences.append("lineage_data_rewritten")
+
+    cost_rows = [
+        row for row in result.get("cost_items", []) if isinstance(row, dict)
+    ]
+    reproducible = {
+        str(row.get("sku_id") or "")
+        for row in cost_rows
+        if row.get("classification") == "reproducible_from_exact_target_anchor"
+        and bool(row.get("automatic_reproduction_eligible"))
+    }
+    if reproducible != EXPECTED_RF013C2_REPRODUCIBLE_COST_SKU_IDS:
+        differences.append("lineage_reproducible_cost_sku_ids")
+    human_cost = {
+        str(row.get("sku_id") or "")
+        for row in cost_rows
+        if row.get("classification") == "human_scope_and_cost_decision_required"
+        and bool(row.get("requires_human_decision"))
+    }
+    if human_cost != EXPECTED_RF013C2_HUMAN_COST_SKU_IDS:
+        differences.append("lineage_human_cost_sku_ids")
+
+    pricing_policy = {
+        str(row.get("sku_id") or "")
+        for row in result.get("sell_in_items", [])
+        if isinstance(row, dict)
+        and row.get("classification") == "human_pricing_policy_required"
+    }
+    if pricing_policy != {EXPECTED_RF013C1_NON_POSITIVE_SELL_IN_SKU_ID}:
+        differences.append("lineage_pricing_policy_sku_id")
+    plan = result.get("plan") or {}
+    if plan.get("classification") != "human_plan_input_required":
+        differences.append("lineage_plan_classification")
+    if len(plan.get("blocker_codes") or []) != 5:
+        differences.append("lineage_plan_blocker_count")
+    return differences
+
+
 def main() -> None:
     args = parse_args()
     if not args.acknowledge_disposable_write:
@@ -222,6 +289,7 @@ def main() -> None:
     from app.domain import (  # noqa: E402
         commercial_yearset_storage,
         cost_authority_service,
+        yearset_blocker_lineage_service,
         yearset_reconciliation_service,
         yearset_reconciliation_storage,
     )
@@ -309,6 +377,17 @@ def main() -> None:
             + ", ".join(worklist_differences)
         )
 
+    lineage_review = yearset_blocker_lineage_service.review_current_lineage(
+        source_year=args.source_year,
+        target_year=args.target_year,
+    )
+    lineage_differences = validate_lineage_review(lineage_review)
+    if lineage_differences:
+        raise SystemExit(
+            "RF-013C2 lineage classification changed unexpectedly: "
+            + ", ".join(lineage_differences)
+        )
+
     after = capture_from_connection_info(database_url, years=years)
     after_schema = _schema_by_table(database_url)
     differences = compare_additive_rehearsal(
@@ -349,6 +428,16 @@ def main() -> None:
             "exactGapIdentitiesConfirmed": True,
             "dataRewritten": bool(worklist["data_rewritten"]),
         },
+        "amountFreeLineageReview": {
+            "version": str(lineage_review["version"]),
+            "lineageReviewHash": str(lineage_review["lineage_review_hash"]),
+            "summary": dict(lineage_review["summary"]),
+            "readyForReconciliationRebuild": bool(
+                lineage_review["ready_for_reconciliation_rebuild"]
+            ),
+            "writeAuthorized": bool(lineage_review["write_authorized"]),
+            "dataRewritten": bool(lineage_review["data_rewritten"]),
+        },
         "candidate": {
             "generationId": str(applied["generation"]["id"]),
             "runId": str(applied["run"]["id"]),
@@ -363,7 +452,8 @@ def main() -> None:
     print(
         "RF-013C rehearsal passed: RF-013P baseline matched, A/B/C remained "
         "strictly additive, candidate creation was idempotent, known gaps blocked "
-        "approval, no authority pointer moved, and legacy consumers were untouched."
+        "approval, exact blocker lineage was classified without amounts or writes, "
+        "no authority pointer moved, and legacy consumers were untouched."
     )
 
 

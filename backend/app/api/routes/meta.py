@@ -22,6 +22,7 @@ from app.domain import company_distance_storage
 from app.domain import commercial_yearset_service
 from app.domain import commercial_yearset_storage
 from app.domain import yearset_reconciliation_service
+from app.domain import yearset_blocker_lineage_service
 from app.domain import yearset_reconciliation_storage
 from app.domain import cost_authority_service
 from app.domain import cost_authority_storage
@@ -3248,6 +3249,23 @@ def get_commercial_yearset_reconciliation_blockers(
 
     try:
         return yearset_reconciliation_service.review_current_blockers(
+            source_year=int(source_year),
+            target_year=int(target_year),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/commercial-yearsets/reconciliation-lineage")
+def get_commercial_yearset_reconciliation_lineage(
+    source_year: int = Query(..., ge=2000, le=2100),
+    target_year: int = Query(..., ge=2000, le=2100),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Admin-only, amount-free lineage classification for current blockers."""
+
+    try:
+        return yearset_blocker_lineage_service.review_current_lineage(
             source_year=int(source_year),
             target_year=int(target_year),
         )
