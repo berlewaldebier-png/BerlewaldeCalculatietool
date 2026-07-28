@@ -169,6 +169,16 @@ required_rf013c1_contracts = {
     "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_review_projection_uses_a_read_only_transaction_without_schema_init",
     "test_yearset_reconciliation.YearsetReconciliationPlanTests.test_worklist_labels_do_not_change_candidate_identity",
 }
+required_rf013c2_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_yearset_reconciliation_routes_keep_prepare_approve_execute_separated",
+    "test_rf013c_rehearsal.Rf013cRehearsalSafetyTests.test_lineage_review_requires_exact_known_gap_classifications",
+    "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_exact_target_authority_is_reproducible_without_inventing_amounts",
+    "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_historical_sellable_sku_without_authority_requires_human_decision",
+    "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_multiple_valid_authority_chains_are_never_selected_automatically",
+    "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_plan_and_zero_sell_in_are_explicit_human_policy_decisions",
+    "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_projection_is_amount_free_and_labels_do_not_change_identity",
+    "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_review_uses_read_only_transaction_without_schema_initialization",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -188,6 +198,7 @@ missing = sorted(
         | required_rf013b_contracts
         | required_rf013c_contracts
         | required_rf013c1_contracts
+        | required_rf013c2_contracts
     ).difference(ids)
 )
 
@@ -200,5 +211,5 @@ print(
     f"unittest discovery: {len(ids)} tests; "
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
-    "RF-013B, RF-013C and RF-013C1 contracts collected"
+    "RF-013B, RF-013C, RF-013C1 and RF-013C2 contracts collected"
 )

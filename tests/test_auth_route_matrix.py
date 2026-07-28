@@ -189,6 +189,10 @@ class AuthRouteMatrixTests(unittest.TestCase):
                 "GET",
                 "/meta/commercial-yearsets/reconciliation-blockers",
             ): "admin",
+            (
+                "GET",
+                "/meta/commercial-yearsets/reconciliation-lineage",
+            ): "admin",
             ("POST", "/meta/commercial-yearsets/reconcile"): "admin",
             (
                 "POST",
@@ -224,8 +228,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 174, normalized)
-        self.assertEqual(digest, "63a650a7a04f92eacdf400c6b004116e7bf31dd66f6b81b0efabe7bdc0a05426", normalized)
+        self.assertEqual(len(rows), 175, normalized)
+        self.assertEqual(digest, "116e2d732c95125084c28f0d95d10d00ce088fa34a8c3322b1309c8296e31e5c", normalized)
 
 
 if __name__ == "__main__":

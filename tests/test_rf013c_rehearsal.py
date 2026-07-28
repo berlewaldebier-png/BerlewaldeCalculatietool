@@ -15,10 +15,14 @@ from scripts.rf013c_rehearse_yearset_reconciliation import (  # noqa: E402
     EXPECTED_RF013C1_COST_DEPENDENT_PRICE_SKU_IDS,
     EXPECTED_RF013C1_COST_SKU_IDS,
     EXPECTED_RF013C1_NON_POSITIVE_SELL_IN_SKU_ID,
+    EXPECTED_RF013C2_HUMAN_COST_SKU_IDS,
+    EXPECTED_RF013C2_REPRODUCIBLE_COST_SKU_IDS,
+    EXPECTED_RF013C2_SUMMARY,
     EXPECTED_RESTORED_BLOCKERS,
     EXPECTED_RESTORED_SUMMARY,
     RF013C_TABLES,
     validate_blocker_worklist,
+    validate_lineage_review,
     validate_restored_result,
 )
 
@@ -115,6 +119,59 @@ class Rf013cRehearsalSafetyTests(unittest.TestCase):
         self.assertIn(
             "worklist_item_count",
             validate_blocker_worklist({**changed, "work_items": work_items[:-1]}),
+        )
+
+    def test_lineage_review_requires_exact_known_gap_classifications(self) -> None:
+        cost_items = [
+            {
+                "sku_id": sku_id,
+                "classification": "reproducible_from_exact_target_anchor",
+                "automatic_reproduction_eligible": True,
+                "requires_human_decision": False,
+            }
+            for sku_id in sorted(EXPECTED_RF013C2_REPRODUCIBLE_COST_SKU_IDS)
+        ]
+        cost_items.extend(
+            {
+                "sku_id": sku_id,
+                "classification": "human_scope_and_cost_decision_required",
+                "automatic_reproduction_eligible": False,
+                "requires_human_decision": True,
+            }
+            for sku_id in sorted(EXPECTED_RF013C2_HUMAN_COST_SKU_IDS)
+        )
+        result = {
+            "version": "rf-013c2-v1",
+            "summary": EXPECTED_RF013C2_SUMMARY,
+            "ready_for_reconciliation_rebuild": False,
+            "write_authorized": False,
+            "consumer_mode": "compatibility_only",
+            "data_rewritten": False,
+            "cost_items": cost_items,
+            "sell_in_items": [
+                {
+                    "sku_id": EXPECTED_RF013C1_NON_POSITIVE_SELL_IN_SKU_ID,
+                    "classification": "human_pricing_policy_required",
+                }
+            ],
+            "plan": {
+                "classification": "human_plan_input_required",
+                "blocker_codes": [
+                    "plan_contribution_missing",
+                    "plan_liters_missing",
+                    "plan_period_allocation_missing",
+                    "plan_revenue_missing",
+                    "plan_units_missing",
+                ],
+            },
+        }
+
+        self.assertEqual(validate_lineage_review(result), [])
+        self.assertIn(
+            "lineage_unexpected_ready",
+            validate_lineage_review(
+                {**result, "ready_for_reconciliation_rebuild": True}
+            ),
         )
 
 
