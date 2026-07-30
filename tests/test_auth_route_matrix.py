@@ -240,8 +240,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 178, normalized)
-        self.assertEqual(digest, "3ecca4f520c9f391038065193c9c9f9070a2b319637ba5dcbeb0045502ce3366", normalized)
+        self.assertEqual(len(rows), 179, normalized)
+        self.assertEqual(digest, "90fb2f78ccef1d0b82d1ea9730dbf1fb65c98d8fee394718882d4e2d6cb368fd", normalized)
 
 
 if __name__ == "__main__":

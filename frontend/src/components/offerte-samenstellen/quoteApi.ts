@@ -8,6 +8,7 @@ import {
   type QuoteDeleteBoundary,
 } from "@/components/offerte-samenstellen/quoteBoundary";
 import { API_BASE_URL } from "@/lib/apiShared";
+import type { QuoteCommercialContextResponse } from "@/features/commercial-context/quoteCommercialContext";
 
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -37,6 +38,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function loadQuoteDraft(draftId: string): Promise<{ record: QuoteDraftRecord }> {
   return request<{ record: QuoteDraftRecord }>(`/quotes/${encodeURIComponent(draftId)}`);
+}
+
+export function loadQuoteCommercialContext(
+  generationId = ""
+): Promise<QuoteCommercialContextResponse> {
+  const suffix = generationId
+    ? `?generation_id=${encodeURIComponent(generationId)}`
+    : "";
+  return request<QuoteCommercialContextResponse>(
+    `/quotes/commercial-context${suffix}`
+  );
 }
 
 export function createQuoteDraft(payload: QuotePersistencePayload): Promise<{ record: QuoteDraftRecord }> {

@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { buildBlockFromForm } from "@/components/offerte-samenstellen/blockFactories";
@@ -27,6 +27,7 @@ import {
 import {
   createQuoteDraft,
   deleteQuoteDraft,
+  loadQuoteCommercialContext,
   loadQuoteDraft,
   updateQuoteDraft,
 } from "@/components/offerte-samenstellen/quoteApi";
@@ -63,6 +64,7 @@ import type {
   ProductOption,
   QuoteBreakEvenSnapshot,
   QuoteChannel,
+  QuoteCommercialContextBinding,
   QuoteDraft,
   QuoteDraftSnapshot,
   QuoteFormState,
@@ -72,6 +74,13 @@ import type {
   StepKey,
   ToolbarGroup,
 } from "@/components/offerte-samenstellen/types";
+import {
+  bindingFromPersistedSnapshot,
+  bindingFromResponse,
+  buildQuoteableActiveContextOptions,
+  contextMatchesBinding,
+  type QuoteCommercialContextResponse,
+} from "@/features/commercial-context/quoteCommercialContext";
 import { HorizontalStepper } from "@/components/offerte-samenstellen/HorizontalStepper";
 import { DealContextBar } from "@/components/offerte-samenstellen/DealContextBar";
 import { BreakEvenProgressCard } from "@/components/offerte-samenstellen/sidebar/BreakEvenProgressCard";
@@ -98,6 +107,7 @@ type Scenario = QuoteScenario;
 
 type Props = {
   year: number;
+  initialCommercialContext: QuoteCommercialContextResponse;
   channels: GenericRecord[];
   bieren: GenericRecord[];
   productie: Record<string, unknown>;
@@ -138,9 +148,28 @@ type CustomerSalesSummary = {
 
 const toolbarGroups: ToolbarGroup[] = offerteToolbarGroups;
 
+function restoreScenarioPresentation(
+  snapshot: QuoteDraftSnapshot
+): Record<ScenarioId, Scenario> {
+  const ids: ScenarioId[] = ["A", "B", "C"];
+  return Object.fromEntries(
+    ids.map((id) => [
+      id,
+      {
+        ...snapshot.scenarios[id],
+        blocks: snapshot.scenarios[id].blocks.map((block) => ({
+          ...block,
+          icon: icons[block.type] ?? null,
+          tone: block.tone || tones[block.type],
+        })),
+      },
+    ])
+  ) as Record<ScenarioId, Scenario>;
+}
 
 export function OfferteSamenstellenApp({
   year,
+  initialCommercialContext,
   channels,
   bieren,
   productie,
@@ -162,6 +191,18 @@ export function OfferteSamenstellenApp({
 }: Props) {
   const router = useRouter();
   const [currentYear, setCurrentYear] = useState<number>(year);
+  const [commercialContextBinding, setCommercialContextBinding] =
+    useState<QuoteCommercialContextBinding>(() =>
+      bindingFromResponse(initialCommercialContext)
+    );
+  const [commercialContext, setCommercialContext] =
+    useState<QuoteCommercialContextResponse | null>(() =>
+      initialCommercialContext.status === "ready"
+        ? initialCommercialContext
+        : null
+    );
+  const [commercialContextWarning, setCommercialContextWarning] =
+    useState<string | null>(null);
   const [step, setStep] = useState<StepKey>("basis");
   const [activeScenario, setActiveScenario] = useState<ScenarioId>("A");
   const [unitMode, setUnitMode] = useState<UnitMode>("producten");
@@ -251,6 +292,37 @@ export function OfferteSamenstellenApp({
   );
 
   const productIndex = useMemo(() => {
+    if (commercialContextBinding.mode === "active_generation") {
+      if (!contextMatchesBinding(commercialContext, commercialContextBinding)) {
+        return {
+          options: [],
+          warnings: [
+            "De opgeslagen commerciële jaarcontext kon niet worden geladen. Bestaande offerteregels blijven ongewijzigd; nieuwe producten toevoegen is geblokkeerd.",
+          ],
+        };
+      }
+      return buildQuoteableActiveContextOptions({
+        context: commercialContext as QuoteCommercialContextResponse,
+        bieren,
+        skus,
+        articles,
+        kostprijsversies,
+        verpakkingsonderdelen,
+        verpakkingsonderdeelPrijzen,
+        litersPerUnitOverrides,
+        scenarioLabelSuffix: appliedScenarioLabel
+          ? ` (${appliedScenarioLabel})`
+          : " (scenario)",
+      });
+    }
+    if (commercialContextBinding.mode === "unavailable") {
+      return {
+        options: [],
+        warnings: [
+          "Er is geen actieve commerciële jaarset beschikbaar. Activeer eerst een gereedstaande jaarset; nieuwe offerteproducten blijven tot die tijd geblokkeerd.",
+        ],
+      };
+    }
     return buildQuoteableProductOptions({
       year: currentYear,
       channel: basis.kanaal,
@@ -269,6 +341,8 @@ export function OfferteSamenstellenApp({
       scenarioLabelSuffix: appliedScenarioLabel ? ` (${appliedScenarioLabel})` : " (scenario)",
     });
   }, [
+    commercialContextBinding,
+    commercialContext,
     currentYear,
     basis.kanaal,
     channels,
@@ -1567,6 +1641,7 @@ export function OfferteSamenstellenApp({
     return buildQuoteDraftSnapshot({
       meta: nextMeta,
       year: currentYear,
+      commercialContext: commercialContextBinding,
       basis,
       dealContext,
       mixSource,
@@ -1583,25 +1658,35 @@ export function OfferteSamenstellenApp({
     });
   }
 
-  function restoreScenarioPresentation(snapshot: QuoteDraftSnapshot): Record<ScenarioId, Scenario> {
-    const ids: ScenarioId[] = ["A", "B", "C"];
-    return Object.fromEntries(
-      ids.map((id) => [
-        id,
-        {
-          ...snapshot.scenarios[id],
-          blocks: snapshot.scenarios[id].blocks.map((block) => ({
-            ...block,
-            icon: icons[block.type] ?? null,
-            tone: block.tone || tones[block.type],
-          })),
-        },
-      ])
-    ) as Record<ScenarioId, Scenario>;
-  }
-
-  function hydrateDraftSnapshot(snapshot: QuoteDraftSnapshot) {
-    setCurrentYear(Number(snapshot.year || year) || year);
+  const hydrateDraftSnapshot = useCallback(function hydrateDraftSnapshot(
+    snapshot: QuoteDraftSnapshot,
+    resolvedBinding?: QuoteCommercialContextBinding,
+    resolvedContext?: QuoteCommercialContextResponse | null
+  ) {
+    const snapshotYear = Number(snapshot.year || year) || year;
+    const binding =
+      resolvedBinding ??
+      bindingFromPersistedSnapshot(snapshot.commercialContext, snapshotYear);
+    setCurrentYear(snapshotYear);
+    setCommercialContextBinding(binding);
+    if (binding.mode === "active_generation") {
+      setCommercialContext((currentContext) =>
+        resolvedContext !== undefined
+          ? resolvedContext
+          : contextMatchesBinding(currentContext, binding)
+            ? currentContext
+            : null
+      );
+    } else {
+      setCommercialContext(null);
+    }
+    setCommercialContextWarning(
+      binding.mode === "legacy_persisted"
+        ? "Deze offerte gebruikt de opgeslagen historische prijscontext. Bestaande bedragen worden niet vervangen door de huidige actieve jaarset."
+        : binding.mode === "unavailable"
+          ? "De commerciële jaarcontext van deze offerte is niet beschikbaar. Bestaande regels blijven ongewijzigd; nieuwe producten toevoegen is geblokkeerd."
+          : null
+    );
     setDraftMeta(snapshot.meta);
     setSavedBreakEvenSnapshot(snapshot.breakEven ?? null);
     setBasis({
@@ -1618,7 +1703,7 @@ export function OfferteSamenstellenApp({
     setActiveScenario(snapshot.ui.activeScenario);
     setUnitMode(snapshot.ui.unitMode);
     setVatMode(snapshot.ui.vatMode);
-  }
+  }, [year]);
 
   useEffect(() => {
     if (!initialDraftId) {
@@ -1630,13 +1715,34 @@ export function OfferteSamenstellenApp({
     setDraftError(null);
 
     void loadQuoteDraft(initialDraftId)
-      .then(({ record }) => {
+      .then(async ({ record }) => {
         if (cancelled) return;
         const snapshot = record.payload?.draft;
         if (!snapshot) {
           throw new Error("Offertepayload bevat geen draft snapshot.");
         }
-        hydrateDraftSnapshot(snapshot);
+        const snapshotYear = Number(snapshot.year || year) || year;
+        const binding = bindingFromPersistedSnapshot(
+          snapshot.commercialContext,
+          snapshotYear
+        );
+        let resolvedContext: QuoteCommercialContextResponse | null = null;
+        if (binding.mode === "active_generation") {
+          resolvedContext = contextMatchesBinding(
+            initialCommercialContext,
+            binding
+          )
+            ? initialCommercialContext
+            : await loadQuoteCommercialContext(binding.generationId);
+          if (
+            resolvedContext.status !== "ready" ||
+            !contextMatchesBinding(resolvedContext, binding)
+          ) {
+            resolvedContext = null;
+          }
+        }
+        if (cancelled) return;
+        hydrateDraftSnapshot(snapshot, binding, resolvedContext);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -1651,7 +1757,7 @@ export function OfferteSamenstellenApp({
     return () => {
       cancelled = true;
     };
-  }, [initialDraftId, year]);
+  }, [hydrateDraftSnapshot, initialDraftId, initialCommercialContext, year]);
 
   async function saveQuoteDraft() {
     await persistQuoteDraft(draftMeta);
@@ -1972,6 +2078,9 @@ export function OfferteSamenstellenApp({
 
         {draftError ? <div className="cpq-alert cpq-alert-warn">{draftError}</div> : null}
         {isLoadingDraft ? <div className="cpq-alert">Offerte wordt geladen...</div> : null}
+        {commercialContextWarning ? (
+          <div className="cpq-alert cpq-alert-warn">{commercialContextWarning}</div>
+        ) : null}
         {appliedScenarioLabel ? (
           <div className="cpq-alert">
             Scenario actief: <strong>{appliedScenarioLabel}</strong>. Kostprijs + sell-in per eenheid zijn aangepast op basis van literinhoud per eenheid.

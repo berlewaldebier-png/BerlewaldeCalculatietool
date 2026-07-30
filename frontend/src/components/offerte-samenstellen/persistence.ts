@@ -3,6 +3,7 @@ import type {
   BuilderBlock,
   QuoteBreakEvenSnapshot,
   QuoteBuilderUiState,
+  QuoteCommercialContextBinding,
   QuoteDraftMeta,
   QuoteDraftSnapshot,
   QuotePersistencePayload,
@@ -11,11 +12,12 @@ import type {
 } from "@/components/offerte-samenstellen/types";
 import { normalizeText } from "@/components/offerte-samenstellen/quoteUtils";
 
-export const QUOTE_DRAFT_SCHEMA_VERSION = 2;
+export const QUOTE_DRAFT_SCHEMA_VERSION = 3;
 
 type BuildQuoteDraftSnapshotParams = {
   meta: QuoteDraftMeta;
   year: number;
+  commercialContext: QuoteCommercialContextBinding;
   basis: BasisData;
   dealContext: "growth" | "agreement" | "one_off";
   mixSource: "quote" | "customer" | "portfolio";
@@ -29,6 +31,7 @@ type BuildQuoteDraftSnapshotParams = {
 export function buildQuoteDraftSnapshot({
   meta,
   year,
+  commercialContext,
   basis,
   dealContext,
   mixSource,
@@ -41,6 +44,7 @@ export function buildQuoteDraftSnapshot({
   return {
     meta,
     year,
+    commercialContext,
     basis,
     dealContext,
     mixSource,

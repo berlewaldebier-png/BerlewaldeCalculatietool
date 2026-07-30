@@ -5,7 +5,11 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.contracts.quote_boundary import adapt_quote_delete_response, quote_list_response
-from app.domain import dashboard_service, quote_drafts_storage
+from app.domain import (
+    dashboard_service,
+    quote_commercial_context_service,
+    quote_drafts_storage,
+)
 from app.domain.auth_dependencies import require_quotes_manage
 
 
@@ -26,6 +30,18 @@ def get_quotes(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return quote_list_response(items)
+
+
+@router.get("/commercial-context")
+def get_quote_commercial_context(
+    generation_id: str = Query(
+        "",
+        description="Optionele opgeslagen generatie voor een heropende offerte.",
+    ),
+) -> dict[str, Any]:
+    return quote_commercial_context_service.read_quote_commercial_context(
+        generation_id=generation_id
+    )
 
 
 @router.get("/{quote_id}")

@@ -1,7 +1,7 @@
 # RF-013C3 — Approved 2026 yearset recovery
 
 Date: 2026-07-28
-Status: implemented; additive recovery input and candidate projection; existing consumers remain compatibility-only
+Status: implemented and activated in development; additive recovery input and candidate projection
 
 ## Outcome
 
@@ -133,27 +133,27 @@ The rehearsal proved:
 The private evidence is retained under ignored
 `outputs/rf013p/rf013c3-final-rehearsal.json`.
 
-## Development database prerequisite
+## Development database execution
 
-A read-only preview against the ordinary development database correctly
-stopped. Its three Juweel activations and cost rows exist, but their RF-013B
-planning anchors are not yet populated. The same database consequently shows
-source-lineage blockers for price rows.
+After merge, the approved operational sequence was executed against the
+ordinary development database:
 
-This is not repaired by RF-013C3. Before approving recovery input in the
-development database:
+1. a fresh private `pg_dump` was created and its archive listing verified;
+2. pre-write data/schema fingerprints were captured;
+3. the exact RF-013B manifest was dry-run, applied and rerun idempotently;
+4. protected legacy fingerprints remained unchanged;
+5. the exact RF-013C3 preview returned 79 SKUs, 77/77 required costs, 47/47
+   prices, four channels, 12 Plan periods, 60 SKU allocations and zero blockers;
+6. Management approved the exact decision/candidate;
+7. Administrator atomically activated generation
+   `5a152227-146c-5904-bb91-f8ef4d0b52ee` and run
+   `636ff712-89a7-5a4c-87e8-d2a371cb0d8d`;
+8. independent post-activation comparison again found no protected legacy,
+   dataset, per-year or integrity difference.
 
-1. run the Administrator RF-013B authority backfill as a dry-run;
-2. review its manifest and known blocker counts;
-3. apply that exact manifest;
-4. rerun RF-013C2 and require the protected
-   `3 automatic / 4 human / 4 dependent / 1 pricing / 5 Plan` result;
-5. run the RF-013C3 preview and require the zero-blocker 79-SKU result;
-6. only then approve the recovery input and build/approve/activate the new
-   candidate.
-
-No backfill or recovery write was applied to the ordinary development database
-during implementation.
+The private backup and comparison artifacts remain ignored under
+`outputs/rf013p/`. RF-012C consumers can now migrate one at a time; activation
+does not itself authorize changing historical readers.
 
 ## Remaining work
 

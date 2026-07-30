@@ -1,6 +1,7 @@
 import { PageShell } from "@/components/PageShell";
-import { getBootstrap } from "@/lib/apiServer";
+import { apiGetServer, getBootstrap } from "@/lib/apiServer";
 import { OfferteSamenstellenApp } from "@/components/offerte-samenstellen/OfferteSamenstellenApp";
+import type { QuoteCommercialContextResponse } from "@/features/commercial-context/quoteCommercialContext";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -11,27 +12,33 @@ export default async function OfferteSamenstellenPage({
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
 
-  const bootstrap = await getBootstrap(
-    [
-      "productie",
-      "bieren",
-      "skus",
-      "articles",
-      "kostprijsversies",
-      "kostprijsproductactiveringen",
-      "verkoopprijzen",
-      "channels",
-      "basisproducten",
-      "samengestelde-producten",
-      "packaging-components",
-      "packaging-component-prices",
-      "break-even-configuraties",
-      "vaste-kosten",
-      "cost-management-settings"
-    ],
-    true,
-    "/offerte-samenstellen"
-  );
+  const [bootstrap, commercialContext] = await Promise.all([
+    getBootstrap(
+      [
+        "productie",
+        "bieren",
+        "skus",
+        "articles",
+        "kostprijsversies",
+        "kostprijsproductactiveringen",
+        "verkoopprijzen",
+        "channels",
+        "basisproducten",
+        "samengestelde-producten",
+        "packaging-components",
+        "packaging-component-prices",
+        "break-even-configuraties",
+        "vaste-kosten",
+        "cost-management-settings"
+      ],
+      true,
+      "/offerte-samenstellen"
+    ),
+    apiGetServer<QuoteCommercialContextResponse>(
+      "/quotes/commercial-context",
+      "/offerte-samenstellen"
+    ),
+  ]);
 
   const navigation = bootstrap.navigation ?? [];
   const productie = (bootstrap.datasets["productie"] as Record<string, any>) ?? {};
@@ -55,7 +62,11 @@ export default async function OfferteSamenstellenPage({
     .filter((year) => Number.isFinite(year))
     .sort((left, right) => right - left);
 
-  const year = yearOptions.length > 0 ? yearOptions[0] : new Date().getFullYear();
+  const legacyYear = yearOptions.length > 0 ? yearOptions[0] : new Date().getFullYear();
+  const year =
+    commercialContext.status === "ready" && commercialContext.binding
+      ? commercialContext.binding.operational_year
+      : legacyYear;
 
   const mode = typeof resolvedSearchParams.mode === "string" ? resolvedSearchParams.mode : "";
   const draftId = typeof resolvedSearchParams.draft === "string" ? resolvedSearchParams.draft : null;
@@ -70,6 +81,7 @@ export default async function OfferteSamenstellenPage({
     >
       <OfferteSamenstellenApp
         year={year}
+        initialCommercialContext={commercialContext}
         channels={channels}
         bieren={bieren}
         productie={productie}
