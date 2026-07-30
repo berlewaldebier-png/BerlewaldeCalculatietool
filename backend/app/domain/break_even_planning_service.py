@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from app.domain import (
+    break_even_commercial_context_service,
     break_even_planning_storage,
     cost_versions_storage,
     dataset_store,
@@ -763,13 +764,32 @@ def _plan_actual_rows(plan_payload: dict[str, Any], contribution_rows: list[dict
                 "planned_units": _num(plan.get("planned_units")),
                 "planned_liters": _num(plan.get("planned_liters")),
                 "planned_variable_cost_unit": plan_variable_cost,
-                "planned_fixed_allocation_unit": _num(plan.get("abc_overhead")),
-                "planned_cost_unit": _num(plan.get("kostprijs")) or plan_variable_cost + _num(plan.get("abc_overhead")),
+                "planned_fixed_allocation_unit": (
+                    _num(plan.get("planned_fixed_allocation_unit"))
+                    or _num(plan.get("abc_overhead"))
+                ),
+                "planned_cost_unit": (
+                    _num(plan.get("planned_cost_unit"))
+                    or _num(plan.get("kostprijs"))
+                    or plan_variable_cost
+                    + _num(plan.get("planned_fixed_allocation_unit"))
+                    + _num(plan.get("abc_overhead"))
+                ),
                 "actual_units": _num(actual.get("units")),
                 "actual_revenue": _num(actual.get("revenue")),
                 "actual_contribution": _num(actual.get("contribution")),
-                "reforecast_units": _num(actual.get("units")),
-                "reforecast_contribution": _num(actual.get("contribution")),
+                "reforecast_units": _num(actual.get("units"))
+                + max(
+                    0.0,
+                    _num(plan.get("planned_units"))
+                    - _num(actual.get("units")),
+                ),
+                "reforecast_contribution": _num(actual.get("contribution"))
+                + max(
+                    0.0,
+                    _num(plan.get("planned_contribution"))
+                    - _num(actual.get("contribution")),
+                ),
                 "status": status,
             }
         )
@@ -1484,20 +1504,87 @@ def create_reforecast(
     )
 
 
-def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str, Any]:
+def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[str, Any]:
     """
     Return the read contract for the next break-even screen.
 
     This function is intentionally read-only. It does not create or refresh snapshots.
     Missing planning inputs are reported as warnings instead of being guessed.
     """
+    commercial_context = (
+        break_even_commercial_context_service.read_break_even_commercial_context()
+    )
+    binding = (
+        commercial_context.get("binding")
+        if isinstance(commercial_context.get("binding"), dict)
+        else {}
+    )
+    active_year = int(binding.get("operational_year", 0) or 0)
     year_value = int(year or 0)
     if year_value <= 0:
-        raise ValueError("Jaar is verplicht.")
+        if commercial_context.get("status") != "ready" or active_year <= 0:
+            raise ValueError(
+                "Geen actieve commerciële jaarset beschikbaar voor Break-even."
+            )
+        year_value = active_year
+    if (
+        active_year > 0
+        and active_year == year_value
+        and commercial_context.get("status") != "ready"
+    ):
+        reason_codes = commercial_context.get("reason_codes")
+        reason = ", ".join(
+            _text(code)
+            for code in (
+                reason_codes if isinstance(reason_codes, list) else []
+            )
+            if _text(code)
+        )
+        suffix = f" ({reason})" if reason else ""
+        raise ValueError(
+            "De actieve commerciële jaarset is niet veilig leesbaar voor "
+            f"Break-even{suffix}."
+        )
     basis_value = _text(basis) or "invoice"
-    plan_snapshot = _latest_active_plan(year_value)
-    plan_payload = plan_snapshot.get("payload") if isinstance(plan_snapshot, dict) else {}
-    plan_payload = plan_payload if isinstance(plan_payload, dict) else {}
+    uses_active_context = bool(
+        commercial_context.get("status") == "ready"
+        and active_year == year_value
+    )
+    plan_snapshot = None if uses_active_context else _latest_active_plan(year_value)
+    if uses_active_context:
+        plan_payload = {
+            "targets": (
+                commercial_context.get("plan", {}).get("targets", {})
+                if isinstance(commercial_context.get("plan"), dict)
+                else {}
+            ),
+            "period_allocations": (
+                commercial_context.get("plan", {}).get(
+                    "period_allocations", []
+                )
+                if isinstance(commercial_context.get("plan"), dict)
+                else []
+            ),
+            "sku_allocations": (
+                commercial_context.get("plan", {}).get(
+                    "sku_allocations", []
+                )
+                if isinstance(commercial_context.get("plan"), dict)
+                else []
+            ),
+            "planning_rows": (
+                commercial_context.get("planning_rows", [])
+                if isinstance(commercial_context.get("planning_rows"), list)
+                else []
+            ),
+        }
+    else:
+        plan_payload = (
+            plan_snapshot.get("payload")
+            if isinstance(plan_snapshot, dict)
+            else {}
+        )
+        plan_payload = plan_payload if isinstance(plan_payload, dict) else {}
     year_close_snapshot = break_even_planning_storage.get_year_close_snapshot(year=year_value)
     year_close_payload = year_close_snapshot.get("payload") if isinstance(year_close_snapshot, dict) else {}
     year_close_payload = year_close_payload if isinstance(year_close_payload, dict) else {}
@@ -1509,10 +1596,15 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     contribution_rows = [_contribution_row(row, labels) for row in source_rows]
     contribution_rows.sort(key=lambda row: _num(row.get("contribution")), reverse=True)
     category_rows = _category_rows(contribution_rows)
-    timeline = _period_timeline([row for row in sales.get("period_totals", []) if isinstance(row, dict)])
     plan_actual_rows = _plan_actual_rows(plan_payload, contribution_rows)
     sales_processing = _sales_processing_diagnostics(year=year_value)
-    reforecast_snapshot = break_even_planning_storage.latest_reforecast_snapshot(year=year_value, basis=basis_value)
+    reforecast_snapshot = (
+        None
+        if uses_active_context
+        else break_even_planning_storage.latest_reforecast_snapshot(
+            year=year_value, basis=basis_value
+        )
+    )
     reforecast_payload = reforecast_snapshot.get("payload") if isinstance(reforecast_snapshot, dict) else {}
     reforecast_payload = reforecast_payload if isinstance(reforecast_payload, dict) else {}
     explicit_reforecast = reforecast_payload.get("reforecast") if isinstance(reforecast_payload.get("reforecast"), dict) else {}
@@ -1551,17 +1643,79 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
     plan_revenue = _num(plan_targets.get("revenue"))
     plan_variable = _num(plan_targets.get("variable_cost"))
     plan_contribution = _num(plan_targets.get("contribution"))
-    plan_fixed_costs = _num(plan_payload.get("fixed_cost_total"))
+    plan_fixed_costs = (
+        fixed_cost_total
+        if uses_active_context
+        else _num(plan_payload.get("fixed_cost_total"))
+    )
     plan_result = plan_contribution - plan_fixed_costs if plan_contribution else 0.0
     is_closed_year = bool(year_close_payload)
-    reforecast_revenue = actual_revenue if is_closed_year else (_num(explicit_reforecast.get("revenue")) or actual_revenue)
-    reforecast_variable = actual_variable if is_closed_year else (_num(explicit_reforecast.get("variable_cost")) or actual_variable)
-    reforecast_contribution = actual_contribution if is_closed_year else (_num(explicit_reforecast.get("contribution")) or actual_contribution)
-    reforecast_fixed_costs = fixed_cost_total
-    reforecast_absorbed_fixed_costs = actual_absorbed_fixed_costs if is_closed_year else (_num(explicit_reforecast.get("absorbed_fixed_costs")) if explicit_reforecast else actual_absorbed_fixed_costs)
-    reforecast_total_cost = actual_total_cost if is_closed_year else (_num(explicit_reforecast.get("total_cost")) if explicit_reforecast else actual_total_cost)
-    if explicit_reforecast and reforecast_total_cost <= 0:
-        reforecast_total_cost = reforecast_variable + reforecast_absorbed_fixed_costs
+    if uses_active_context:
+        forecast_projection = (
+            break_even_commercial_context_service.project_plan_forecast(
+                commercial_context,
+                actual_totals={
+                    "revenue": actual_revenue,
+                    "variable_cost": actual_variable,
+                    "contribution": actual_contribution,
+                    "units": sum(
+                        _num(row.get("units"))
+                        for row in contribution_rows
+                    ),
+                    "liters": 0.0,
+                },
+                actual_periods=[
+                    row
+                    for row in sales.get("period_totals", [])
+                    if isinstance(row, dict)
+                ],
+                closed_year=is_closed_year,
+            )
+        )
+        forecast_targets = forecast_projection["forecast_targets"]
+        reforecast_revenue = _num(forecast_targets.get("revenue"))
+        reforecast_variable = _num(
+            forecast_targets.get("variable_cost")
+        )
+        reforecast_contribution = _num(
+            forecast_targets.get("contribution")
+        )
+        reforecast_fixed_costs = fixed_cost_total
+        reforecast_absorbed_fixed_costs = fixed_cost_total
+        reforecast_total_cost = reforecast_variable + fixed_cost_total
+        reforecast_source = _text(
+            forecast_projection.get("forecast_source")
+        )
+        forecast_cutoff_period = _text(
+            forecast_projection.get("actual_cutoff_period")
+        )
+        timeline = forecast_projection.get("timeline", [])
+    else:
+        reforecast_revenue = actual_revenue if is_closed_year else (_num(explicit_reforecast.get("revenue")) or actual_revenue)
+        reforecast_variable = actual_variable if is_closed_year else (_num(explicit_reforecast.get("variable_cost")) or actual_variable)
+        reforecast_contribution = actual_contribution if is_closed_year else (_num(explicit_reforecast.get("contribution")) or actual_contribution)
+        reforecast_fixed_costs = fixed_cost_total
+        reforecast_absorbed_fixed_costs = actual_absorbed_fixed_costs if is_closed_year else (_num(explicit_reforecast.get("absorbed_fixed_costs")) if explicit_reforecast else actual_absorbed_fixed_costs)
+        reforecast_total_cost = actual_total_cost if is_closed_year else (_num(explicit_reforecast.get("total_cost")) if explicit_reforecast else actual_total_cost)
+        if explicit_reforecast and reforecast_total_cost <= 0:
+            reforecast_total_cost = reforecast_variable + reforecast_absorbed_fixed_costs
+        reforecast_source = (
+            "year_close_snapshot"
+            if is_closed_year
+            else (
+                "reforecast_snapshot"
+                if reforecast_snapshot
+                else "actual_ytd_temporary"
+            )
+        )
+        forecast_cutoff_period = ""
+        timeline = _period_timeline(
+            [
+                row
+                for row in sales.get("period_totals", [])
+                if isinstance(row, dict)
+            ]
+        )
     reforecast_result = reforecast_contribution - reforecast_fixed_costs - incidental_cost_total
     variance_bridge = _variance_bridge_rows(
         plan_contribution=plan_contribution,
@@ -1570,7 +1724,7 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         reforecast_fixed_costs=reforecast_fixed_costs + incidental_cost_total,
     )
     warnings: list[dict[str, str]] = []
-    if not plan_snapshot:
+    if not uses_active_context and not plan_snapshot:
         warnings.append({"code": "missing_plan_snapshot", "message": "Geen actief break-even plan gevonden; planwaarden blijven leeg."})
     if plan_revenue <= 0:
         warnings.append({"code": "missing_plan_revenue", "message": "Actief plan bevat nog geen frozen plan-omzet."})
@@ -1592,12 +1746,59 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         "basis": basis_value,
         "generated_at": date.today().isoformat(),
         "sources": {
-            "plan_snapshot_id": _text((plan_snapshot or {}).get("id")),
-            "plan_source": "active_plan_snapshot" if plan_snapshot else "missing",
+            "consumer_mode": (
+                "active_generation"
+                if uses_active_context
+                else "legacy_compatibility"
+            ),
+            "commercial_generation_id": (
+                _text(binding.get("generation_id"))
+                if uses_active_context
+                else ""
+            ),
+            "commercial_run_id": (
+                _text(binding.get("run_id"))
+                if uses_active_context
+                else ""
+            ),
+            "commercial_manifest_hash": (
+                _text(binding.get("manifest_hash"))
+                if uses_active_context
+                else ""
+            ),
+            "commercial_validation_hash": (
+                _text(binding.get("validation_hash"))
+                if uses_active_context
+                else ""
+            ),
+            "plan_contract_hash": (
+                _text(binding.get("plan_contract_hash"))
+                if uses_active_context
+                else ""
+            ),
+            "plan_snapshot_id": (
+                _text(binding.get("plan_id"))
+                if uses_active_context
+                else _text((plan_snapshot or {}).get("id"))
+            ),
+            "plan_source": (
+                "active_commercial_generation_frozen_plan"
+                if uses_active_context
+                else ("active_plan_snapshot" if plan_snapshot else "missing")
+            ),
             "actual_source": "year_close_snapshot" if is_closed_year else "douano_sales_line_cost_snapshots",
             "year_close_snapshot_id": _text((year_close_snapshot or {}).get("id")),
-            "reforecast_snapshot_id": _text((reforecast_snapshot or {}).get("id")),
-            "reforecast_source": "year_close_snapshot" if is_closed_year else ("reforecast_snapshot" if reforecast_snapshot else "actual_ytd_temporary"),
+            "reforecast_snapshot_id": (
+                _text(
+                    (
+                        commercial_context.get("forecast_revision") or {}
+                    ).get("id")
+                )
+                if uses_active_context
+                else _text((reforecast_snapshot or {}).get("id"))
+            ),
+            "reforecast_source": reforecast_source,
+            "forecast_cutoff_period": forecast_cutoff_period,
             "fixed_cost_source": "year_close_snapshot" if is_closed_year else "fixed_costs_by_year",
             "actual_revenue_source": "year_close_snapshot" if is_closed_year else "douano_sales_line_cost_snapshots",
             "contribution_source": "year_close_snapshot" if is_closed_year else "douano_sales_line_cost_snapshots",
@@ -1661,7 +1862,14 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         "revenue_reconciliation": revenue_reconciliation,
         "plan_actual": {
             "rows": plan_actual_rows,
-            "model_note": "Per-SKU planvolume is nog niet beschikbaar. Deze regels tonen daarom plan-kostprijs per SKU naast actual/reforecast verkopen.",
+            "model_note": (
+                "Planvolume en SKU-verdeling komen uit het immutable frozen "
+                "Plan van de actieve commerciële jaarset. Actuals blijven "
+                "transactiesnapshots; Forecast vult alleen het resterende "
+                "positieve SKU-plan aan."
+                if uses_active_context
+                else "Per-SKU planvolume is nog niet beschikbaar. Deze regels tonen daarom plan-kostprijs per SKU naast actual/reforecast verkopen."
+            ),
         },
         "data_quality": {
             "missing_cost_lines": missing_cost_lines,
@@ -1671,9 +1879,17 @@ def build_analysis_read_model(*, year: int, basis: str = "invoice") -> dict[str,
         },
         "model_notes": {
             "read_only": True,
-            "plan_policy": "Plan targets are never guessed. Missing targets are returned as warnings.",
+            "plan_policy": (
+                "Plan is the immutable frozen Plan bound to the active commercial generation."
+                if uses_active_context
+                else "Plan targets are never guessed. Missing targets are returned as warnings."
+            ),
             "actual_policy": "Actuals are read from existing Omzet en Marge line cost snapshots; this endpoint does not refresh snapshots.",
-            "reforecast_policy": "Reforecast uses the latest explicit reforecast snapshot when available; otherwise it is temporarily equal to actual YTD.",
+            "reforecast_policy": (
+                "Forecast uses realized periods plus the approved remaining Plan; only an exact generation-bound revision may replace it."
+                if uses_active_context
+                else "Reforecast uses the latest explicit reforecast snapshot when available; otherwise it is temporarily equal to actual YTD."
+            ),
             "year_close_policy": "When a year-close snapshot exists, closed-year actual and reforecast values are read from that immutable snapshot.",
         },
     }

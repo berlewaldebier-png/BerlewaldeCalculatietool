@@ -15,6 +15,12 @@ import {
   YAxis,
 } from "recharts";
 
+import {
+  activeForecastSourceLabel,
+  buildActiveGenerationRevenueTimeline,
+  isActiveGenerationPlanSource,
+} from "@/features/commercial-context/breakEvenCommercialContext";
+
 type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
 
 type RevenueCategory = "beer" | "giftset" | "service" | "merchandise";
@@ -184,6 +190,7 @@ type ReadModelBreakEven = {
 
 type ReadModelTimelinePoint = {
   period: string;
+  actual_available?: boolean;
   revenue: number;
   variable_cost: number;
   contribution: number;
@@ -191,6 +198,12 @@ type ReadModelTimelinePoint = {
   running_revenue: number;
   running_variable_cost: number;
   running_contribution: number;
+  running_plan_revenue?: number;
+  running_plan_variable_cost?: number;
+  running_actual_revenue?: number;
+  running_actual_variable_cost?: number;
+  running_forecast_revenue?: number;
+  running_forecast_variable_cost?: number;
 };
 
 type VarianceRow = {
@@ -222,11 +235,16 @@ type BreakEvenReadModel = {
   year?: number;
   basis?: string;
   sources?: {
+    consumer_mode?: string;
+    commercial_generation_id?: string;
+    commercial_run_id?: string;
+    plan_contract_hash?: string;
     plan_snapshot_id?: string;
     plan_source?: string;
     actual_source?: string;
     reforecast_snapshot_id?: string;
     reforecast_source?: string;
+    forecast_cutoff_period?: string;
     fixed_cost_source?: string;
   };
   contribution?: {
@@ -377,11 +395,16 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
     year: asNumber(value.year),
     basis: asText(value.basis),
     sources: {
+      consumer_mode: asText(sources.consumer_mode),
+      commercial_generation_id: asText(sources.commercial_generation_id),
+      commercial_run_id: asText(sources.commercial_run_id),
+      plan_contract_hash: asText(sources.plan_contract_hash),
       plan_snapshot_id: asText(sources.plan_snapshot_id),
       plan_source: asText(sources.plan_source),
       actual_source: asText(sources.actual_source),
       reforecast_snapshot_id: asText(sources.reforecast_snapshot_id),
       reforecast_source: asText(sources.reforecast_source),
+      forecast_cutoff_period: asText(sources.forecast_cutoff_period),
       fixed_cost_source: asText(sources.fixed_cost_source),
     },
     contribution: {
@@ -444,6 +467,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       const row = asRecord(item);
       return {
         period: asText(row.period),
+        actual_available: Boolean(row.actual_available),
         revenue: asNumber(row.revenue),
         variable_cost: asNumber(row.variable_cost),
         contribution: asNumber(row.contribution),
@@ -451,6 +475,12 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
         running_revenue: asNumber(row.running_revenue),
         running_variable_cost: asNumber(row.running_variable_cost),
         running_contribution: asNumber(row.running_contribution),
+        running_plan_revenue: asNumber(row.running_plan_revenue),
+        running_plan_variable_cost: asNumber(row.running_plan_variable_cost),
+        running_actual_revenue: asNumber(row.running_actual_revenue),
+        running_actual_variable_cost: asNumber(row.running_actual_variable_cost),
+        running_forecast_revenue: asNumber(row.running_forecast_revenue),
+        running_forecast_variable_cost: asNumber(row.running_forecast_variable_cost),
       };
     }).filter((row) => row.period),
     variance_bridge: rawVarianceBridge.map((item) => {
@@ -597,8 +627,13 @@ function buildRevenueTimelineFromReadModel(
   reforecastRevenue: number,
   reforecastVariable: number,
   readModelTimeline: ReadModelTimelinePoint[] | undefined,
+  useActiveGenerationTimeline: boolean,
 ) {
   const fallback = buildRevenueTimeline(planRevenue, planVariable, actualRevenue, actualVariable, reforecastRevenue, reforecastVariable);
+  if (useActiveGenerationTimeline) {
+    const activeTimeline = buildActiveGenerationRevenueTimeline(readModelTimeline);
+    if (activeTimeline) return activeTimeline;
+  }
   if (!readModelTimeline?.length) return fallback;
 
   const byMonth = new Map<string, ReadModelTimelinePoint>();
@@ -767,7 +802,8 @@ export function BreakEvenNextMockup({
   );
   const hasActuals = Boolean(parsedReadModel && (parsedReadModel.dashboard?.actual?.revenue ?? 0) > 0);
   const hasTemporaryReforecast = Boolean(parsedReadModel && (parsedReadModel.dashboard?.reforecast?.revenue ?? 0) > 0);
-  const hasExplicitReforecast = parsedReadModel?.sources?.reforecast_source === "reforecast_snapshot";
+  const hasActiveGenerationPlan = isActiveGenerationPlanSource(parsedReadModel?.sources?.plan_source);
+  const forecastSourceLabel = activeForecastSourceLabel(parsedReadModel?.sources?.reforecast_source);
   const plan = {
     ...emptyTotals,
     revenue: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.revenue ?? 0 : 0,
@@ -817,8 +853,17 @@ export function BreakEvenNextMockup({
   const actualSnapshotTotalCost = actual.totalCost || 0;
   const reforecastTotalCost = reforecast.totalCost || (reforecast.variable + activeReforecastFixedCosts);
   const revenueTimeline = useMemo(
-    () => buildRevenueTimelineFromReadModel(plan.revenue, plan.variable, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, readModelTimeline),
-    [actual.revenue, actual.variable, plan.revenue, plan.variable, readModelTimeline, reforecast.revenue, reforecast.variable],
+    () => buildRevenueTimelineFromReadModel(
+      plan.revenue,
+      plan.variable,
+      actual.revenue,
+      actual.variable,
+      reforecast.revenue,
+      reforecast.variable,
+      readModelTimeline,
+      hasActiveGenerationPlan,
+    ),
+    [actual.revenue, actual.variable, hasActiveGenerationPlan, plan.revenue, plan.variable, readModelTimeline, reforecast.revenue, reforecast.variable],
   );
   const revenueGap = reforecast.revenue - plan.revenue;
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
@@ -1293,11 +1338,13 @@ export function BreakEvenNextMockup({
         {
           label: "Forecast omzet",
           value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast),
-          helper: hasExplicitReforecast ? "reforecast snapshot" : "nog geen aparte forecast",
+          helper: forecastSourceLabel,
           formula: {
             title: "Forecast omzet",
-            formula: "Verwachte jaaromzet. Voor 2025 is dit nu gelijk aan actuals zolang er geen aparte reforecast is.",
-            source: hasExplicitReforecast ? "Bron: reforecast snapshot." : "Bron: actuals als tijdelijke reforecast.",
+            formula: hasActiveGenerationPlan
+              ? "Actual van gerealiseerde perioden plus het resterende goedgekeurde Plan."
+              : "Verwachte jaaromzet uit de bestaande historische prognosebron.",
+            source: `Bron: ${forecastSourceLabel}.`,
             rows: [
               { label: "Forecast omzet", value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast) },
             ],
@@ -1310,7 +1357,7 @@ export function BreakEvenNextMockup({
           formula: {
             title: "Forecast variabele kostprijs",
             formula: "Verwachte omzetmix x variabele kostprijs.",
-            source: hasExplicitReforecast ? "Bron: reforecast snapshot." : "Bron: actuals als tijdelijke reforecast.",
+            source: `Bron: ${forecastSourceLabel}.`,
             rows: [
               { label: "Forecast variabele kostprijs", value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast) },
               { label: "Forecast contributie", value: moneyOrMissing(reforecast.contribution, hasTemporaryReforecast) },
@@ -1369,7 +1416,7 @@ export function BreakEvenNextMockup({
           formula: {
             title: "Forecast break-even omzet",
             formula: "Vaste kosten ABC / (forecast contributie / forecast omzet).",
-            source: hasExplicitReforecast ? "Bron: reforecast snapshot plus vaste kosten ABC." : "Bron: actuals als tijdelijke reforecast plus vaste kosten ABC.",
+            source: `Bron: ${forecastSourceLabel} plus vaste kosten ABC.`,
             rows: [
               { label: "Forecast contributieratio", value: reforecastContributionRatio > 0 ? `${number(reforecastContributionRatio * 100, 1)}%` : "-" },
               { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
@@ -1407,11 +1454,13 @@ export function BreakEvenNextMockup({
           <div>
             <div className="module-card-title">Read-model koppeling</div>
             <div className="module-card-text">
-              Deze analyse gebruikt het backend read-model voor echte cijfers. Ontbrekende planwaarden worden leeg getoond en niet aangevuld.
+              {hasActiveGenerationPlan
+                ? "Plan komt uit de actieve commerciële jaarset; Actual blijft transactiedata en Forecast gebruikt de resterende goedgekeurde Plan-perioden."
+                : "Deze analyse gebruikt het backend read-model voor echte cijfers. Ontbrekende planwaarden worden leeg getoond en niet aangevuld."}
             </div>
           </div>
           <span className={`status-pill ${readModelError ? "status-error" : parsedReadModel ? "status-ok" : "status-warning"}`}>
-            {readModelError ? "niet geladen" : parsedReadModel ? "backend gekoppeld" : "geen backenddata"}
+            {readModelError ? "niet geladen" : hasActiveGenerationPlan ? "actieve jaarset gekoppeld" : parsedReadModel ? "backend gekoppeld" : "geen backenddata"}
           </span>
         </div>
         {readModelError ? (
@@ -1688,7 +1737,7 @@ export function BreakEvenNextMockup({
               <div className="be-next-explain">
                 <strong>Dit vertelt of de verwachte contributie genoeg is om vaste kosten te dragen.</strong>
                 <p>
-                  De analyse houdt plan, actuals en reforecast gescheiden. {hasExplicitReforecast ? "De reforecast komt uit een vastgelegde snapshot." : "Zonder reforecast-snapshot blijft dit tijdelijk gelijk aan actual YTD."}
+                  De analyse houdt Plan, Actual en Forecast gescheiden. De Forecast komt uit {forecastSourceLabel}.
                 </p>
               </div>
             </div>

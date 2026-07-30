@@ -197,6 +197,20 @@ required_rf012c1_contracts = {
     "test_quote_commercial_context.QuoteCommercialContextProjectionTests.test_non_operational_generation_fails_closed",
     "test_quote_commercial_context.QuoteCommercialContextReaderTests.test_reader_starts_read_only_and_does_not_initialize_schema",
 }
+required_rf012c2_contracts = {
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_active_generation_exposes_immutable_plan_and_cost_rows",
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_initial_forecast_mismatch_fails_closed",
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_tampered_plan_hash_fails_closed",
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_incomplete_year_periods_fail_closed",
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_legacy_or_other_generation_revision_is_not_applied",
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_exact_generation_bound_revision_is_available",
+    "test_break_even_commercial_context.BreakEvenPlanForecastProjectionTests.test_without_actuals_initial_forecast_exactly_equals_plan",
+    "test_break_even_commercial_context.BreakEvenPlanForecastProjectionTests.test_actual_period_replaces_plan_period_and_future_plan_remains",
+    "test_break_even_commercial_context.BreakEvenPlanForecastProjectionTests.test_year_close_forecast_equals_final_actual",
+    "test_break_even_commercial_context.BreakEvenAnalysisConsumerTests.test_active_year_uses_generation_plan_without_legacy_plan_reader",
+    "test_break_even_commercial_context.BreakEvenAnalysisConsumerTests.test_active_year_does_not_fall_back_when_generation_is_invalid",
+    "test_break_even_commercial_context.BreakEvenCommercialContextReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -219,6 +233,7 @@ missing = sorted(
         | required_rf013c2_contracts
         | required_rf013c3_contracts
         | required_rf012c1_contracts
+        | required_rf012c2_contracts
     ).difference(ids)
 )
 
@@ -231,5 +246,6 @@ print(
     f"unittest discovery: {len(ids)} tests; "
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
-    "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3 and RF-012C1 contracts collected"
+    "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
+    "RF-012C2 contracts collected"
 )
