@@ -97,6 +97,35 @@ export type MixSource = "quote" | "customer" | "portfolio";
 
 export type QuoteDraftStatus = "concept" | "definitief";
 
+export type QuoteActiveGenerationBinding = {
+  mode: "active_generation";
+  version: "rf-012c1-v1";
+  generationId: string;
+  runId: string;
+  operationalYear: number;
+  manifestHash: string;
+  validationHash: string;
+};
+
+export type QuoteLegacyContextBinding = {
+  mode: "legacy_persisted";
+  version: "rf-012c1-v1";
+  operationalYear: number;
+  reasonCode: "pre_rf012c1_snapshot";
+};
+
+export type QuoteUnavailableContextBinding = {
+  mode: "unavailable";
+  version: "rf-012c1-v1";
+  operationalYear: number;
+  reasonCode: string;
+};
+
+export type QuoteCommercialContextBinding =
+  | QuoteActiveGenerationBinding
+  | QuoteLegacyContextBinding
+  | QuoteUnavailableContextBinding;
+
 export type QuoteDraftMeta = {
   draftId: string | null;
   status: QuoteDraftStatus;
@@ -108,6 +137,7 @@ export type QuoteDraftMeta = {
 export type QuoteDraft = {
   meta: QuoteDraftMeta;
   year: number;
+  commercialContext?: QuoteCommercialContextBinding;
   basis: BasisData;
   dealContext: DealContext;
   mixSource: MixSource;

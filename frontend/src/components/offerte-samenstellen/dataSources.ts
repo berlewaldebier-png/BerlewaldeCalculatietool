@@ -44,12 +44,20 @@ type BuildProductOptionsParams = {
   scenarioLabelSuffix?: string;
 };
 
+export type BuildQuoteablePackagingOptionsParams = {
+  year: number;
+  verpakkingsonderdelen?: GenericRecord[];
+  verpakkingsonderdeelPrijzen?: GenericRecord[];
+};
+
 function asNumber(value: unknown, fallback = 0) {
   const parsed = typeof value === "number" ? value : Number(String(value ?? "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function buildQuoteablePackagingComponentOptions(params: BuildProductOptionsParams): ProductOption[] {
+export function buildQuoteablePackagingComponentOptions(
+  params: BuildQuoteablePackagingOptionsParams
+): ProductOption[] {
   const pricesByComponentId = new Map<string, GenericRecord>();
   (Array.isArray(params.verpakkingsonderdeelPrijzen) ? params.verpakkingsonderdeelPrijzen : []).forEach((row) => {
     const year = asNumber((row as any)?.jaar, 0);

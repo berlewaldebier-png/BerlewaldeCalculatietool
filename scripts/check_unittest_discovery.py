@@ -190,6 +190,13 @@ required_rf013c3_contracts = {
     "test_yearset_recovery.YearsetRecoveryProjectionTests.test_exact_decision_sets_must_match_the_current_lineage",
     "test_yearset_recovery.YearsetRecoveryProjectionTests.test_only_management_may_approve_the_recovery_input",
 }
+required_rf012c1_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_quote_read_and_mutation_routes_use_quote_capability",
+    "test_quote_commercial_context.QuoteCommercialContextProjectionTests.test_active_generation_exposes_exact_cost_price_and_binding",
+    "test_quote_commercial_context.QuoteCommercialContextProjectionTests.test_exclusion_keeps_typed_reasons_instead_of_silently_dropping_sku",
+    "test_quote_commercial_context.QuoteCommercialContextProjectionTests.test_non_operational_generation_fails_closed",
+    "test_quote_commercial_context.QuoteCommercialContextReaderTests.test_reader_starts_read_only_and_does_not_initialize_schema",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -211,6 +218,7 @@ missing = sorted(
         | required_rf013c1_contracts
         | required_rf013c2_contracts
         | required_rf013c3_contracts
+        | required_rf012c1_contracts
     ).difference(ids)
 )
 
@@ -223,5 +231,5 @@ print(
     f"unittest discovery: {len(ids)} tests; "
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
-    "RF-013B, RF-013C, RF-013C1, RF-013C2 and RF-013C3 contracts collected"
+    "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3 and RF-012C1 contracts collected"
 )
