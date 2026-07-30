@@ -18,11 +18,14 @@ from scripts.rf013c_rehearse_yearset_reconciliation import (  # noqa: E402
     EXPECTED_RF013C2_HUMAN_COST_SKU_IDS,
     EXPECTED_RF013C2_REPRODUCIBLE_COST_SKU_IDS,
     EXPECTED_RF013C2_SUMMARY,
+    EXPECTED_RF013C3_RECOVERED_SUMMARY,
     EXPECTED_RESTORED_BLOCKERS,
     EXPECTED_RESTORED_SUMMARY,
+    RF013C3_TABLES,
     RF013C_TABLES,
     validate_blocker_worklist,
     validate_lineage_review,
+    validate_recovered_result,
     validate_restored_result,
 )
 
@@ -40,7 +43,8 @@ class Rf013cRehearsalSafetyTests(unittest.TestCase):
                 "commercial_yearset_reconciliation_runs",
             },
         )
-        self.assertEqual(len(ALLOWED_NEW_TABLES), 16)
+        self.assertEqual(RF013C3_TABLES, {"commercial_yearset_recovery_inputs"})
+        self.assertEqual(len(ALLOWED_NEW_TABLES), 17)
 
     def test_restored_characterization_requires_exact_known_gaps(self) -> None:
         result = {
@@ -171,6 +175,32 @@ class Rf013cRehearsalSafetyTests(unittest.TestCase):
             "lineage_unexpected_ready",
             validate_lineage_review(
                 {**result, "ready_for_reconciliation_rebuild": True}
+            ),
+        )
+
+    def test_approved_recovery_requires_the_exact_ready_projection(self) -> None:
+        result = {
+            "ready": True,
+            "candidate_summary": EXPECTED_RF013C3_RECOVERED_SUMMARY,
+            "candidate_blocker_counts": {},
+            "consumer_mode": "compatibility_only",
+            "legacy_target_untouched": True,
+            "data_rewritten": False,
+        }
+        self.assertEqual(validate_recovered_result(result), [])
+        self.assertIn(
+            "recovered_candidate_not_ready",
+            validate_recovered_result({**result, "ready": False}),
+        )
+        self.assertIn(
+            "recovered_blockers",
+            validate_recovered_result(
+                {
+                    **result,
+                    "candidate_blocker_counts": {
+                        "target_cost_input_missing": 1
+                    },
+                }
             ),
         )
 

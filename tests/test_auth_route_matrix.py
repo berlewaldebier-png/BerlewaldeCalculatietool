@@ -193,6 +193,18 @@ class AuthRouteMatrixTests(unittest.TestCase):
                 "GET",
                 "/meta/commercial-yearsets/reconciliation-lineage",
             ): "admin",
+            (
+                "GET",
+                "/meta/commercial-yearsets/recovery-inputs",
+            ): "admin",
+            (
+                "POST",
+                "/meta/commercial-yearsets/recovery/preview",
+            ): "costs:activate",
+            (
+                "POST",
+                "/meta/commercial-yearsets/recovery/approve",
+            ): "costs:activate",
             ("POST", "/meta/commercial-yearsets/reconcile"): "admin",
             (
                 "POST",
@@ -228,8 +240,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 175, normalized)
-        self.assertEqual(digest, "116e2d732c95125084c28f0d95d10d00ce088fa34a8c3322b1309c8296e31e5c", normalized)
+        self.assertEqual(len(rows), 178, normalized)
+        self.assertEqual(digest, "3ecca4f520c9f391038065193c9c9f9070a2b319637ba5dcbeb0045502ce3366", normalized)
 
 
 if __name__ == "__main__":

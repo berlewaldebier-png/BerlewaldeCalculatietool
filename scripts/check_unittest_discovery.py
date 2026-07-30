@@ -179,6 +179,17 @@ required_rf013c2_contracts = {
     "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_projection_is_amount_free_and_labels_do_not_change_identity",
     "test_yearset_blocker_lineage.YearsetBlockerLineageTests.test_review_uses_read_only_transaction_without_schema_initialization",
 }
+required_rf013c3_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_yearset_reconciliation_routes_keep_prepare_approve_execute_separated",
+    "test_main_middleware.MainMiddlewareTests.test_startup_event_ensures_postgres_schema",
+    "test_rf013c_rehearsal.Rf013cRehearsalSafetyTests.test_approved_recovery_requires_the_exact_ready_projection",
+    "test_yearset_recovery.YearsetRecoveryPostgresTests.test_approved_inputs_are_additive_and_previous_decisions_are_retained",
+    "test_yearset_recovery.YearsetRecoveryProjectionTests.test_approved_projection_is_ready_balanced_and_keeps_legacy_input_untouched",
+    "test_yearset_recovery.YearsetRecoveryProjectionTests.test_changed_exact_authority_blocks_instead_of_silently_recalculating",
+    "test_yearset_recovery.YearsetRecoveryProjectionTests.test_duplicate_exact_authority_blocks_after_approval",
+    "test_yearset_recovery.YearsetRecoveryProjectionTests.test_exact_decision_sets_must_match_the_current_lineage",
+    "test_yearset_recovery.YearsetRecoveryProjectionTests.test_only_management_may_approve_the_recovery_input",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -199,6 +210,7 @@ missing = sorted(
         | required_rf013c_contracts
         | required_rf013c1_contracts
         | required_rf013c2_contracts
+        | required_rf013c3_contracts
     ).difference(ids)
 )
 
@@ -211,5 +223,5 @@ print(
     f"unittest discovery: {len(ids)} tests; "
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
-    "RF-013B, RF-013C, RF-013C1 and RF-013C2 contracts collected"
+    "RF-013B, RF-013C, RF-013C1, RF-013C2 and RF-013C3 contracts collected"
 )

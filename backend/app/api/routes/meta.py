@@ -23,6 +23,8 @@ from app.domain import commercial_yearset_service
 from app.domain import commercial_yearset_storage
 from app.domain import yearset_reconciliation_service
 from app.domain import yearset_blocker_lineage_service
+from app.domain import yearset_recovery_service
+from app.domain import yearset_recovery_storage
 from app.domain import yearset_reconciliation_storage
 from app.domain import cost_authority_service
 from app.domain import cost_authority_storage
@@ -45,6 +47,7 @@ from app.schemas.commercial_yearsets import (
     YearsetReconciliationActivationRequest,
     YearsetReconciliationApprovalRequest,
     YearsetReconciliationRequest,
+    YearsetRecoveryRequest,
 )
 from app.schemas.cost_authority import (
     CostAuthorityBackfillRequest,
@@ -3271,6 +3274,54 @@ def get_commercial_yearset_reconciliation_lineage(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commercial-yearsets/recovery/preview")
+def post_commercial_yearset_recovery_preview(
+    payload: YearsetRecoveryRequest,
+    _: dict = Depends(require_cost_activation),
+) -> dict[str, Any]:
+    """Preview the exact approved-input projection without persisting it."""
+
+    try:
+        return yearset_recovery_service.preview(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/commercial-yearsets/recovery/approve")
+def post_commercial_yearset_recovery_approve(
+    payload: YearsetRecoveryRequest,
+    session: dict = Depends(require_cost_activation),
+) -> dict[str, Any]:
+    """Persist one Management-approved input; no legacy row is overwritten."""
+
+    try:
+        return yearset_recovery_service.approve(
+            payload,
+            actor=str(session.get("username", "") or ""),
+            actor_role=str(session.get("role", "") or ""),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except yearset_recovery_storage.YearsetRecoveryConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/commercial-yearsets/recovery-inputs")
+def get_commercial_yearset_recovery_inputs(
+    target_year: int = Query(0, ge=0, le=2100),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    return {
+        "items": yearset_recovery_storage.list_inputs(
+            target_year=int(target_year)
+        ),
+        "consumer_mode": "compatibility_only",
+        "data_rewritten": False,
+    }
 
 
 @router.post("/commercial-yearsets/reconcile")

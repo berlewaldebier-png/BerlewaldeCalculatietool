@@ -20,6 +20,7 @@ from app.domain import (
     commercial_yearset_storage,
     cost_authority_storage,
     postgres_storage,
+    yearset_recovery_storage,
     yearset_reconciliation_storage,
     db_pool,
 )
@@ -95,6 +96,7 @@ def startup_event():
             commercial_yearset_storage.ensure_schema()
             cost_authority_storage.ensure_schema()
             yearset_reconciliation_storage.ensure_schema()
+            yearset_recovery_storage.ensure_schema()
             logger.info("PostgreSQL schema ensured successfully")
         
         logger.info("Application startup complete")
