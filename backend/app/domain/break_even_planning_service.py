@@ -1039,6 +1039,7 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
 
     rows_by_key: dict[str, dict[str, Any]] = {}
     period_totals: dict[str, dict[str, float]] = {}
+    latest_actual_date = ""
     total_revenue = 0.0
     total_cost = 0.0
     total_fixed_alloc = 0.0
@@ -1110,13 +1111,18 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
 
         period = _text(line_date_raw)[:7]
         if period:
-            period_bucket = period_totals.setdefault(period, {"revenue": 0.0, "variable_cost": 0.0, "variabel_ex": 0.0, "variabel_accijns_ex": 0.0, "fixed_alloc": 0.0, "contribution": 0.0})
+            period_bucket = period_totals.setdefault(period, {"revenue": 0.0, "variable_cost": 0.0, "variabel_ex": 0.0, "variabel_accijns_ex": 0.0, "fixed_alloc": 0.0, "contribution": 0.0, "units": 0.0})
             period_bucket["revenue"] += revenue
             period_bucket["variable_cost"] += variable_with_excise
             period_bucket["variabel_ex"] += variable_without_excise
             period_bucket["variabel_accijns_ex"] += variable_with_excise
             period_bucket["fixed_alloc"] += fixed_alloc
             period_bucket["contribution"] += revenue - variable_with_excise
+            period_bucket["units"] += qty
+            latest_actual_date = max(
+                latest_actual_date,
+                _text(line_date_raw)[:10],
+            )
 
         total_revenue += revenue
         total_cost += cost
@@ -1128,6 +1134,7 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
     contribution = total_revenue - (total_cost - total_fixed_alloc)
     return {
         "raw": {"source": "douano_sales_line_cost_snapshots", "source_type": source_type},
+        "latest_actual_date": latest_actual_date,
         "rows": rows,
         "period_totals": [{"period": key, **value} for key, value in sorted(period_totals.items())],
         "totals": {
@@ -1634,6 +1641,23 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
     actual_variable = _num(totals.get("variable_cost"))
     actual_absorbed_fixed_costs = _num(totals.get("fixed_alloc"))
     actual_contribution = _num(totals.get("contribution"))
+    actual_units = sum(_num(row.get("units")) for row in contribution_rows)
+    context_planning_rows = (
+        commercial_context.get("planning_rows", [])
+        if uses_active_context
+        and isinstance(commercial_context.get("planning_rows"), list)
+        else []
+    )
+    liters_per_unit_by_sku = {
+        _text(row.get("sku_id")): _num(row.get("liters_per_unit"))
+        for row in context_planning_rows
+        if isinstance(row, dict) and _text(row.get("sku_id"))
+    }
+    actual_liters = sum(
+        _num(row.get("units"))
+        * liters_per_unit_by_sku.get(_text(row.get("sku_id")), 0.0)
+        for row in contribution_rows
+    )
     contribution_ratio = _money_ratio(actual_contribution, actual_revenue)
     break_even_revenue = controllable_cost_total / contribution_ratio if contribution_ratio > 0 else 0.0
     break_even_variable = break_even_revenue * _money_ratio(actual_variable, actual_revenue)
@@ -1643,6 +1667,8 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
     plan_revenue = _num(plan_targets.get("revenue"))
     plan_variable = _num(plan_targets.get("variable_cost"))
     plan_contribution = _num(plan_targets.get("contribution"))
+    plan_liters = _num(plan_targets.get("liters"))
+    plan_units = _num(plan_targets.get("units"))
     plan_fixed_costs = (
         fixed_cost_total
         if uses_active_context
@@ -1658,17 +1684,17 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
                     "revenue": actual_revenue,
                     "variable_cost": actual_variable,
                     "contribution": actual_contribution,
-                    "units": sum(
-                        _num(row.get("units"))
-                        for row in contribution_rows
-                    ),
-                    "liters": 0.0,
+                    "units": actual_units,
+                    "liters": actual_liters,
                 },
                 actual_periods=[
                     row
                     for row in sales.get("period_totals", [])
                     if isinstance(row, dict)
                 ],
+                actual_as_of_date=_text(
+                    sales.get("latest_actual_date")
+                ),
                 closed_year=is_closed_year,
             )
         )
@@ -1680,9 +1706,38 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
         reforecast_contribution = _num(
             forecast_targets.get("contribution")
         )
+        reforecast_liters = _num(forecast_targets.get("liters"))
+        reforecast_units = _num(forecast_targets.get("units"))
         reforecast_fixed_costs = fixed_cost_total
-        reforecast_absorbed_fixed_costs = fixed_cost_total
-        reforecast_total_cost = reforecast_variable + fixed_cost_total
+        occupancy = (
+            break_even_commercial_context_service.project_abc_occupancy(
+                forecast_projection,
+                fixed_cost_total=fixed_cost_total,
+                actual_absorbed_fixed_costs=actual_absorbed_fixed_costs,
+            )
+        )
+        plan_absorbed_fixed_costs = _num(
+            occupancy.get("plan_absorbed_fixed_costs")
+        )
+        planned_absorbed_fixed_costs_to_date = _num(
+            occupancy.get("planned_absorbed_fixed_costs_to_date")
+        )
+        reforecast_absorbed_fixed_costs = _num(
+            occupancy.get("forecast_absorbed_fixed_costs")
+        )
+        plan_occupancy_variance = _num(
+            occupancy.get("plan_occupancy_variance")
+        )
+        actual_occupancy_variance = _num(
+            occupancy.get("actual_occupancy_variance")
+        )
+        reforecast_occupancy_variance = _num(
+            occupancy.get("forecast_occupancy_variance")
+        )
+        occupancy_driver = _text(occupancy.get("driver"))
+        reforecast_total_cost = (
+            reforecast_variable + reforecast_absorbed_fixed_costs
+        )
         reforecast_source = _text(
             forecast_projection.get("forecast_source")
         )
@@ -1694,6 +1749,8 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
         reforecast_revenue = actual_revenue if is_closed_year else (_num(explicit_reforecast.get("revenue")) or actual_revenue)
         reforecast_variable = actual_variable if is_closed_year else (_num(explicit_reforecast.get("variable_cost")) or actual_variable)
         reforecast_contribution = actual_contribution if is_closed_year else (_num(explicit_reforecast.get("contribution")) or actual_contribution)
+        reforecast_liters = _num(explicit_reforecast.get("liters")) or actual_liters
+        reforecast_units = _num(explicit_reforecast.get("units")) or actual_units
         reforecast_fixed_costs = fixed_cost_total
         reforecast_absorbed_fixed_costs = actual_absorbed_fixed_costs if is_closed_year else (_num(explicit_reforecast.get("absorbed_fixed_costs")) if explicit_reforecast else actual_absorbed_fixed_costs)
         reforecast_total_cost = actual_total_cost if is_closed_year else (_num(explicit_reforecast.get("total_cost")) if explicit_reforecast else actual_total_cost)
@@ -1709,6 +1766,16 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
             )
         )
         forecast_cutoff_period = ""
+        plan_absorbed_fixed_costs = plan_fixed_costs
+        planned_absorbed_fixed_costs_to_date = plan_fixed_costs
+        plan_occupancy_variance = 0.0
+        actual_occupancy_variance = (
+            actual_absorbed_fixed_costs - fixed_cost_total
+        )
+        reforecast_occupancy_variance = (
+            reforecast_absorbed_fixed_costs - fixed_cost_total
+        )
+        occupancy_driver = "legacy_compatibility"
         timeline = _period_timeline(
             [
                 row
@@ -1799,6 +1866,8 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
             ),
             "reforecast_source": reforecast_source,
             "forecast_cutoff_period": forecast_cutoff_period,
+            "actual_as_of_date": _text(sales.get("latest_actual_date")),
+            "occupancy_driver": occupancy_driver,
             "fixed_cost_source": "year_close_snapshot" if is_closed_year else "fixed_costs_by_year",
             "actual_revenue_source": "year_close_snapshot" if is_closed_year else "douano_sales_line_cost_snapshots",
             "contribution_source": "year_close_snapshot" if is_closed_year else "douano_sales_line_cost_snapshots",
@@ -1808,8 +1877,12 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
                 "revenue": plan_revenue,
                 "variable_cost": plan_variable,
                 "total_cost": plan_variable + plan_fixed_costs if plan_variable or plan_fixed_costs else 0.0,
-                "absorbed_fixed_costs": plan_fixed_costs,
+                "absorbed_fixed_costs": plan_absorbed_fixed_costs,
+                "planned_absorbed_fixed_costs": plan_absorbed_fixed_costs,
+                "occupancy_variance": plan_occupancy_variance,
                 "contribution": plan_contribution,
+                "liters": plan_liters,
+                "units": plan_units,
                 "fixed_costs": plan_fixed_costs,
                 "incidental_costs": 0.0,
                 "result": plan_result,
@@ -1819,7 +1892,11 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
                 "variable_cost": actual_variable,
                 "total_cost": actual_total_cost,
                 "absorbed_fixed_costs": actual_absorbed_fixed_costs,
+                "planned_absorbed_fixed_costs": planned_absorbed_fixed_costs_to_date,
+                "occupancy_variance": actual_occupancy_variance,
                 "contribution": actual_contribution,
+                "liters": actual_liters,
+                "units": actual_units,
                 "fixed_costs": fixed_cost_total,
                 "incidental_costs": incidental_cost_total,
                 "result": actual_contribution - fixed_cost_total - incidental_cost_total,
@@ -1829,7 +1906,11 @@ def build_analysis_read_model(*, year: int = 0, basis: str = "invoice") -> dict[
                 "variable_cost": reforecast_variable,
                 "total_cost": reforecast_total_cost,
                 "absorbed_fixed_costs": reforecast_absorbed_fixed_costs,
+                "planned_absorbed_fixed_costs": fixed_cost_total,
+                "occupancy_variance": reforecast_occupancy_variance,
                 "contribution": reforecast_contribution,
+                "liters": reforecast_liters,
+                "units": reforecast_units,
                 "fixed_costs": reforecast_fixed_costs,
                 "incidental_costs": incidental_cost_total,
                 "result": reforecast_result,

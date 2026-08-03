@@ -162,7 +162,11 @@ type ReadModelFinancialSet = {
   variable_cost: number;
   total_cost: number;
   absorbed_fixed_costs: number;
+  planned_absorbed_fixed_costs: number;
+  occupancy_variance: number;
   contribution: number;
+  liters: number;
+  units: number;
   fixed_costs: number;
   incidental_costs: number;
   result: number;
@@ -245,6 +249,8 @@ type BreakEvenReadModel = {
     reforecast_snapshot_id?: string;
     reforecast_source?: string;
     forecast_cutoff_period?: string;
+    actual_as_of_date?: string;
+    occupancy_driver?: string;
     fixed_cost_source?: string;
   };
   contribution?: {
@@ -284,7 +290,6 @@ const tabs: Array<{ id: TabId; title: string; description: string }> = [
   { id: "year_close", title: "Jaarafsluiting", description: "Finale waarheid" },
 ];
 
-const plannedNormalLiters = 40000;
 const contributionPageSize = 5;
 const emptyTotals = {
   revenue: 0,
@@ -296,20 +301,7 @@ const emptyTotals = {
   units: 0,
 };
 
-const revenuePhasing = [
-  { month: "Jan", planPct: 0.05, actualPct: 0.052, reforecastPct: 0.052 },
-  { month: "Feb", planPct: 0.11, actualPct: 0.105, reforecastPct: 0.105 },
-  { month: "Mrt", planPct: 0.18, actualPct: 0.165, reforecastPct: 0.165 },
-  { month: "Apr", planPct: 0.27, actualPct: 0.238, reforecastPct: 0.238 },
-  { month: "Mei", planPct: 0.37, actualPct: 0.335, reforecastPct: 0.335 },
-  { month: "Jun", planPct: 0.48, actualPct: 0.445, reforecastPct: 0.445 },
-  { month: "Jul", planPct: 0.58, actualPct: null, reforecastPct: 0.545 },
-  { month: "Aug", planPct: 0.67, actualPct: null, reforecastPct: 0.625 },
-  { month: "Sep", planPct: 0.76, actualPct: null, reforecastPct: 0.715 },
-  { month: "Okt", planPct: 0.86, actualPct: null, reforecastPct: 0.82 },
-  { month: "Nov", planPct: 0.94, actualPct: null, reforecastPct: 0.91 },
-  { month: "Dec", planPct: 1, actualPct: null, reforecastPct: 1 },
-];
+const monthNames = ["Jan", "Feb", "Mrt", "Apr", "Mei", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"];
 
 function money(value: number) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
@@ -385,7 +377,11 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       variable_cost: asNumber(row.variable_cost),
       total_cost: asNumber(row.total_cost),
       absorbed_fixed_costs: asNumber(row.absorbed_fixed_costs),
+      planned_absorbed_fixed_costs: asNumber(row.planned_absorbed_fixed_costs),
+      occupancy_variance: asNumber(row.occupancy_variance),
       contribution: asNumber(row.contribution),
+      liters: asNumber(row.liters),
+      units: asNumber(row.units),
       fixed_costs: asNumber(row.fixed_costs),
       incidental_costs: asNumber(row.incidental_costs),
       result: asNumber(row.result),
@@ -405,6 +401,8 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       reforecast_snapshot_id: asText(sources.reforecast_snapshot_id),
       reforecast_source: asText(sources.reforecast_source),
       forecast_cutoff_period: asText(sources.forecast_cutoff_period),
+      actual_as_of_date: asText(sources.actual_as_of_date),
+      occupancy_driver: asText(sources.occupancy_driver),
       fixed_cost_source: asText(sources.fixed_cost_source),
     },
     contribution: {
@@ -600,19 +598,21 @@ function buildScenarioFromRemaining(
 }
 
 function buildRevenueTimeline(planRevenue: number, planVariable: number, actualRevenue: number, actualVariable: number, reforecastRevenue: number, reforecastVariable: number) {
-  return revenuePhasing.map((point) => ({
-    month: point.month,
-    plan: planRevenue * point.planPct,
-    planCost: planVariable * point.planPct,
-    actual: point.actualPct === null ? null : actualRevenue * (point.actualPct / 0.445),
-    actualCost: point.actualPct === null ? null : actualVariable * (point.actualPct / 0.445),
-    reforecast: reforecastRevenue * point.reforecastPct,
-    reforecastCost: reforecastVariable * point.reforecastPct,
-  }));
+  return monthNames.map((month, index) => {
+    const cumulativeShare = (index + 1) / monthNames.length;
+    return {
+      month,
+      plan: planRevenue * cumulativeShare,
+      planCost: planVariable * cumulativeShare,
+      actual: actualRevenue * cumulativeShare,
+      actualCost: actualVariable * cumulativeShare,
+      reforecast: reforecastRevenue * cumulativeShare,
+      reforecastCost: reforecastVariable * cumulativeShare,
+    };
+  });
 }
 
 function monthLabel(period: string, fallback: string) {
-  const monthNames = ["Jan", "Feb", "Mrt", "Apr", "Mei", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"];
   const match = /^(\d{4})-(\d{2})/.exec(period);
   if (!match) return fallback;
   const monthIndex = Number(match[2]) - 1;
@@ -684,10 +684,20 @@ function buildRevenueTimelineFromReadModel(
 
 function contributionDisplaySignal(row: ReadModelContributionRow): ContributionDisplayRow["signal"] {
   if (row.missing_cost_lines > 0) return { label: "kostprijs ontbreekt", tone: "error" };
-  if (row.contribution_ratio > 0 && row.contribution_ratio < 0.25) return { label: "marge-risico", tone: "error" };
-  if (row.contribution > 9000) return { label: "mixdrager", tone: "ok" };
+  if (row.contribution <= 0) return { label: "geen positieve contributie", tone: "error" };
   if (row.contribution > 0) return { label: "contributie", tone: "neutral" };
   return { label: "controle nodig", tone: "warning" };
+}
+
+function fixedCostSourceLabel(source: unknown) {
+  switch (asText(source)) {
+    case "year_close_snapshot":
+      return "Vaste kosten ABC uit de afgesloten jaarsnapshot";
+    case "fixed_costs_by_year":
+      return "Vaste kosten ABC uit de actieve jaarbasis";
+    default:
+      return "Vaste kosten ABC uit het backend-readmodel";
+  }
 }
 
 function perUnit(total: number, units: number) {
@@ -777,7 +787,7 @@ export function BreakEvenNextMockup({
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
   const [contributionPage, setContributionPage] = useState(1);
-  const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 5, volumePct: 8, fixedCostPct: 0 });
+  const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 0, volumePct: 0, fixedCostPct: 0 });
   const [selectedFormula, setSelectedFormula] = useState<FormulaInfo | null>(null);
 
   const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
@@ -810,7 +820,11 @@ export function BreakEvenNextMockup({
     variable: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.variable_cost ?? 0 : 0,
     totalCost: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.total_cost ?? 0 : 0,
     absorbedFixed: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.absorbed_fixed_costs ?? 0 : 0,
+    plannedAbsorbedFixed: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.planned_absorbed_fixed_costs ?? 0 : 0,
+    occupancyVariance: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.occupancy_variance ?? 0 : 0,
     contribution: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.contribution ?? 0 : 0,
+    liters: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.liters ?? 0 : 0,
+    units: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.units ?? 0 : 0,
     incidental: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.incidental_costs ?? 0 : 0,
   };
   const actual = {
@@ -819,7 +833,11 @@ export function BreakEvenNextMockup({
     variable: parsedReadModel?.dashboard?.actual?.variable_cost ?? 0,
     totalCost: parsedReadModel?.dashboard?.actual?.total_cost ?? 0,
     absorbedFixed: parsedReadModel?.dashboard?.actual?.absorbed_fixed_costs ?? 0,
+    plannedAbsorbedFixed: parsedReadModel?.dashboard?.actual?.planned_absorbed_fixed_costs ?? 0,
+    occupancyVariance: parsedReadModel?.dashboard?.actual?.occupancy_variance ?? 0,
     contribution: parsedReadModel?.dashboard?.actual?.contribution ?? 0,
+    liters: parsedReadModel?.dashboard?.actual?.liters ?? 0,
+    units: parsedReadModel?.dashboard?.actual?.units ?? 0,
     incidental: parsedReadModel?.dashboard?.actual?.incidental_costs ?? 0,
   };
   const reforecast = {
@@ -828,7 +846,11 @@ export function BreakEvenNextMockup({
     variable: parsedReadModel?.dashboard?.reforecast?.variable_cost ?? 0,
     totalCost: parsedReadModel?.dashboard?.reforecast?.total_cost ?? 0,
     absorbedFixed: parsedReadModel?.dashboard?.reforecast?.absorbed_fixed_costs ?? 0,
+    plannedAbsorbedFixed: parsedReadModel?.dashboard?.reforecast?.planned_absorbed_fixed_costs ?? 0,
+    occupancyVariance: parsedReadModel?.dashboard?.reforecast?.occupancy_variance ?? 0,
     contribution: parsedReadModel?.dashboard?.reforecast?.contribution ?? 0,
+    liters: parsedReadModel?.dashboard?.reforecast?.liters ?? 0,
+    units: parsedReadModel?.dashboard?.reforecast?.units ?? 0,
     incidental: parsedReadModel?.dashboard?.reforecast?.incidental_costs ?? 0,
   };
   const activePlanFixedCosts = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.fixed_costs ?? 0 : 0;
@@ -843,8 +865,7 @@ export function BreakEvenNextMockup({
     ),
     [activeRequiredCosts, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, scenario],
   );
-  const fixedRate = activePlanFixedCosts > 0 ? activePlanFixedCosts / plannedNormalLiters : 0;
-  const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
+  const occupancyResult = reforecast.occupancyVariance;
   const planResult = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.result ?? (plan.contribution - activePlanFixedCosts) : 0;
   const actualResult = parsedReadModel?.dashboard?.actual?.result ?? (actual.contribution - activeReforecastFixedCosts);
   const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result ?? (reforecast.contribution - activeReforecastFixedCosts);
@@ -871,9 +892,9 @@ export function BreakEvenNextMockup({
   const planAbsorbedFixedCosts = plan.absorbedFixed || Math.max(0, planTotalCost - plan.variable);
   const actualAbsorbedFixedCosts = actual.absorbedFixed || Math.max(0, actualSnapshotTotalCost - actual.variable);
   const reforecastAbsorbedFixedCosts = reforecast.absorbedFixed || Math.max(0, (reforecast.totalCost || actualSnapshotTotalCost) - reforecast.variable);
-  const planOccupancyVariance = planAbsorbedFixedCosts - activePlanFixedCosts;
-  const actualOccupancyVariance = actualAbsorbedFixedCosts - activeReforecastFixedCosts;
-  const reforecastOccupancyVariance = reforecastAbsorbedFixedCosts - activeReforecastFixedCosts;
+  const planOccupancyVariance = plan.occupancyVariance;
+  const actualOccupancyVariance = actual.occupancyVariance;
+  const reforecastOccupancyVariance = reforecast.occupancyVariance;
   const actualCostReconciliationDifference = actualSnapshotTotalCost - (actual.variable + actualAbsorbedFixedCosts);
   const planExplainedResult = planResult;
   const actualExplainedResult = actualResult;
@@ -945,7 +966,7 @@ export function BreakEvenNextMockup({
       label: "Bezettingsresultaat ABC",
       value: occupancyResult,
       explanation: "Laat zien of vaste ABC-kosten over meer of minder volume worden terugverdiend dan de normale bezetting.",
-      source: "Reforecast liters versus normale productie/sales basis.",
+      source: "Gerealiseerde ABC-dekking plus resterende dekking uit het frozen Plan.",
     },
     {
       label: "Incidentele kosten",
@@ -963,7 +984,7 @@ export function BreakEvenNextMockup({
     reforecast.variable,
   ) / 20000) * 20000);
   const revenueChartTicks = Array.from({ length: Math.floor(revenueChartMax / 20000) + 1 }, (_, index) => index * 20000);
-  const fixedCostSource = selectedYear <= 2025 ? "Vaste kosten ABC van afgesloten/actueel jaar" : "Vaste kosten ABC uit plan of aangepaste jaarbasis";
+  const fixedCostSource = fixedCostSourceLabel(parsedReadModel?.sources?.fixed_cost_source);
   const dashboardStatementRows: DashboardStatementRow[] = [
     {
       label: "Omzet",
@@ -1910,7 +1931,7 @@ export function BreakEvenNextMockup({
                 value={topContributor ? money(topContributor.totalContribution) : "-"}
                 helper={topContributor?.sku ?? "geen regels"}
               />
-              <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="contributie onder 25% van prijs" tone={marginRiskCount > 0 ? "negative" : "positive"} />
+              <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="kostprijs ontbreekt of contributie is niet positief" tone={marginRiskCount > 0 ? "negative" : "positive"} />
             </div>
             <div className="data-table">
               <table>
@@ -2081,7 +2102,7 @@ export function BreakEvenNextMockup({
             <div className="placeholder-block">
               <strong>{money(occupancyResult)}</strong>
               <div className="muted">
-                Formule: ({number(reforecast.liters)} L reforecast - {number(plannedNormalLiters)} L normale bezetting) x {money2(fixedRate)} vaste kosten per liter.
+                Formule: {money(reforecastAbsorbedFixedCosts)} Forecast geabsorbeerde ABC - {money(activeReforecastFixedCosts)} vaste kosten ABC. De resterende Plan-dekking gebruikt het frozen Planvolume van {number(plan.liters)} L.
               </div>
             </div>
             <div className="module-card-text">

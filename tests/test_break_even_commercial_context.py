@@ -189,6 +189,7 @@ class BreakEvenCommercialContextProjectionTests(unittest.TestCase):
             if row["sku_id"] == "sku-blond"
         )
         self.assertEqual(blond["planned_units"], 20.0)
+        self.assertEqual(blond["liters_per_unit"], 7.92)
         self.assertEqual(blond["sku_name"], "Product sku-blond")
         self.assertEqual(blond["planned_variable_cost_unit"], 13.0)
         self.assertEqual(blond["planned_fixed_allocation_unit"], 4.0)
@@ -372,6 +373,47 @@ class BreakEvenPlanForecastProjectionTests(unittest.TestCase):
             300.0,
         )
 
+    def test_partial_month_keeps_unelapsed_plan_in_forecast(self) -> None:
+        result = break_even_commercial_context_service.project_plan_forecast(
+            _context(),
+            actual_totals={
+                "revenue": 110,
+                "variable_cost": 45,
+                "contribution": 65,
+                "liters": 20,
+                "units": 6,
+            },
+            actual_periods=[
+                {
+                    "period": "2026-01",
+                    "revenue": 110,
+                    "variable_cost": 45,
+                    "contribution": 65,
+                    "liters": 20,
+                    "units": 6,
+                }
+            ],
+            actual_as_of_date="2026-01-15",
+        )
+
+        self.assertAlmostEqual(
+            result["plan_to_date_targets"]["revenue"],
+            100 * 15 / 31,
+        )
+        self.assertAlmostEqual(
+            result["forecast_targets"]["revenue"],
+            110 + 100 * 16 / 31 + 200,
+        )
+        self.assertAlmostEqual(
+            result["forecast_targets"]["liters"],
+            20 + 30 * 16 / 31 + 60,
+        )
+        january = result["timeline"][0]
+        self.assertAlmostEqual(
+            january["forecast_revenue"],
+            110 + 100 * 16 / 31,
+        )
+
     def test_year_close_forecast_equals_final_actual(self) -> None:
         result = break_even_commercial_context_service.project_plan_forecast(
             _context(),
@@ -394,6 +436,65 @@ class BreakEvenPlanForecastProjectionTests(unittest.TestCase):
         self.assertEqual(result["forecast_source"], "year_close_snapshot")
         self.assertEqual(result["forecast_targets"]["revenue"], 280.0)
         self.assertEqual(result["forecast_targets"]["contribution"], 165.0)
+
+
+class BreakEvenAbcOccupancyProjectionTests(unittest.TestCase):
+    def test_forecast_uses_actual_absorption_plus_remaining_plan(self) -> None:
+        forecast = break_even_commercial_context_service.project_plan_forecast(
+            _context(),
+            actual_totals={
+                "revenue": 110,
+                "variable_cost": 45,
+                "contribution": 65,
+                "liters": 20,
+                "units": 6,
+            },
+            actual_periods=[{"period": "2026-01", "revenue": 110}],
+            actual_as_of_date="2026-01-15",
+        )
+
+        result = (
+            break_even_commercial_context_service.project_abc_occupancy(
+                forecast,
+                fixed_cost_total=300,
+                actual_absorbed_fixed_costs=40,
+            )
+        )
+
+        expected_plan_to_date = 300 * ((30 * 15 / 31) / 90)
+        self.assertEqual(result["driver"], "liters")
+        self.assertEqual(result["plan_occupancy_variance"], 0.0)
+        self.assertEqual(result["actual_occupancy_variance"], -260.0)
+        self.assertAlmostEqual(
+            result["planned_absorbed_fixed_costs_to_date"],
+            expected_plan_to_date,
+        )
+        self.assertAlmostEqual(
+            result["forecast_absorbed_fixed_costs"],
+            40 + 300 - expected_plan_to_date,
+        )
+        self.assertAlmostEqual(
+            result["forecast_occupancy_variance"],
+            40 - expected_plan_to_date,
+        )
+
+    def test_initial_forecast_occupancy_is_zero_without_actuals(self) -> None:
+        forecast = break_even_commercial_context_service.project_plan_forecast(
+            _context(),
+            actual_totals={},
+            actual_periods=[],
+        )
+
+        result = (
+            break_even_commercial_context_service.project_abc_occupancy(
+                forecast,
+                fixed_cost_total=300,
+                actual_absorbed_fixed_costs=0,
+            )
+        )
+
+        self.assertEqual(result["forecast_absorbed_fixed_costs"], 300.0)
+        self.assertEqual(result["forecast_occupancy_variance"], 0.0)
 
 
 class BreakEvenAnalysisConsumerTests(unittest.TestCase):
@@ -481,7 +582,11 @@ class BreakEvenAnalysisConsumerTests(unittest.TestCase):
             "active_commercial_generation_frozen_plan",
         )
         self.assertEqual(result["dashboard"]["plan"]["revenue"], 300.0)
+        self.assertEqual(result["dashboard"]["plan"]["liters"], 90.0)
+        self.assertEqual(result["dashboard"]["plan"]["occupancy_variance"], 0.0)
         self.assertEqual(result["dashboard"]["reforecast"]["revenue"], 300.0)
+        self.assertEqual(result["dashboard"]["reforecast"]["liters"], 90.0)
+        self.assertEqual(result["dashboard"]["reforecast"]["occupancy_variance"], 0.0)
         self.assertEqual(
             result["sources"]["reforecast_source"],
             "active_generation_initial_forecast",

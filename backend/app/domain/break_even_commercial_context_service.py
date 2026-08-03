@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
+from calendar import monthrange
+from datetime import date
 from decimal import Decimal
 from typing import Any, Iterable
 
@@ -116,6 +118,9 @@ def _planning_rows(
                 ),
                 "planned_liters": _number(allocation.get("liters")),
                 "planned_units": _number(allocation.get("units")),
+                "liters_per_unit": _number(
+                    candidate.get("liters_per_unit")
+                ),
                 "planned_variable_cost_unit": primary + packaging + excise,
                 "planned_fixed_allocation_unit": overhead,
                 "planned_cost_unit": _number(candidate.get("cost_price")),
@@ -407,18 +412,80 @@ def _timeline(
     return result
 
 
+def _period_elapsed_fraction(
+    period: str,
+    *,
+    actual_cutoff_period: str,
+    actual_as_of_date: str,
+) -> float:
+    if not actual_cutoff_period:
+        return 0.0
+    if period < actual_cutoff_period:
+        return 1.0
+    if period > actual_cutoff_period:
+        return 0.0
+    try:
+        as_of = date.fromisoformat(actual_as_of_date[:10])
+        year_value, month_value = (int(part) for part in period.split("-"))
+    except (TypeError, ValueError):
+        return 1.0
+    if as_of.year != year_value or as_of.month != month_value:
+        return 1.0
+    return min(
+        1.0,
+        max(0.0, as_of.day / monthrange(as_of.year, as_of.month)[1]),
+    )
+
+
+def _scaled_period(row: dict[str, Any], factor: float) -> dict[str, Any]:
+    return {
+        "period": _text(row.get("period"))[:7],
+        **{
+            key: _number(row.get(key)) * factor
+            for key in _TARGET_KEYS
+        },
+    }
+
+
+def _sum_targets(rows: Iterable[dict[str, Any]]) -> dict[str, float]:
+    return {
+        key: sum(_number(row.get(key)) for row in rows)
+        for key in _TARGET_KEYS
+    }
+
+
+def _merge_periods(
+    *groups: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        for row in group:
+            period = _text(row.get("period"))[:7]
+            if len(period) != 7:
+                continue
+            bucket = merged.setdefault(
+                period,
+                {"period": period, **{key: 0.0 for key in _TARGET_KEYS}},
+            )
+            for key in _TARGET_KEYS:
+                bucket[key] += _number(row.get(key))
+    return [merged[key] for key in sorted(merged)]
+
+
 def project_plan_forecast(
     context: dict[str, Any],
     *,
     actual_totals: dict[str, Any],
     actual_periods: Iterable[dict[str, Any]],
+    actual_as_of_date: str = "",
     closed_year: bool = False,
 ) -> dict[str, Any]:
     """
     Keep Plan immutable and derive Forecast from realized periods plus remaining Plan.
 
-    A period with realized transactions replaces that complete Plan period. A matching
-    explicit revision may replace the resulting Forecast, while year close always wins.
+    Actual-to-date replaces only the elapsed Plan portion. The unelapsed part of
+    the current month and all future Plan periods remain in Forecast. A matching
+    explicit revision may replace Forecast, while year close always wins.
     """
 
     plan = _mapping(context.get("plan"))
@@ -434,40 +501,35 @@ def project_plan_forecast(
         "liters": _number(actual_totals.get("liters")),
         "units": _number(actual_totals.get("units")),
     }
+    plan_to_date_periods: list[dict[str, Any]] = []
+    remaining_periods: list[dict[str, Any]] = []
+    for row in plan_periods:
+        period = _text(row.get("period"))[:7]
+        elapsed = _period_elapsed_fraction(
+            period,
+            actual_cutoff_period=actual_cutoff,
+            actual_as_of_date=actual_as_of_date,
+        )
+        plan_to_date_periods.append(_scaled_period(row, elapsed))
+        remaining_periods.append(_scaled_period(row, 1.0 - elapsed))
+    plan_to_date = _sum_targets(plan_to_date_periods)
+    remaining = _sum_targets(remaining_periods)
 
     if closed_year:
         forecast_targets = copy.deepcopy(actual)
         forecast_periods = actual_period_rows
+        plan_to_date = copy.deepcopy(plan_targets)
+        remaining = {key: 0.0 for key in _TARGET_KEYS}
         source = "year_close_snapshot"
     else:
-        remaining_periods = [
-            row
-            for row in plan_periods
-            if not actual_cutoff or _text(row.get("period"))[:7] > actual_cutoff
-        ]
-        remaining = {
-            key: sum(_number(row.get(key)) for row in remaining_periods)
-            for key in _TARGET_KEYS
-        }
         forecast_targets = {
             key: actual[key] + remaining[key]
-            for key in _FINANCIAL_KEYS
+            for key in _TARGET_KEYS
         }
-        forecast_targets["liters"] = plan_targets["liters"]
-        forecast_targets["units"] = plan_targets["units"]
-        forecast_periods = [
-            *[
-                {
-                    "period": _text(row.get("period"))[:7],
-                    **{
-                        key: _number(row.get(key))
-                        for key in _TARGET_KEYS
-                    },
-                }
-                for row in actual_period_rows
-            ],
-            *remaining_periods,
-        ]
+        forecast_periods = _merge_periods(
+            actual_period_rows,
+            remaining_periods,
+        )
         source = (
             "active_generation_initial_forecast"
             if not actual_cutoff and not any(actual[key] for key in _FINANCIAL_KEYS)
@@ -494,14 +556,71 @@ def project_plan_forecast(
     return {
         "plan_targets": copy.deepcopy(plan_targets),
         "forecast_targets": forecast_targets,
+        "plan_to_date_targets": plan_to_date,
+        "remaining_plan_targets": remaining,
         "forecast_source": source,
         "actual_cutoff_period": actual_cutoff,
+        "actual_as_of_date": _text(actual_as_of_date)[:10],
         "timeline": _timeline(
             plan_periods=plan_periods,
             actual_periods=actual_period_rows,
             forecast_periods=forecast_periods,
             actual_cutoff_period=actual_cutoff,
         ),
+    }
+
+
+def project_abc_occupancy(
+    forecast_projection: dict[str, Any],
+    *,
+    fixed_cost_total: Any,
+    actual_absorbed_fixed_costs: Any,
+) -> dict[str, Any]:
+    """Compare applied ABC with the same frozen-Plan capacity horizon."""
+
+    fixed_costs = _number(fixed_cost_total)
+    actual_absorbed = _number(actual_absorbed_fixed_costs)
+    plan_targets = _target_values(
+        forecast_projection.get("plan_targets")
+    )
+    plan_to_date = _target_values(
+        forecast_projection.get("plan_to_date_targets")
+    )
+    driver = next(
+        (
+            key
+            for key in ("liters", "units", "revenue")
+            if plan_targets[key] > 0
+        ),
+        "",
+    )
+    progress = (
+        min(1.0, max(0.0, plan_to_date[driver] / plan_targets[driver]))
+        if driver
+        else 0.0
+    )
+    planned_absorbed_to_date = fixed_costs * progress
+    closed_year = (
+        _text(forecast_projection.get("forecast_source"))
+        == "year_close_snapshot"
+    )
+    forecast_absorbed = (
+        actual_absorbed
+        if closed_year
+        else actual_absorbed + fixed_costs - planned_absorbed_to_date
+    )
+    return {
+        "driver": driver or "unavailable",
+        "plan_driver_total": plan_targets.get(driver, 0.0),
+        "plan_driver_to_date": plan_to_date.get(driver, 0.0),
+        "plan_progress_ratio": progress,
+        "plan_absorbed_fixed_costs": fixed_costs,
+        "planned_absorbed_fixed_costs_to_date": planned_absorbed_to_date,
+        "actual_absorbed_fixed_costs": actual_absorbed,
+        "forecast_absorbed_fixed_costs": forecast_absorbed,
+        "plan_occupancy_variance": 0.0,
+        "actual_occupancy_variance": actual_absorbed - fixed_costs,
+        "forecast_occupancy_variance": forecast_absorbed - fixed_costs,
     }
 
 

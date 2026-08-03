@@ -105,7 +105,7 @@ The read-only development check resolved:
 - Plan revenue of EUR 220,000;
 - Plan contribution of EUR 78,436.40;
 - Actual revenue of EUR 65,174 at the verification moment;
-- Forecast revenue of EUR 172,747.12 at the verification moment;
+- Forecast revenue of EUR 182,928.19 at the verification moment;
 - 76 Plan-versus-Actual rows.
 
 The exact Actual and Forecast values may change after a later Douano
@@ -121,6 +121,61 @@ The authenticated browser check confirmed:
 - `/break-even?year=2025` remained a historical view without the active-yearset
   indicator;
 - no form was submitted and no persistent value changed.
+
+## ABC occupancy amendment (2026-08-03)
+
+The original RF-012C2 presentation forced Forecast absorbed ABC to the full
+annual fixed-cost amount. This made Forecast occupancy show EUR 0 even when
+the realized plus remaining planned volume did not cover the annual ABC
+amount. A separate frontend card also assumed a fixed normal capacity of
+40,000 liters. Both were calculation-source defects, not persisted-data
+defects.
+
+The amended active-year read model now calculates occupancy centrally:
+
+- Plan absorbed ABC equals the approved annual ABC basis, so Plan occupancy is
+  EUR 0 by definition;
+- Actual absorbed ABC remains the ABC component observed in realized sales;
+- Forecast absorbed ABC equals realized absorbed ABC plus the approved ABC
+  absorption belonging to the unelapsed part of the frozen Plan;
+- the current Plan month is split at the latest actual transaction date, so
+  only its elapsed fraction is replaced by Actual;
+- the volume driver is selected from the approved Plan data in the order
+  liters, units, then revenue; no fixed 40,000-liter assumption remains.
+
+The read-only development check on 2026-08-03 resolved Actual through
+2026-07-03 and produced:
+
+- Plan: 37,751.231 liters, EUR 90,545.32 absorbed ABC and EUR 0 occupancy;
+- Actual: 10,925.31 liters, EUR 3,114.22 absorbed ABC and EUR -87,431.10
+  occupancy;
+- Forecast: 30,026.319 liters, EUR 48,927.48 absorbed ABC and
+  EUR -41,617.84 occupancy.
+
+The authenticated browser showed the rounded values EUR 0, EUR -87,431 and
+EUR -41,618 and explained the Forecast using the frozen Plan volume of 37,751
+liters. The three scenario controls now start at a neutral 0%; no browser
+errors were observed.
+
+### Hardcoded-parameter audit
+
+The audit removed these business-like frontend assumptions:
+
+- 40,000 liters as normal capacity;
+- a static monthly revenue/cost phasing curve;
+- the year-number heuristic for choosing the fixed-cost source label;
+- automatic +5% price and +8% volume scenario defaults;
+- unexplained 25% contribution-ratio and EUR 9,000 contribution labels.
+
+The active commercial year uses the exact backend period timeline. The neutral
+equal-month fallback remains presentation-only for a compatibility response
+without that timeline and is not stored or used as financial authority.
+
+The following constants remain intentionally presentational or input-boundary
+settings and do not feed persisted or authoritative financial values: table
+page size, chart tick spacing, progress-ring cap, one-euro display
+reconciliation tolerance, scenario slider ranges and the supported UI year
+range. They are not cost, Plan, Actual or Forecast sources.
 
 ## Regression protection
 
@@ -150,9 +205,9 @@ The RF-010/RF-011 financial golden tests remain in the same pricing gate.
 
 The complete local baseline passed:
 
-- backend discovery guard: 263 tests discovered, including every required
+- backend discovery guard: 266 tests discovered, including every required
   RF-012C2 contract;
-- backend unit suite: 263 passed, 40 skipped;
+- backend unit suite: 266 passed, 40 skipped;
 - frontend type-check: passed;
 - frontend pricing and financial golden contracts: passed;
 - frontend workflow contracts: passed;
