@@ -62,6 +62,16 @@ type HistoricalWizardResponse = {
     updated_at: string;
     fidelity: Fidelity;
   };
+  inflation: {
+    value_pct: number | null;
+    fidelity: Fidelity;
+    source: string;
+    detail: string;
+    fixed_cost_matches: number;
+    fixed_cost_comparable: number;
+    packaging_matches: number;
+    packaging_comparable: number;
+  };
   fixed_costs: {
     fidelity: Fidelity;
     updated_at: string;
@@ -78,6 +88,10 @@ type HistoricalWizardResponse = {
       basis_code: string;
       stand_code: string;
       annual_amount: number;
+      source_annual_amount: number | null;
+      expected_inflated_amount: number | null;
+      delta_amount: number;
+      matches_inflation: boolean;
       redistribution_pct: number;
       updated_at: string;
     }>;
@@ -90,6 +104,40 @@ type HistoricalWizardResponse = {
       component_id: string;
       component_name: string;
       price_per_unit: number;
+      source_price_per_unit: number | null;
+      expected_inflated_price: number | null;
+      delta_price: number;
+      matches_inflation: boolean;
+    }>;
+  };
+  recipes: {
+    fidelity: Fidelity;
+    rows: Array<{
+      beer_id: string;
+      beer_name: string;
+      style: string;
+      source_version_id: string;
+      target_version_id: string;
+      source_alcohol_pct: number | null;
+      target_alcohol_pct: number | null;
+      source_excise_rate: string;
+      target_excise_rate: string;
+      source_recipe_total: number;
+      target_recipe_total: number;
+      ingredients: Array<{
+        id: string;
+        ingredient: string;
+        description: string;
+        quantity: number | null;
+        unit: string;
+        needed_in_recipe: number | null;
+        source_price: number | null;
+        expected_inflated_price: number | null;
+        target_price: number | null;
+        source_recipe_cost: number | null;
+        target_recipe_cost: number | null;
+        matches_inflation: boolean;
+      }>;
     }>;
   };
   cost_snapshot: null | {
@@ -256,7 +304,117 @@ function filterRows(rows: HistoricalCostRow[], query: string) {
 }
 
 
-function CostTable({ rows, sourceYear, targetYear }: { rows: HistoricalCostRow[]; sourceYear: number; targetYear: number }) {
+function InflationSummary({ wizard }: { wizard: HistoricalWizardResponse }) {
+  const inflation = wizard.inflation;
+  return (
+    <div className="module-card compact-card historical-wizard-inflation">
+      <div className="module-card-title">Verwachte inflatie</div>
+      <div className="historical-wizard-inflation-value">
+        {inflation.value_pct === null ? "Niet betrouwbaar afleidbaar" : `${amount.format(inflation.value_pct)}%`}
+        <span className={`status-pill ${inflation.fidelity === "derived_exact" ? "status-info" : "status-neutral"}`}>
+          {inflation.fidelity === "derived_exact" ? "Afgeleid" : "Niet bewaard"}
+        </span>
+      </div>
+      <div className="module-card-text">{inflation.detail}</div>
+      <div className="muted" style={{ marginTop: 8 }}>
+        Onderbouwing: {inflation.fixed_cost_matches}/{inflation.fixed_cost_comparable} vergelijkbare vaste-kostenregels en {" "}
+        {inflation.packaging_matches}/{inflation.packaging_comparable} verpakkingsprijzen volgen dit percentage na afronding.
+      </div>
+    </div>
+  );
+}
+
+
+function RecipeHistory({ wizard }: { wizard: HistoricalWizardResponse }) {
+  if (wizard.recipes.rows.length === 0) {
+    return <div className="placeholder-block"><strong>Geen gekoppelde productierecepten bewaard</strong>Er is niets uit actuele recepten aangevuld.</div>;
+  }
+  return (
+    <div className="wizard-stack">
+      <InflationSummary wizard={wizard} />
+      {wizard.recipes.rows.map((recipe) => (
+        <details className="module-card compact-card historical-wizard-group" key={recipe.target_version_id} open>
+          <summary className="module-card-title historical-wizard-group-summary">
+            <span>{recipe.beer_name}</span>
+            <span className="editor-actions-group">
+              {recipe.style ? <span className="pill">{recipe.style}</span> : null}
+              <span className="editor-pill">{recipe.ingredients.length} ingrediënten</span>
+            </span>
+          </summary>
+          <div className="module-card-text" style={{ marginTop: 10 }}>
+            Exact gekoppeld via de definitieve jaarovergang. De kolom “Bron + inflatie” is een controleberekening en wijzigt niets.
+          </div>
+          <div className="historical-wizard-recipe-meta" style={{ marginTop: 12 }}>
+            <ReadOnlyValue label={`Alcohol bronjaar ${wizard.source_year}`} value={recipe.source_alcohol_pct === null ? "—" : `${amount.format(recipe.source_alcohol_pct)}%`} />
+            <ReadOnlyValue label={`Alcohol doeljaar ${wizard.target_year}`} value={recipe.target_alcohol_pct === null ? "—" : `${amount.format(recipe.target_alcohol_pct)}%`} />
+            <ReadOnlyValue label={`Accijnstarief bronjaar ${wizard.source_year}`} value={recipe.source_excise_rate || "—"} />
+            <ReadOnlyValue label={`Accijnstarief doeljaar ${wizard.target_year}`} value={recipe.target_excise_rate || "—"} />
+          </div>
+          <div className="dataset-editor-scroll" style={{ marginTop: 12 }}>
+            <table className="dataset-editor-table">
+              <thead><tr><th>Ingrediënt</th><th>Verpakking</th><th>In recept</th><th>Bronprijs</th><th>Bron + inflatie</th><th>Opgeslagen doelprijs</th><th>Receptkosten bron</th><th>Receptkosten doel</th><th>Controle</th></tr></thead>
+              <tbody>{recipe.ingredients.map((row) => (
+                <tr key={row.id}>
+                  <td><strong>{row.ingredient || row.description || "Onbenoemd ingrediënt"}</strong>{row.description && row.description !== row.ingredient ? <div className="muted">{row.description}</div> : null}</td>
+                  <td>{row.quantity === null ? "—" : amount.format(row.quantity)} {row.unit}</td>
+                  <td>{row.needed_in_recipe === null ? "—" : amount.format(row.needed_in_recipe)} {row.unit}</td>
+                  <td>{formatMoney(row.source_price)}</td>
+                  <td>{formatMoney(row.expected_inflated_price)}</td>
+                  <td><strong>{formatMoney(row.target_price)}</strong></td>
+                  <td>{formatMoney(row.source_recipe_cost)}</td>
+                  <td><strong>{formatMoney(row.target_recipe_cost)}</strong></td>
+                  <td><span className={`status-pill ${row.matches_inflation ? "status-ok" : "status-warning"}`}>{row.matches_inflation ? "Volgt inflatie" : "Handmatig/ongewijzigd"}</span></td>
+                </tr>
+              ))}</tbody>
+              <tfoot><tr><th colSpan={6}>Totale receptkosten</th><th>{formatMoney(recipe.source_recipe_total)}</th><th>{formatMoney(recipe.target_recipe_total)}</th><th /></tr></tfoot>
+            </table>
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
+
+function StrategyGroups({ rows }: { rows: HistoricalCostRow[] }) {
+  const groups = useMemo(() => {
+    const byBeer = new Map<string, HistoricalCostRow[]>();
+    rows.filter((row) => row.list_price !== null).forEach((row) => {
+      const key = row.beer_name || "Overige producten";
+      byBeer.set(key, [...(byBeer.get(key) || []), row]);
+    });
+    return Array.from(byBeer, ([name, groupRows]) => ({ name, rows: groupRows }))
+      .sort((a, b) => a.name.localeCompare(b.name, "nl-NL"));
+  }, [rows]);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const setAll = (open: boolean) => setOpenGroups(Object.fromEntries(groups.map((group) => [group.name, open])));
+  return (
+    <div>
+      <div className="editor-actions" style={{ paddingTop: 0 }}>
+        <div className="editor-actions-group">
+          <button type="button" className="editor-button editor-button-secondary" onClick={() => setAll(true)}>Alles openen</button>
+          <button type="button" className="editor-button editor-button-secondary" onClick={() => setAll(false)}>Alles sluiten</button>
+        </div>
+      </div>
+      <div className="wizard-stack">
+        {groups.map((group) => {
+          const open = Boolean(openGroups[group.name]);
+          return (
+            <section className="module-card compact-card historical-wizard-group" key={group.name}>
+              <button type="button" className="module-card-title historical-wizard-group-button" onClick={() => setOpenGroups((current) => ({ ...current, [group.name]: !open }))} aria-expanded={open}>
+                <span>{open ? "⌄" : ">"} {group.name}</span><span className="editor-pill">{group.rows.length} SKU&apos;s</span>
+              </button>
+              {open ? <div className="dataset-editor-scroll" style={{ marginTop: 12 }}><table className="dataset-editor-table"><thead><tr><th>SKU</th><th>Kostprijs</th><th>Sell-in</th><th>Status</th></tr></thead><tbody>{group.rows.map((row) => <tr key={row.sku_id}><td><strong>{row.sku_name}</strong><div className="muted">{row.sku_code || row.sku_id}</div></td><td>{formatMoney(row.target.cost_price)}</td><td>{formatMoney(row.list_price)}</td><td><span className="status-pill status-ok">Vastgelegd</span></td></tr>)}</tbody></table></div> : null}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+function CostTable({ rows, sourceYear }: { rows: HistoricalCostRow[]; sourceYear: number }) {
   return (
     <div className="dataset-editor-scroll">
       <table className="dataset-editor-table historical-wizard-cost-table">
@@ -274,7 +432,7 @@ function CostTable({ rows, sourceYear, targetYear }: { rows: HistoricalCostRow[]
               <td><strong>{formatMoney(row.target.packaging_cost)}</strong><div className="muted">{sourceYear}: {formatMoney(row.source?.packaging_cost)}</div></td>
               <td><strong>{formatMoney(row.target.overhead_cost)}</strong><div className="muted">{sourceYear}: {formatMoney(row.source?.overhead_cost)}</div></td>
               <td><strong>{formatMoney(row.target.excise_cost)}</strong><div className="muted">{sourceYear}: {formatMoney(row.source?.excise_cost)}</div></td>
-              <td><strong>{row.cost_required ? formatMoney(row.target.cost_price) : "n.v.t."}</strong><div className="muted">{targetYear}</div></td>
+              <td><strong>{row.cost_required ? formatMoney(row.target.cost_price) : "n.v.t."}</strong>{row.source ? <div className="muted">{sourceYear}: {formatMoney(row.source.cost_price)}</div> : null}</td>
               <td><span className={`status-pill ${row.fidelity === "exact" || row.fidelity === "exact_anchor" ? "status-ok" : "status-neutral"}`}>{row.fidelity === "exact" ? "Exact gelijk" : row.fidelity === "exact_anchor" ? "Exact 2026-anker" : row.cost_required ? "Niet bewaard" : "n.v.t."}</span></td>
             </tr>
           ))}
@@ -338,6 +496,7 @@ export function HistoricalYearsetWizard({
   const targetYear = wizard.target_year;
   const activeEvidence = stepEvidence || wizard.steps[activeStep];
   const fixedTotal = wizard.fixed_costs.rows.reduce((sum, row) => sum + row.annual_amount, 0);
+  const sourceFixedTotal = wizard.fixed_costs.rows.reduce((sum, row) => sum + (row.source_annual_amount || 0), 0);
   const next = () => setActiveStep((value) => Math.min(sharedSteps.length - 1, value + 1));
   const previous = () => setActiveStep((value) => Math.max(0, value - 1));
 
@@ -388,12 +547,16 @@ export function HistoricalYearsetWizard({
       case "vaste-kosten":
         return (
           <>
-            <div className="yearset-dossier-metrics"><Metric label="Totaal vaste kosten" value={money.format(fixedTotal)} detail={`${wizard.fixed_costs.rows.length} regels`} /></div>
-            <div className="dataset-editor-scroll" style={{ marginTop: 14 }}><table className="dataset-editor-table"><thead><tr><th>Omschrijving</th><th>Soort</th><th>Pool</th><th>Driver</th><th>Scope</th><th>Per jaar</th></tr></thead><tbody>{wizard.fixed_costs.rows.map((row) => <tr key={row.id}><td>{row.description}</td><td>{row.cost_type}</td><td>{row.cost_pool || "—"}</td><td>{row.allocation_driver || "—"}</td><td>{row.allocation_scope}</td><td>{money.format(row.annual_amount)}</td></tr>)}</tbody></table></div>
+            <InflationSummary wizard={wizard} />
+            <div className="yearset-dossier-metrics" style={{ marginTop: 14 }}>
+              <Metric label={`Totaal bronjaar ${sourceYear}`} value={money.format(sourceFixedTotal)} detail="vergelijkbare regels" />
+              <Metric label={`Totaal doeljaar ${targetYear}`} value={money.format(fixedTotal)} detail={`${wizard.fixed_costs.rows.length} regels`} />
+            </div>
+            <div className="dataset-editor-scroll" style={{ marginTop: 14 }}><table className="dataset-editor-table"><thead><tr><th>Omschrijving</th><th>Soort / verdeling</th><th>Bronjaar {sourceYear}</th><th>Bron + inflatie</th><th>Doeljaar {targetYear}</th><th>Verschil</th><th>Controle</th></tr></thead><tbody>{wizard.fixed_costs.rows.map((row) => <tr key={row.id}><td><strong>{row.description}</strong><div className="muted">{row.cost_pool || "Geen pool"}</div></td><td>{row.cost_type}<div className="muted">{row.allocation_driver || "Geen driver"} · {row.allocation_scope}</div></td><td>{formatMoney(row.source_annual_amount)}</td><td>{formatMoney(row.expected_inflated_amount)}</td><td><strong>{money.format(row.annual_amount)}</strong></td><td>{formatMoney(row.delta_amount)}</td><td><span className={`status-pill ${row.matches_inflation ? "status-ok" : "status-warning"}`}>{row.source_annual_amount === null ? "Nieuwe regel" : row.matches_inflation ? "Volgt inflatie" : "Handmatig aangepast"}</span></td></tr>)}</tbody></table></div>
           </>
         );
       case "verpakking":
-        return <div className="dataset-editor-scroll"><table className="dataset-editor-table"><thead><tr><th>Onderdeel</th><th>Component-ID</th><th>Prijs per stuk</th></tr></thead><tbody>{wizard.packaging_prices.rows.map((row) => <tr key={row.id}><td>{row.component_name}</td><td><code>{row.component_id}</code></td><td>{money.format(row.price_per_unit)}</td></tr>)}</tbody></table></div>;
+        return <><InflationSummary wizard={wizard} /><div className="dataset-editor-scroll" style={{ marginTop: 14 }}><table className="dataset-editor-table"><thead><tr><th>Onderdeel</th><th>Bronjaar {sourceYear}</th><th>Bron + inflatie</th><th>Doeljaar {targetYear}</th><th>Verschil</th><th>Controle</th></tr></thead><tbody>{wizard.packaging_prices.rows.map((row) => <tr key={row.id}><td><strong>{row.component_name}</strong><div className="muted"><code>{row.component_id}</code></div></td><td>{formatMoney(row.source_price_per_unit)}</td><td>{formatMoney(row.expected_inflated_price)}</td><td><strong>{money.format(row.price_per_unit)}</strong></td><td>{formatMoney(row.delta_price)}</td><td><span className={`status-pill ${row.matches_inflation ? "status-ok" : "status-warning"}`}>{row.matches_inflation ? "Volgt inflatie" : "Handmatig aangepast"}</span></td></tr>)}</tbody></table></div></>;
       case "inkoop-scenario":
         return (
           <>
@@ -402,7 +565,7 @@ export function HistoricalYearsetWizard({
           </>
         );
       case "recepten":
-        return <div className="placeholder-block"><strong>Geen afzonderlijke historische receptsnapshot</strong>De wizard verwees voor receptwijzigingen naar Kostprijs beheren. De bedragen die het recept uiteindelijk aan de kostprijs toevoegde zijn wel exact bewaard in stap 9. Er wordt hier niets uit actuele recepten terugberekend.</div>;
+        return <RecipeHistory wizard={wizard} />;
       case "kostprijs":
         return (
           <>
@@ -413,11 +576,11 @@ export function HistoricalYearsetWizard({
               <Metric label="Dubbele verwijzingen" value={String(wizard.cost_snapshot.duplicate_reference_count)} detail="geen financieel conflict" />
             </div>
             <label className="nested-field historical-wizard-search"><span>Zoeken</span><input className="dataset-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Zoek bier of SKU…" /></label>
-            <CostTable rows={costRows} sourceYear={sourceYear} targetYear={targetYear} />
+            <CostTable rows={costRows} sourceYear={sourceYear} />
           </>
         );
       case "verkoopstrategie":
-        return <div className="dataset-editor-scroll"><table className="dataset-editor-table"><thead><tr><th>SKU</th><th>Kostprijs {targetYear}</th><th>Sell-in {targetYear}</th><th>Status</th></tr></thead><tbody>{costRows.filter((row) => row.list_price !== null).map((row) => <tr key={row.sku_id}><td><strong>{row.sku_name}</strong><div className="muted">{row.beer_name}</div></td><td>{formatMoney(row.target.cost_price)}</td><td>{formatMoney(row.list_price)}</td><td><span className="status-pill status-ok">Vastgelegd</span></td></tr>)}</tbody></table></div>;
+        return <><label className="nested-field historical-wizard-search"><span>Zoeken</span><input className="dataset-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Zoek bier of SKU…" /></label><StrategyGroups rows={costRows} /></>;
       case "adviesprijzen":
         return <div className="dataset-editor-scroll"><table className="dataset-editor-table"><thead><tr><th>Kanaal</th><th>Opslag</th><th>Status</th></tr></thead><tbody>{dossier.channels.map((channel) => <tr key={channel.channel_code}><td>{channel.channel_code}</td><td>{channel.advice_markup_pct === null ? "—" : `${amount.format(channel.advice_markup_pct)}%`}</td><td><span className="status-pill status-ok">Vastgelegd</span></td></tr>)}</tbody></table></div>;
       case "preview":

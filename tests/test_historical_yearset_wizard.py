@@ -40,9 +40,36 @@ def _canonical(sku_id: str = "sku-blond", **overrides) -> dict:
     return row
 
 
+def _recipe_snapshot() -> dict:
+    ingredient_source = {
+        "id": "ingredient-malt",
+        "ingredient": "Mout",
+        "omschrijving": "Pilsmout",
+        "hoeveelheid": 100,
+        "eenheid": "KG",
+        "prijs": 250,
+        "benodigd_in_recept": 50,
+    }
+    ingredient_target = {**ingredient_source, "prijs": 265}
+    return {
+        "beer_id": "beer-blond",
+        "source_version_id": "source-version-blond",
+        "target_version_id": "target-version-blond",
+        "source": {
+            "basisgegevens": {"biernaam": "Berlewalde Blond", "stijl": "Blond", "alcoholpercentage": 6, "tarief_accijns": "Hoog"},
+            "invoer": {"ingredienten": {"regels": [ingredient_source]}},
+        },
+        "target": {
+            "basisgegevens": {"biernaam": "Berlewalde Blond", "stijl": "Blond", "alcoholpercentage": 6, "tarief_accijns": "Hoog"},
+            "invoer": {"ingredienten": {"regels": [ingredient_target]}},
+        },
+    }
+
+
 def _engine_row(sku_id: str = "sku-blond", **overrides) -> dict:
     row = {
         "sku_id": sku_id,
+        "source_version_id": "source-version-blond",
         "product_label": "Blond doos",
         "source_primary": 9,
         "source_packaging": 1,
@@ -89,9 +116,20 @@ def _build(*, dossier=None, rows=None, production_at=None) -> dict:
         source_close={"id": "close-2025", "status": "closed", "closed_at": "2026-01-01T00:00:00+00:00"},
         production={"updated_at": (production_at or SNAPSHOT_AT).isoformat()},
         tariffs={"updated_at": SNAPSHOT_AT.isoformat()},
-        fixed_cost_rows=[{"id": "fixed-1", "updated_at": SNAPSHOT_AT.isoformat()}],
-        packaging_price_rows=[{"id": "pack-1"}],
+        source_fixed_cost_rows=[{
+            "id": "fixed-source-1", "description": "Huur", "cost_type": "indirect",
+            "cost_pool": "productie", "domain_code": "production", "allocation_driver": "liter",
+            "allocation_scope": "all", "annual_amount": 100, "updated_at": SNAPSHOT_AT.isoformat(),
+        }],
+        fixed_cost_rows=[{
+            "id": "fixed-target-1", "description": "Huur", "cost_type": "indirect",
+            "cost_pool": "productie", "domain_code": "production", "allocation_driver": "liter",
+            "allocation_scope": "all", "annual_amount": 106, "updated_at": SNAPSHOT_AT.isoformat(),
+        }],
+        source_packaging_price_rows=[{"id": "pack-source-1", "component_id": "bottle", "price_per_unit": 1}],
+        packaging_price_rows=[{"id": "pack-target-1", "component_id": "bottle", "price_per_unit": 1.06}],
         packaging_updated_at=SNAPSHOT_AT,
+        recipe_snapshots=[_recipe_snapshot()],
     )
 
 
@@ -163,6 +201,20 @@ class HistoricalYearsetWizardProjectionTests(unittest.TestCase):
         self.assertEqual(result["fixed_costs"]["fidelity"], "exact")
         self.assertEqual(result["packaging_prices"]["fidelity"], "exact")
 
+    def test_inflation_and_recipe_inputs_are_compared_without_mutating_history(self) -> None:
+        result = _build()
+
+        self.assertEqual(result["inflation"]["value_pct"], 6.0)
+        self.assertEqual(result["inflation"]["fidelity"], "derived_exact")
+        self.assertTrue(result["fixed_costs"]["rows"][0]["matches_inflation"])
+        self.assertTrue(result["packaging_prices"]["rows"][0]["matches_inflation"])
+        self.assertEqual(result["recipes"]["fidelity"], "exact")
+        recipe = result["recipes"]["rows"][0]
+        self.assertEqual(recipe["beer_name"], "Berlewalde Blond")
+        self.assertEqual(recipe["source_recipe_total"], 125.0)
+        self.assertEqual(recipe["target_recipe_total"], 132.5)
+        self.assertTrue(recipe["ingredients"][0]["matches_inflation"])
+
 
 class _Result:
     def __init__(self, *, one=None, all_rows=None):
@@ -204,7 +256,7 @@ class _ReadOnlyConnection:
             return _Result(one=("close-2025", "closed", SNAPSHOT_AT))
         if "FROM production_years" in normalized or "FROM tarieven_heffingen_years" in normalized:
             return _Result(one=None)
-        if "FROM fixed_cost_lines" in normalized or "jsonb_array_elements" in normalized:
+        if "FROM fixed_cost_lines" in normalized or "jsonb_array_elements" in normalized or "FROM cost_versions target" in normalized:
             return _Result(all_rows=[])
         raise AssertionError(f"Unexpected read: {normalized} {params}")
 
@@ -246,6 +298,11 @@ class HistoricalYearsetWizardFrontendContractTests(unittest.TestCase):
         self.assertIn("readOnly", historical)
         self.assertIn("Vorige", historical)
         self.assertIn("Volgende", historical)
+        self.assertIn("InflationSummary", historical)
+        self.assertIn("Bron + inflatie", historical)
+        self.assertIn("RecipeHistory", historical)
+        self.assertIn("StrategyGroups", historical)
+        self.assertIn("row.source.cost_price", historical)
         self.assertNotIn("<form", historical)
         self.assertNotIn("onSubmit=", historical)
         self.assertNotIn('method: "POST"', historical)

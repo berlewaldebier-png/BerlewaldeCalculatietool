@@ -4610,6 +4610,49 @@ a {
   min-width: 74rem;
 }
 
+.historical-wizard-inflation {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.historical-wizard-inflation-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.historical-wizard-recipe-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.historical-wizard-group summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.historical-wizard-group-summary,
+.historical-wizard-group-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.historical-wizard-group-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
 @media (max-width: 820px) {
   .yearset-dossier-heading,
   .yearset-dossier-actions,
@@ -4625,7 +4668,8 @@ a {
 
   .yearset-dossier-metrics,
   .yearset-dossier-audit-grid,
-  .historical-wizard-source-grid {
+  .historical-wizard-source-grid,
+  .historical-wizard-recipe-meta {
     grid-template-columns: 1fr;
   }
 

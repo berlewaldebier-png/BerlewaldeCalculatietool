@@ -26,7 +26,11 @@ De read-only controle van de ontwikkeldata vond:
 - nul materiële verschillen;
 - vijf definitieve SKU-regels buiten de oude batch: drie expliciet herstelde exacte doeljaarankers en twee catalogusregels waarvoor geen kostprijs vereist is.
 
-De 2026 productie- en driverregel is na de oude wizardbatch bijgewerkt. Deze waarden worden daarom zichtbaar als `gereconstrueerd`. De Planwaarden en maandverdeling komen uit het onveranderlijke Plancontract. Tarieven, vaste kosten en verpakkingsprijzen zijn op hetzelfde bewaarmoment als de oude berekeningsbatch vastgelegd en worden als exact gemarkeerd. Een afzonderlijke receptsnapshot en oorspronkelijke initialisatie-checkboxes zijn niet bewaard.
+De 2026 productie- en driverregel is na de oude wizardbatch bijgewerkt. Deze waarden worden daarom zichtbaar als `gereconstrueerd`. De Planwaarden en maandverdeling komen uit het onveranderlijke Plancontract. Tarieven, vaste kosten en verpakkingsprijzen zijn op hetzelfde bewaarmoment als de oude berekeningsbatch vastgelegd en worden als exact gemarkeerd.
+
+De oorspronkelijke losse inflatie-invoer is niet bewaard. Het percentage is wel exact afleidbaar: **6,0%** verklaart na afronding op centen 8 van 9 vergelijkbare vaste-kostenregels en alle 25 vergelijkbare verpakkingsprijzen. De afwijkende vaste-kostenregel en twee nieuwe doeljaarregels blijven als handmatige/nieuwe regels zichtbaar. De weergave toont daarom steeds bronjaar, bron + inflatie en de werkelijk opgeslagen doeljaarwaarde; zij schrijft de afgeleide 6,0% niet terug.
+
+De definitieve doeljaar-kostprijsversies bevatten bovendien vier expliciet aan hun bronversie gekoppelde productierecepten: Berlewalde Goudkoorts, Hazy IPA, Lentebock en Stout. Deze bron- en doelreceptregels worden exact getoond. De opgeslagen doeljaar-ingrediëntprijzen zijn gelijk aan het bronjaar en volgen dus niet de afgeleide 6,0%; ook dit wordt alleen zichtbaar gemaakt en niet achteraf gecorrigeerd. De oorspronkelijke initialisatie-checkboxes zijn niet bewaard.
 
 ## Veiligheidsgrenzen
 
@@ -58,6 +62,9 @@ De contracttests bewaken:
 - fail-closed gedrag bij afwijking van het definitieve dossier;
 - uitsluitend toegestane exacte doeljaarankers en niet-kostprijscatalogusregels buiten de oude batch;
 - het zichtbaar onderscheiden van exacte en later gereconstrueerde bronnen;
+- het exact afleiden en alleen-lezen tonen van inflatie-effecten op vaste kosten en verpakking;
+- het tonen van gekoppelde bron-/doelrecepten en afwijkingen van de afgeleide inflatie;
+- bron- én doeljaartotalen in de kostprijsstap en groepering van verkoopstrategie per bierstijl/familie;
 - een strict read-only reader zonder DDL of DML;
 - admin-only routebescherming;
 - hergebruik van één 14-stappencontract en afwezigheid van frontendmutaties.
@@ -66,11 +73,15 @@ De contracttests bewaken:
 
 1. Open `/beheer/jaarsets/2026` en controleer dat `Jaarsetoverzicht` standaard actief is.
 2. Kies `Wizardweergave` en controleer bronjaar 2025, doeljaar 2026 en exact 14 stappen.
-3. Controleer in stap 9: 103 oorspronkelijke regels, 74 unieke SKU's en 74 exacte matches.
-4. Controleer dat gereconstrueerde of niet-bewaarde bronnen expliciet zo zijn gemarkeerd.
-5. Loop met `Vorige` en `Volgende` door de stappen; er mag geen opslag-, activatie-, herstel- of verwijderactie zijn.
-6. Ga terug naar `Jaarsetoverzicht`; de oorspronkelijke dossierweergave moet ongewijzigd beschikbaar zijn.
-7. Kies afzonderlijk `Nieuw jaar voorbereiden`; deze actie moet nog steeds 2026→2027 openen.
+3. Controleer in stap 5 dat 6,0% als **afgeleid** staat, met bron-, inflatie- en doelwaarden per vaste-kostenregel.
+4. Controleer in stap 6 dezelfde driedeling voor alle 25 verpakkingsprijzen.
+5. Controleer in stap 8 dat onder meer Berlewalde Stout zichtbaar is en dat de ongewijzigde opgeslagen ingrediëntprijs expliciet afwijkt van bron + 6,0%.
+6. Controleer in stap 9: 103 oorspronkelijke regels, 74 unieke SKU's, 74 exacte matches en per SKU zowel de totale bron- als doeljaarkostprijs.
+7. Controleer in stap 10 dat SKU's per bierstijl/familie zijn gegroepeerd.
+8. Controleer dat gereconstrueerde of niet-bewaarde bronnen expliciet zo zijn gemarkeerd.
+9. Loop met `Vorige` en `Volgende` door de stappen; er mag geen opslag-, activatie-, herstel- of verwijderactie zijn.
+10. Ga terug naar `Jaarsetoverzicht`; de oorspronkelijke dossierweergave moet ongewijzigd beschikbaar zijn.
+11. Kies afzonderlijk `Nieuw jaar voorbereiden`; deze actie moet nog steeds 2026→2027 openen.
 
 ## Uitgesloten vervolgwerk
 
