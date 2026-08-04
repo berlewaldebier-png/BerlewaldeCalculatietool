@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { CalendarPlus, ExternalLink, Pencil, Trash2 } from "lucide-react";
 
 import { API_BASE_URL } from "@/lib/apiShared";
 
@@ -527,9 +527,14 @@ export function JaarsetsPanel() {
 
                     {row.kind === "Jaarset" ? (
                       <>
-                        <LinkIconButton title="Open nieuw jaar voorbereiden" href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.year))}&target_year=${encodeURIComponent(String(row.year + 1))}`}>
+                        <LinkIconButton title="Open jaarsetdossier" href={`/beheer/jaarsets/${row.year}`}>
                           <ExternalLink size={16} aria-hidden="true" />
                         </LinkIconButton>
+                        {row.isLastYear ? (
+                          <LinkIconButton title="Nieuw jaar voorbereiden" href={`/nieuw-jaar-voorbereiden?source_year=${encodeURIComponent(String(row.year))}&target_year=${encodeURIComponent(String(row.year + 1))}`}>
+                            <CalendarPlus size={16} aria-hidden="true" />
+                          </LinkIconButton>
+                        ) : null}
                         <IconButton
                           title="Rollback jaarset"
                           disabled={busy !== null || !row.isLastYear}

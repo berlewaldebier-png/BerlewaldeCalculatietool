@@ -150,6 +150,7 @@ class AuthRouteMatrixTests(unittest.TestCase):
     def test_commercial_yearset_authority_routes_are_admin_only(self) -> None:
         routes = (
             ("GET", "/meta/commercial-yearsets"),
+            ("GET", "/meta/commercial-yearsets/{operational_year}/dossier"),
             ("POST", "/meta/commercial-yearsets/backfill"),
             ("POST", "/meta/commercial-yearsets/{generation_id}/activate"),
             ("POST", "/meta/commercial-yearsets/{generation_id}/rollback"),
@@ -240,8 +241,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 179, normalized)
-        self.assertEqual(digest, "90fb2f78ccef1d0b82d1ea9730dbf1fb65c98d8fee394718882d4e2d6cb368fd", normalized)
+        self.assertEqual(len(rows), 180, normalized)
+        self.assertEqual(digest, "289e1b2acf4ba5d07cdd2c988c12064928f8eb0d4d92f5fb64fea027bbca958f", normalized)
 
 
 if __name__ == "__main__":
