@@ -15,6 +15,12 @@ import {
   YAxis,
 } from "recharts";
 
+import {
+  activeForecastSourceLabel,
+  buildActiveGenerationRevenueTimeline,
+  isActiveGenerationPlanSource,
+} from "@/features/commercial-context/breakEvenCommercialContext";
+
 type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
 
 type RevenueCategory = "beer" | "giftset" | "service" | "merchandise";
@@ -156,7 +162,11 @@ type ReadModelFinancialSet = {
   variable_cost: number;
   total_cost: number;
   absorbed_fixed_costs: number;
+  planned_absorbed_fixed_costs: number;
+  occupancy_variance: number;
   contribution: number;
+  liters: number;
+  units: number;
   fixed_costs: number;
   incidental_costs: number;
   result: number;
@@ -184,6 +194,7 @@ type ReadModelBreakEven = {
 
 type ReadModelTimelinePoint = {
   period: string;
+  actual_available?: boolean;
   revenue: number;
   variable_cost: number;
   contribution: number;
@@ -191,6 +202,12 @@ type ReadModelTimelinePoint = {
   running_revenue: number;
   running_variable_cost: number;
   running_contribution: number;
+  running_plan_revenue?: number;
+  running_plan_variable_cost?: number;
+  running_actual_revenue?: number;
+  running_actual_variable_cost?: number;
+  running_forecast_revenue?: number;
+  running_forecast_variable_cost?: number;
 };
 
 type VarianceRow = {
@@ -222,11 +239,18 @@ type BreakEvenReadModel = {
   year?: number;
   basis?: string;
   sources?: {
+    consumer_mode?: string;
+    commercial_generation_id?: string;
+    commercial_run_id?: string;
+    plan_contract_hash?: string;
     plan_snapshot_id?: string;
     plan_source?: string;
     actual_source?: string;
     reforecast_snapshot_id?: string;
     reforecast_source?: string;
+    forecast_cutoff_period?: string;
+    actual_as_of_date?: string;
+    occupancy_driver?: string;
     fixed_cost_source?: string;
   };
   contribution?: {
@@ -266,7 +290,6 @@ const tabs: Array<{ id: TabId; title: string; description: string }> = [
   { id: "year_close", title: "Jaarafsluiting", description: "Finale waarheid" },
 ];
 
-const plannedNormalLiters = 40000;
 const contributionPageSize = 5;
 const emptyTotals = {
   revenue: 0,
@@ -278,20 +301,7 @@ const emptyTotals = {
   units: 0,
 };
 
-const revenuePhasing = [
-  { month: "Jan", planPct: 0.05, actualPct: 0.052, reforecastPct: 0.052 },
-  { month: "Feb", planPct: 0.11, actualPct: 0.105, reforecastPct: 0.105 },
-  { month: "Mrt", planPct: 0.18, actualPct: 0.165, reforecastPct: 0.165 },
-  { month: "Apr", planPct: 0.27, actualPct: 0.238, reforecastPct: 0.238 },
-  { month: "Mei", planPct: 0.37, actualPct: 0.335, reforecastPct: 0.335 },
-  { month: "Jun", planPct: 0.48, actualPct: 0.445, reforecastPct: 0.445 },
-  { month: "Jul", planPct: 0.58, actualPct: null, reforecastPct: 0.545 },
-  { month: "Aug", planPct: 0.67, actualPct: null, reforecastPct: 0.625 },
-  { month: "Sep", planPct: 0.76, actualPct: null, reforecastPct: 0.715 },
-  { month: "Okt", planPct: 0.86, actualPct: null, reforecastPct: 0.82 },
-  { month: "Nov", planPct: 0.94, actualPct: null, reforecastPct: 0.91 },
-  { month: "Dec", planPct: 1, actualPct: null, reforecastPct: 1 },
-];
+const monthNames = ["Jan", "Feb", "Mrt", "Apr", "Mei", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"];
 
 function money(value: number) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
@@ -367,7 +377,11 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       variable_cost: asNumber(row.variable_cost),
       total_cost: asNumber(row.total_cost),
       absorbed_fixed_costs: asNumber(row.absorbed_fixed_costs),
+      planned_absorbed_fixed_costs: asNumber(row.planned_absorbed_fixed_costs),
+      occupancy_variance: asNumber(row.occupancy_variance),
       contribution: asNumber(row.contribution),
+      liters: asNumber(row.liters),
+      units: asNumber(row.units),
       fixed_costs: asNumber(row.fixed_costs),
       incidental_costs: asNumber(row.incidental_costs),
       result: asNumber(row.result),
@@ -377,11 +391,18 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
     year: asNumber(value.year),
     basis: asText(value.basis),
     sources: {
+      consumer_mode: asText(sources.consumer_mode),
+      commercial_generation_id: asText(sources.commercial_generation_id),
+      commercial_run_id: asText(sources.commercial_run_id),
+      plan_contract_hash: asText(sources.plan_contract_hash),
       plan_snapshot_id: asText(sources.plan_snapshot_id),
       plan_source: asText(sources.plan_source),
       actual_source: asText(sources.actual_source),
       reforecast_snapshot_id: asText(sources.reforecast_snapshot_id),
       reforecast_source: asText(sources.reforecast_source),
+      forecast_cutoff_period: asText(sources.forecast_cutoff_period),
+      actual_as_of_date: asText(sources.actual_as_of_date),
+      occupancy_driver: asText(sources.occupancy_driver),
       fixed_cost_source: asText(sources.fixed_cost_source),
     },
     contribution: {
@@ -444,6 +465,7 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
       const row = asRecord(item);
       return {
         period: asText(row.period),
+        actual_available: Boolean(row.actual_available),
         revenue: asNumber(row.revenue),
         variable_cost: asNumber(row.variable_cost),
         contribution: asNumber(row.contribution),
@@ -451,6 +473,12 @@ function parseReadModel(value: Record<string, unknown> | null): BreakEvenReadMod
         running_revenue: asNumber(row.running_revenue),
         running_variable_cost: asNumber(row.running_variable_cost),
         running_contribution: asNumber(row.running_contribution),
+        running_plan_revenue: asNumber(row.running_plan_revenue),
+        running_plan_variable_cost: asNumber(row.running_plan_variable_cost),
+        running_actual_revenue: asNumber(row.running_actual_revenue),
+        running_actual_variable_cost: asNumber(row.running_actual_variable_cost),
+        running_forecast_revenue: asNumber(row.running_forecast_revenue),
+        running_forecast_variable_cost: asNumber(row.running_forecast_variable_cost),
       };
     }).filter((row) => row.period),
     variance_bridge: rawVarianceBridge.map((item) => {
@@ -570,19 +598,21 @@ function buildScenarioFromRemaining(
 }
 
 function buildRevenueTimeline(planRevenue: number, planVariable: number, actualRevenue: number, actualVariable: number, reforecastRevenue: number, reforecastVariable: number) {
-  return revenuePhasing.map((point) => ({
-    month: point.month,
-    plan: planRevenue * point.planPct,
-    planCost: planVariable * point.planPct,
-    actual: point.actualPct === null ? null : actualRevenue * (point.actualPct / 0.445),
-    actualCost: point.actualPct === null ? null : actualVariable * (point.actualPct / 0.445),
-    reforecast: reforecastRevenue * point.reforecastPct,
-    reforecastCost: reforecastVariable * point.reforecastPct,
-  }));
+  return monthNames.map((month, index) => {
+    const cumulativeShare = (index + 1) / monthNames.length;
+    return {
+      month,
+      plan: planRevenue * cumulativeShare,
+      planCost: planVariable * cumulativeShare,
+      actual: actualRevenue * cumulativeShare,
+      actualCost: actualVariable * cumulativeShare,
+      reforecast: reforecastRevenue * cumulativeShare,
+      reforecastCost: reforecastVariable * cumulativeShare,
+    };
+  });
 }
 
 function monthLabel(period: string, fallback: string) {
-  const monthNames = ["Jan", "Feb", "Mrt", "Apr", "Mei", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dec"];
   const match = /^(\d{4})-(\d{2})/.exec(period);
   if (!match) return fallback;
   const monthIndex = Number(match[2]) - 1;
@@ -597,8 +627,13 @@ function buildRevenueTimelineFromReadModel(
   reforecastRevenue: number,
   reforecastVariable: number,
   readModelTimeline: ReadModelTimelinePoint[] | undefined,
+  useActiveGenerationTimeline: boolean,
 ) {
   const fallback = buildRevenueTimeline(planRevenue, planVariable, actualRevenue, actualVariable, reforecastRevenue, reforecastVariable);
+  if (useActiveGenerationTimeline) {
+    const activeTimeline = buildActiveGenerationRevenueTimeline(readModelTimeline);
+    if (activeTimeline) return activeTimeline;
+  }
   if (!readModelTimeline?.length) return fallback;
 
   const byMonth = new Map<string, ReadModelTimelinePoint>();
@@ -649,10 +684,20 @@ function buildRevenueTimelineFromReadModel(
 
 function contributionDisplaySignal(row: ReadModelContributionRow): ContributionDisplayRow["signal"] {
   if (row.missing_cost_lines > 0) return { label: "kostprijs ontbreekt", tone: "error" };
-  if (row.contribution_ratio > 0 && row.contribution_ratio < 0.25) return { label: "marge-risico", tone: "error" };
-  if (row.contribution > 9000) return { label: "mixdrager", tone: "ok" };
+  if (row.contribution <= 0) return { label: "geen positieve contributie", tone: "error" };
   if (row.contribution > 0) return { label: "contributie", tone: "neutral" };
   return { label: "controle nodig", tone: "warning" };
+}
+
+function fixedCostSourceLabel(source: unknown) {
+  switch (asText(source)) {
+    case "year_close_snapshot":
+      return "Vaste kosten ABC uit de afgesloten jaarsnapshot";
+    case "fixed_costs_by_year":
+      return "Vaste kosten ABC uit de actieve jaarbasis";
+    default:
+      return "Vaste kosten ABC uit het backend-readmodel";
+  }
 }
 
 function perUnit(total: number, units: number) {
@@ -742,7 +787,7 @@ export function BreakEvenNextMockup({
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
   const [contributionPage, setContributionPage] = useState(1);
-  const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 5, volumePct: 8, fixedCostPct: 0 });
+  const [scenario, setScenario] = useState<ScenarioState>({ pricePct: 0, volumePct: 0, fixedCostPct: 0 });
   const [selectedFormula, setSelectedFormula] = useState<FormulaInfo | null>(null);
 
   const parsedReadModel = useMemo(() => parseReadModel(readModel ?? null), [readModel]);
@@ -767,14 +812,19 @@ export function BreakEvenNextMockup({
   );
   const hasActuals = Boolean(parsedReadModel && (parsedReadModel.dashboard?.actual?.revenue ?? 0) > 0);
   const hasTemporaryReforecast = Boolean(parsedReadModel && (parsedReadModel.dashboard?.reforecast?.revenue ?? 0) > 0);
-  const hasExplicitReforecast = parsedReadModel?.sources?.reforecast_source === "reforecast_snapshot";
+  const hasActiveGenerationPlan = isActiveGenerationPlanSource(parsedReadModel?.sources?.plan_source);
+  const forecastSourceLabel = activeForecastSourceLabel(parsedReadModel?.sources?.reforecast_source);
   const plan = {
     ...emptyTotals,
     revenue: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.revenue ?? 0 : 0,
     variable: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.variable_cost ?? 0 : 0,
     totalCost: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.total_cost ?? 0 : 0,
     absorbedFixed: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.absorbed_fixed_costs ?? 0 : 0,
+    plannedAbsorbedFixed: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.planned_absorbed_fixed_costs ?? 0 : 0,
+    occupancyVariance: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.occupancy_variance ?? 0 : 0,
     contribution: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.contribution ?? 0 : 0,
+    liters: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.liters ?? 0 : 0,
+    units: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.units ?? 0 : 0,
     incidental: hasPlanTargets ? parsedReadModel?.dashboard?.plan?.incidental_costs ?? 0 : 0,
   };
   const actual = {
@@ -783,7 +833,11 @@ export function BreakEvenNextMockup({
     variable: parsedReadModel?.dashboard?.actual?.variable_cost ?? 0,
     totalCost: parsedReadModel?.dashboard?.actual?.total_cost ?? 0,
     absorbedFixed: parsedReadModel?.dashboard?.actual?.absorbed_fixed_costs ?? 0,
+    plannedAbsorbedFixed: parsedReadModel?.dashboard?.actual?.planned_absorbed_fixed_costs ?? 0,
+    occupancyVariance: parsedReadModel?.dashboard?.actual?.occupancy_variance ?? 0,
     contribution: parsedReadModel?.dashboard?.actual?.contribution ?? 0,
+    liters: parsedReadModel?.dashboard?.actual?.liters ?? 0,
+    units: parsedReadModel?.dashboard?.actual?.units ?? 0,
     incidental: parsedReadModel?.dashboard?.actual?.incidental_costs ?? 0,
   };
   const reforecast = {
@@ -792,7 +846,11 @@ export function BreakEvenNextMockup({
     variable: parsedReadModel?.dashboard?.reforecast?.variable_cost ?? 0,
     totalCost: parsedReadModel?.dashboard?.reforecast?.total_cost ?? 0,
     absorbedFixed: parsedReadModel?.dashboard?.reforecast?.absorbed_fixed_costs ?? 0,
+    plannedAbsorbedFixed: parsedReadModel?.dashboard?.reforecast?.planned_absorbed_fixed_costs ?? 0,
+    occupancyVariance: parsedReadModel?.dashboard?.reforecast?.occupancy_variance ?? 0,
     contribution: parsedReadModel?.dashboard?.reforecast?.contribution ?? 0,
+    liters: parsedReadModel?.dashboard?.reforecast?.liters ?? 0,
+    units: parsedReadModel?.dashboard?.reforecast?.units ?? 0,
     incidental: parsedReadModel?.dashboard?.reforecast?.incidental_costs ?? 0,
   };
   const activePlanFixedCosts = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.fixed_costs ?? 0 : 0;
@@ -807,8 +865,7 @@ export function BreakEvenNextMockup({
     ),
     [activeRequiredCosts, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, scenario],
   );
-  const fixedRate = activePlanFixedCosts > 0 ? activePlanFixedCosts / plannedNormalLiters : 0;
-  const occupancyResult = (reforecast.liters - plannedNormalLiters) * fixedRate;
+  const occupancyResult = reforecast.occupancyVariance;
   const planResult = hasPlanTargets ? parsedReadModel?.dashboard?.plan?.result ?? (plan.contribution - activePlanFixedCosts) : 0;
   const actualResult = parsedReadModel?.dashboard?.actual?.result ?? (actual.contribution - activeReforecastFixedCosts);
   const reforecastResult = parsedReadModel?.dashboard?.reforecast?.result ?? (reforecast.contribution - activeReforecastFixedCosts);
@@ -817,8 +874,17 @@ export function BreakEvenNextMockup({
   const actualSnapshotTotalCost = actual.totalCost || 0;
   const reforecastTotalCost = reforecast.totalCost || (reforecast.variable + activeReforecastFixedCosts);
   const revenueTimeline = useMemo(
-    () => buildRevenueTimelineFromReadModel(plan.revenue, plan.variable, actual.revenue, actual.variable, reforecast.revenue, reforecast.variable, readModelTimeline),
-    [actual.revenue, actual.variable, plan.revenue, plan.variable, readModelTimeline, reforecast.revenue, reforecast.variable],
+    () => buildRevenueTimelineFromReadModel(
+      plan.revenue,
+      plan.variable,
+      actual.revenue,
+      actual.variable,
+      reforecast.revenue,
+      reforecast.variable,
+      readModelTimeline,
+      hasActiveGenerationPlan,
+    ),
+    [actual.revenue, actual.variable, hasActiveGenerationPlan, plan.revenue, plan.variable, readModelTimeline, reforecast.revenue, reforecast.variable],
   );
   const revenueGap = reforecast.revenue - plan.revenue;
   const revenueGapPct = plan.revenue > 0 ? (revenueGap / plan.revenue) * 100 : 0;
@@ -826,9 +892,9 @@ export function BreakEvenNextMockup({
   const planAbsorbedFixedCosts = plan.absorbedFixed || Math.max(0, planTotalCost - plan.variable);
   const actualAbsorbedFixedCosts = actual.absorbedFixed || Math.max(0, actualSnapshotTotalCost - actual.variable);
   const reforecastAbsorbedFixedCosts = reforecast.absorbedFixed || Math.max(0, (reforecast.totalCost || actualSnapshotTotalCost) - reforecast.variable);
-  const planOccupancyVariance = planAbsorbedFixedCosts - activePlanFixedCosts;
-  const actualOccupancyVariance = actualAbsorbedFixedCosts - activeReforecastFixedCosts;
-  const reforecastOccupancyVariance = reforecastAbsorbedFixedCosts - activeReforecastFixedCosts;
+  const planOccupancyVariance = plan.occupancyVariance;
+  const actualOccupancyVariance = actual.occupancyVariance;
+  const reforecastOccupancyVariance = reforecast.occupancyVariance;
   const actualCostReconciliationDifference = actualSnapshotTotalCost - (actual.variable + actualAbsorbedFixedCosts);
   const planExplainedResult = planResult;
   const actualExplainedResult = actualResult;
@@ -900,7 +966,7 @@ export function BreakEvenNextMockup({
       label: "Bezettingsresultaat ABC",
       value: occupancyResult,
       explanation: "Laat zien of vaste ABC-kosten over meer of minder volume worden terugverdiend dan de normale bezetting.",
-      source: "Reforecast liters versus normale productie/sales basis.",
+      source: "Gerealiseerde ABC-dekking plus resterende dekking uit het frozen Plan.",
     },
     {
       label: "Incidentele kosten",
@@ -918,7 +984,7 @@ export function BreakEvenNextMockup({
     reforecast.variable,
   ) / 20000) * 20000);
   const revenueChartTicks = Array.from({ length: Math.floor(revenueChartMax / 20000) + 1 }, (_, index) => index * 20000);
-  const fixedCostSource = selectedYear <= 2025 ? "Vaste kosten ABC van afgesloten/actueel jaar" : "Vaste kosten ABC uit plan of aangepaste jaarbasis";
+  const fixedCostSource = fixedCostSourceLabel(parsedReadModel?.sources?.fixed_cost_source);
   const dashboardStatementRows: DashboardStatementRow[] = [
     {
       label: "Omzet",
@@ -1293,11 +1359,13 @@ export function BreakEvenNextMockup({
         {
           label: "Forecast omzet",
           value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast),
-          helper: hasExplicitReforecast ? "reforecast snapshot" : "nog geen aparte forecast",
+          helper: forecastSourceLabel,
           formula: {
             title: "Forecast omzet",
-            formula: "Verwachte jaaromzet. Voor 2025 is dit nu gelijk aan actuals zolang er geen aparte reforecast is.",
-            source: hasExplicitReforecast ? "Bron: reforecast snapshot." : "Bron: actuals als tijdelijke reforecast.",
+            formula: hasActiveGenerationPlan
+              ? "Actual van gerealiseerde perioden plus het resterende goedgekeurde Plan."
+              : "Verwachte jaaromzet uit de bestaande historische prognosebron.",
+            source: `Bron: ${forecastSourceLabel}.`,
             rows: [
               { label: "Forecast omzet", value: moneyOrMissing(reforecast.revenue, hasTemporaryReforecast) },
             ],
@@ -1310,7 +1378,7 @@ export function BreakEvenNextMockup({
           formula: {
             title: "Forecast variabele kostprijs",
             formula: "Verwachte omzetmix x variabele kostprijs.",
-            source: hasExplicitReforecast ? "Bron: reforecast snapshot." : "Bron: actuals als tijdelijke reforecast.",
+            source: `Bron: ${forecastSourceLabel}.`,
             rows: [
               { label: "Forecast variabele kostprijs", value: moneyOrMissing(reforecast.variable, hasTemporaryReforecast) },
               { label: "Forecast contributie", value: moneyOrMissing(reforecast.contribution, hasTemporaryReforecast) },
@@ -1369,7 +1437,7 @@ export function BreakEvenNextMockup({
           formula: {
             title: "Forecast break-even omzet",
             formula: "Vaste kosten ABC / (forecast contributie / forecast omzet).",
-            source: hasExplicitReforecast ? "Bron: reforecast snapshot plus vaste kosten ABC." : "Bron: actuals als tijdelijke reforecast plus vaste kosten ABC.",
+            source: `Bron: ${forecastSourceLabel} plus vaste kosten ABC.`,
             rows: [
               { label: "Forecast contributieratio", value: reforecastContributionRatio > 0 ? `${number(reforecastContributionRatio * 100, 1)}%` : "-" },
               { label: "Vaste kosten ABC", value: moneyOrMissing(activeReforecastFixedCosts, hasTemporaryReforecast) },
@@ -1407,11 +1475,13 @@ export function BreakEvenNextMockup({
           <div>
             <div className="module-card-title">Read-model koppeling</div>
             <div className="module-card-text">
-              Deze analyse gebruikt het backend read-model voor echte cijfers. Ontbrekende planwaarden worden leeg getoond en niet aangevuld.
+              {hasActiveGenerationPlan
+                ? "Plan komt uit de actieve commerciële jaarset; Actual blijft transactiedata en Forecast gebruikt de resterende goedgekeurde Plan-perioden."
+                : "Deze analyse gebruikt het backend read-model voor echte cijfers. Ontbrekende planwaarden worden leeg getoond en niet aangevuld."}
             </div>
           </div>
           <span className={`status-pill ${readModelError ? "status-error" : parsedReadModel ? "status-ok" : "status-warning"}`}>
-            {readModelError ? "niet geladen" : parsedReadModel ? "backend gekoppeld" : "geen backenddata"}
+            {readModelError ? "niet geladen" : hasActiveGenerationPlan ? "actieve jaarset gekoppeld" : parsedReadModel ? "backend gekoppeld" : "geen backenddata"}
           </span>
         </div>
         {readModelError ? (
@@ -1688,7 +1758,7 @@ export function BreakEvenNextMockup({
               <div className="be-next-explain">
                 <strong>Dit vertelt of de verwachte contributie genoeg is om vaste kosten te dragen.</strong>
                 <p>
-                  De analyse houdt plan, actuals en reforecast gescheiden. {hasExplicitReforecast ? "De reforecast komt uit een vastgelegde snapshot." : "Zonder reforecast-snapshot blijft dit tijdelijk gelijk aan actual YTD."}
+                  De analyse houdt Plan, Actual en Forecast gescheiden. De Forecast komt uit {forecastSourceLabel}.
                 </p>
               </div>
             </div>
@@ -1861,7 +1931,7 @@ export function BreakEvenNextMockup({
                 value={topContributor ? money(topContributor.totalContribution) : "-"}
                 helper={topContributor?.sku ?? "geen regels"}
               />
-              <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="contributie onder 25% van prijs" tone={marginRiskCount > 0 ? "negative" : "positive"} />
+              <MetricCard label="Marge-risico's" value={`${marginRiskCount}`} helper="kostprijs ontbreekt of contributie is niet positief" tone={marginRiskCount > 0 ? "negative" : "positive"} />
             </div>
             <div className="data-table">
               <table>
@@ -2032,7 +2102,7 @@ export function BreakEvenNextMockup({
             <div className="placeholder-block">
               <strong>{money(occupancyResult)}</strong>
               <div className="muted">
-                Formule: ({number(reforecast.liters)} L reforecast - {number(plannedNormalLiters)} L normale bezetting) x {money2(fixedRate)} vaste kosten per liter.
+                Formule: {money(reforecastAbsorbedFixedCosts)} Forecast geabsorbeerde ABC - {money(activeReforecastFixedCosts)} vaste kosten ABC. De resterende Plan-dekking gebruikt het frozen Planvolume van {number(plan.liters)} L.
               </div>
             </div>
             <div className="module-card-text">

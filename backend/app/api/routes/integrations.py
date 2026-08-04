@@ -2230,7 +2230,7 @@ def get_break_even_model_review(_: dict = Depends(require_admin)) -> dict[str, A
 
 @router.get("/break-even/analysis-read-model")
 def get_break_even_analysis_read_model(
-    year: int = Query(...),
+    year: int = Query(0, ge=0),
     basis: str = Query("invoice"),
     _: dict = Depends(require_admin),
 ) -> dict[str, Any]:

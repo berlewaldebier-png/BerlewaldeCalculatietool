@@ -25,23 +25,34 @@ export default async function BreakEvenPage({ searchParams }: BreakEvenPageProps
   const productie = (bootstrap.datasets["productie"] as Record<string, unknown>) ?? {};
   const yearOptions = deriveYearOptions(productie);
   const rawYear = Array.isArray(params?.year) ? params?.year[0] : params?.year;
+  const hasRequestedYear = typeof rawYear === "string" && rawYear.trim() !== "";
   const requestedYear = Number.parseInt(String(rawYear || ""), 10);
   const defaultYear = chooseDefaultYear(yearOptions);
-  const year = yearOptions.length > 0
+  const requestedOrFallbackYear = yearOptions.length > 0
     ? yearOptions.includes(requestedYear) ? requestedYear : defaultYear
     : requestedYear || defaultYear;
   let readModel: Record<string, unknown> | null = null;
   let readModelError = "";
 
   try {
+    const yearQuery = hasRequestedYear
+      ? `&year=${encodeURIComponent(String(requestedOrFallbackYear))}`
+      : "";
     const response = await apiGetServer<{ item?: Record<string, unknown> }>(
-      `/integrations/break-even/analysis-read-model?year=${encodeURIComponent(String(year))}&basis=invoice`,
+      `/integrations/break-even/analysis-read-model?basis=invoice${yearQuery}`,
       "/break-even"
     );
     readModel = response.item ?? null;
   } catch (err) {
     readModelError = err instanceof Error ? err.message : String(err);
   }
+  const readModelYear = Number(readModel?.year ?? 0);
+  const year = Number.isFinite(readModelYear) && readModelYear > 0
+    ? readModelYear
+    : requestedOrFallbackYear;
+  const availableYears = [...new Set([...yearOptions, year])]
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
 
   return (
     <PageShell
@@ -50,7 +61,7 @@ export default async function BreakEvenPage({ searchParams }: BreakEvenPageProps
       activePath="/break-even"
       navigation={bootstrap.navigation ?? []}
     >
-      <BreakEvenNextMockup selectedYear={year} availableYears={yearOptions} readModel={readModel} readModelError={readModelError} />
+      <BreakEvenNextMockup selectedYear={year} availableYears={availableYears} readModel={readModel} readModelError={readModelError} />
     </PageShell>
   );
 }
