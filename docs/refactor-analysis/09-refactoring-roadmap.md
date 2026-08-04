@@ -93,9 +93,11 @@ flowchart TD
     R13A --> R13C
     R13B --> R13C
     R13C --> R12C["RF-012C Commercial consumer migrations"]
-    R13C --> R12D["RF-012D Cost overview and history UI"]
+    R13C --> R12D1["RF-012D1 Read-only finalized yearset dossier"]
+    R12D1 --> R12D2["RF-012D2 Active cost overview"]
+    R12D2 --> R12D3["RF-012D3 Cost variants and history"]
     R12C --> R14
-    R12D --> R14
+    R12D3 --> R14
     R12 --> R14["RF-014 Proven deprecated-path removal"]
     R13 --> R15["RF-015 Separately approved destructive cleanup"]
     R14 --> R15
@@ -475,8 +477,14 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 
 **RF-012C2 occupancy amendment (2026-08-03):** ABC occupancy is now an active-context backend projection instead of a frontend capacity assumption. Plan remains the EUR 0 baseline; Actual remains realized absorbed ABC minus the annual fixed ABC basis; Forecast is realized absorbed ABC plus the unelapsed frozen-Plan absorption minus that same annual basis. The latest Actual date splits the current month proportionally, preventing the whole current Plan month from disappearing after its first transaction. Dynamic frozen-Plan liters/units/revenue select the driver; the hardcoded 40,000-liter capacity, static phasing curve, automatic scenario uplifts and unexplained margin thresholds were removed. No schema, migration, backfill, historical rewrite or persistent write is included. The read-only 2026 check produced Plan/Huidig/Forecast occupancy of EUR 0 / EUR -87,431.10 / EUR -41,617.84 using 37,751.231 frozen-Plan liters. See `32-rf-012c2-break-even-plan-forecast.md`.
 
+**Approved continuation order (2026-08-04):** after RF-012C2, continue with RF-012D1 (finalized yearset dossier), RF-012D2 (active cost-price overview), RF-012D3 (cost variants/history), RF-012C2B (explicit Management Forecast), RF-012C3 (exact LOT/non-LOT Actual costs) and RF-012C4 (sales strategy/advice prices). RF-012C2B must not infer backlog from unregistered orders: orders enter this application only when invoiced, so Forecast revisions require an explicit Management input bound to generation/run/Plan hash.
+
 ### RF-012D — Cost overview, format defaults and immutable history dossier
 
+- **Slice boundary:** RF-012D is implemented as three separately reviewed branches/PRs. RF-012D1 only introduces the finalized Jaarset dossier; RF-012D2 switches the current “Kostprijs beheren” overview; RF-012D3 adds cost variants/history. Approval of one identifier does not authorize either later identifier.
+- **RF-012D1 finalized Jaarset dossier:** opening `/beheer/jaarsets/{year}` reads only an `active` or `superseded` ready commercial generation and its exact reconciliation run. It shows the immutable frozen Plan, all canonical generation SKU cost components, target sell-in prices, advice-channel policy and generation/run/hash/audit provenance. Opening Jaarset 2026 must never route to a new 2027 wizard; “Nieuw jaar voorbereiden” is a separate explicit action. Candidate, incomplete, count-divergent or hash-invalid data fails closed. No schema initialization, write, migration, activation, backfill or data rewrite is allowed on this read path.
+- **RF-012D2 current overview:** refactor “Kostprijs beheren” onto the active commercial generation, grouping by Beer and concrete SKU. This remains a separate consumer switch with shadow parity; RF-012D1 does not change that screen.
+- **RF-012D3 variants/history:** add complete read-only planning-anchor and later invoice/brew/LOT cost history after D2. Viewing history cannot rebaseline or activate implicitly.
 - **Objective / classification:** refactor “Kostprijs beheren” and historical cost-version inspection onto the approved read models after data reconciliation. This combines a screen refactor with separately approved presentation corrections; it does not define cost authority.
 - **Default overview:** group by Beer and concrete SKU; show the planning `Doos 24 × 33cl` first and show keg when that Beer has one. Distinguish `n.v.t.` (format does not exist), `Niet geactiveerd` (SKU exists without activation), `Kostprijs ontbreekt` (invalid/non-positive active cost) and a valid formatted amount.
 - **History expansion:** “Alle varianten / historie” shows every concrete SKU and its stable planning anchor, later invoice/brew/LOT cost versions, source year, method, provenance and component breakdown. Viewing history is read-only and cannot rebaseline/activate implicitly.
@@ -487,6 +495,8 @@ RF-009C, RF-009F and RF-009G are always separate branches/PRs. Combining them is
 - **Rollout / rollback / observability:** one screen/stage per branch/PR; compare displayed stable IDs/reason codes to RF-011 resolvers; route-level E2E and visual checks; rollback to old screen without changing reconciled data.
 - **Acceptance criteria:** the user can tell what is planned, what actually occurred, what is missing and why; valid numeric values match RF-010 fixtures; history is complete/read-only; no unavailable format is represented as numeric zero.
 - **Dependencies / complexity / risk / human confirmation:** RF-011A/RF-011B/RF-011C/RF-013B/RF-013C/RF-009; **large complexity, medium UI risk, high financial-context risk**. Product/finance/design approval required.
+
+**RF-012D1 implementation note (2026-08-04):** Jaarbeheer now separates “Open jaarsetdossier” from “Nieuw jaar voorbereiden”. The dedicated `/beheer/jaarsets/{year}` route uses one strict read-only transaction and exposes only ready finalized generations; candidates and invalid hashes/counts fail closed. The 2026 development check resolved generation `5a152227-146c-5904-bb91-f8ef4d0b52ee`, run `636ff712-89a7-5a4c-87e8-d2a371cb0d8d`, 79 SKU rows, 77/77 required costs, 47 prices, four channels and the exact EUR 220,000 frozen Plan also used by Break-even. The responsive screen provides sortable/searchable SKU evidence, monthly Plan, channel policy and audit provenance. No stored row, schema, migration, activation or business calculation changed. See `33-rf-012d1-finalized-yearset-dossier.md`.
 
 ## RF-013 — Backward-compatible data-model improvements, one authority at a time
 

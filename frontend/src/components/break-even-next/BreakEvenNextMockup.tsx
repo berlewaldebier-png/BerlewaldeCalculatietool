@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   Bar,
@@ -1739,9 +1740,9 @@ export function BreakEvenNextMockup({
                 <span className="status-pill status-warning">plan ontbreekt</span>
               </div>
               <div className="editor-actions" style={{ marginTop: 12 }}>
-                <a className="editor-button" href="/beheer/jaarsets">
+                <Link className="editor-button" href="/beheer/jaarsets">
                   Open Jaarbeheer
-                </a>
+                </Link>
               </div>
             </section>
           ) : null}

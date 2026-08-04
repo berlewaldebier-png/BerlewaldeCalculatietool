@@ -214,6 +214,16 @@ required_rf012c2_contracts = {
     "test_break_even_commercial_context.BreakEvenAnalysisConsumerTests.test_active_year_does_not_fall_back_when_generation_is_invalid",
     "test_break_even_commercial_context.BreakEvenCommercialContextReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
 }
+required_rf012d1_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_commercial_yearset_authority_routes_are_admin_only",
+    "test_yearset_dossier.YearsetDossierProjectionTests.test_finalized_dossier_exposes_exact_frozen_plan_and_sku_values",
+    "test_yearset_dossier.YearsetDossierProjectionTests.test_superseded_generation_remains_a_read_only_historical_dossier",
+    "test_yearset_dossier.YearsetDossierProjectionTests.test_candidate_generation_is_not_exposed_as_finalized",
+    "test_yearset_dossier.YearsetDossierProjectionTests.test_tampered_plan_hash_fails_closed",
+    "test_yearset_dossier.YearsetDossierProjectionTests.test_candidate_count_mismatch_fails_closed",
+    "test_yearset_dossier.YearsetDossierReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
+    "test_yearset_dossier.YearsetDossierFrontendContractTests.test_open_dossier_and_prepare_next_year_are_separate_actions",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -237,6 +247,7 @@ missing = sorted(
         | required_rf013c3_contracts
         | required_rf012c1_contracts
         | required_rf012c2_contracts
+        | required_rf012d1_contracts
     ).difference(ids)
 )
 
@@ -250,5 +261,5 @@ print(
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
-    "RF-012C2 contracts collected"
+    "RF-012C2, and RF-012D1 contracts collected"
 )

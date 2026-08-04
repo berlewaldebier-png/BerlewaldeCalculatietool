@@ -26,6 +26,7 @@ from app.domain import yearset_blocker_lineage_service
 from app.domain import yearset_recovery_service
 from app.domain import yearset_recovery_storage
 from app.domain import yearset_reconciliation_storage
+from app.domain import yearset_dossier_service
 from app.domain import cost_authority_service
 from app.domain import cost_authority_storage
 from app.domain import setup_service
@@ -3161,6 +3162,20 @@ def get_commercial_yearsets(
 ) -> dict[str, Any]:
     return commercial_yearset_service.authority_overview(
         fallback_year=int(fallback_year)
+    )
+
+
+@router.get("/commercial-yearsets/{operational_year}/dossier")
+def get_commercial_yearset_dossier(
+    operational_year: int,
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Return one finalized yearset as a strictly read-only dossier."""
+
+    if int(operational_year or 0) <= 0:
+        raise HTTPException(status_code=422, detail="Jaar moet groter zijn dan nul.")
+    return yearset_dossier_service.read_yearset_dossier(
+        int(operational_year)
     )
 
 
