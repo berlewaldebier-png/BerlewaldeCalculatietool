@@ -1772,6 +1772,12 @@ a {
   color: #92400e;
 }
 
+.status-pill.status-info {
+  border-color: var(--status-info-border);
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+}
+
 .status-pill.status-danger {
   border-color: #fecaca;
   background: #fee2e2;
@@ -4463,6 +4469,27 @@ a {
   margin-top: 1rem;
 }
 
+.yearset-dossier-view-toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.yearset-dossier-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(248, 250, 255, 0.78);
+}
+
+.yearset-dossier-view-toggle .editor-button {
+  min-height: 38px;
+}
+
 .yearset-dossier-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4539,9 +4566,97 @@ a {
   margin-bottom: 0.8rem;
 }
 
+.historical-yearset-wizard {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.historical-yearset-wizard .cpq-frame,
+.historical-yearset-wizard .cpq-grid,
+.historical-yearset-wizard .cpq-main,
+.historical-yearset-wizard .wizard-step-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.historical-wizard-fidelity {
+  margin-bottom: 1rem;
+}
+
+.historical-wizard-fidelity-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-bottom: 0.35rem;
+}
+
+.historical-wizard-source-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.historical-wizard-search {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 36rem;
+  margin: 0 0 1rem;
+}
+
+.historical-wizard-production {
+  margin-top: 1rem;
+}
+
+.historical-wizard-cost-table {
+  min-width: 74rem;
+}
+
+.historical-wizard-inflation {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.historical-wizard-inflation-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.historical-wizard-recipe-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.historical-wizard-group summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.historical-wizard-group-summary,
+.historical-wizard-group-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.historical-wizard-group-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
 @media (max-width: 820px) {
   .yearset-dossier-heading,
-  .yearset-dossier-actions {
+  .yearset-dossier-actions,
+  .yearset-dossier-view-toggle-card {
     align-items: stretch;
     flex-direction: column;
   }
@@ -4552,8 +4667,21 @@ a {
   }
 
   .yearset-dossier-metrics,
-  .yearset-dossier-audit-grid {
+  .yearset-dossier-audit-grid,
+  .historical-wizard-source-grid,
+  .historical-wizard-recipe-meta {
     grid-template-columns: 1fr;
+  }
+
+  .yearset-dossier-view-toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .historical-yearset-wizard .cpq-topbar-actions {
+    align-items: stretch;
+    width: 100%;
   }
 }
 

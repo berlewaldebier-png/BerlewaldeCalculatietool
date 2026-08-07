@@ -1,0 +1,99 @@
+# RF-012D1A — Historische Jaarset in wizardweergave
+
+## Uitkomst
+
+RF-012D1A voegt aan het definitieve Jaarsetdossier een tweede, alleen-lezen weergave toe. `Jaarsetoverzicht` behoudt het in RF-012D1 opgeleverde dossier. `Wizardweergave` gebruikt dezelfde centrale lijst met 14 stappen als de actieve route `Nieuw jaar voorbereiden`, maar zet bron- en doeljaar vast op de geselecteerde definitieve generatie.
+
+Voor Jaarset 2026 betekent dit bronjaar 2025 en doeljaar 2026. De afzonderlijke actie `Nieuw jaar voorbereiden` blijft bronjaar 2026 en doeljaar 2027 openen. De historische weergave bevat geen formulier en kan niet opslaan, activeren, afronden, herstellen of verwijderen.
+
+## Bewijs en bronkwaliteit
+
+De oorspronkelijke conceptwizard is niet meer aanwezig in `new_year_drafts`. Daarom presenteert deze slice niet alsof alle oude invoervelden exact zijn teruggevonden. Iedere stap toont één van vier bronkwaliteiten:
+
+- `exact`: rechtstreeks bewaard en tegen de definitieve generatie gecontroleerd;
+- `derived_exact`: uitsluitend samengesteld uit bevroren bronnen, zonder kostprijs opnieuw te berekenen;
+- `reconstructed`: een herkenbare latere toestand, niet de exacte invoer op het oorspronkelijke wizardmoment;
+- `not_retained`: de afzonderlijke historische invoer is niet bewaard en wordt niet ingevuld met actuele defaults.
+
+De read-only controle van de ontwikkeldata vond:
+
+- één bewaarde berekeningsbatch voor 2025→2026;
+- 103 oorspronkelijke presentatieregels;
+- 74 unieke stabiele SKU-ID's;
+- acht SKU's die in de oude presentatie dubbel voorkwamen, samen 29 extra verwijzingen;
+- nul conflicterende financiële duplicaten;
+- 74 exacte matches met de definitieve 2026-generatie op zes decimalen;
+- nul materiële verschillen;
+- vijf definitieve SKU-regels buiten de oude batch: drie expliciet herstelde exacte doeljaarankers en twee catalogusregels waarvoor geen kostprijs vereist is.
+
+De 2026 productie- en driverregel is na de oude wizardbatch bijgewerkt. Deze waarden worden daarom zichtbaar als `gereconstrueerd`. De Planwaarden en maandverdeling komen uit het onveranderlijke Plancontract. Tarieven, vaste kosten en verpakkingsprijzen zijn op hetzelfde bewaarmoment als de oude berekeningsbatch vastgelegd en worden als exact gemarkeerd.
+
+De oorspronkelijke losse inflatie-invoer is niet bewaard. Het percentage is wel exact afleidbaar: **6,0%** verklaart na afronding op centen 8 van 9 vergelijkbare vaste-kostenregels en alle 25 vergelijkbare verpakkingsprijzen. De afwijkende vaste-kostenregel en twee nieuwe doeljaarregels blijven als handmatige/nieuwe regels zichtbaar. De weergave toont daarom steeds bronjaar, bron + inflatie en de werkelijk opgeslagen doeljaarwaarde; zij schrijft de afgeleide 6,0% niet terug.
+
+De definitieve doeljaar-kostprijsversies bevatten bovendien vier expliciet aan hun bronversie gekoppelde productierecepten: Berlewalde Goudkoorts, Hazy IPA, Lentebock en Stout. Deze bron- en doelreceptregels worden exact getoond. De opgeslagen doeljaar-ingrediëntprijzen zijn gelijk aan het bronjaar en volgen dus niet de afgeleide 6,0%; ook dit wordt alleen zichtbaar gemaakt en niet achteraf gecorrigeerd. De oorspronkelijke initialisatie-checkboxes zijn niet bewaard.
+
+### SSOT-grens bij Verkoopstrategie
+
+De bewaarde 2025→2026-wizardbatch bevat 15 presentatieregels die vanuit Berlewalde Blond werden getoond. Dit zijn niet 15 exclusief aan Blond toebehorende SKU's. Ze bestaan uit zeven rechtstreeks aan Blond gekoppelde SKU's en acht bundel-/serviceverwijzingen. Onder meer `Alles onder de boom 2025`, de geschenkverpakkingen en de proeverijen kwamen in dezelfde batch onder meerdere bierstijlen voor. De definitieve generatie dedupliceert zulke verwijzingen op stabiele `sku_id` en bewaart de financiële SKU eenmaal.
+
+Daarmee is de financiële identiteit wel centraal, maar de gewenste presentatie-eigendom of meervoudige stijltoewijzing van gedeelde bundels/services nog geen afzonderlijke SSOT. Stap 10 groepeert nu op de canonieke `beer_name` van het definitieve dossier en toont uitsluitend regels met een vastgelegde sell-inprijs. Voor Blond betekent dit: zeven canonieke kostprijs-SKU's, waarvan zes met een sell-inprijs. De gewone route `/verkoopstrategie` gebruikt tot RF-012C4 nog de compatibiliteitsreader met actuele activaties en `berekeningen.cost_lines`; die bron kan daarom een andere selectie tonen.
+
+RF-012C4 mag de gewone Verkoopstrategie pas omschakelen nadat het onderscheid is vastgelegd tussen (a) de eigenaar/familie van een SKU en (b) een gedeelde BOM-/presentatieverwijzing. Een gedeeld product mag niet stilzwijgend worden gekopieerd naar iedere stijl, maar ook niet verdwijnen. SKU's zonder sell-inprijs moeten met een getypeerde ontbrekende-prijsstatus zichtbaar blijven.
+
+## Veiligheidsgrenzen
+
+De nieuwe backendreader:
+
+- accepteert uitsluitend een gereed `active` of `superseded` Jaarsetdossier met de exacte generatie/runbinding;
+- start de aanvullende PostgreSQL-transactie met `SET TRANSACTION READ ONLY`;
+- initialiseert geen schema;
+- groepeert oude presentatieregels op stabiele `sku_id`;
+- blokkeert bij conflicterende duplicaten, een financieel verschil of onverklaarde ontbrekende lineage;
+- roept geen kostprijsformule en geen mutatie-endpoint aan.
+
+Deze slice bevat geen schemawijziging, migratie, backfill, dataherstel, herberekening of wijziging van een opgeslagen record. Het later bewerkbaar herstellen van een Jaarset blijft buiten scope en vereist een apart ontwerp, autorisatiepad en tests.
+
+## Gewijzigde grenzen
+
+- Backendprojectie: `backend/app/domain/historical_yearset_wizard_service.py`
+- Admin-only read endpoint: `GET /api/meta/commercial-yearsets/{operational_year}/historical-wizard`
+- Gedeelde 14-stappenbron: `frontend/src/components/nieuw-jaar/nieuwJaarWizardSteps.ts`
+- Historische UI: `frontend/src/components/HistoricalYearsetWizard.tsx`
+- Jaarsettoggle: `frontend/src/components/YearsetDossier.tsx`
+
+## Beschermende tests
+
+De contracttests bewaken:
+
+- exact dedupliceren zonder financieel verlies;
+- fail-closed gedrag bij conflicterende dubbele regels;
+- fail-closed gedrag bij afwijking van het definitieve dossier;
+- uitsluitend toegestane exacte doeljaarankers en niet-kostprijscatalogusregels buiten de oude batch;
+- het zichtbaar onderscheiden van exacte en later gereconstrueerde bronnen;
+- het exact afleiden en alleen-lezen tonen van inflatie-effecten op vaste kosten en verpakking;
+- het tonen van gekoppelde bron-/doelrecepten en afwijkingen van de afgeleide inflatie;
+- bron- én doeljaartotalen in de kostprijsstap en groepering van verkoopstrategie per bierstijl/familie;
+- een strict read-only reader zonder DDL of DML;
+- admin-only routebescherming;
+- hergebruik van één 14-stappencontract en afwezigheid van frontendmutaties.
+
+## Handmatige acceptatie
+
+1. Open `/beheer/jaarsets/2026` en controleer dat `Jaarsetoverzicht` standaard actief is.
+2. Kies `Wizardweergave` en controleer bronjaar 2025, doeljaar 2026 en exact 14 stappen.
+3. Controleer in stap 5 dat 6,0% als **afgeleid** staat, met bron-, inflatie- en doelwaarden per vaste-kostenregel.
+4. Controleer in stap 6 dezelfde driedeling voor alle 25 verpakkingsprijzen.
+5. Controleer in stap 8 dat onder meer Berlewalde Stout zichtbaar is en dat de ongewijzigde opgeslagen ingrediëntprijs expliciet afwijkt van bron + 6,0%.
+6. Controleer in stap 9: 103 oorspronkelijke regels, 74 unieke SKU's, 74 exacte matches en per SKU zowel de totale bron- als doeljaarkostprijs.
+7. Controleer in stap 10 dat SKU's volgens de canonieke eigenaar/familie zijn gegroepeerd; voor Blond zijn zes geprijsde regels zichtbaar. Gedeelde bundel-/serviceverwijzingen worden niet als extra Blond-eigendom gekopieerd.
+8. Controleer dat gereconstrueerde of niet-bewaarde bronnen expliciet zo zijn gemarkeerd.
+9. Loop met `Vorige` en `Volgende` door de stappen; er mag geen opslag-, activatie-, herstel- of verwijderactie zijn.
+10. Ga terug naar `Jaarsetoverzicht`; de oorspronkelijke dossierweergave moet ongewijzigd beschikbaar zijn.
+11. Kies afzonderlijk `Nieuw jaar voorbereiden`; deze actie moet nog steeds 2026→2027 openen.
+
+## Uitgesloten vervolgwerk
+
+- RF-012D2: `Kostprijs beheren` op de actieve commerciële generatie aansluiten.
+- RF-012D3: volledige planning-anchor- en factuur/brouw/LOT-kostprijshistorie tonen.
+- Historische Jaarset herstellen of opnieuw activeren.
+- Niet-bewaarde oude wizardinvoer reconstrueren of raden.

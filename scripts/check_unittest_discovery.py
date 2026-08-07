@@ -224,6 +224,16 @@ required_rf012d1_contracts = {
     "test_yearset_dossier.YearsetDossierReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
     "test_yearset_dossier.YearsetDossierFrontendContractTests.test_open_dossier_and_prepare_next_year_are_separate_actions",
 }
+required_rf012d1a_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_commercial_yearset_authority_routes_are_admin_only",
+    "test_historical_yearset_wizard.HistoricalYearsetWizardProjectionTests.test_duplicate_presentation_rows_collapse_to_one_exact_stable_sku",
+    "test_historical_yearset_wizard.HistoricalYearsetWizardProjectionTests.test_conflicting_duplicate_financial_rows_fail_closed",
+    "test_historical_yearset_wizard.HistoricalYearsetWizardProjectionTests.test_material_difference_from_finalized_dossier_fails_closed",
+    "test_historical_yearset_wizard.HistoricalYearsetWizardProjectionTests.test_only_exact_target_anchor_and_non_cost_catalog_rows_may_lack_legacy_batch",
+    "test_historical_yearset_wizard.HistoricalYearsetWizardProjectionTests.test_later_production_state_is_labeled_reconstructed",
+    "test_historical_yearset_wizard.HistoricalYearsetWizardReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
+    "test_historical_yearset_wizard.HistoricalYearsetWizardFrontendContractTests.test_historical_view_reuses_fourteen_step_source_and_has_no_mutation_form",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -248,6 +258,7 @@ missing = sorted(
         | required_rf012c1_contracts
         | required_rf012c2_contracts
         | required_rf012d1_contracts
+        | required_rf012d1a_contracts
     ).difference(ids)
 )
 
@@ -261,5 +272,5 @@ print(
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
-    "RF-012C2, and RF-012D1 contracts collected"
+    "RF-012C2, RF-012D1, and RF-012D1A contracts collected"
 )

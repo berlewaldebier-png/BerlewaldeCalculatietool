@@ -151,6 +151,7 @@ class AuthRouteMatrixTests(unittest.TestCase):
         routes = (
             ("GET", "/meta/commercial-yearsets"),
             ("GET", "/meta/commercial-yearsets/{operational_year}/dossier"),
+            ("GET", "/meta/commercial-yearsets/{operational_year}/historical-wizard"),
             ("POST", "/meta/commercial-yearsets/backfill"),
             ("POST", "/meta/commercial-yearsets/{generation_id}/activate"),
             ("POST", "/meta/commercial-yearsets/{generation_id}/rollback"),
@@ -241,8 +242,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 180, normalized)
-        self.assertEqual(digest, "289e1b2acf4ba5d07cdd2c988c12064928f8eb0d4d92f5fb64fea027bbca958f", normalized)
+        self.assertEqual(len(rows), 181, normalized)
+        self.assertEqual(digest, "03855b33a52f9f3e679d75db7838e203632a8f92c13d99dcdd1210a6adc4fd7a", normalized)
 
 
 if __name__ == "__main__":

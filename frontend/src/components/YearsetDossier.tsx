@@ -5,10 +5,11 @@ import { ArrowLeft, CalendarPlus, LockKeyhole } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { DataTablePro, type DataTableProColumn } from "@/components/DataTablePro";
+import { HistoricalYearsetWizard } from "@/components/HistoricalYearsetWizard";
 import { API_BASE_URL } from "@/lib/apiShared";
 
 
-type DossierTargets = {
+export type DossierTargets = {
   revenue: number;
   variable_cost: number;
   contribution: number;
@@ -16,9 +17,9 @@ type DossierTargets = {
   units: number;
 };
 
-type DossierPeriod = DossierTargets & { period: string };
+export type DossierPeriod = DossierTargets & { period: string };
 
-type DossierSku = {
+export type DossierSku = {
   sku_id: string;
   sku_code: string;
   sku_name: string;
@@ -55,14 +56,14 @@ type DossierSku = {
   };
 };
 
-type DossierEvent = {
+export type DossierEvent = {
   event_type: string;
   actor: string;
   reason: string;
   occurred_at: string;
 };
 
-type YearsetDossierResponse = {
+export type YearsetDossierResponse = {
   version: string;
   status: "ready" | "missing";
   read_only: boolean;
@@ -226,8 +227,10 @@ export function YearsetDossier({ year }: { year: number }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<"overview" | "wizard">("overview");
 
   useEffect(() => {
+    setView("overview");
     setLoading(true);
     setError("");
     void getDossier(year)
@@ -406,6 +409,38 @@ export function YearsetDossier({ year }: { year: number }) {
         </div>
       </section>
 
+      <section className="module-card yearset-dossier-view-toggle-card">
+        <div className="yearset-dossier-view-toggle" role="tablist" aria-label="Weergave van Jaarset">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "overview"}
+            className={`editor-button ${view === "overview" ? "editor-button-primary" : "editor-button-secondary"}`}
+            onClick={() => setView("overview")}
+          >
+            Jaarsetoverzicht
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "wizard"}
+            className={`editor-button ${view === "wizard" ? "editor-button-primary" : "editor-button-secondary"}`}
+            onClick={() => setView("wizard")}
+          >
+            Wizardweergave
+          </button>
+        </div>
+        <div className="module-card-text">
+          {view === "overview"
+            ? "Samenvatting van het definitieve dossier."
+            : "De 14 oorspronkelijke stappen, gevuld vanuit uitsluitend bewaarde bronnen en zonder wijzigingsmogelijkheden."}
+        </div>
+      </section>
+
+      {view === "wizard" ? (
+        <HistoricalYearsetWizard dossier={dossier} onShowOverview={() => setView("overview")} />
+      ) : (
+        <>
       <section className="module-card">
         <div className="module-card-header">
           <div className="module-card-title">Vastgelegd plan</div>
@@ -557,6 +592,8 @@ export function YearsetDossier({ year }: { year: number }) {
           </div>
         </details>
       </section>
+        </>
+      )}
     </div>
   );
 }
