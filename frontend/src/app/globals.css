@@ -1796,6 +1796,45 @@ a {
   color: #334155;
 }
 
+.cost-history-panel,
+.cost-history-panel .wizard-stack,
+.cost-history-panel .module-card,
+.cost-history-panel .editor-actions,
+.cost-history-panel .editor-actions-group {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cost-history-panel .editor-actions > *,
+.cost-history-panel .nested-field {
+  min-width: 0 !important;
+  max-width: 100%;
+}
+
+.cost-history-panel .dataset-editor-scroll {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overscroll-behavior-x: contain;
+}
+
+.cost-history-panel .dataset-editor-table {
+  min-width: 640px;
+}
+
+.cost-history-sku-toggle {
+  min-width: 0;
+}
+
+.cost-history-sku-name,
+.cost-history-panel .module-card-text,
+.cost-history-panel .muted {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .active-cost-group-header {
   width: 100%;
   display: flex;

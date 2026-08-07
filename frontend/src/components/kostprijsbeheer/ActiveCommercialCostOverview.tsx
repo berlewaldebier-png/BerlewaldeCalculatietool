@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState, type RefObject } from "react";
 import { API_BASE_URL } from "@/lib/api";
 import { ActionStatus } from "@/components/ActionStatus";
 import { SortButton } from "@/components/table/TableControls";
+import { CostHistoryPanel } from "@/components/kostprijsbeheer/CostHistoryPanel";
+import { methodLabel, money, provenanceLabel } from "@/components/kostprijsbeheer/costPresentation";
 
 
 type CostState = "ready" | "missing_cost" | "not_activated" | "not_applicable";
@@ -74,44 +76,6 @@ type SortKey = "sku" | "method" | "cost";
 type SortState = { key: SortKey; direction: "asc" | "desc" };
 
 
-const money = new Intl.NumberFormat("nl-NL", {
-  style: "currency",
-  currency: "EUR",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-
-function methodLabel(value: string) {
-  const labels: Record<string, string> = {
-    purchase: "Inkoop",
-    inkoop: "Inkoop",
-    production: "Eigen productie",
-    productie: "Eigen productie",
-    "eigen productie": "Eigen productie",
-    derived: "Afgeleid",
-    composed: "Zelf samengesteld",
-    year_transition: "Jaarovergang",
-    bundle: "Zelf samengesteld",
-    article: "Artikelkostprijs",
-  };
-  return labels[value] || value || "Onbekend";
-}
-
-
-function provenanceLabel(kind: string, sourceYear: number) {
-  const year = sourceYear > 0 ? ` uit ${sourceYear}` : "";
-  const labels: Record<string, string> = {
-    source_anchor: `Actieve planningskostprijs${year}`,
-    recalculated_from_source_year: `Overgenomen en herberekend${year}`,
-    recovered_from_exact_target_anchor: "Hersteld uit exact vastgelegd doeljaaranker",
-    target_operational_addition: "Toegevoegd in het actieve jaar",
-    catalog_reference: "Alleen catalogusreferentie",
-  };
-  return labels[kind] || kind || "Herkomst onbekend";
-}
-
-
 function typeLabel(value: string) {
   const labels: Record<string, string> = {
     beer: "Bier-SKU",
@@ -164,6 +128,7 @@ export function ActiveCommercialCostOverview({
   const [reloadKey, setReloadKey] = useState(0);
   const [search, setSearch] = useState("");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [sort, setSort] = useState<SortState>({ key: "sku", direction: "asc" });
 
   useEffect(() => {
@@ -266,6 +231,15 @@ export function ActiveCommercialCostOverview({
               <Link className="editor-button editor-button-secondary" href={`/beheer/jaarsets/${payload.binding.operational_year}`}>
                 Jaarset bekijken
               </Link>
+              <button
+                type="button"
+                className="editor-button editor-button-secondary"
+                aria-expanded={historyOpen}
+                aria-controls="active-cost-history"
+                onClick={() => setHistoryOpen((current) => !current)}
+              >
+                {historyOpen ? "Varianten / historie sluiten" : "Alle varianten / historie"}
+              </button>
             </div>
           </div>
 
@@ -372,6 +346,8 @@ export function ActiveCommercialCostOverview({
               })}
             </div>
           )}
+
+          {historyOpen ? <CostHistoryPanel id="active-cost-history" /> : null}
         </>
       )}
     </section>
