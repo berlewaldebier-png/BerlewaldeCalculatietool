@@ -136,11 +136,13 @@ def _sku(sku_id: str, **overrides) -> dict:
         "sku_code": sku_id.upper(),
         "sku_name": f"Product {sku_id}",
         "beer_name": "Berlewalde Blond",
+        "canonical_beer_id": "beer-blond",
         "scope_classification": "carried_forward",
         "subject_type": "beer",
         "subject_id": "beer-blond",
         "sku_kind": "beer_format",
         "calculation_method": "year_transition",
+        "cost_method": "inkoop",
         "provenance_kind": "source_anchor",
         "provenance_source_year": 2025,
         "primary_cost": "10",
@@ -234,6 +236,7 @@ class YearsetDossierProjectionTests(unittest.TestCase):
             if item["sku_id"] == "sku-blond-box"
         )
         self.assertEqual(blond["cost_price"], 17.0)
+        self.assertEqual(blond["subject_id"], "beer-blond")
         self.assertEqual(blond["list_price"], 42.5)
         self.assertEqual(blond["planned_revenue"], 220000.0)
         rounding = next(
@@ -336,9 +339,9 @@ class _ReadOnlyConnection:
                 cost_price=None,
             )]
             keys = (
-                "sku_id", "sku_code", "sku_name", "beer_name",
+                "sku_id", "sku_code", "sku_name", "beer_name", "canonical_beer_id",
                 "scope_classification", "subject_type", "subject_id", "sku_kind",
-                "calculation_method", "provenance_kind", "provenance_source_year",
+                "calculation_method", "cost_method", "provenance_kind", "provenance_source_year",
                 "primary_cost", "packaging_cost", "overhead_cost", "excise_cost",
                 "cost_price", "liters_per_unit", "cost_required",
                 "readiness_status", "blocker_codes", "source_anchor_id",
@@ -382,6 +385,21 @@ class YearsetDossierReaderTests(unittest.TestCase):
         self.assertEqual(connection.statements[0], "SET TRANSACTION READ ONLY")
         self.assertEqual(result["status"], "ready")
         self.assertEqual(result["binding"]["generation_id"], "generation-2026")
+
+    def test_active_reader_selects_the_active_generation_without_year_fallback(self) -> None:
+        connection = _ReadOnlyConnection()
+
+        @contextmanager
+        def connect():
+            yield connection
+
+        with patch.object(yearset_dossier_service.postgres_storage, "connect", connect):
+            result = yearset_dossier_service.read_active_yearset_dossier()
+
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["operational_year"], 2026)
+        self.assertIn("WHERE status = 'active'", connection.statements[1])
+        self.assertNotIn("operational_year =", connection.statements[1])
 
 
 class YearsetDossierFrontendContractTests(unittest.TestCase):

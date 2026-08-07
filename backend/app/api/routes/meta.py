@@ -27,6 +27,7 @@ from app.domain import yearset_recovery_service
 from app.domain import yearset_recovery_storage
 from app.domain import yearset_reconciliation_storage
 from app.domain import yearset_dossier_service
+from app.domain import active_cost_overview_service
 from app.domain import historical_yearset_wizard_service
 from app.domain import cost_authority_service
 from app.domain import cost_authority_storage
@@ -34,7 +35,7 @@ from app.domain import setup_service
 from app.domain import product_model_storage
 from app.domain import douano_margin_service
 from app.domain.ors_client import OrsClient, Coordinate
-from app.domain.auth_dependencies import require_admin, require_cost_activation, require_cost_draft, require_user
+from app.domain.auth_dependencies import require_admin, require_cost_activation, require_cost_draft, require_cost_view, require_user
 from app.schemas.new_year import PrepareNewYearRequest, UpsertNewYearDraftRequest, CommitNewYearRequest
 from app.schemas.kostprijs_activation import (
     ActivateKostprijzenRequest,
@@ -3164,6 +3165,15 @@ def get_commercial_yearsets(
     return commercial_yearset_service.authority_overview(
         fallback_year=int(fallback_year)
     )
+
+
+@router.get("/commercial-yearsets/active/cost-overview")
+def get_active_commercial_cost_overview(
+    _: dict = Depends(require_cost_view),
+) -> dict[str, Any]:
+    """Return the read-only active-generation projection for Kostprijs beheren."""
+
+    return active_cost_overview_service.read_active_cost_overview()
 
 
 @router.get("/commercial-yearsets/{operational_year}/dossier")

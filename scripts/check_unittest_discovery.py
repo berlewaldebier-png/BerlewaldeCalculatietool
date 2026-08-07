@@ -234,6 +234,15 @@ required_rf012d1a_contracts = {
     "test_historical_yearset_wizard.HistoricalYearsetWizardReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
     "test_historical_yearset_wizard.HistoricalYearsetWizardFrontendContractTests.test_historical_view_reuses_fourteen_step_source_and_has_no_mutation_form",
 }
+required_rf012d2_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_active_cost_overview_requires_cost_view_capability",
+    "test_active_cost_overview.ActiveCostOverviewProjectionTests.test_groups_each_physical_sku_once_and_prioritizes_box_then_keg",
+    "test_active_cost_overview.ActiveCostOverviewProjectionTests.test_keeps_missing_not_applicable_and_not_activated_distinct",
+    "test_active_cost_overview.ActiveCostOverviewProjectionTests.test_weizen_recalculation_provenance_is_preserved",
+    "test_active_cost_overview.ActiveCostOverviewProjectionTests.test_duplicate_sku_fails_closed_instead_of_cloning_a_cross_reference",
+    "test_active_cost_overview.ActiveCostOverviewReaderTests.test_reader_uses_read_only_shadow_query_and_never_initializes_schema",
+    "test_active_cost_overview.ActiveCostOverviewFrontendContractTests.test_kostprijs_beheren_uses_the_read_only_active_generation_component",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -259,6 +268,7 @@ missing = sorted(
         | required_rf012c2_contracts
         | required_rf012d1_contracts
         | required_rf012d1a_contracts
+        | required_rf012d2_contracts
     ).difference(ids)
 )
 
@@ -272,5 +282,5 @@ print(
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
-    "RF-012C2, RF-012D1, and RF-012D1A contracts collected"
+    "RF-012C2, RF-012D1, RF-012D1A, and RF-012D2 contracts collected"
 )
