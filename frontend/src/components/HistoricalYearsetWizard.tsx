@@ -414,7 +414,7 @@ function StrategyGroups({ rows }: { rows: HistoricalCostRow[] }) {
 }
 
 
-function CostTable({ rows, sourceYear }: { rows: HistoricalCostRow[]; sourceYear: number }) {
+function CostTable({ rows }: { rows: HistoricalCostRow[] }) {
   return (
     <div className="dataset-editor-scroll">
       <table className="dataset-editor-table historical-wizard-cost-table">
@@ -428,11 +428,11 @@ function CostTable({ rows, sourceYear }: { rows: HistoricalCostRow[]; sourceYear
             <tr key={row.sku_id}>
               <td><strong>{row.sku_name}</strong><div className="muted">{row.beer_name || row.sku_code || row.sku_id}</div></td>
               <td>{sourceKindLabel(row.source_kind)}<div className="muted">{row.reference_count > 1 ? `${row.reference_count} oorspronkelijke weergaveregels` : row.reference_count === 1 ? "1 stabiele SKU" : "Buiten de oude wizardbatch"}</div></td>
-              <td><strong>{formatMoney(row.target.primary_cost)}</strong><div className="muted">{sourceYear}: {formatMoney(row.source?.primary_cost)}</div></td>
-              <td><strong>{formatMoney(row.target.packaging_cost)}</strong><div className="muted">{sourceYear}: {formatMoney(row.source?.packaging_cost)}</div></td>
-              <td><strong>{formatMoney(row.target.overhead_cost)}</strong><div className="muted">{sourceYear}: {formatMoney(row.source?.overhead_cost)}</div></td>
-              <td><strong>{formatMoney(row.target.excise_cost)}</strong><div className="muted">{sourceYear}: {formatMoney(row.source?.excise_cost)}</div></td>
-              <td><strong>{row.cost_required ? formatMoney(row.target.cost_price) : "n.v.t."}</strong>{row.source ? <div className="muted">{sourceYear}: {formatMoney(row.source.cost_price)}</div> : null}</td>
+              <td><strong>{formatMoney(row.target.primary_cost)}</strong><div className="muted">{formatMoney(row.source?.primary_cost)}</div></td>
+              <td><strong>{formatMoney(row.target.packaging_cost)}</strong><div className="muted">{formatMoney(row.source?.packaging_cost)}</div></td>
+              <td><strong>{formatMoney(row.target.overhead_cost)}</strong><div className="muted">{formatMoney(row.source?.overhead_cost)}</div></td>
+              <td><strong>{formatMoney(row.target.excise_cost)}</strong><div className="muted">{formatMoney(row.source?.excise_cost)}</div></td>
+              <td><strong>{row.cost_required ? formatMoney(row.target.cost_price) : "n.v.t."}</strong>{row.source ? <div className="muted">{formatMoney(row.source.cost_price)}</div> : null}</td>
               <td><span className={`status-pill ${row.fidelity === "exact" || row.fidelity === "exact_anchor" ? "status-ok" : "status-neutral"}`}>{row.fidelity === "exact" ? "Exact gelijk" : row.fidelity === "exact_anchor" ? "Exact 2026-anker" : row.cost_required ? "Niet bewaard" : "n.v.t."}</span></td>
             </tr>
           ))}
@@ -576,7 +576,7 @@ export function HistoricalYearsetWizard({
               <Metric label="Dubbele verwijzingen" value={String(wizard.cost_snapshot.duplicate_reference_count)} detail="geen financieel conflict" />
             </div>
             <label className="nested-field historical-wizard-search"><span>Zoeken</span><input className="dataset-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Zoek bier of SKU…" /></label>
-            <CostTable rows={costRows} sourceYear={sourceYear} />
+            <CostTable rows={costRows} />
           </>
         );
       case "verkoopstrategie":

@@ -303,6 +303,7 @@ class HistoricalYearsetWizardFrontendContractTests(unittest.TestCase):
         self.assertIn("RecipeHistory", historical)
         self.assertIn("StrategyGroups", historical)
         self.assertIn("row.source.cost_price", historical)
+        self.assertNotIn("{sourceYear}: {formatMoney", historical)
         self.assertNotIn("<form", historical)
         self.assertNotIn("onSubmit=", historical)
         self.assertNotIn('method: "POST"', historical)

@@ -32,6 +32,14 @@ De oorspronkelijke losse inflatie-invoer is niet bewaard. Het percentage is wel 
 
 De definitieve doeljaar-kostprijsversies bevatten bovendien vier expliciet aan hun bronversie gekoppelde productierecepten: Berlewalde Goudkoorts, Hazy IPA, Lentebock en Stout. Deze bron- en doelreceptregels worden exact getoond. De opgeslagen doeljaar-ingrediëntprijzen zijn gelijk aan het bronjaar en volgen dus niet de afgeleide 6,0%; ook dit wordt alleen zichtbaar gemaakt en niet achteraf gecorrigeerd. De oorspronkelijke initialisatie-checkboxes zijn niet bewaard.
 
+### SSOT-grens bij Verkoopstrategie
+
+De bewaarde 2025→2026-wizardbatch bevat 15 presentatieregels die vanuit Berlewalde Blond werden getoond. Dit zijn niet 15 exclusief aan Blond toebehorende SKU's. Ze bestaan uit zeven rechtstreeks aan Blond gekoppelde SKU's en acht bundel-/serviceverwijzingen. Onder meer `Alles onder de boom 2025`, de geschenkverpakkingen en de proeverijen kwamen in dezelfde batch onder meerdere bierstijlen voor. De definitieve generatie dedupliceert zulke verwijzingen op stabiele `sku_id` en bewaart de financiële SKU eenmaal.
+
+Daarmee is de financiële identiteit wel centraal, maar de gewenste presentatie-eigendom of meervoudige stijltoewijzing van gedeelde bundels/services nog geen afzonderlijke SSOT. Stap 10 groepeert nu op de canonieke `beer_name` van het definitieve dossier en toont uitsluitend regels met een vastgelegde sell-inprijs. Voor Blond betekent dit: zeven canonieke kostprijs-SKU's, waarvan zes met een sell-inprijs. De gewone route `/verkoopstrategie` gebruikt tot RF-012C4 nog de compatibiliteitsreader met actuele activaties en `berekeningen.cost_lines`; die bron kan daarom een andere selectie tonen.
+
+RF-012C4 mag de gewone Verkoopstrategie pas omschakelen nadat het onderscheid is vastgelegd tussen (a) de eigenaar/familie van een SKU en (b) een gedeelde BOM-/presentatieverwijzing. Een gedeeld product mag niet stilzwijgend worden gekopieerd naar iedere stijl, maar ook niet verdwijnen. SKU's zonder sell-inprijs moeten met een getypeerde ontbrekende-prijsstatus zichtbaar blijven.
+
 ## Veiligheidsgrenzen
 
 De nieuwe backendreader:
@@ -77,7 +85,7 @@ De contracttests bewaken:
 4. Controleer in stap 6 dezelfde driedeling voor alle 25 verpakkingsprijzen.
 5. Controleer in stap 8 dat onder meer Berlewalde Stout zichtbaar is en dat de ongewijzigde opgeslagen ingrediëntprijs expliciet afwijkt van bron + 6,0%.
 6. Controleer in stap 9: 103 oorspronkelijke regels, 74 unieke SKU's, 74 exacte matches en per SKU zowel de totale bron- als doeljaarkostprijs.
-7. Controleer in stap 10 dat SKU's per bierstijl/familie zijn gegroepeerd.
+7. Controleer in stap 10 dat SKU's volgens de canonieke eigenaar/familie zijn gegroepeerd; voor Blond zijn zes geprijsde regels zichtbaar. Gedeelde bundel-/serviceverwijzingen worden niet als extra Blond-eigendom gekopieerd.
 8. Controleer dat gereconstrueerde of niet-bewaarde bronnen expliciet zo zijn gemarkeerd.
 9. Loop met `Vorige` en `Volgende` door de stappen; er mag geen opslag-, activatie-, herstel- of verwijderactie zijn.
 10. Ga terug naar `Jaarsetoverzicht`; de oorspronkelijke dossierweergave moet ongewijzigd beschikbaar zijn.
