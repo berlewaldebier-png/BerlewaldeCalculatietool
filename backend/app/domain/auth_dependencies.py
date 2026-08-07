@@ -66,6 +66,10 @@ def require_cost_activation(request: Request) -> dict:
     return _require_capability(request, auth_policy.CAP_COSTS_ACTIVATE)
 
 
+def require_cost_view(request: Request) -> dict:
+    return _require_capability(request, auth_policy.CAP_COSTS_VIEW)
+
+
 def require_cost_draft(request: Request) -> dict:
     return _require_capability(request, auth_policy.CAP_COSTS_DRAFT)
 

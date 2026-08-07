@@ -158,12 +158,15 @@ def _sku_items(
                 "sku_code": _text(raw.get("sku_code")),
                 "sku_name": _text(raw.get("sku_name")) or sku_id,
                 "beer_name": _text(raw.get("beer_name")),
+                "canonical_beer_id": _text(raw.get("canonical_beer_id")),
                 "sku_kind": _text(raw.get("sku_kind")),
                 "subject_type": _text(raw.get("subject_type")),
+                "subject_id": _text(raw.get("subject_id")),
                 "scope_classification": _text(
                     raw.get("scope_classification")
                 ),
                 "calculation_method": _text(raw.get("calculation_method")),
+                "cost_method": _text(raw.get("cost_method")),
                 "provenance_kind": _text(raw.get("provenance_kind")),
                 "provenance_source_year": int(
                     raw.get("provenance_source_year") or 0
@@ -422,29 +425,49 @@ def build_yearset_dossier(
     }
 
 
-def read_yearset_dossier(operational_year: int) -> dict[str, Any]:
+def _read_yearset_dossier(
+    operational_year: int | None,
+) -> dict[str, Any]:
     """Read one finalized yearset in one read-only transaction."""
 
-    year = int(operational_year or 0)
+    requested_year = int(operational_year or 0)
     with postgres_storage.connect() as conn:
         conn.execute("SET TRANSACTION READ ONLY")
-        generation_data = conn.execute(
-            """
-            SELECT id, operational_year, revision, status, readiness_status,
-                   source_year, source_generation_id, cost_source_year,
-                   pricing_source_year, advice_source_year, validation_hash,
-                   created_at, activated_at, activated_by, superseded_at
-            FROM commercial_yearsets
-            WHERE operational_year = %s
-              AND status IN ('active', 'superseded')
-            ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
-                     revision DESC, created_at DESC
-            LIMIT 1
-            """,
-            (year,),
-        ).fetchone()
+        if operational_year is None:
+            generation_data = conn.execute(
+                """
+                SELECT id, operational_year, revision, status, readiness_status,
+                       source_year, source_generation_id, cost_source_year,
+                       pricing_source_year, advice_source_year, validation_hash,
+                       created_at, activated_at, activated_by, superseded_at
+                FROM commercial_yearsets
+                WHERE status = 'active'
+                LIMIT 1
+                """
+            ).fetchone()
+        else:
+            generation_data = conn.execute(
+                """
+                SELECT id, operational_year, revision, status, readiness_status,
+                       source_year, source_generation_id, cost_source_year,
+                       pricing_source_year, advice_source_year, validation_hash,
+                       created_at, activated_at, activated_by, superseded_at
+                FROM commercial_yearsets
+                WHERE operational_year = %s
+                  AND status IN ('active', 'superseded')
+                ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                         revision DESC, created_at DESC
+                LIMIT 1
+                """,
+                (requested_year,),
+            ).fetchone()
         if not generation_data:
-            return _missing(year, "finalized_commercial_yearset_missing")
+            return _missing(
+                requested_year,
+                "active_commercial_yearset_missing"
+                if operational_year is None
+                else "finalized_commercial_yearset_missing",
+            )
         generation_columns = (
             "id",
             "operational_year",
@@ -463,6 +486,7 @@ def read_yearset_dossier(operational_year: int) -> dict[str, Any]:
             "superseded_at",
         )
         generation = dict(zip(generation_columns, generation_data, strict=True))
+        year = int(generation.get("operational_year") or requested_year)
         run_data = conn.execute(
             """
             SELECT id, generation_id, planner_version, status, readiness_status,
@@ -535,9 +559,15 @@ def read_yearset_dossier(operational_year: int) -> dict[str, Any]:
             plan_row = dict(zip(plan_columns, plan_data, strict=True))
         sku_data = conn.execute(
             """
-            SELECT s.sku_id, k.code, k.name, b.name,
+            SELECT s.sku_id, k.code, k.name, b.name, s.canonical_beer_id,
                    s.scope_classification, s.subject_type, s.subject_id,
-                   s.sku_kind, s.calculation_method, s.provenance_kind,
+                   s.sku_kind, s.calculation_method,
+                   COALESCE(
+                       NULLIF(source_v.payload->>'type', ''),
+                       NULLIF(source_v.payload->'soort_berekening'->>'type', ''),
+                       ''
+                   ),
+                   s.provenance_kind,
                    s.provenance_source_year, s.primary_cost,
                    s.packaging_cost, s.overhead_cost, s.excise_cost,
                    s.cost_price, s.liters_per_unit, s.cost_required,
@@ -547,6 +577,7 @@ def read_yearset_dossier(operational_year: int) -> dict[str, Any]:
             FROM commercial_yearset_candidate_skus s
             LEFT JOIN skus k ON k.id = s.sku_id
             LEFT JOIN canonical_beers b ON b.id = s.canonical_beer_id
+            LEFT JOIN cost_versions source_v ON source_v.id = s.source_cost_version_id
             WHERE s.run_id = %s
             ORDER BY COALESCE(b.name, ''), COALESCE(k.name, ''), s.sku_id
             """,
@@ -557,11 +588,13 @@ def read_yearset_dossier(operational_year: int) -> dict[str, Any]:
             "sku_code",
             "sku_name",
             "beer_name",
+            "canonical_beer_id",
             "scope_classification",
             "subject_type",
             "subject_id",
             "sku_kind",
             "calculation_method",
+            "cost_method",
             "provenance_kind",
             "provenance_source_year",
             "primary_cost",
@@ -661,3 +694,13 @@ def read_yearset_dossier(operational_year: int) -> dict[str, Any]:
         generation_events=events(generation_event_data),
         run_events=events(run_event_data),
     )
+
+
+def read_yearset_dossier(operational_year: int) -> dict[str, Any]:
+    return _read_yearset_dossier(int(operational_year or 0))
+
+
+def read_active_yearset_dossier() -> dict[str, Any]:
+    """Read the one active commercial yearset without a fallback-year guess."""
+
+    return _read_yearset_dossier(None)

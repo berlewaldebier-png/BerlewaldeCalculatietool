@@ -23,6 +23,7 @@ from app.domain.auth_dependencies import (
     require_admin,
     require_cost_activation,
     require_cost_draft,
+    require_cost_view,
     require_dataset_mutation,
     require_douano_sync,
     require_product_mappings_manage,
@@ -39,6 +40,7 @@ CAPABILITY_DEPENDENCIES = {
     require_users_manage: "users:manage",
     require_cost_activation: "costs:activate",
     require_cost_draft: "costs:draft",
+    require_cost_view: "costs:view",
     require_dataset_mutation: "dataset:mutate",
     require_quotes_manage: "quotes:manage",
     require_douano_sync: "douano:sync",
@@ -160,6 +162,18 @@ class AuthRouteMatrixTests(unittest.TestCase):
             with self.subTest(method=method, path=path):
                 self.assertEqual(_static_access(_route(meta_router, path, method)), "admin")
 
+    def test_active_cost_overview_requires_cost_view_capability(self) -> None:
+        self.assertEqual(
+            _static_access(
+                _route(
+                    meta_router,
+                    "/meta/commercial-yearsets/active/cost-overview",
+                    "GET",
+                )
+            ),
+            "costs:view",
+        )
+
     def test_cost_authority_routes_keep_prepare_approve_execute_separated(self) -> None:
         expected = {
             ("GET", "/meta/cost-authority"): "admin",
@@ -242,8 +256,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 181, normalized)
-        self.assertEqual(digest, "03855b33a52f9f3e679d75db7838e203632a8f92c13d99dcdd1210a6adc4fd7a", normalized)
+        self.assertEqual(len(rows), 182, normalized)
+        self.assertEqual(digest, "136963e3a7d766a7d50252916d710e7519caef9ff3c1634b710ceea172e98dac", normalized)
 
 
 if __name__ == "__main__":

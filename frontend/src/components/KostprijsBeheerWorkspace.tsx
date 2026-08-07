@@ -14,16 +14,12 @@ import {
 import { API_BASE_URL } from "@/lib/api";
 import {
   formatEuro,
-  formatPct,
 } from "@/components/kostprijsbeheer/kostprijsBeheerUtils";
-import type { PendingActivationState } from "@/components/kostprijsbeheer/ActivationModal";
 import { KostprijsBeheerHero } from "@/components/kostprijsbeheer/KostprijsBeheerHero";
-import { ActiveKostprijzenSection } from "@/components/kostprijsbeheer/ActiveKostprijzenSection";
+import { ActiveCommercialCostOverview } from "@/components/kostprijsbeheer/ActiveCommercialCostOverview";
 import { ExistingBerekeningenSection } from "@/components/kostprijsbeheer/ExistingBerekeningenSection";
 import {
-  buildActiveRows,
   buildExistingBerekeningenRows,
-  type ActiveCostRow,
   type ExistingBerekeningRow,
 } from "@/components/kostprijsbeheer/kostprijsBeheerDerivations";
 
@@ -102,14 +98,6 @@ export function KostprijsBeheerWorkspace({
     const seed = String(initialSelectedId ?? "").trim();
     return seed ? seed : null;
   });
-  const [search, setSearch] = useState("");
-  const [activeSort, setActiveSort] = useState<{
-    key: "bron" | "artikel" | "categorie" | "since" | "kostprijs";
-    direction: "asc" | "desc";
-  }>({ key: "bron", direction: "desc" });
-  const [pendingActivation, setPendingActivation] = useState<PendingActivationState | null>(null);
-  const [activationStatus, setActivationStatus] = useState("");
-
   // Lightweight "focus" hook for deep links from the dashboard (no UI changes, only initial scroll).
   const focusActivations = String(initialFocus ?? "") === "activations";
   const activeCostsRef = useRef<HTMLDivElement | null>(null);
@@ -149,11 +137,6 @@ export function KostprijsBeheerWorkspace({
     );
     return Array.from(years).sort((a, b) => a - b);
   }, [kostprijsproductactiveringen]);
-
-  const yearOptions = useMemo(() => {
-    const merged = new Set<number>([...productionYears, ...activationYears]);
-    return Array.from(merged).sort((a, b) => a - b);
-  }, [activationYears, productionYears]);
 
   const defaultYear = useMemo(() => {
     const now = new Date().getFullYear();
@@ -230,27 +213,6 @@ export function KostprijsBeheerWorkspace({
     }
   }
 
-  async function activateVersionFromOverview(versionId: string) {
-    const cleanId = String(versionId ?? "").trim();
-    if (!cleanId) {
-      throw new Error("Geen kostprijsversie geselecteerd.");
-    }
-    const response = await fetch(`${API_BASE_URL}/data/kostprijsversies/${encodeURIComponent(cleanId)}/activate`, {
-      method: "POST",
-    });
-    if (!response.ok) {
-      let detail = "";
-      try {
-        const payload = await response.json();
-        detail = String((payload as any)?.detail ?? "");
-      } catch {
-        detail = await response.text().catch(() => "");
-      }
-      throw new Error(detail || "Activeren mislukt.");
-    }
-    await refreshActivations();
-  }
-
   function handleRowsChange(rows: GenericRecord[]) {
     setCurrentBerekeningen(Array.isArray(rows) ? rows : []);
     void refreshBieren();
@@ -300,52 +262,6 @@ export function KostprijsBeheerWorkspace({
     return map;
   }, [currentBieren]);
 
-  const basisById = useMemo(() => {
-    const map = new Map<string, string>();
-    (Array.isArray(basisproducten) ? basisproducten : []).forEach((row) => {
-      const id = String((row as any)?.id ?? "");
-      const label = String((row as any)?.omschrijving ?? "");
-      if (id && label) {
-        map.set(id, label);
-      }
-    });
-    return map;
-  }, [basisproducten]);
-
-  const skuById = useMemo(() => {
-    const map = new Map<string, GenericRecord>();
-    (Array.isArray(currentSkus) ? currentSkus : []).forEach((row) => {
-      const id = String((row as any)?.id ?? "");
-      if (id) {
-        map.set(id, row);
-      }
-    });
-    return map;
-  }, [currentSkus]);
-
-  const articleById = useMemo(() => {
-    const map = new Map<string, GenericRecord>();
-    (Array.isArray(articles) ? articles : []).forEach((row) => {
-      const id = String((row as any)?.id ?? "");
-      if (id) {
-        map.set(id, row);
-      }
-    });
-    return map;
-  }, [articles]);
-
-  const samengesteldById = useMemo(() => {
-    const map = new Map<string, string>();
-    (Array.isArray(samengesteldeProducten) ? samengesteldeProducten : []).forEach((row) => {
-      const id = String((row as any)?.id ?? "");
-      const label = String((row as any)?.omschrijving ?? "");
-      if (id && label) {
-        map.set(id, label);
-      }
-    });
-    return map;
-  }, [samengesteldeProducten]);
-
   const berekeningenById = useMemo(() => {
     const map = new Map<string, GenericRecord>();
     (Array.isArray(currentBerekeningen) ? currentBerekeningen : []).forEach((row) => {
@@ -366,39 +282,6 @@ export function KostprijsBeheerWorkspace({
       selectedYear,
     });
   }, [bierenById, currentBerekeningen, existingFilterMode, existingSearch, selectedYear]);
-
-  const activeRows: ActiveCostRow[] = useMemo(() => {
-    return buildActiveRows({
-      kostprijsproductactiveringen: currentActivations,
-      selectedYear,
-      search,
-      activeSort,
-      bierenById,
-      basisById,
-      skuById,
-      articleById,
-      bomLines,
-      samengesteldById,
-      berekeningenById,
-      currentBerekeningen,
-      packagingComponentPrices,
-    });
-  }, [
-    activeSort.direction,
-    activeSort.key,
-    articleById,
-    bomLines,
-    basisById,
-    berekeningenById,
-    bierenById,
-    currentBerekeningen,
-    currentActivations,
-    packagingComponentPrices,
-    search,
-    samengesteldById,
-    selectedYear,
-    skuById,
-  ]);
 
   if (mode === "wizard-new") {
     if (newWizardKind === "article") {
@@ -550,22 +433,9 @@ export function KostprijsBeheerWorkspace({
 
       <div style={{ marginTop: 18 }} />
 
-      <ActiveKostprijzenSection
+      <ActiveCommercialCostOverview
         activeCostsRef={activeCostsRef}
-        selectedYear={selectedYear}
-        setSelectedYear={setSelectedYear}
-        yearOptions={yearOptions}
-        search={search}
-        setSearch={setSearch}
-        activeSort={activeSort}
-        setActiveSort={setActiveSort}
-        activeRows={activeRows}
-        formatEuro={formatEuro}
-        pendingActivation={pendingActivation}
-        activationStatus={activationStatus}
-        setPendingActivation={setPendingActivation}
-        setActivationStatus={setActivationStatus}
-        onActivateVersion={activateVersionFromOverview}
+        onOperationalYear={setSelectedYear}
       />
 
       <ExistingBerekeningenSection

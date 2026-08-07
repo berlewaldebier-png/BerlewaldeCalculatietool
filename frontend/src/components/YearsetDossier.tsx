@@ -24,10 +24,13 @@ export type DossierSku = {
   sku_code: string;
   sku_name: string;
   beer_name: string;
+  canonical_beer_id: string;
+  subject_id: string;
   sku_kind: string;
   subject_type: string;
   scope_classification: string;
   calculation_method: string;
+  cost_method: string;
   provenance_kind: string;
   provenance_source_year: number;
   primary_cost: number | null;
