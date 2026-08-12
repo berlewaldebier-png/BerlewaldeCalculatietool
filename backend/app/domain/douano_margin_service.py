@@ -15,6 +15,12 @@ from app.domain import (
     postgres_storage,
     product_model_storage,
 )
+from app.domain.actual_lot_cost_resolver import ActualLotCostResolver
+from app.domain.cost_resolution_postgres_reader import (
+    PostgresCostResolutionSnapshotReader,
+)
+from app.domain.cost_resolution_types import ActualLotCostResolution
+from app.domain.planning_actual_cost_resolver import ReadOnlyCostResolutionService
 
 
 def _parse_date(value: Any) -> date | None:
@@ -505,6 +511,82 @@ def _build_cost_resolution_context(
     return context
 
 
+def _build_sales_lot_context(sales_refs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Load only external transaction/SKU LOT facts; canonical mapping lives in RF-013B."""
+
+    txs = sorted(
+        {
+            str(tx or "").strip()
+            for ref in sales_refs
+            for tx in (ref.get("transaction_numbers") or [])
+            if str(tx or "").strip()
+        }
+    )
+    sku_codes = sorted(
+        {
+            str(ref.get("sku_code", "") or "").strip()
+            for ref in sales_refs
+            if str(ref.get("sku_code", "") or "").strip()
+        }
+    )
+    sales_lot_candidates: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    try:
+        if txs and sku_codes:
+            with postgres_storage.connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT lot_number, quantity, transaction_number, sku_code, updated_at
+                    FROM sales_lot_allocations
+                    WHERE transaction_number = ANY(%s)
+                      AND sku_code = ANY(%s)
+                    """,
+                    (txs, sku_codes),
+                ).fetchall()
+            for lot_number, quantity, transaction_number, sku_code, updated_at in rows:
+                key = (
+                    str(transaction_number or "").strip(),
+                    str(sku_code or "").strip(),
+                )
+                candidate = {
+                    "lot_number": str(lot_number or "").strip(),
+                    "quantity": float(quantity or 0),
+                    "transaction_number": key[0],
+                    "_score": (
+                        1 if str(lot_number or "").strip() else 0,
+                        abs(float(quantity or 0)),
+                        str(updated_at or ""),
+                    ),
+                }
+                sales_lot_candidates.setdefault(key, []).append(candidate)
+    except Exception:
+        return {"complete": False, "sales_lots": {}, "sales_lot_conflicts": {}}
+
+    sales_lots: dict[tuple[str, str], dict[str, Any]] = {}
+    sales_lot_conflicts: dict[tuple[str, str], tuple[str, ...]] = {}
+    for key, candidates in sales_lot_candidates.items():
+        distinct_lots = tuple(
+            sorted(
+                {
+                    str(row.get("lot_number", "") or "").strip()
+                    for row in candidates
+                    if str(row.get("lot_number", "") or "").strip()
+                }
+            )
+        )
+        if len(distinct_lots) > 1:
+            sales_lot_conflicts[key] = distinct_lots
+            continue
+        sales_lots[key] = max(
+            candidates,
+            key=lambda row: row.get("_score", (0, 0, "")),
+        )
+    return {
+        "complete": True,
+        "sales_lots": sales_lots,
+        "sales_lot_conflicts": sales_lot_conflicts,
+    }
+
+
 def _resolve_cost_per_unit(
     *,
     sku_id: str,
@@ -605,6 +687,148 @@ def _resolve_composed_sku_cost(
     if missing:
         return None, missing
     return total, []
+
+
+def _resolve_authoritative_cost_for_sale(
+    *,
+    transaction_number: str,
+    transaction_numbers: list[str] | None,
+    douano_sku: str,
+    sku_id: str,
+    as_of: date,
+    quantity: Any,
+    actual_resolver: ActualLotCostResolver,
+    versions_by_id: dict[str, dict[str, Any]],
+    resolution_context: dict[str, Any] | None = None,
+    lot_required: bool,
+    cost_requirement: str = "required",
+    internal_lot_number_override: str = "",
+) -> dict[str, Any]:
+    """Resolve one realized line through RF-013B authority, never through a LOT fallback."""
+
+    qty = _num(quantity)
+    tx_candidates = [
+        str(tx or "").strip()
+        for tx in (transaction_numbers or [])
+        if str(tx or "").strip()
+    ]
+    if transaction_number and transaction_number not in tx_candidates:
+        tx_candidates.insert(0, transaction_number)
+    context = resolution_context or {}
+    lot: dict[str, Any] | None = None
+    lot_candidates: list[dict[str, Any]] = []
+    conflicting_lot_set: set[str] = set()
+    sales_lot_conflicts = context.get("sales_lot_conflicts")
+    if isinstance(sales_lot_conflicts, dict):
+        for tx in tx_candidates:
+            conflict = sales_lot_conflicts.get((tx, douano_sku))
+            if conflict:
+                conflicting_lot_set.update(
+                    str(value).strip() for value in conflict if str(value).strip()
+                )
+    sales_lots = context.get("sales_lots")
+    if isinstance(sales_lots, dict):
+        for tx in tx_candidates:
+            candidate = sales_lots.get((tx, douano_sku))
+            if isinstance(candidate, dict):
+                lot_candidates.append(candidate)
+                candidate_lot = str(candidate.get("lot_number", "") or "").strip()
+                if candidate_lot:
+                    conflicting_lot_set.add(candidate_lot)
+    conflicting_lots = tuple(sorted(conflicting_lot_set))
+    if len(conflicting_lots) <= 1 and lot_candidates:
+        lot = max(
+            lot_candidates,
+            key=lambda row: row.get("_score", (0, 0, "")),
+        )
+    if (
+        lot is None
+        and len(conflicting_lots) <= 1
+        and not bool(context.get("complete", False))
+        and tx_candidates
+    ):
+        lot = lot_costs_storage.find_sales_lot_any(
+            transaction_numbers=tx_candidates,
+            sku_code=douano_sku,
+        )
+
+    external_lot = str((lot or {}).get("lot_number", "") or "").strip()
+    maintained_internal_lot = str(internal_lot_number_override or "").strip()
+    requested_lot = external_lot or maintained_internal_lot
+    if len(conflicting_lots) > 1 and lot_required and cost_requirement == "required":
+        result = ActualLotCostResolution(
+            status="multiple_lots_per_sales_line",
+            source="unresolved",
+            warnings=("multiple_exact_lots_require_explicit_line_allocation",),
+            candidate_lot_ids=conflicting_lots,
+        )
+    else:
+        result = actual_resolver.resolve_actual_lot_cost(
+            sku_id,
+            requested_lot,
+            cost_requirement=(
+                "ignored"
+                if cost_requirement == "ignored"
+                else "not_required"
+                if cost_requirement == "not_required"
+                else "required"
+            ),
+            lot_requirement="required" if lot_required else "not_required",
+            planning_year=int(as_of.year),
+        )
+    resolved = result.status in {
+        "resolved_exact_lot",
+        "resolved_non_lot_sku_cost",
+        "no_cost_required",
+        "ignored",
+    }
+    unit = result.cost_price_ex
+    component_breakdown = result.components
+    resolved_internal_lot = str(result.resolved_lot_id or "").strip()
+    if resolved_internal_lot == external_lot:
+        resolved_internal_lot = ""
+    return {
+        "cost_price_ex": float(unit) if unit is not None else None,
+        "cost_total_ex": qty * float(unit) if unit is not None else 0.0,
+        "cost_source": result.source,
+        "actual_resolution_status": result.status,
+        "lot_number": external_lot,
+        "lot_internal_number": resolved_internal_lot,
+        "lot_alias_id": str(result.lot_mapping_id or ""),
+        "lot_transaction_number": str(
+            (lot or {}).get("transaction_number", "") or ""
+        ).strip(),
+        "lot_cost_id": "",
+        "lot_supplier": "",
+        "lot_cost_missing": bool(lot_required and not resolved),
+        "kostprijsversie_id": str(result.cost_version_id or ""),
+        "kostprijsversie_label": _cost_version_label(
+            versions_by_id,
+            str(result.cost_version_id or ""),
+        ),
+        "cost_row_id": str(result.cost_row_id or ""),
+        "cost_components": (
+            {
+                "inkoop": float(component_breakdown.purchase_ex),
+                "verpakkingskosten": float(component_breakdown.packaging_ex),
+                "indirecte_kosten": float(component_breakdown.indirect_ex),
+                "accijns": float(component_breakdown.excise_ex),
+                "kostprijs": float(component_breakdown.cost_price_ex),
+            }
+            if component_breakdown is not None
+            else {}
+        ),
+        "missing_cost": not resolved,
+        "resolution_warnings": list(result.warnings),
+        "candidate_mapping_ids": list(result.candidate_mapping_ids),
+        "candidate_lot_ids": list(result.candidate_lot_ids),
+        "candidate_version_ids": list(result.candidate_version_ids),
+        "candidate_cost_row_ids": list(result.candidate_cost_row_ids),
+        "candidate_lot_cost_record_ids": list(
+            result.candidate_lot_cost_record_ids
+        ),
+        "resolution_policy_version": "rf-012c3-v1",
+    }
 
 
 def _resolve_cost_for_sale(
@@ -1374,6 +1598,13 @@ def list_company_lines(
                 "lot_near_match_version_id": str(payload.get("lot_near_match_version_id", "") or ""),
                 "lot_near_match_version_label": str(payload.get("lot_near_match_version_label", "") or ""),
                 "lot_near_match_number": str(payload.get("lot_near_match_number", "") or ""),
+                "resolution_warnings": list(payload.get("resolution_warnings", []) or []),
+                "candidate_mapping_ids": list(payload.get("candidate_mapping_ids", []) or []),
+                "candidate_lot_ids": list(payload.get("candidate_lot_ids", []) or []),
+                "candidate_version_ids": list(payload.get("candidate_version_ids", []) or []),
+                "candidate_cost_row_ids": list(payload.get("candidate_cost_row_ids", []) or []),
+                "candidate_lot_cost_record_ids": list(payload.get("candidate_lot_cost_record_ids", []) or []),
+                "resolution_policy_version": str(payload.get("resolution_policy_version", "") or ""),
             }
         )
     return out
@@ -1701,6 +1932,11 @@ def list_order_lines(
             )
             rows = cur.fetchall() or []
 
+    frozen_snapshots = douano_margin_snapshot_storage.load_line_snapshots(
+        source_type="order",
+        source_line_ids=[int(row[0] or 0) for row in rows],
+    )
+
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
     versions = dataset_store.load_dataset("kostprijsversies")
     activation_index = _build_activation_index(activations if isinstance(activations, list) else [])
@@ -1761,6 +1997,9 @@ def list_order_lines(
         versions_by_id=versions_by_id,
         snapshot_cost_index=snapshot_cost_index,
     )
+    authoritative_actual = ReadOnlyCostResolutionService(
+        PostgresCostResolutionSnapshotReader()
+    ).actual
 
     out: list[dict[str, Any]] = []
     for (
@@ -1781,10 +2020,11 @@ def list_order_lines(
         ignored,
     ) in rows:
         order_date = _parse_date(order_date_raw)
-        sku_id_text = str(sku_id or "")
+        frozen = frozen_snapshots.get(int(line_id or 0))
+        sku_id_text = str((frozen or {}).get("sku_id", "") or sku_id or "")
         info = sku_info.get(sku_id_text, {})
-        bier_id_text = str(info.get("beer_id", "") or "")
-        product_id_text = str(info.get("format_article_id", "") or "")
+        bier_id_text = str((frozen or {}).get("bier_id", "") or info.get("beer_id", "") or "")
+        product_id_text = str((frozen or {}).get("product_id", "") or info.get("format_article_id", "") or "")
         sku_kind = str(info.get("kind", "") or "").strip().lower()
         sku_product_group = str(info.get("product_group", "") or "").strip().lower()
         lot_required = bool(sku_id_text) and sku_kind == "beer_format" and sku_product_group != "giftset"
@@ -1794,21 +2034,25 @@ def list_order_lines(
         missing_cost = False
         kostprijsversie_id = ""
 
-        if sku_id_text and order_date is not None:
-            resolved_cost = _resolve_cost_for_sale(
+        if frozen is not None:
+            resolved_cost = frozen
+            cost_unit = frozen.get("cost_price_ex")
+            kostprijsversie_id = str(frozen.get("kostprijsversie_id", "") or "")
+            missing_cost = bool(frozen.get("missing_cost"))
+            cost_total = float(frozen.get("cost_total_ex", 0.0) or 0.0)
+            margin = float(frozen.get("margin_ex", 0.0) or 0.0)
+        elif sku_id_text and order_date is not None:
+            resolved_cost = _resolve_authoritative_cost_for_sale(
                 transaction_number=str(transaction_number or ""),
+                transaction_numbers=None,
                 douano_sku=str(sku or ""),
                 sku_id=sku_id_text,
                 as_of=order_date,
                 quantity=quantity,
-                activations_index=activation_index,
+                actual_resolver=authoritative_actual,
                 versions_by_id=versions_by_id,
-                snapshot_cost_index=snapshot_cost_index,
-                snapshot_components_index=snapshot_components_index,
                 resolution_context=resolution_context,
-                sku_info_index=sku_info,
-                packaging_component_cost_index=packaging_component_cost_index,
-                sku_composition_index=sku_composition_index,
+                lot_required=lot_required,
             )
             cost_unit = resolved_cost.get("cost_price_ex")
             kostprijsversie_id = str(resolved_cost.get("kostprijsversie_id", "") or "")
@@ -1820,7 +2064,13 @@ def list_order_lines(
 
         if only_missing_cost and not missing_cost:
             continue
-        cost_components = snapshot_components_index.get((kostprijsversie_id, sku_id_text), {}) if kostprijsversie_id and sku_id_text else {}
+        cost_components = (
+            resolved_cost.get("cost_components")
+            if isinstance(resolved_cost.get("cost_components"), dict)
+            else snapshot_components_index.get((kostprijsversie_id, sku_id_text), {})
+            if kostprijsversie_id and sku_id_text
+            else {}
+        )
         variable_breakdown = _variable_cost_breakdown(
             cost_total=cost_total,
             quantity=quantity,
@@ -1844,14 +2094,14 @@ def list_order_lines(
             "sku_id": sku_id_text,
             "bier_id": bier_id_text,
             "product_id": product_id_text,
-            "ignored": bool(ignored),
+            "ignored": bool((frozen or {}).get("ignored", ignored)),
             "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
             "cost_total_ex": float(cost_total),
             "variabel_ex": float(variable_breakdown["variable_cost_ex"]),
             "variabel_accijns_ex": float(variable_breakdown["variable_cost_with_excise_ex"]),
             "margin_ex": float(margin),
             "missing_cost": bool(missing_cost),
-            "mapped": bool(sku_id_text),
+            "mapped": bool((frozen or {}).get("mapped", bool(sku_id_text))),
             "lot_required": lot_required,
             "kostprijsversie_id": kostprijsversie_id,
             "kostprijsversie_label": str(resolved_cost.get("kostprijsversie_label", "") or ""),
@@ -1864,8 +2114,10 @@ def list_order_lines(
             "lot_near_match_version_id": str(resolved_cost.get("lot_near_match_version_id", "") or ""),
             "lot_near_match_version_label": str(resolved_cost.get("lot_near_match_version_label", "") or ""),
             "lot_near_match_number": str(resolved_cost.get("lot_near_match_number", "") or ""),
+            "resolution_warnings": list(resolved_cost.get("resolution_warnings", []) or []),
+            "candidate_version_ids": list(resolved_cost.get("candidate_version_ids", []) or []),
         }
-        item["cost_status"] = _snapshot_cost_status(item)
+        item["cost_status"] = str((frozen or {}).get("cost_status", "") or _snapshot_cost_status(item))
         out.append(item)
     return out
 
@@ -1936,6 +2188,11 @@ def list_invoice_lines(
             )
             rows = cur.fetchall() or []
 
+    frozen_snapshots = douano_margin_snapshot_storage.load_line_snapshots(
+        source_type="invoice",
+        source_line_ids=[int(row[0] or 0) for row in rows],
+    )
+
     activations = dataset_store.load_dataset("kostprijsproductactiveringen")
     versions = dataset_store.load_dataset("kostprijsversies")
     activation_index = _build_activation_index(activations if isinstance(activations, list) else [])
@@ -1996,6 +2253,9 @@ def list_invoice_lines(
         versions_by_id=versions_by_id,
         snapshot_cost_index=snapshot_cost_index,
     )
+    authoritative_actual = ReadOnlyCostResolutionService(
+        PostgresCostResolutionSnapshotReader()
+    ).actual
 
     out: list[dict[str, Any]] = []
     for (
@@ -2018,10 +2278,11 @@ def list_invoice_lines(
         tx_candidates = [str(tx or "") for tx in (transaction_numbers or []) if str(tx or "")]
         transaction_number = tx_candidates[0] if tx_candidates else ""
         invoice_date = _parse_date(invoice_date_raw)
-        sku_id_text = str(sku_id or "")
+        frozen = frozen_snapshots.get(int(line_id or 0))
+        sku_id_text = str((frozen or {}).get("sku_id", "") or sku_id or "")
         info = sku_info.get(sku_id_text, {})
-        bier_id_text = str(info.get("beer_id", "") or "")
-        product_id_text = str(info.get("format_article_id", "") or "")
+        bier_id_text = str((frozen or {}).get("bier_id", "") or info.get("beer_id", "") or "")
+        product_id_text = str((frozen or {}).get("product_id", "") or info.get("format_article_id", "") or "")
         sku_kind = str(info.get("kind", "") or "").strip().lower()
         sku_product_group = str(info.get("product_group", "") or "").strip().lower()
         lot_required = bool(sku_id_text) and sku_kind == "beer_format" and sku_product_group != "giftset"
@@ -2031,22 +2292,25 @@ def list_invoice_lines(
         missing_cost = False
         kostprijsversie_id = ""
 
-        if sku_id_text and invoice_date is not None:
-            resolved_cost = _resolve_cost_for_sale(
+        if frozen is not None:
+            resolved_cost = frozen
+            cost_unit = frozen.get("cost_price_ex")
+            kostprijsversie_id = str(frozen.get("kostprijsversie_id", "") or "")
+            missing_cost = bool(frozen.get("missing_cost"))
+            cost_total = float(frozen.get("cost_total_ex", 0.0) or 0.0)
+            margin = float(frozen.get("margin_ex", 0.0) or 0.0)
+        elif sku_id_text and invoice_date is not None:
+            resolved_cost = _resolve_authoritative_cost_for_sale(
                 transaction_number=transaction_number,
                 transaction_numbers=tx_candidates,
                 douano_sku=str(sku or ""),
                 sku_id=sku_id_text,
                 as_of=invoice_date,
                 quantity=quantity,
-                activations_index=activation_index,
+                actual_resolver=authoritative_actual,
                 versions_by_id=versions_by_id,
-                snapshot_cost_index=snapshot_cost_index,
-                snapshot_components_index=snapshot_components_index,
                 resolution_context=resolution_context,
-                sku_info_index=sku_info,
-                packaging_component_cost_index=packaging_component_cost_index,
-                sku_composition_index=sku_composition_index,
+                lot_required=lot_required,
             )
             cost_unit = resolved_cost.get("cost_price_ex")
             kostprijsversie_id = str(resolved_cost.get("kostprijsversie_id", "") or "")
@@ -2058,7 +2322,13 @@ def list_invoice_lines(
 
         if only_missing_cost and not missing_cost:
             continue
-        cost_components = snapshot_components_index.get((kostprijsversie_id, sku_id_text), {}) if kostprijsversie_id and sku_id_text else {}
+        cost_components = (
+            resolved_cost.get("cost_components")
+            if isinstance(resolved_cost.get("cost_components"), dict)
+            else snapshot_components_index.get((kostprijsversie_id, sku_id_text), {})
+            if kostprijsversie_id and sku_id_text
+            else {}
+        )
         variable_breakdown = _variable_cost_breakdown(
             cost_total=cost_total,
             quantity=quantity,
@@ -2082,14 +2352,14 @@ def list_invoice_lines(
             "sku_id": sku_id_text,
             "bier_id": bier_id_text,
             "product_id": product_id_text,
-            "ignored": bool(ignored),
+            "ignored": bool((frozen or {}).get("ignored", ignored)),
             "cost_price_ex": float(cost_unit or 0) if cost_unit is not None else None,
             "cost_total_ex": float(cost_total),
             "variabel_ex": float(variable_breakdown["variable_cost_ex"]),
             "variabel_accijns_ex": float(variable_breakdown["variable_cost_with_excise_ex"]),
             "margin_ex": float(margin),
             "missing_cost": bool(missing_cost),
-            "mapped": bool(sku_id_text),
+            "mapped": bool((frozen or {}).get("mapped", bool(sku_id_text))),
             "lot_required": lot_required,
             "kostprijsversie_id": kostprijsversie_id,
             "kostprijsversie_label": str(resolved_cost.get("kostprijsversie_label", "") or ""),
@@ -2102,8 +2372,10 @@ def list_invoice_lines(
             "lot_near_match_version_id": str(resolved_cost.get("lot_near_match_version_id", "") or ""),
             "lot_near_match_version_label": str(resolved_cost.get("lot_near_match_version_label", "") or ""),
             "lot_near_match_number": str(resolved_cost.get("lot_near_match_number", "") or ""),
+            "resolution_warnings": list(resolved_cost.get("resolution_warnings", []) or []),
+            "candidate_version_ids": list(resolved_cost.get("candidate_version_ids", []) or []),
         }
-        item["cost_status"] = _snapshot_cost_status(item)
+        item["cost_status"] = str((frozen or {}).get("cost_status", "") or _snapshot_cost_status(item))
         out.append(item)
     return out
 
@@ -2115,6 +2387,11 @@ def _snapshot_cost_status(line: dict[str, Any]) -> str:
         return "no_cost_required"
     if not bool(line.get("mapped")):
         return "unmapped_sku"
+    authoritative_status = str(
+        line.get("actual_resolution_status", "") or ""
+    ).strip()
+    if authoritative_status:
+        return authoritative_status
     if bool(line.get("missing_cost")):
         return "missing_lot_cost" if str(line.get("lot_number", "") or "").strip() else "missing_cost"
     source = str(line.get("cost_source", "") or "").strip().lower()
@@ -2184,51 +2461,55 @@ def _line_snapshot_record(*, source_type: str, line: dict[str, Any]) -> dict[str
             "lot_near_match_version_id": str(line.get("lot_near_match_version_id", "") or ""),
             "lot_near_match_version_label": str(line.get("lot_near_match_version_label", "") or ""),
             "lot_near_match_number": str(line.get("lot_near_match_number", "") or ""),
+            "actual_resolution_status": str(line.get("actual_resolution_status", "") or ""),
+            "cost_row_id": str(line.get("cost_row_id", "") or ""),
+            "cost_components": (
+                dict(line.get("cost_components") or {})
+                if isinstance(line.get("cost_components"), dict)
+                else {}
+            ),
+            "resolution_warnings": list(line.get("resolution_warnings", []) or []),
+            "candidate_mapping_ids": list(line.get("candidate_mapping_ids", []) or []),
+            "candidate_lot_ids": list(line.get("candidate_lot_ids", []) or []),
+            "candidate_version_ids": list(line.get("candidate_version_ids", []) or []),
+            "candidate_cost_row_ids": list(line.get("candidate_cost_row_ids", []) or []),
+            "candidate_lot_cost_record_ids": list(line.get("candidate_lot_cost_record_ids", []) or []),
+            "resolution_policy_version": str(line.get("resolution_policy_version", "") or ""),
         },
     }
 
 
 def _build_snapshot_run_context() -> dict[str, Any]:
-    activations = dataset_store.load_dataset("kostprijsproductactiveringen")
-    activation_rows = activations if isinstance(activations, list) else []
-    activation_index = _build_activation_index([row for row in activation_rows if isinstance(row, dict)])
-    cost_versions_storage.ensure_schema()
-    versions_by_id: dict[str, dict[str, Any]] = {}
-    with postgres_storage.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, jaar, status, bier_id, versie_nummer, payload
-                FROM cost_versions
-                """
-            )
-            for version_id, jaar, status, bier_id, versie_nummer, payload in cur.fetchall() or []:
-                vid = str(version_id or "").strip()
-                if not vid:
-                    continue
-                row = payload if isinstance(payload, dict) else {}
-                if not isinstance(row, dict):
-                    row = {}
-                row = dict(row)
-                row["id"] = vid
-                row["jaar"] = int(jaar or row.get("jaar", 0) or 0)
-                row["status"] = str(status or row.get("status", "") or "")
-                row["bier_id"] = str(bier_id or row.get("bier_id", "") or "")
-                row["versie_nummer"] = int(versie_nummer or row.get("versie_nummer", 0) or 0)
-                versions_by_id[vid] = row
-    used_version_ids = [
-        str(row.get("kostprijsversie_id", "") or "")
-        for row in activation_rows
-        if isinstance(row, dict) and str(row.get("kostprijsversie_id", "") or "").strip()
-    ]
-    used_version_ids.extend(
-        version_id
-        for version_id, row in versions_by_id.items()
-        if str(row.get("status", "") or "").strip().lower() == "definitief"
+    authority_snapshot = (
+        PostgresCostResolutionSnapshotReader().read_cost_resolution_snapshot()
     )
-    snapshot_cost_index = _build_snapshot_cost_index(versions_by_id, used_version_ids)
-    snapshot_components_index = _build_snapshot_components_index(used_version_ids)
-    skus_payload = postgres_storage.load_dataset("skus", [])
+    actual_cost_resolver = ActualLotCostResolver(authority_snapshot)
+    with postgres_storage.connect() as conn:
+        conn.execute("SET TRANSACTION READ ONLY")
+        active_year_rows = conn.execute(
+            """
+            SELECT operational_year
+            FROM commercial_yearsets
+            WHERE status = 'active'
+            ORDER BY activated_at DESC NULLS LAST, id
+            """
+        ).fetchall()
+        conn.rollback()
+    if len(active_year_rows) != 1:
+        raise RuntimeError(
+            "Er moet exact één actieve commerciële jaarset zijn; actual-cost snapshots worden niet herberekend."
+        )
+    active_commercial_year = int(active_year_rows[0][0] or 0)
+    if active_commercial_year <= 0:
+        raise RuntimeError(
+            "De actieve commerciële jaarset heeft geen geldig jaar; actual-cost snapshots worden niet herberekend."
+        )
+    versions_by_id = {
+        str(row.get("id", "") or ""): dict(row)
+        for row in authority_snapshot.cost_versions
+        if str(row.get("id", "") or "").strip()
+    }
+    skus_payload = list(authority_snapshot.skus)
     sku_info: dict[str, dict[str, str]] = {}
     if isinstance(skus_payload, list):
         for sku_row in skus_payload:
@@ -2275,12 +2556,9 @@ def _build_snapshot_run_context() -> dict[str, Any]:
             if desc_key and _rule_priority(rule) >= _rule_priority(unmapped_rules_by_description.get(desc_key)):
                 unmapped_rules_by_description[desc_key] = rule
     return {
-        "activation_index": activation_index,
+        "actual_cost_resolver": actual_cost_resolver,
+        "active_commercial_year": active_commercial_year,
         "versions_by_id": versions_by_id,
-        "snapshot_cost_index": snapshot_cost_index,
-        "snapshot_components_index": snapshot_components_index,
-        "packaging_component_cost_index": _build_packaging_component_cost_index(),
-        "sku_composition_index": _build_sku_composition_index(),
         "sku_info": sku_info,
         "unmapped_rules_by_product_id": unmapped_rules_by_product_id,
         "unmapped_rules_by_description": unmapped_rules_by_description,
@@ -2304,11 +2582,7 @@ def _resolve_snapshot_batch(
             transaction_numbers = [str(row[4] or "")] if str(row[4] or "") else []
             sku = str(row[7] or "")
         sales_refs.append({"transaction_numbers": transaction_numbers, "sku_code": sku})
-    resolution_context = _build_cost_resolution_context(
-        sales_refs,
-        versions_by_id=run_context["versions_by_id"],
-        snapshot_cost_index=run_context["snapshot_cost_index"],
-    )
+    resolution_context = _build_sales_lot_context(sales_refs)
 
     out: list[dict[str, Any]] = []
     sku_info: dict[str, dict[str, str]] = run_context["sku_info"]
@@ -2359,28 +2633,25 @@ def _resolve_snapshot_batch(
         margin = 0.0
         missing_cost = False
         kostprijsversie_id = ""
-        if no_cost_required:
-            cost_unit = 0.0
-            cost_total = 0.0
-            margin = float(net_revenue_ex or 0.0)
-            missing_cost = False
-            resolved_cost = {"cost_source": "no_cost_required"}
-        elif sku_id_text and line_date is not None:
-            resolved_cost = _resolve_cost_for_sale(
+        if line_date is not None and (bool(ignored) or no_cost_required or sku_id_text):
+            resolved_cost = _resolve_authoritative_cost_for_sale(
                 transaction_number=transaction_number,
                 transaction_numbers=tx_candidates,
                 douano_sku=str(sku or ""),
                 sku_id=sku_id_text,
                 as_of=line_date,
                 quantity=quantity,
-                activations_index=run_context["activation_index"],
+                actual_resolver=run_context["actual_cost_resolver"],
                 versions_by_id=run_context["versions_by_id"],
-                snapshot_cost_index=run_context["snapshot_cost_index"],
-                snapshot_components_index=run_context["snapshot_components_index"],
                 resolution_context=resolution_context,
-                sku_info_index=sku_info,
-                packaging_component_cost_index=run_context["packaging_component_cost_index"],
-                sku_composition_index=run_context["sku_composition_index"],
+                lot_required=lot_required,
+                cost_requirement=(
+                    "ignored"
+                    if bool(ignored)
+                    else "not_required"
+                    if no_cost_required
+                    else "required"
+                ),
                 internal_lot_number_override=rule_internal_lot_number,
             )
             cost_unit = resolved_cost.get("cost_price_ex")
@@ -2422,6 +2693,20 @@ def _resolve_snapshot_batch(
             "lot_near_match_version_id": str(resolved_cost.get("lot_near_match_version_id", "") or ""),
             "lot_near_match_version_label": str(resolved_cost.get("lot_near_match_version_label", "") or ""),
             "lot_near_match_number": str(resolved_cost.get("lot_near_match_number", "") or ""),
+            "actual_resolution_status": str(resolved_cost.get("actual_resolution_status", "") or ""),
+            "cost_row_id": str(resolved_cost.get("cost_row_id", "") or ""),
+            "cost_components": (
+                dict(resolved_cost.get("cost_components") or {})
+                if isinstance(resolved_cost.get("cost_components"), dict)
+                else {}
+            ),
+            "resolution_warnings": list(resolved_cost.get("resolution_warnings", []) or []),
+            "candidate_mapping_ids": list(resolved_cost.get("candidate_mapping_ids", []) or []),
+            "candidate_lot_ids": list(resolved_cost.get("candidate_lot_ids", []) or []),
+            "candidate_version_ids": list(resolved_cost.get("candidate_version_ids", []) or []),
+            "candidate_cost_row_ids": list(resolved_cost.get("candidate_cost_row_ids", []) or []),
+            "candidate_lot_cost_record_ids": list(resolved_cost.get("candidate_lot_cost_record_ids", []) or []),
+            "resolution_policy_version": str(resolved_cost.get("resolution_policy_version", "") or ""),
         }
         if source_type == "invoice":
             line["sales_invoice_id"] = int(document_id or 0)
@@ -2528,7 +2813,11 @@ def backfill_line_snapshots(
                 record for line in lines
                 if (record := _line_snapshot_record(source_type="order", line=line)) is not None
             ]
-            computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+            computed += douano_margin_snapshot_storage.upsert_line_snapshots(
+                records,
+                preserve_finalized=True,
+                recompute_from_year=int(run_context["active_commercial_year"]),
+            )
             for line in lines:
                 documents.add(("order", int(line.get("sales_order_id", 0) or 0)))
                 if line.get("missing_cost"):
@@ -2605,7 +2894,11 @@ def backfill_line_snapshots(
                 record for line in lines
                 if (record := _line_snapshot_record(source_type="invoice", line=line)) is not None
             ]
-            computed += douano_margin_snapshot_storage.upsert_line_snapshots(records)
+            computed += douano_margin_snapshot_storage.upsert_line_snapshots(
+                records,
+                preserve_finalized=True,
+                recompute_from_year=int(run_context["active_commercial_year"]),
+            )
             for line in lines:
                 documents.add(("invoice", int(line.get("sales_invoice_id", 0) or 0)))
                 if line.get("missing_cost"):

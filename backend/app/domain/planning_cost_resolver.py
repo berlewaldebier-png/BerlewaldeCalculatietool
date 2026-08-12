@@ -43,6 +43,9 @@ class PlanningCostResolver:
                 warnings=("planning_scope_invalid",),
             )
 
+        if self._snapshot.authority_mode == "canonical":
+            return self._resolve_canonical_anchor(sku, scope_year)
+
         activations = [
             row
             for row in self._snapshot.activations
@@ -149,6 +152,105 @@ class PlanningCostResolver:
             cost_row_id=text(cost_row.get("id")),
             components=breakdown,
             warnings=warnings,
+            **common,
+        )
+
+    def _resolve_canonical_anchor(
+        self,
+        sku_id: str,
+        planning_year: int,
+    ) -> PlanningCostResolution:
+        anchors = [
+            row
+            for row in self._snapshot.planning_anchors
+            if text(row.get("sku_id")) == sku_id
+            and year(row.get("planning_year") or row.get("jaar")) == planning_year
+        ]
+        if not anchors:
+            return PlanningCostResolution(
+                status="missing_anchor",
+                source="canonical_planning_anchor",
+                warnings=("canonical_planning_anchor_missing",),
+            )
+        if len(anchors) > 1:
+            return PlanningCostResolution(
+                status="ambiguous_anchor",
+                source="canonical_planning_anchor",
+                warnings=("canonical_planning_anchor_ambiguous",),
+                candidate_source_ids=dedupe(text(row.get("id")) for row in anchors),
+                candidate_version_ids=dedupe(
+                    text(row.get("cost_version_id") or row.get("kostprijsversie_id"))
+                    for row in anchors
+                ),
+                candidate_cost_row_ids=dedupe(
+                    text(row.get("cost_row_id")) for row in anchors
+                ),
+            )
+
+        anchor = anchors[0]
+        version_id = text(
+            anchor.get("cost_version_id") or anchor.get("kostprijsversie_id")
+        )
+        cost_row_id = text(anchor.get("cost_row_id"))
+        source = (
+            "canonical_explicit_rebaseline"
+            if text(anchor.get("anchor_kind")).casefold() == "explicit_rebaseline"
+            else "canonical_first_activation_anchor"
+        )
+        common = {
+            "source": source,
+            "source_id": text(anchor.get("id")),
+            "activation_id": text(anchor.get("activation_id")),
+            "cost_version_id": version_id,
+            "effective_at": text(anchor.get("effective_at")),
+            "history_proven": True,
+            "candidate_source_ids": (text(anchor.get("id")),)
+            if text(anchor.get("id"))
+            else (),
+            "candidate_version_ids": (version_id,) if version_id else (),
+        }
+        if not version_id or version_id not in self._versions_by_id:
+            return PlanningCostResolution(
+                status="missing_cost_version",
+                warnings=("canonical_planning_cost_version_missing",),
+                **common,
+            )
+
+        matching_rows = [
+            row
+            for row in self._rows_by_key.get((version_id, sku_id), [])
+            if not cost_row_id or text(row.get("id")) == cost_row_id
+        ]
+        if not matching_rows:
+            return PlanningCostResolution(
+                status="missing_cost_row",
+                warnings=("canonical_planning_cost_row_missing",),
+                candidate_cost_row_ids=(cost_row_id,) if cost_row_id else (),
+                **common,
+            )
+        if len(matching_rows) > 1:
+            return PlanningCostResolution(
+                status="ambiguous_cost_row",
+                warnings=("canonical_planning_cost_row_ambiguous",),
+                candidate_cost_row_ids=dedupe(
+                    text(row.get("id")) for row in matching_rows
+                ),
+                **common,
+            )
+        cost_row = matching_rows[0]
+        breakdown = components(cost_row)
+        if breakdown.cost_price_ex <= 0:
+            return PlanningCostResolution(
+                status="invalid_cost",
+                cost_row_id=text(cost_row.get("id")),
+                components=breakdown,
+                warnings=("canonical_planning_cost_non_positive",),
+                **common,
+            )
+        return PlanningCostResolution(
+            status="resolved",
+            cost_row_id=text(cost_row.get("id")),
+            components=breakdown,
             **common,
         )
 
