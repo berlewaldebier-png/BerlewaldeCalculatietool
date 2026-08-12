@@ -21,6 +21,8 @@ from app.domain.douano_client import request as _douano_request
 from app.domain.auth_dependencies import (
     require_admin,
     require_douano_sync,
+    require_forecast_manage,
+    require_forecast_view,
     require_product_mappings_manage,
     require_user,
 )
@@ -38,8 +40,11 @@ from app.domain import correction_run_storage
 from app.domain import douano_unmapped_service
 from app.domain import break_even_planning_service
 from app.domain import break_even_planning_storage
+from app.domain import management_forecast_service
+from app.domain import management_forecast_storage
 from app.domain import skus_storage
 from app.utils import storage as storage_utils
+from app.schemas.management_forecast import CreateManagementForecastRequest
 
 
 router = APIRouter(prefix="/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
@@ -2232,7 +2237,7 @@ def get_break_even_model_review(_: dict = Depends(require_admin)) -> dict[str, A
 def get_break_even_analysis_read_model(
     year: int = Query(0, ge=0),
     basis: str = Query("invoice"),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_forecast_view),
 ) -> dict[str, Any]:
     try:
         return {"item": break_even_planning_service.build_analysis_read_model(year=int(year), basis=str(basis or "invoice"))}
@@ -2241,6 +2246,57 @@ def get_break_even_analysis_read_model(
     except Exception as exc:
         logger.exception("Break-even analysis read model failed")
         raise HTTPException(status_code=500, detail="Break-even analyse read-model kon niet worden geladen.") from exc
+
+
+@router.get("/break-even/management-forecast")
+def get_management_forecast(
+    _: dict = Depends(require_forecast_view),
+) -> dict[str, Any]:
+    try:
+        return {"item": management_forecast_service.read_workspace()}
+    except management_forecast_storage.ManagementForecastBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Management Forecast workspace failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Management Forecast kon niet worden geladen.",
+        ) from exc
+
+
+@router.post("/break-even/management-forecast")
+def post_management_forecast(
+    payload: CreateManagementForecastRequest,
+    session: dict = Depends(require_forecast_manage),
+) -> dict[str, Any]:
+    try:
+        return {
+            "result": management_forecast_service.create_revision(
+                binding=payload.binding.model_dump(mode="python"),
+                expected_active_revision_id=payload.expected_active_revision_id,
+                reason=payload.reason,
+                period_allocations=[
+                    row.model_dump(mode="python")
+                    for row in payload.period_allocations
+                ],
+                actor=str(session.get("username", "") or ""),
+                actor_role=str(session.get("role", "") or ""),
+            )
+        }
+    except management_forecast_service.ManagementForecastValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except management_forecast_storage.ManagementForecastConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except management_forecast_storage.ManagementForecastBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Management Forecast revision failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Management Forecast-revisie kon niet worden opgeslagen.",
+        ) from exc
 
 
 @router.get("/lot-costs")

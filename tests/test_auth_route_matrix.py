@@ -26,6 +26,8 @@ from app.domain.auth_dependencies import (
     require_cost_view,
     require_dataset_mutation,
     require_douano_sync,
+    require_forecast_manage,
+    require_forecast_view,
     require_product_mappings_manage,
     require_quotes_manage,
     require_user,
@@ -45,6 +47,8 @@ CAPABILITY_DEPENDENCIES = {
     require_quotes_manage: "quotes:manage",
     require_douano_sync: "douano:sync",
     require_product_mappings_manage: "product-mappings:manage",
+    require_forecast_view: "forecast:view",
+    require_forecast_manage: "forecast:manage",
 }
 
 
@@ -173,6 +177,38 @@ class AuthRouteMatrixTests(unittest.TestCase):
                     "costs:view",
                 )
 
+    def test_management_forecast_separates_view_and_revision_rights(self) -> None:
+        self.assertEqual(
+            _static_access(
+                _route(
+                    integrations_router,
+                    "/integrations/break-even/analysis-read-model",
+                    "GET",
+                )
+            ),
+            "forecast:view",
+        )
+        self.assertEqual(
+            _static_access(
+                _route(
+                    integrations_router,
+                    "/integrations/break-even/management-forecast",
+                    "GET",
+                )
+            ),
+            "forecast:view",
+        )
+        self.assertEqual(
+            _static_access(
+                _route(
+                    integrations_router,
+                    "/integrations/break-even/management-forecast",
+                    "POST",
+                )
+            ),
+            "forecast:manage",
+        )
+
     def test_cost_authority_routes_keep_prepare_approve_execute_separated(self) -> None:
         expected = {
             ("GET", "/meta/cost-authority"): "admin",
@@ -255,8 +291,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 183, normalized)
-        self.assertEqual(digest, "1c2717f705ebc09a015a6483fcc3ed43b7ec339ce7d1ebd0e3e3f820257952c8", normalized)
+        self.assertEqual(len(rows), 185, normalized)
+        self.assertEqual(digest, "2706fac580bbaefcc16f11ffa55caf866c3dba8ad170395acd0ce243fb1feba3", normalized)
 
 
 if __name__ == "__main__":

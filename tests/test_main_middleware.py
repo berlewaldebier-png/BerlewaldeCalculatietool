@@ -78,7 +78,9 @@ class MainMiddlewareTests(unittest.IsolatedAsyncioTestCase):
                 "app.main.yearset_reconciliation_storage.ensure_schema"
             ) as ensure_reconciliation_schema, patch(
                 "app.main.yearset_recovery_storage.ensure_schema"
-            ) as ensure_recovery_schema:
+            ) as ensure_recovery_schema, patch(
+                "app.main.management_forecast_storage.ensure_schema"
+            ) as ensure_forecast_schema:
                     startup_event()
 
         init_pool.assert_called_once_with("postgres://test", min_size=5, max_size=20)
@@ -87,6 +89,7 @@ class MainMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         ensure_cost_authority_schema.assert_called_once()
         ensure_reconciliation_schema.assert_called_once()
         ensure_recovery_schema.assert_called_once()
+        ensure_forecast_schema.assert_called_once()
 
 
 if __name__ == "__main__":

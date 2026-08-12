@@ -57,7 +57,6 @@
       "/inkoopfacturen",
       "/verkoopstrategie",
       "/adviesprijzen",
-      "/break-even",
       "/omzet-en-marge",
       "/jaar-afsluiten",
       "/nieuw-jaar-voorbereiden",
@@ -71,7 +70,6 @@
       "/bieren",
       "/verkoopstrategie",
       "/adviesprijzen",
-      "/break-even",
       "/omzet-en-marge",
       "/prijsvoorstellen",
       "/jaar-afsluiten",
@@ -86,7 +84,6 @@
       "/bieren",
       "/verkoopstrategie",
       "/adviesprijzen",
-      "/break-even",
       "/omzet-en-marge",
       "/prijsvoorstellen",
       "/jaar-afsluiten",
@@ -141,7 +138,6 @@
       "/beheer"
     ],
     "brewer": [
-      "/break-even",
       "/scenario-analyse",
       "/omzet-en-marge",
       "/verkoopstrategie",
@@ -162,7 +158,6 @@
       "/beheer"
     ],
     "sales": [
-      "/break-even",
       "/scenario-analyse",
       "/omzet-en-marge",
       "/prijsvoorstellen",
@@ -181,7 +176,6 @@
       "/beheer"
     ],
     "user": [
-      "/break-even",
       "/scenario-analyse",
       "/omzet-en-marge",
       "/prijsvoorstellen",

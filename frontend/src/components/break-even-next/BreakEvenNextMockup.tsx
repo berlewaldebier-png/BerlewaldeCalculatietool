@@ -21,6 +21,7 @@ import {
   buildActiveGenerationRevenueTimeline,
   isActiveGenerationPlanSource,
 } from "@/features/commercial-context/breakEvenCommercialContext";
+import { ManagementForecastPanel } from "@/components/break-even-next/ManagementForecastPanel";
 
 type TabId = "dashboard" | "pnl" | "break_even" | "contribution" | "plan_actual" | "variance" | "scenario" | "year_close";
 
@@ -779,11 +780,13 @@ export function BreakEvenNextMockup({
   availableYears = [],
   readModel,
   readModelError = "",
+  canManageForecast = false,
 }: {
   selectedYear: number;
   availableYears?: number[];
   readModel?: Record<string, unknown> | null;
   readModelError?: string;
+  canManageForecast?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [query, setQuery] = useState("");
@@ -1499,6 +1502,8 @@ export function BreakEvenNextMockup({
           <div className="editor-status success">Read-model is geladen zonder waarschuwingen.</div>
         )}
       </section>
+
+      <ManagementForecastPanel enabled={hasActiveGenerationPlan && selectedYear === parsedReadModel?.year} canManage={canManageForecast} initialReadModel={readModel} />
 
       <div className="data-quality-tabs" role="tablist" aria-label="Break-even analyse onderdelen">
         {tabs.map((tab) => (
