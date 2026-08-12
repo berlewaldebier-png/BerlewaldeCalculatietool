@@ -28,6 +28,7 @@ from app.domain import yearset_recovery_storage
 from app.domain import yearset_reconciliation_storage
 from app.domain import yearset_dossier_service
 from app.domain import active_cost_overview_service
+from app.domain import cost_history_service
 from app.domain import historical_yearset_wizard_service
 from app.domain import cost_authority_service
 from app.domain import cost_authority_storage
@@ -3174,6 +3175,15 @@ def get_active_commercial_cost_overview(
     """Return the read-only active-generation projection for Kostprijs beheren."""
 
     return active_cost_overview_service.read_active_cost_overview()
+
+
+@router.get("/commercial-yearsets/active/cost-history")
+def get_active_commercial_cost_history(
+    _: dict = Depends(require_cost_view),
+) -> dict[str, Any]:
+    """Return planning anchors and immutable cost/LOT history read-only."""
+
+    return cost_history_service.read_active_cost_history()
 
 
 @router.get("/commercial-yearsets/{operational_year}/dossier")

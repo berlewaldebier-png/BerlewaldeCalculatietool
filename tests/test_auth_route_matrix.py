@@ -163,16 +163,15 @@ class AuthRouteMatrixTests(unittest.TestCase):
                 self.assertEqual(_static_access(_route(meta_router, path, method)), "admin")
 
     def test_active_cost_overview_requires_cost_view_capability(self) -> None:
-        self.assertEqual(
-            _static_access(
-                _route(
-                    meta_router,
-                    "/meta/commercial-yearsets/active/cost-overview",
-                    "GET",
+        for path in (
+            "/meta/commercial-yearsets/active/cost-overview",
+            "/meta/commercial-yearsets/active/cost-history",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    _static_access(_route(meta_router, path, "GET")),
+                    "costs:view",
                 )
-            ),
-            "costs:view",
-        )
 
     def test_cost_authority_routes_keep_prepare_approve_execute_separated(self) -> None:
         expected = {
@@ -256,8 +255,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 182, normalized)
-        self.assertEqual(digest, "136963e3a7d766a7d50252916d710e7519caef9ff3c1634b710ceea172e98dac", normalized)
+        self.assertEqual(len(rows), 183, normalized)
+        self.assertEqual(digest, "1c2717f705ebc09a015a6483fcc3ed43b7ec339ce7d1ebd0e3e3f820257952c8", normalized)
 
 
 if __name__ == "__main__":

@@ -243,6 +243,15 @@ required_rf012d2_contracts = {
     "test_active_cost_overview.ActiveCostOverviewReaderTests.test_reader_uses_read_only_shadow_query_and_never_initializes_schema",
     "test_active_cost_overview.ActiveCostOverviewFrontendContractTests.test_kostprijs_beheren_uses_the_read_only_active_generation_component",
 }
+required_rf012d3_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_active_cost_overview_requires_cost_view_capability",
+    "test_cost_history.CostHistoryProjectionTests.test_distinguishes_active_anchor_variants_and_unresolved_evidence",
+    "test_cost_history.CostHistoryProjectionTests.test_mismatched_source_anchor_fails_closed",
+    "test_cost_history.CostHistoryProjectionTests.test_duplicate_cost_row_identity_fails_closed",
+    "test_cost_history.CostHistoryProjectionTests.test_component_mismatch_remains_visible_without_changing_active_anchor",
+    "test_cost_history.CostHistoryReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
+    "test_cost_history.CostHistoryFrontendContractTests.test_history_is_lazy_read_only_and_has_accessible_disclosures",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -269,6 +278,7 @@ missing = sorted(
         | required_rf012d1_contracts
         | required_rf012d1a_contracts
         | required_rf012d2_contracts
+        | required_rf012d3_contracts
     ).difference(ids)
 )
 
@@ -282,5 +292,5 @@ print(
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
-    "RF-012C2, RF-012D1, RF-012D1A, and RF-012D2 contracts collected"
+    "RF-012C2, RF-012D1, RF-012D1A, RF-012D2, and RF-012D3 contracts collected"
 )
