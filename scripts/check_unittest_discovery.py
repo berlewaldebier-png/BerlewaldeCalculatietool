@@ -214,6 +214,22 @@ required_rf012c2_contracts = {
     "test_break_even_commercial_context.BreakEvenAnalysisConsumerTests.test_active_year_does_not_fall_back_when_generation_is_invalid",
     "test_break_even_commercial_context.BreakEvenCommercialContextReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
 }
+required_rf012c2b_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_management_forecast_separates_view_and_revision_rights",
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_new_forecast_authority_row_is_generation_bound",
+    "test_break_even_commercial_context.BreakEvenCommercialContextProjectionTests.test_tampered_new_forecast_revision_is_ignored",
+    "test_management_forecast.ManagementForecastValidationTests.test_completed_month_cannot_diverge_from_actual",
+    "test_management_forecast.ManagementForecastValidationTests.test_partial_month_cannot_be_lower_than_invoiced_actual",
+    "test_management_forecast.ManagementForecastValidationTests.test_contribution_is_an_enforced_identity",
+    "test_management_forecast.ManagementForecastValidationTests.test_negative_contribution_is_allowed_when_costs_exceed_revenue",
+    "test_management_forecast.ManagementForecastValidationTests.test_closed_credit_month_remains_exact_instead_of_becoming_zero",
+    "test_management_forecast.ManagementForecastValidationTests.test_last_day_of_cutoff_month_is_closed",
+    "test_management_forecast.ManagementForecastWriteTests.test_stale_binding_fails_before_storage_write",
+    "test_management_forecast.ManagementForecastWriteTests.test_short_audit_reason_fails_before_workspace_read",
+    "test_management_forecast.ManagementForecastWriteTests.test_write_is_audited_and_bound_to_current_authority",
+    "test_management_forecast.ManagementForecastSchemaContractTests.test_schema_is_additive_append_only_and_restricts_parent_deletion",
+    "test_management_forecast.ManagementForecastFrontendContractTests.test_editor_reuses_the_server_read_model_and_loads_history_lazily",
+}
 required_rf012d1_contracts = {
     "test_auth_route_matrix.AuthRouteMatrixTests.test_commercial_yearset_authority_routes_are_admin_only",
     "test_yearset_dossier.YearsetDossierProjectionTests.test_finalized_dossier_exposes_exact_frozen_plan_and_sku_values",
@@ -275,6 +291,7 @@ missing = sorted(
         | required_rf013c3_contracts
         | required_rf012c1_contracts
         | required_rf012c2_contracts
+        | required_rf012c2b_contracts
         | required_rf012d1_contracts
         | required_rf012d1a_contracts
         | required_rf012d2_contracts
@@ -292,5 +309,5 @@ print(
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
-    "RF-012C2, RF-012D1, RF-012D1A, RF-012D2, and RF-012D3 contracts collected"
+    "RF-012C2, RF-012C2B, RF-012D1, RF-012D1A, RF-012D2, and RF-012D3 contracts collected"
 )

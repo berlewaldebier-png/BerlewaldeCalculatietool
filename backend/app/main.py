@@ -19,6 +19,7 @@ from app.config_validation import validate_config, log_startup_info
 from app.domain import (
     commercial_yearset_storage,
     cost_authority_storage,
+    management_forecast_storage,
     postgres_storage,
     yearset_recovery_storage,
     yearset_reconciliation_storage,
@@ -97,6 +98,7 @@ def startup_event():
             cost_authority_storage.ensure_schema()
             yearset_reconciliation_storage.ensure_schema()
             yearset_recovery_storage.ensure_schema()
+            management_forecast_storage.ensure_schema()
             logger.info("PostgreSQL schema ensured successfully")
         
         logger.info("Application startup complete")

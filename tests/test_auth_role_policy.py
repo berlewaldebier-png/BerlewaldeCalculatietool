@@ -23,6 +23,8 @@ from app.domain.auth_dependencies import (
     require_cost_draft,
     require_dataset_mutation,
     require_douano_sync,
+    require_forecast_manage,
+    require_forecast_view,
     require_product_mappings_manage,
     require_quotes_manage,
     require_users_manage,
@@ -81,6 +83,8 @@ class AuthRolePolicyTests(unittest.TestCase):
                 auth_policy.CAP_COSTS_ACTIVATE,
                 auth_policy.CAP_QUOTES_MANAGE,
                 auth_policy.CAP_CALCULATION_SETTINGS_MANAGE,
+                auth_policy.CAP_FORECAST_VIEW,
+                auth_policy.CAP_FORECAST_MANAGE,
             },
             "brewer": {auth_policy.CAP_COSTS_VIEW, auth_policy.CAP_COSTS_DRAFT},
             "sales": {auth_policy.CAP_COSTS_VIEW, auth_policy.CAP_QUOTES_MANAGE},
@@ -104,6 +108,8 @@ class AuthRolePolicyTests(unittest.TestCase):
             require_quotes_manage: {"admin", "management", "sales", "user"},
             require_douano_sync: {"admin"},
             require_product_mappings_manage: {"admin"},
+            require_forecast_view: {"admin", "management"},
+            require_forecast_manage: {"admin", "management"},
         }
         for dependency, allowed_roles in dependency_roles.items():
             for role in auth_policy.SUPPORTED_ROLES:
@@ -139,8 +145,8 @@ class AuthRolePolicyTests(unittest.TestCase):
 
     def test_navigation_hides_workflows_without_the_required_capability(self) -> None:
         expected_visibility = {
-            "admin": {"nieuwe-kostprijsberekening", "prijsvoorstel", "productkoppeling"},
-            "management": {"nieuwe-kostprijsberekening", "prijsvoorstel"},
+            "admin": {"nieuwe-kostprijsberekening", "prijsvoorstel", "productkoppeling", "break-even"},
+            "management": {"nieuwe-kostprijsberekening", "prijsvoorstel", "break-even"},
             "brewer": {"nieuwe-kostprijsberekening"},
             "sales": {"prijsvoorstel"},
         }
@@ -148,7 +154,7 @@ class AuthRolePolicyTests(unittest.TestCase):
             for role, expected in expected_visibility.items():
                 with self.subTest(role=role):
                     keys = {item.key for item in meta.get_navigation({"role": role})}
-                    for key in {"nieuwe-kostprijsberekening", "prijsvoorstel", "productkoppeling"}:
+                    for key in {"nieuwe-kostprijsberekening", "prijsvoorstel", "productkoppeling", "break-even"}:
                         self.assertEqual(key in keys, key in expected)
 
     def test_complete_navigation_projection_matches_rf_005a_role_contract(self) -> None:

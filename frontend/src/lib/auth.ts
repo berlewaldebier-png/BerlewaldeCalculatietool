@@ -10,7 +10,9 @@ export type AuthCapability =
   | "quotes:manage"
   | "douano:sync"
   | "calculation-settings:manage"
-  | "product-mappings:manage";
+  | "product-mappings:manage"
+  | "forecast:view"
+  | "forecast:manage";
 
 export type AuthSession = {
   username: string;

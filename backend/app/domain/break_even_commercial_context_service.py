@@ -7,7 +7,11 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Iterable
 
-from app.domain import commercial_yearset_service, postgres_storage
+from app.domain import (
+    commercial_yearset_service,
+    management_forecast_storage,
+    postgres_storage,
+)
 
 
 CONTRACT_VERSION = "rf-012c2-v1"
@@ -141,10 +145,59 @@ def _matching_forecast_revision(
     *,
     generation_id: str,
     run_id: str,
+    plan_id: str,
     plan_contract_hash: str,
+    operational_year: int,
 ) -> dict[str, Any] | None:
     if not raw:
         return None
+    # RF-012C2B authority: a revision is directly bound to the active
+    # commercial generation, reconciliation run and immutable Plan hash.
+    if _text(raw.get("generation_id")):
+        if (
+            _text(raw.get("generation_id")) != generation_id
+            or _text(raw.get("run_id")) != run_id
+            or _text(raw.get("plan_id")) != plan_id
+            or _text(raw.get("plan_contract_hash")) != plan_contract_hash
+            or int(raw.get("operational_year") or 0) != operational_year
+            or _text(raw.get("status")) != "active"
+        ):
+            return None
+        targets = _target_values(raw.get("annual_targets"))
+        periods = _array(raw.get("period_allocations"))
+        binding = {
+            "generation_id": generation_id,
+            "run_id": run_id,
+            "plan_id": plan_id,
+            "plan_contract_hash": plan_contract_hash,
+            "operational_year": operational_year,
+        }
+        if (
+            len(periods) != 12
+            or _text(raw.get("content_hash"))
+            != management_forecast_storage.compute_content_hash(
+                binding=binding,
+                as_of_date=_text(raw.get("as_of_date")),
+                annual_targets=targets,
+                period_allocations=periods,
+            )
+        ):
+            return None
+        return {
+            "id": _text(raw.get("id")),
+            "revision_number": int(raw.get("revision_number") or 0),
+            "as_of_date": _text(raw.get("as_of_date")),
+            "basis": _text(raw.get("basis")) or "invoice",
+            "targets": targets,
+            "period_allocations": periods,
+            "reason": _text(raw.get("reason")),
+            "created_by": _text(raw.get("created_by")),
+            "created_role": _text(raw.get("created_role")),
+            "created_at": _text(raw.get("created_at")),
+        }
+
+    # Read compatibility for characterization fixtures from RF-012C2. New
+    # writes never use the legacy JSON snapshot shape.
     payload = _mapping(raw.get("payload"))
     binding = _mapping(payload.get("commercial_context"))
     revision = _mapping(payload.get("forecast_revision"))
@@ -329,7 +382,9 @@ def build_break_even_commercial_context(
             forecast_revision_row,
             generation_id=generation_id,
             run_id=run_id,
+            plan_id=_text(plan_row.get("id")),
             plan_contract_hash=plan_contract_hash,
+            operational_year=int(binding.get("operational_year") or 0),
         ),
         "reason_codes": [],
     }
@@ -360,15 +415,9 @@ def _timeline(
     forecast = _period_values(forecast_periods)
     periods = sorted(set(plan) | set(actual) | set(forecast))
     running = {
-        "plan_revenue": 0.0,
-        "plan_variable_cost": 0.0,
-        "plan_contribution": 0.0,
-        "actual_revenue": 0.0,
-        "actual_variable_cost": 0.0,
-        "actual_contribution": 0.0,
-        "forecast_revenue": 0.0,
-        "forecast_variable_cost": 0.0,
-        "forecast_contribution": 0.0,
+        f"{scope}_{key}": 0.0
+        for scope in ("plan", "actual", "forecast")
+        for key in _TARGET_KEYS
     }
     result: list[dict[str, Any]] = []
     for period in periods:
@@ -376,19 +425,13 @@ def _timeline(
         actual_row = actual.get(period, {})
         forecast_row = forecast.get(period, {})
         values = {
-            "plan_revenue": _number(plan_row.get("revenue")),
-            "plan_variable_cost": _number(plan_row.get("variable_cost")),
-            "plan_contribution": _number(plan_row.get("contribution")),
-            "actual_revenue": _number(actual_row.get("revenue")),
-            "actual_variable_cost": _number(actual_row.get("variable_cost")),
-            "actual_contribution": _number(actual_row.get("contribution")),
-            "forecast_revenue": _number(forecast_row.get("revenue")),
-            "forecast_variable_cost": _number(
-                forecast_row.get("variable_cost")
-            ),
-            "forecast_contribution": _number(
-                forecast_row.get("contribution")
-            ),
+            f"{scope}_{key}": _number(row.get(key))
+            for scope, row in (
+                ("plan", plan_row),
+                ("actual", actual_row),
+                ("forecast", forecast_row),
+            )
+            for key in _TARGET_KEYS
         }
         for key, value in values.items():
             running[key] += value
@@ -539,11 +582,7 @@ def project_plan_forecast(
         revision = _mapping(context.get("forecast_revision"))
         revision_targets = _target_values(revision.get("targets"))
         revision_periods = _array(revision.get("period_allocations"))
-        if (
-            revision
-            and revision_targets["revenue"] > 0
-            and revision_targets["contribution"] > 0
-        ):
+        if revision and revision_periods:
             forecast_targets = revision_targets
             if revision_periods:
                 forecast_periods = revision_periods
@@ -708,13 +747,24 @@ def read_break_even_commercial_context() -> dict[str, Any]:
         ).fetchall()
         revision_data = conn.execute(
             """
-            SELECT id, as_of_date, basis, payload
-            FROM break_even_reforecast_snapshots
-            WHERE jaar = %s
-            ORDER BY as_of_date DESC NULLS LAST, created_at DESC
-            LIMIT 1
+            SELECT id, generation_id, run_id, plan_id,
+                   plan_contract_hash, operational_year, revision_number,
+                   status, as_of_date, basis, annual_targets,
+                   period_allocations, reason, created_by, created_role,
+                   created_at, supersedes_revision_id, content_hash
+            FROM commercial_forecast_revisions
+            WHERE generation_id = %s
+              AND run_id = %s
+              AND plan_id = %s
+              AND plan_contract_hash = %s
+              AND status = 'active'
             """,
-            (generation["operational_year"],),
+            (
+                generation["id"],
+                run["id"],
+                _text((plan_row or {}).get("id")),
+                _text((plan_row or {}).get("plan_contract_hash")),
+            ),
         ).fetchone()
 
     sku_columns = (
@@ -731,13 +781,15 @@ def read_break_even_commercial_context() -> dict[str, Any]:
         "sku_code",
         "sku_name",
     )
+    revision_columns = (
+        "id", "generation_id", "run_id", "plan_id",
+        "plan_contract_hash", "operational_year", "revision_number",
+        "status", "as_of_date", "basis", "annual_targets",
+        "period_allocations", "reason", "created_by", "created_role",
+        "created_at", "supersedes_revision_id", "content_hash",
+    )
     revision_row = (
-        {
-            "id": _text(revision_data[0]),
-            "as_of_date": _text(revision_data[1]),
-            "basis": _text(revision_data[2]),
-            "payload": revision_data[3],
-        }
+        dict(zip(revision_columns, revision_data, strict=True))
         if revision_data
         else None
     )

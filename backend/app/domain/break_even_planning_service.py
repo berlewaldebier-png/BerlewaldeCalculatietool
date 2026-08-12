@@ -1021,14 +1021,18 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT sku_id, douano_sku, kostprijsversie_id, quantity, net_revenue_ex, cost_total_ex,
-                       cost_source, cost_status, line_date, payload
-                FROM douano_sales_line_cost_snapshots
-                WHERE source_type = %s
-                  AND line_date >= %s::date
-                  AND line_date < %s::date
-                  AND NOT ignored
-                ORDER BY line_date ASC NULLS LAST, source_line_id ASC
+                SELECT snap.sku_id, snap.douano_sku, snap.kostprijsversie_id,
+                       snap.quantity, snap.net_revenue_ex, snap.cost_total_ex,
+                       snap.cost_source, snap.cost_status, snap.line_date,
+                       snap.payload, COALESCE(article.content_liter, 0)
+                FROM douano_sales_line_cost_snapshots snap
+                LEFT JOIN skus sku ON sku.id = snap.sku_id
+                LEFT JOIN articles article ON article.id = sku.format_article_id
+                WHERE snap.source_type = %s
+                  AND snap.line_date >= %s::date
+                  AND snap.line_date < %s::date
+                  AND NOT snap.ignored
+                ORDER BY snap.line_date ASC NULLS LAST, snap.source_line_id ASC
                 """,
                 (source_type, year_start, year_end),
             )
@@ -1044,9 +1048,10 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
     total_cost = 0.0
     total_fixed_alloc = 0.0
     total_excise = 0.0
+    total_liters = 0.0
     missing_cost_lines = 0
 
-    for sku_id_raw, sku_code_raw, version_id_raw, qty_raw, revenue_raw, cost_raw, cost_source_raw, cost_status_raw, line_date_raw, payload_raw in snapshot_rows:
+    for sku_id_raw, sku_code_raw, version_id_raw, qty_raw, revenue_raw, cost_raw, cost_source_raw, cost_status_raw, line_date_raw, payload_raw, liters_per_unit_raw in snapshot_rows:
         sku_id = _text(sku_id_raw)
         sku_code = _text(sku_code_raw)
         version_id = _text(version_id_raw)
@@ -1055,6 +1060,7 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
         cost_status = _text(cost_status_raw)
         cost_source = _text(cost_source_raw)
         qty = _num(qty_raw)
+        liters = qty * _num(liters_per_unit_raw)
         revenue = _num(revenue_raw)
         cost = _num(cost_raw)
         components = component_index.get((version_id, sku_id)) if version_id and sku_id else None
@@ -1111,7 +1117,7 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
 
         period = _text(line_date_raw)[:7]
         if period:
-            period_bucket = period_totals.setdefault(period, {"revenue": 0.0, "variable_cost": 0.0, "variabel_ex": 0.0, "variabel_accijns_ex": 0.0, "fixed_alloc": 0.0, "contribution": 0.0, "units": 0.0})
+            period_bucket = period_totals.setdefault(period, {"revenue": 0.0, "variable_cost": 0.0, "variabel_ex": 0.0, "variabel_accijns_ex": 0.0, "fixed_alloc": 0.0, "contribution": 0.0, "units": 0.0, "liters": 0.0})
             period_bucket["revenue"] += revenue
             period_bucket["variable_cost"] += variable_with_excise
             period_bucket["variabel_ex"] += variable_without_excise
@@ -1119,6 +1125,7 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
             period_bucket["fixed_alloc"] += fixed_alloc
             period_bucket["contribution"] += revenue - variable_with_excise
             period_bucket["units"] += qty
+            period_bucket["liters"] += liters
             latest_actual_date = max(
                 latest_actual_date,
                 _text(line_date_raw)[:10],
@@ -1128,6 +1135,7 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
         total_cost += cost
         total_fixed_alloc += fixed_alloc
         total_excise += excise_alloc
+        total_liters += liters
 
     rows = list(rows_by_key.values())
     rows.sort(key=lambda row: _num(row.get("net_revenue_ex")), reverse=True)
@@ -1146,6 +1154,8 @@ def _sales_totals(year: int, basis: str) -> dict[str, Any]:
             "fixed_alloc": total_fixed_alloc,
             "excise": total_excise,
             "contribution": contribution,
+            "liters": total_liters,
+            "units": sum(_num(row.get("units")) for row in rows),
             "missing_cost_lines": missing_cost_lines,
             "unmapped_revenue": 0.0,
         },

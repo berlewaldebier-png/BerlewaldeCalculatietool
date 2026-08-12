@@ -315,6 +315,8 @@ def get_navigation(session: dict = Depends(require_user)) -> list[NavigationItem
         hidden_keys.update({"nieuwe-kostprijsberekening", "recept-hercalculatie", "inkoopfacturen"})
     if not auth_policy.has_capability(session, auth_policy.CAP_QUOTES_MANAGE):
         hidden_keys.add("prijsvoorstel")
+    if not auth_policy.has_capability(session, auth_policy.CAP_FORECAST_VIEW):
+        hidden_keys.add("break-even")
     if not auth_policy.has_capability(session, auth_policy.CAP_PRODUCT_MAPPINGS_MANAGE):
         hidden_keys.add("productkoppeling")
     return [item for item in items if item.key not in hidden_keys]

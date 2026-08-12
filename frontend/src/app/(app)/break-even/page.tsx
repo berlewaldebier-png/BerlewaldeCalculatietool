@@ -1,6 +1,7 @@
 import { BreakEvenNextMockup } from "@/components/break-even-next/BreakEvenNextMockup";
 import { PageShell } from "@/components/PageShell";
 import { apiGetServer, getBootstrap } from "@/lib/apiServer";
+import type { MeResponse } from "@/lib/apiShared";
 
 type BreakEvenPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -33,6 +34,15 @@ export default async function BreakEvenPage({ searchParams }: BreakEvenPageProps
     : requestedYear || defaultYear;
   let readModel: Record<string, unknown> | null = null;
   let readModelError = "";
+  let me: MeResponse | null = null;
+
+  try {
+    me = await apiGetServer<MeResponse>("/auth/me", "/break-even");
+  } catch {
+    // The analysis route remains the authorization boundary. If session
+    // metadata is unavailable, the editor stays read-only.
+    me = null;
+  }
 
   try {
     const yearQuery = hasRequestedYear
@@ -61,7 +71,7 @@ export default async function BreakEvenPage({ searchParams }: BreakEvenPageProps
       activePath="/break-even"
       navigation={bootstrap.navigation ?? []}
     >
-      <BreakEvenNextMockup selectedYear={year} availableYears={availableYears} readModel={readModel} readModelError={readModelError} />
+      <BreakEvenNextMockup selectedYear={year} availableYears={availableYears} readModel={readModel} readModelError={readModelError} canManageForecast={Boolean(me?.capabilities?.includes("forecast:manage"))} />
     </PageShell>
   );
 }

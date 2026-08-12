@@ -86,6 +86,14 @@ def require_product_mappings_manage(request: Request) -> dict:
     return _require_capability(request, auth_policy.CAP_PRODUCT_MAPPINGS_MANAGE)
 
 
+def require_forecast_view(request: Request) -> dict:
+    return _require_capability(request, auth_policy.CAP_FORECAST_VIEW)
+
+
+def require_forecast_manage(request: Request) -> dict:
+    return _require_capability(request, auth_policy.CAP_FORECAST_MANAGE)
+
+
 def require_dataset_mutation(dataset_name: str, request: Request) -> dict:
     session = get_current_session(request)
     if auth_policy.has_capability(session, auth_policy.CAP_ADMIN):

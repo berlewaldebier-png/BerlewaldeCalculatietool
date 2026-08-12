@@ -319,6 +319,85 @@ class BreakEvenCommercialContextProjectionTests(unittest.TestCase):
         self.assertEqual(result["forecast_revision"]["id"], "revision-1")
         self.assertEqual(result["forecast_revision"]["targets"]["revenue"], 320.0)
 
+    def test_new_forecast_authority_row_is_generation_bound(self) -> None:
+        plan_hash = _plan_row()["plan_contract_hash"]
+        annual_targets = {
+            "revenue": 330.0,
+            "variable_cost": 130.0,
+            "contribution": 200.0,
+            "liters": 100.0,
+            "units": 35.0,
+        }
+        period_allocations = _plan_payload()["period_allocations"]
+        binding = {
+            "generation_id": "generation-2026",
+            "run_id": "run-2026",
+            "plan_id": "plan-2026",
+            "plan_contract_hash": plan_hash,
+            "operational_year": 2026,
+        }
+        result = _context(
+            forecast_revision_row={
+                "id": "revision-2",
+                "generation_id": "generation-2026",
+                "run_id": "run-2026",
+                "plan_id": "plan-2026",
+                "plan_contract_hash": plan_hash,
+                "operational_year": 2026,
+                "status": "active",
+                "revision_number": 2,
+                "as_of_date": "2026-07-31",
+                "basis": "invoice",
+                "annual_targets": annual_targets,
+                "period_allocations": period_allocations,
+                "reason": "Management expectation updated",
+                "created_by": "hans",
+                "created_role": "management",
+                "content_hash": (
+                    break_even_commercial_context_service
+                    .management_forecast_storage.compute_content_hash(
+                        binding=binding,
+                        as_of_date="2026-07-31",
+                        annual_targets=annual_targets,
+                        period_allocations=period_allocations,
+                    )
+                ),
+            }
+        )
+
+        self.assertEqual(result["forecast_revision"]["id"], "revision-2")
+        self.assertEqual(result["forecast_revision"]["revision_number"], 2)
+        self.assertEqual(result["forecast_revision"]["targets"]["revenue"], 330.0)
+        self.assertEqual(result["forecast_revision"]["created_by"], "hans")
+
+    def test_tampered_new_forecast_revision_is_ignored(self) -> None:
+        plan_hash = _plan_row()["plan_contract_hash"]
+        result = _context(
+            forecast_revision_row={
+                "id": "revision-tampered",
+                "generation_id": "generation-2026",
+                "run_id": "run-2026",
+                "plan_id": "plan-2026",
+                "plan_contract_hash": plan_hash,
+                "operational_year": 2026,
+                "status": "active",
+                "revision_number": 3,
+                "as_of_date": "2026-07-31",
+                "basis": "invoice",
+                "annual_targets": {
+                    "revenue": 330,
+                    "variable_cost": 130,
+                    "contribution": 200,
+                    "liters": 100,
+                    "units": 35,
+                },
+                "period_allocations": _plan_payload()["period_allocations"],
+                "content_hash": "tampered",
+            }
+        )
+
+        self.assertIsNone(result["forecast_revision"])
+
 
 class BreakEvenPlanForecastProjectionTests(unittest.TestCase):
     def test_without_actuals_initial_forecast_exactly_equals_plan(self) -> None:
@@ -718,7 +797,7 @@ class _ReadOnlyConnection:
                     )
                 ]
             )
-        if "FROM break_even_reforecast_snapshots" in normalized:
+        if "FROM commercial_forecast_revisions" in normalized:
             return _Result(one=None)
         raise AssertionError(f"Unexpected SQL: {normalized}")
 

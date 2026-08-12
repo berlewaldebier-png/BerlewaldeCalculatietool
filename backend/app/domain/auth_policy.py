@@ -22,6 +22,8 @@ CAP_QUOTES_MANAGE = "quotes:manage"
 CAP_DOUANO_SYNC = "douano:sync"
 CAP_CALCULATION_SETTINGS_MANAGE = "calculation-settings:manage"
 CAP_PRODUCT_MAPPINGS_MANAGE = "product-mappings:manage"
+CAP_FORECAST_VIEW = "forecast:view"
+CAP_FORECAST_MANAGE = "forecast:manage"
 
 ALL_CAPABILITIES = frozenset(
     {
@@ -35,6 +37,8 @@ ALL_CAPABILITIES = frozenset(
         CAP_DOUANO_SYNC,
         CAP_CALCULATION_SETTINGS_MANAGE,
         CAP_PRODUCT_MAPPINGS_MANAGE,
+        CAP_FORECAST_VIEW,
+        CAP_FORECAST_MANAGE,
     }
 )
 
@@ -48,6 +52,8 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
             CAP_COSTS_ACTIVATE,
             CAP_QUOTES_MANAGE,
             CAP_CALCULATION_SETTINGS_MANAGE,
+            CAP_FORECAST_VIEW,
+            CAP_FORECAST_MANAGE,
         }
     ),
     ROLE_BREWER: frozenset({CAP_COSTS_VIEW, CAP_COSTS_DRAFT}),
