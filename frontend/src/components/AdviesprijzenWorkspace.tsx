@@ -2,206 +2,94 @@
 
 import { useMemo, useState } from "react";
 
+import type { ActionStatusState } from "@/components/ActionStatus";
 import type { VatDisplayMode } from "@/components/ui/VatDisplayToggle";
 import {
-  buildAdviesOpslagByChannel,
-  buildAdviesprijzenSavePayload,
-  buildChannelDefaultOpslag,
-  buildProductCostRows,
-  buildProductionYears,
-  buildYears,
-  buildYearRows,
-  normalizeAdviesprijsRows,
-  normalizeChannels,
-  type AdviesprijsRow,
-  type Channel,
-  type ProductCostRow,
-} from "@/components/adviesprijzen/adviesprijzenDerivations";
-import { parseBtwPct } from "@/components/adviesprijzen/adviesprijzenUtils";
-import {
-  buildSellInLookup,
-  resolveSellInPriceEx,
-} from "@/components/offerte-samenstellen/sellInResolver";
-import {
-  buildRecommendedPriceDisplayRow,
-  getDefaultRecommendedPriceYear,
-  RECOMMENDED_PRICE_SAVE_ERROR,
-  RECOMMENDED_PRICE_SAVE_SUCCESS,
-} from "@/features/recommended-price/recommendedPriceFormModel";
+  buildActiveRecommendedPriceDisplayRow,
+  filterActiveRecommendedPriceGroups,
+  type ActiveRecommendedPriceProjection,
+} from "@/features/recommended-price/activeRecommendedPriceModel";
 import {
   RecommendedPriceWorkspaceView,
   type RecommendedPriceChannelGroup,
 } from "@/features/recommended-price/RecommendedPriceWorkspaceView";
-import { useCentralSkuIndex } from "@/features/sku/useCentralSkuIndex";
-import { reconcileDatasetItems } from "@/lib/datasetItems";
+import { ApiRequestError, apiRequestJsonClient } from "@/lib/apiClient";
 
-type GenericRecord = Record<string, unknown>;
-type ProductieMap = Record<string, unknown>;
+type DraftMarkups = Record<string, number | "">;
 
 export type AdviesprijzenWorkspaceProps = {
-  initialChannels: GenericRecord[];
-  initialAdviesprijzen: GenericRecord[];
-  initialProductie: ProductieMap;
-  initialVerkoopprijzen: GenericRecord[];
-  initialBieren: GenericRecord[];
-  initialSkus: GenericRecord[];
-  initialArticles: GenericRecord[];
-  initialKostprijsversies: GenericRecord[];
-  initialKostprijsproductactiveringen: GenericRecord[];
-  initialPackagingComponents: GenericRecord[];
-  initialPackagingComponentPriceVersions: GenericRecord[];
+  initialProjection: ActiveRecommendedPriceProjection;
 };
 
-export function AdviesprijzenWorkspace(props: AdviesprijzenWorkspaceProps) {
+function initialDrafts(projection: ActiveRecommendedPriceProjection): DraftMarkups {
+  return Object.fromEntries(
+    projection.channels.map((channel) => [
+      channel.channel_code,
+      channel.advice_markup_pct ?? "",
+    ])
+  );
+}
+
+function errorStatus(error: unknown): ActionStatusState {
+  if (error instanceof ApiRequestError && error.status === 409) {
+    return {
+      kind: "error",
+      message: error.detail || "De actieve adviesinstellingen zijn intussen gewijzigd.",
+      guidance: "Herlaad de pagina, controleer de nieuwe waarden en probeer opnieuw.",
+    };
+  }
+  return {
+    kind: "error",
+    message: "Opslaan mislukt.",
+    guidance: "Controleer de ingevoerde opslagen en je verbinding. Probeer daarna opnieuw.",
+  };
+}
+
+export function AdviesprijzenWorkspace({ initialProjection }: AdviesprijzenWorkspaceProps) {
+  const [projection, setProjection] = useState(initialProjection);
   const [vatDisplay, setVatDisplay] = useState<VatDisplayMode>("excl");
-  const channels = useMemo(() => normalizeChannels(props.initialChannels), [props.initialChannels]);
-  const [rows, setRows] = useState<AdviesprijsRow[]>(() => normalizeAdviesprijsRows(props.initialAdviesprijzen));
-
-  const productionYears = useMemo(
-    () => buildProductionYears(props.initialProductie ?? {}),
-    [props.initialProductie]
+  const [drafts, setDrafts] = useState<DraftMarkups>(() => initialDrafts(initialProjection));
+  const [dirtyChannelCodes, setDirtyChannelCodes] = useState<Set<string>>(() => new Set());
+  const [openChannelCodes, setOpenChannelCodes] = useState<string[]>(() =>
+    initialProjection.channels.map((channel) => channel.channel_code)
   );
-  const years = useMemo(() => buildYears(productionYears, rows), [productionYears, rows]);
-  const [selectedYear, setSelectedYear] = useState<number>(() =>
-    getDefaultRecommendedPriceYear(years, new Date().getFullYear())
-  );
-  const [status, setStatus] = useState("");
+  const [filter, setFilter] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [status, setStatus] = useState<ActionStatusState | null>(null);
 
-  const activeChannels = useMemo(() => channels.filter((channel) => channel.actief), [channels]);
-  const channelCodes = useMemo(() => activeChannels.map((channel) => channel.code), [activeChannels]);
-  const [openChannelCodes, setOpenChannelCodes] = useState<string[]>(() => activeChannels.map((channel) => channel.code));
-
-  const adviesOpslagByChannel = useMemo(
-    () => buildAdviesOpslagByChannel(rows, selectedYear),
-    [rows, selectedYear]
+  const visibleGroups = useMemo(
+    () => filterActiveRecommendedPriceGroups(projection.groups, filter),
+    [projection.groups, filter]
   );
-  const verkoopprijzenRows = useMemo(
-    () => Array.isArray(props.initialVerkoopprijzen) ? props.initialVerkoopprijzen : [],
-    [props.initialVerkoopprijzen]
+  const channelCodes = useMemo(
+    () => projection.channels.map((channel) => channel.channel_code),
+    [projection.channels]
   );
-  const kostprijsversies = useMemo(
-    () => Array.isArray(props.initialKostprijsversies) ? props.initialKostprijsversies : [],
-    [props.initialKostprijsversies]
-  );
-  const activations = useMemo(
-    () => Array.isArray(props.initialKostprijsproductactiveringen) ? props.initialKostprijsproductactiveringen : [],
-    [props.initialKostprijsproductactiveringen]
-  );
-  const bieren = useMemo(
-    () => Array.isArray(props.initialBieren) ? props.initialBieren : [],
-    [props.initialBieren]
-  );
-  const skus = useMemo(
-    () => Array.isArray(props.initialSkus) ? props.initialSkus : [],
-    [props.initialSkus]
-  );
-  const articles = useMemo(
-    () => Array.isArray(props.initialArticles) ? props.initialArticles : [],
-    [props.initialArticles]
-  );
-
-  const beerById = useMemo(() => {
-    const map = new Map<string, { biernaam: string; btwPct: number }>();
-    bieren.forEach((row) => {
-      const id = String(row?.id ?? "");
-      if (!id) return;
-      map.set(id, {
-        biernaam: String(row?.biernaam ?? row?.naam ?? ""),
-        btwPct: parseBtwPct(row?.btw_tarief ?? row?.btw ?? ""),
-      });
-    });
-    return map;
-  }, [bieren]);
-
-  const skuById = useMemo(() => {
-    const map = new Map<string, GenericRecord>();
-    skus.forEach((row) => {
-      const id = String(row?.id ?? "").trim();
-      if (id) map.set(id, row);
-    });
-    return map;
-  }, [skus]);
-
-  const articleNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    articles.forEach((row) => {
-      const id = String(row?.id ?? "").trim();
-      if (!id) return;
-      map.set(id, String(row?.name ?? row?.naam ?? id).trim() || id);
-    });
-    return map;
-  }, [articles]);
-
-  const centralSkuIndex = useCentralSkuIndex({
-    year: selectedYear,
-    channels: props.initialChannels,
-    verkoopprijzen: verkoopprijzenRows,
-    skus,
-    articles,
-    kostprijsversies,
-    kostprijsproductactiveringen: activations,
-  });
-
-  const productCostRows = useMemo<ProductCostRow[]>(() => {
-    // Keep the existing RF-010/RF-011 source path unchanged in RF-012B2.
-    return buildProductCostRows({
-      centralRows: centralSkuIndex.rows,
-      skuById,
-      beerById,
-      articleNameById,
-    });
-  }, [centralSkuIndex.rows, skuById, beerById, articleNameById]);
-
-  const sellInLookup = useMemo(
-    () => buildSellInLookup(verkoopprijzenRows, selectedYear),
-    [verkoopprijzenRows, selectedYear]
-  );
-  const channelDefaultOpslag = useMemo(
-    () => buildChannelDefaultOpslag(activeChannels),
-    [activeChannels]
-  );
-  const yearRows = useMemo(
-    () => buildYearRows({ rows, selectedYear, activeChannels }),
-    [rows, selectedYear, activeChannels]
-  );
-
-  const channelGroups = useMemo<RecommendedPriceChannelGroup[]>(() => {
-    return activeChannels.map((channel) => {
-      const adviesOpslag = adviesOpslagByChannel.get(channel.code) ?? 0;
+  const channelGroups = useMemo<RecommendedPriceChannelGroup[]>(() =>
+    projection.channels.map((channel) => {
+      const draft = drafts[channel.channel_code];
+      const markup = draft === "" ? null : Number(draft);
       return {
         channel,
-        adviesOpslag,
-        rows: productCostRows.map((row) => {
-          const { sellInEx } = resolveSellInPriceEx({
-            bierId: row.bierId,
-            productId: row.productId,
-            costPriceEx: row.kostprijsEx,
-            channelCode: channel.code,
-            lookup: sellInLookup,
-            channelDefaultOpslag,
-          });
-          return buildRecommendedPriceDisplayRow({ row, sellInEx, adviesOpslagPct: adviesOpslag, vatDisplay });
-        }),
+        adviceMarkupPct: markup,
+        rows: visibleGroups.flatMap((group) =>
+          group.items.map((item) =>
+            buildActiveRecommendedPriceDisplayRow({
+              item,
+              ownerLabel: group.label,
+              adviceMarkupPct: markup,
+              vatDisplay,
+            })
+          )
+        ),
       };
-    });
-  }, [activeChannels, adviesOpslagByChannel, channelDefaultOpslag, productCostRows, sellInLookup, vatDisplay]);
+    }),
+  [drafts, projection.channels, vatDisplay, visibleGroups]);
 
-  function updateMarkup(channel: Channel, row: AdviesprijsRow, nextValue: number) {
-    setRows((current) => {
-      const other = current.filter(
-        (item) => !(Number(item.jaar ?? 0) === selectedYear && item.channel_code === channel.code)
-      );
-      return [
-        ...other,
-        {
-          id: row.id,
-          jaar: selectedYear,
-          channel_code: channel.code,
-          opslag_pct: nextValue,
-        },
-      ];
-    });
+  function updateMarkup(channelCode: string, value: number | "") {
+    setDrafts((current) => ({ ...current, [channelCode]: value }));
+    setDirtyChannelCodes((current) => new Set(current).add(channelCode));
+    setStatus(null);
   }
 
   function toggleChannel(code: string, nextOpen: boolean) {
@@ -214,15 +102,54 @@ export function AdviesprijzenWorkspace(props: AdviesprijzenWorkspaceProps) {
   }
 
   async function save() {
+    if (!projection.binding || dirtyChannelCodes.size === 0) return;
     setIsSaving(true);
-    setStatus("");
+    setStatus({ kind: "pending", message: "Adviesopslagen worden opgeslagen." });
     try {
-      const next = buildAdviesprijzenSavePayload({ rows, selectedYear, yearRows });
-      await reconcileDatasetItems("adviesprijzen", next);
-      setRows(next);
-      setStatus(RECOMMENDED_PRICE_SAVE_SUCCESS);
+      const byCode = new Map(
+        projection.channels.map((channel) => [channel.channel_code, channel])
+      );
+      const changes = [...dirtyChannelCodes].map((channelCode) => {
+        const channel = byCode.get(channelCode);
+        const markup = drafts[channelCode];
+        if (!channel || markup === "" || !Number.isFinite(markup) || markup < 0) {
+          throw new Error("invalid-markup");
+        }
+        return {
+          channel_code: channelCode,
+          advice_markup_pct: markup,
+          pricing_record_id: channel.pricing_record_id,
+          expected_record_hash: channel.pricing_record_hash,
+        };
+      });
+      const next = await apiRequestJsonClient<ActiveRecommendedPriceProjection>(
+        "/meta/commercial-yearsets/active/recommended-prices",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            generation_id: projection.binding.generation_id,
+            run_id: projection.binding.run_id,
+            manifest_hash: projection.binding.manifest_hash,
+            changes,
+          }),
+        },
+        { timeoutMs: 30_000 }
+      );
+      setProjection(next);
+      setDrafts(initialDrafts(next));
+      setDirtyChannelCodes(new Set());
+      setStatus({ kind: "success", message: "Adviesopslagen opgeslagen." });
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : RECOMMENDED_PRICE_SAVE_ERROR);
+      if (error instanceof Error && error.message === "invalid-markup") {
+        setStatus({
+          kind: "error",
+          message: "Vul voor ieder gewijzigd kanaal een opslag van nul of hoger in.",
+          guidance: "Ontbrekende SKU-bronnen worden niet automatisch ingevuld of aangepast.",
+        });
+      } else {
+        setStatus(errorStatus(error));
+      }
     } finally {
       setIsSaving(false);
     }
@@ -230,18 +157,19 @@ export function AdviesprijzenWorkspace(props: AdviesprijzenWorkspaceProps) {
 
   return (
     <RecommendedPriceWorkspaceView
-      years={years}
-      selectedYear={selectedYear}
+      projection={projection}
       vatDisplay={vatDisplay}
-      yearRows={yearRows}
+      drafts={drafts}
+      filter={filter}
       channelCodes={channelCodes}
       openChannelCodes={openChannelCodes}
       channelGroups={channelGroups}
       status={status}
       isSaving={isSaving}
-      onYearChange={setSelectedYear}
+      dirtyCount={dirtyChannelCodes.size}
       onVatDisplayChange={setVatDisplay}
       onMarkupChange={updateMarkup}
+      onFilterChange={setFilter}
       onSetOpenChannelCodes={setOpenChannelCodes}
       onToggleChannel={toggleChannel}
       onSave={save}

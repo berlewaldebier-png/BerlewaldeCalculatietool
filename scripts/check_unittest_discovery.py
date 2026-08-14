@@ -291,6 +291,18 @@ required_rf012c4a_contracts = {
     "test_active_sales_strategy.ActiveSalesStrategyWriterTests.test_writer_rejects_stale_price_hash_without_writing",
     "test_active_sales_strategy.ActiveSalesStrategyFrontendContractTests.test_runtime_screen_uses_active_projection_while_wizard_keeps_draft_workspace",
 }
+required_rf012c4b_contracts = {
+    "test_auth_route_matrix.AuthRouteMatrixTests.test_active_cost_overview_requires_cost_view_capability",
+    "test_active_recommended_prices.ActiveRecommendedPriceProjectionTests.test_current_channel_markup_and_current_sell_in_drive_ready_advice",
+    "test_active_recommended_prices.ActiveRecommendedPriceProjectionTests.test_every_active_sku_remains_visible_with_typed_missing_states",
+    "test_active_recommended_prices.ActiveRecommendedPriceProjectionTests.test_missing_live_channel_does_not_fall_back_to_activation_snapshot",
+    "test_active_recommended_prices.ActiveRecommendedPriceProjectionTests.test_sales_binding_mismatch_fails_closed",
+    "test_active_recommended_prices.ActiveRecommendedPriceReaderTests.test_reader_is_strictly_read_only_and_never_initializes_schema",
+    "test_active_recommended_prices.ActiveRecommendedPriceWriterTests.test_writer_updates_only_exact_channel_without_delete",
+    "test_active_recommended_prices.ActiveRecommendedPriceWriterTests.test_writer_creates_deterministic_missing_channel_row",
+    "test_active_recommended_prices.ActiveRecommendedPriceWriterTests.test_writer_rejects_stale_hash_before_write",
+    "test_active_recommended_prices.ActiveRecommendedPriceFrontendContractTests.test_runtime_screen_uses_active_projection_while_wizard_stays_separate",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -321,6 +333,7 @@ missing = sorted(
         | required_rf012d2_contracts
         | required_rf012d3_contracts
         | required_rf012c4a_contracts
+        | required_rf012c4b_contracts
     ).difference(ids)
 )
 
@@ -335,5 +348,5 @@ print(
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
     "RF-012C2, RF-012C2B, RF-012C3, RF-012D1, RF-012D1A, RF-012D2, "
-    "RF-012D3, and RF-012C4A contracts collected"
+    "RF-012D3, RF-012C4A, and RF-012C4B contracts collected"
 )
