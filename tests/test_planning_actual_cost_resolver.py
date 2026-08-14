@@ -69,6 +69,71 @@ class PlanningActualCostResolverTests(unittest.TestCase):
         values.update(overrides)
         return CostResolutionSnapshot.from_records(**values)  # type: ignore[arg-type]
 
+    def _canonical_snapshot(self) -> CostResolutionSnapshot:
+        versions = [{**row, "cost_lines": []} for row in deepcopy(self.input["versions"])]
+        rows = []
+        row_id_by_scope: dict[tuple[str, str], str] = {}
+        for version in self.input["versions"]:
+            for index, source in enumerate(version.get("cost_lines", [])):
+                row_id = f"row:{version['id']}:{source['sku_id']}:{index}"
+                row_id_by_scope[(version["id"], source["sku_id"])] = row_id
+                rows.append(
+                    {
+                        **source,
+                        "id": row_id,
+                        "version_id": version["id"],
+                    }
+                )
+        return CostResolutionSnapshot.from_records(
+            activations=(),
+            activation_events=(),
+            cost_versions=versions,
+            cost_rows=rows,
+            planning_anchors=[
+                {
+                    "id": "anchor-case-2026",
+                    "sku_id": "sku-case-24",
+                    "planning_year": 2026,
+                    "cost_version_id": "version-jan",
+                    "cost_row_id": row_id_by_scope[("version-jan", "sku-case-24")],
+                    "anchor_kind": "first_activation",
+                }
+            ],
+            lot_lineage=[
+                {
+                    "id": "lineage-jan",
+                    "sku_id": "sku-case-24",
+                    "lot_exact_key": "LOTJAN",
+                    "lot_number": "LOT-JAN",
+                    "cost_version_id": "version-jan",
+                    "cost_row_id": row_id_by_scope[("version-jan", "sku-case-24")],
+                    "resolution_status": "resolved",
+                },
+                {
+                    "id": "lineage-may",
+                    "sku_id": "sku-case-24",
+                    "lot_exact_key": "LOTMAY",
+                    "lot_number": "LOT-MAY",
+                    "cost_version_id": "version-may",
+                    "cost_row_id": row_id_by_scope[("version-may", "sku-case-24")],
+                    "resolution_status": "resolved",
+                },
+                {
+                    "id": "lineage-ambiguous",
+                    "sku_id": "sku-case-24",
+                    "lot_exact_key": "DUPLOT",
+                    "resolution_status": "ambiguous",
+                    "candidate_version_ids": ["version-ambiguous-a", "version-ambiguous-b"],
+                    "candidate_cost_row_ids": [
+                        row_id_by_scope[("version-ambiguous-a", "sku-case-24")],
+                        row_id_by_scope[("version-ambiguous-b", "sku-case-24")],
+                    ],
+                },
+            ],
+            skus=deepcopy(self.input["skus"]),
+            authority_mode="canonical",
+        )
+
     def _current_actual(self, *, transaction: str, lot: str | None) -> dict:
         versions_by_id = {row["id"]: row for row in self.input["versions"]}
         cost_index = {
@@ -426,6 +491,111 @@ class PlanningActualCostResolverTests(unittest.TestCase):
 
         self.assertEqual(reader.calls, 1)
         self.assertEqual(self.input, original)
+
+    def test_canonical_mode_uses_only_persisted_anchor_and_lot_lineage(self) -> None:
+        snapshot = self._canonical_snapshot()
+        planning = PlanningCostResolver(snapshot)
+        actual = ActualLotCostResolver(snapshot, planning)
+
+        anchor = planning.resolve_planning_cost("sku-case-24", 2026)
+        january = actual.resolve_actual_lot_cost("sku-case-24", "LOT-JAN")
+        may = actual.resolve_actual_lot_cost("sku-case-24", "LOT-MAY")
+
+        self.assertEqual(anchor.source, "canonical_first_activation_anchor")
+        self.assertEqual(anchor.cost_version_id, "version-jan")
+        self.assertEqual(january.source, "canonical_exact_lot")
+        self.assertEqual(january.cost_price_ex, 14)
+        self.assertEqual(may.cost_version_id, "version-may")
+        self.assertEqual(may.cost_price_ex, 17)
+
+    def test_canonical_ambiguity_and_unknown_lot_fail_closed(self) -> None:
+        actual = ActualLotCostResolver(self._canonical_snapshot())
+
+        ambiguous = actual.resolve_actual_lot_cost("sku-case-24", "DUP-LOT")
+        unknown = actual.resolve_actual_lot_cost("sku-case-24", "NOT-REGISTERED")
+
+        self.assertEqual(ambiguous.status, "ambiguous_exact_lot")
+        self.assertEqual(
+            ambiguous.candidate_version_ids,
+            ("version-ambiguous-a", "version-ambiguous-b"),
+        )
+        self.assertIsNone(ambiguous.cost_price_ex)
+        self.assertEqual(unknown.status, "unknown_lot")
+        self.assertIsNone(unknown.cost_price_ex)
+
+    def test_canonical_non_lot_cost_uses_the_persisted_anchor(self) -> None:
+        actual = ActualLotCostResolver(self._canonical_snapshot())
+        result = actual.resolve_actual_lot_cost(
+            "sku-case-24",
+            "",
+            lot_requirement="not_required",
+            planning_year=2026,
+        )
+
+        self.assertEqual(result.status, "resolved_non_lot_sku_cost")
+        self.assertEqual(result.source, "planning_anchor_for_non_lot_sku")
+        self.assertEqual(result.cost_version_id, "version-jan")
+        self.assertEqual(result.cost_price_ex, 14)
+
+    def test_margin_adapter_does_not_turn_unknown_lot_into_planning_cost(self) -> None:
+        snapshot = self._canonical_snapshot()
+        resolver = ActualLotCostResolver(snapshot, PlanningCostResolver(snapshot))
+        versions = {str(row["id"]): row for row in snapshot.cost_versions}
+        result = douano_margin_service._resolve_authoritative_cost_for_sale(
+            transaction_number="TX-UNKNOWN",
+            transaction_numbers=None,
+            douano_sku="EXT-CASE-24",
+            sku_id="sku-case-24",
+            as_of=date(2026, 7, 1),
+            quantity=2,
+            actual_resolver=resolver,
+            versions_by_id=versions,
+            resolution_context={
+                "complete": True,
+                "sales_lots": {
+                    ("TX-UNKNOWN", "EXT-CASE-24"): {
+                        "lot_number": "NOT-REGISTERED",
+                        "transaction_number": "TX-UNKNOWN",
+                    }
+                },
+            },
+            lot_required=True,
+        )
+
+        self.assertEqual(result["actual_resolution_status"], "unknown_lot")
+        self.assertTrue(result["missing_cost"])
+        self.assertIsNone(result["cost_price_ex"])
+        self.assertEqual(result["kostprijsversie_id"], "")
+        self.assertEqual(result["resolution_policy_version"], "rf-012c3-v1")
+
+    def test_margin_adapter_returns_components_from_the_canonical_cost_row(self) -> None:
+        snapshot = self._canonical_snapshot()
+        resolver = ActualLotCostResolver(snapshot, PlanningCostResolver(snapshot))
+        result = douano_margin_service._resolve_authoritative_cost_for_sale(
+            transaction_number="TX-MAY",
+            transaction_numbers=None,
+            douano_sku="EXT-CASE-24",
+            sku_id="sku-case-24",
+            as_of=date(2026, 7, 1),
+            quantity=2,
+            actual_resolver=resolver,
+            versions_by_id={str(row["id"]): row for row in snapshot.cost_versions},
+            resolution_context={
+                "complete": True,
+                "sales_lots": {
+                    ("TX-MAY", "EXT-CASE-24"): {
+                        "lot_number": "LOT-MAY",
+                        "transaction_number": "TX-MAY",
+                    }
+                },
+            },
+            lot_required=True,
+        )
+
+        self.assertEqual(result["actual_resolution_status"], "resolved_exact_lot")
+        self.assertEqual(result["cost_price_ex"], 17)
+        self.assertEqual(result["cost_components"]["kostprijs"], 17)
+        self.assertIn("accijns", result["cost_components"])
 
     def test_indexed_resolution_is_bounded_for_development_shaped_volume(self) -> None:
         activations = []

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from threading import Lock
 from typing import Any
 
@@ -9,6 +9,34 @@ from app.domain import postgres_storage
 
 _SCHEMA_READY = False
 _SCHEMA_LOCK = Lock()
+RECOMPUTABLE_COST_STATUSES = (
+    "",
+    "unmapped_sku",
+    "missing_cost",
+    "missing_lot_cost",
+    "fallback_active_sku_cost",
+    "lot_unmatched_fallback",
+    "lot_near_match_fallback",
+    "missing_sku",
+    "missing_planning_year",
+    "missing_planning_anchor",
+    "ambiguous_planning_anchor",
+    "missing_lot",
+    "unknown_lot",
+    "ambiguous_lot_mapping",
+    "multiple_lots_per_sales_line",
+    "ambiguous_exact_lot",
+    "missing_canonical_lot_lineage",
+    "ambiguous_direct_lot_cost",
+    "missing_cost_version",
+    "missing_cost_row",
+    "ambiguous_cost_row",
+    "invalid_cost",
+)
+
+
+def is_recomputable_cost_status(value: Any) -> bool:
+    return str(value or "").strip() in RECOMPUTABLE_COST_STATUSES
 
 
 def ensure_schema() -> None:
@@ -262,9 +290,31 @@ def upsert_line_snapshot(
             conn.commit()
 
 
-def upsert_line_snapshots(records: list[dict[str, Any]]) -> int:
+def upsert_line_snapshots(
+    records: list[dict[str, Any]],
+    *,
+    preserve_finalized: bool = False,
+    recompute_from_year: int = 0,
+) -> int:
     ensure_schema()
     cleaned = [row for row in records if isinstance(row, dict) and int(row.get("source_line_id", 0) or 0) > 0]
+    if preserve_finalized and int(recompute_from_year or 0) > 0:
+        cutoff = date(int(recompute_from_year), 1, 1)
+        protected: list[dict[str, Any]] = []
+        for row in cleaned:
+            raw_line_date = row.get("line_date")
+            if isinstance(raw_line_date, datetime):
+                line_date = raw_line_date.date()
+            elif isinstance(raw_line_date, date):
+                line_date = raw_line_date
+            else:
+                try:
+                    line_date = date.fromisoformat(str(raw_line_date or "")[:10])
+                except ValueError:
+                    line_date = None
+            if line_date is not None and line_date >= cutoff:
+                protected.append(row)
+        cleaned = protected
     if not cleaned:
         return 0
     now = datetime.now(UTC)
@@ -307,10 +357,29 @@ def upsert_line_snapshots(records: list[dict[str, Any]]) -> int:
         )
     if not values:
         return 0
+    update_guard = ""
+    if preserve_finalized:
+        escaped = ", ".join(
+            "'" + value.replace("'", "''") + "'"
+            for value in RECOMPUTABLE_COST_STATUSES
+        )
+        year_guard = ""
+        if int(recompute_from_year or 0) > 0:
+            year_guard = (
+                "douano_sales_line_cost_snapshots.line_date >= "
+                f"DATE '{int(recompute_from_year)}-01-01' AND "
+            )
+        update_guard = (
+            " WHERE "
+            + year_guard
+            + "douano_sales_line_cost_snapshots.cost_status IN ("
+            + escaped
+            + ")"
+        )
     with postgres_storage.connect() as conn:
         with conn.cursor() as cur:
             cur.executemany(
-                """
+                f"""
                 INSERT INTO douano_sales_line_cost_snapshots(
                     id, source_type, source_line_id, computed_at, company_id, line_date,
                     douano_product_id, douano_sku, sku_id, bier_id, product_id,
@@ -353,12 +422,14 @@ def upsert_line_snapshots(records: list[dict[str, Any]]) -> int:
                     mapped = EXCLUDED.mapped,
                     ignored = EXCLUDED.ignored,
                     payload = EXCLUDED.payload
+                {update_guard}
                 """,
                 values,
             )
+            written = max(0, int(cur.rowcount or 0))
         if not postgres_storage.in_transaction():
             conn.commit()
-    return len(values)
+    return written
 
 
 def get_snapshot(line_id: int) -> dict[str, Any] | None:
@@ -390,4 +461,57 @@ def get_snapshot(line_id: int) -> dict[str, Any] | None:
         "cost_total_ex": float(cost_total_ex or 0.0),
         "margin_ex": float(margin_ex or 0.0),
     }
+
+
+def load_line_snapshots(
+    *,
+    source_type: str,
+    source_line_ids: list[int],
+) -> dict[int, dict[str, Any]]:
+    """Load frozen actual-cost selections for a detail view; never recompute them."""
+
+    source = str(source_type or "").strip().lower()
+    if source not in {"order", "invoice"}:
+        raise ValueError("source_type must be 'order' or 'invoice'.")
+    line_ids = sorted({int(value or 0) for value in source_line_ids if int(value or 0) > 0})
+    if not line_ids:
+        return {}
+    with postgres_storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT source_line_id, cost_price_ex, cost_total_ex, margin_ex,
+                   missing_cost, mapped, ignored, cost_source, cost_status,
+                   kostprijsversie_id, kostprijsversie_label, lot_number,
+                   lot_internal_number, lot_transaction_number, bier_id,
+                   product_id, sku_id, payload
+            FROM douano_sales_line_cost_snapshots
+            WHERE source_type = %s
+              AND source_line_id = ANY(%s::bigint[])
+            """,
+            (source, line_ids),
+        ).fetchall()
+    result: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        payload = row[17] if isinstance(row[17], dict) else {}
+        line_id = int(row[0] or 0)
+        result[line_id] = {
+            **payload,
+            "cost_price_ex": float(row[1]) if row[1] is not None else None,
+            "cost_total_ex": float(row[2] or 0),
+            "margin_ex": float(row[3] or 0),
+            "missing_cost": bool(row[4]),
+            "mapped": bool(row[5]),
+            "ignored": bool(row[6]),
+            "cost_source": str(row[7] or ""),
+            "cost_status": str(row[8] or ""),
+            "kostprijsversie_id": str(row[9] or ""),
+            "kostprijsversie_label": str(row[10] or ""),
+            "lot_number": str(row[11] or ""),
+            "lot_internal_number": str(row[12] or ""),
+            "lot_transaction_number": str(row[13] or ""),
+            "bier_id": str(row[14] or ""),
+            "product_id": str(row[15] or ""),
+            "sku_id": str(row[16] or ""),
+        }
+    return result
 

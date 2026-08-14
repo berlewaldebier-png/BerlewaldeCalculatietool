@@ -42,26 +42,80 @@ class ActualLotCostResolver:
             if text(row.get("id")) and text(row.get("code") or row.get("sku_code"))
         }
         rows_by_key: dict[tuple[str, str], list[GenericRecord]] = {}
+        rows_by_id: dict[str, GenericRecord] = {}
         for row in snapshot.cost_rows:
             key = (text(row.get("version_id")), text(row.get("sku_id")))
             if key[0] and key[1]:
                 rows_by_key.setdefault(key, []).append(row)
+            if text(row.get("id")):
+                rows_by_id[text(row.get("id"))] = row
 
         rows_by_version: dict[str, list[tuple[str, list[GenericRecord]]]] = {}
         for (version_id, sku_id), rows in rows_by_key.items():
             rows_by_version.setdefault(version_id, []).append((sku_id, rows))
         self._exact_candidates: dict[tuple[str, str], list[tuple[str, GenericRecord]]] = {}
         self._near_candidate_versions: dict[tuple[str, str], set[str]] = {}
-        for version_id, version in self._versions_by_id.items():
-            keys = version_lot_keys(version)
-            for sku_id, rows in rows_by_version.get(version_id, []):
-                for key in keys:
-                    self._exact_candidates.setdefault((sku_id, key), []).extend(
-                        (version_id, row) for row in rows
+        self._canonical_ambiguities: dict[tuple[str, str], list[GenericRecord]] = {}
+        self._canonical_lineage_errors: dict[tuple[str, str], ActualLotCostResolution] = {}
+        if snapshot.authority_mode == "canonical":
+            for lineage in snapshot.lot_lineage:
+                sku_id = text(lineage.get("sku_id"))
+                key = lot_exact_key(
+                    lineage.get("lot_exact_key") or lineage.get("lot_number")
+                )
+                if not sku_id or not key:
+                    continue
+                if text(lineage.get("resolution_status")).casefold() == "ambiguous":
+                    self._canonical_ambiguities.setdefault((sku_id, key), []).append(
+                        lineage
                     )
-                    self._near_candidate_versions.setdefault(
-                        (sku_id, lot_near_key(key)), set()
-                    ).add(version_id)
+                    for version_id in lineage.get("candidate_version_ids", ()) or ():
+                        self._near_candidate_versions.setdefault(
+                            (sku_id, lot_near_key(key)), set()
+                        ).add(text(version_id))
+                    continue
+                version_id = text(lineage.get("cost_version_id"))
+                row_id = text(lineage.get("cost_row_id"))
+                row = rows_by_id.get(row_id)
+                if not version_id or version_id not in self._versions_by_id:
+                    self._canonical_lineage_errors[(sku_id, key)] = ActualLotCostResolution(
+                        status="missing_cost_version",
+                        source="canonical_lot_lineage",
+                        cost_version_id=version_id,
+                        cost_row_id=row_id,
+                        warnings=("canonical_lot_cost_version_missing",),
+                    )
+                    continue
+                if (
+                    row is None
+                    or text(row.get("version_id")) != version_id
+                    or text(row.get("sku_id")) != sku_id
+                ):
+                    self._canonical_lineage_errors[(sku_id, key)] = ActualLotCostResolution(
+                        status="missing_cost_row",
+                        source="canonical_lot_lineage",
+                        cost_version_id=version_id,
+                        cost_row_id=row_id,
+                        warnings=("canonical_lot_cost_row_missing_or_mismatched",),
+                    )
+                    continue
+                self._exact_candidates.setdefault((sku_id, key), []).append(
+                    (version_id, row)
+                )
+                self._near_candidate_versions.setdefault(
+                    (sku_id, lot_near_key(key)), set()
+                ).add(version_id)
+        else:
+            for version_id, version in self._versions_by_id.items():
+                keys = version_lot_keys(version)
+                for sku_id, rows in rows_by_version.get(version_id, []):
+                    for key in keys:
+                        self._exact_candidates.setdefault((sku_id, key), []).extend(
+                            (version_id, row) for row in rows
+                        )
+                        self._near_candidate_versions.setdefault(
+                            (sku_id, lot_near_key(key)), set()
+                        ).add(version_id)
         self._direct_lot_records: dict[tuple[str, str], list[GenericRecord]] = {}
         for row in snapshot.direct_lot_cost_records:
             sku_id = text(row.get("sku_id"))
@@ -126,7 +180,40 @@ class ActualLotCostResolver:
             )
 
         resolved_lot = mapped_lot_ids[0] if mapped_lot_ids else requested_lot
-        candidates = self._exact_candidates.get((sku, lot_exact_key(resolved_lot)), [])
+        resolved_key = lot_exact_key(resolved_lot)
+        candidates = self._exact_candidates.get((sku, resolved_key), [])
+        canonical_ambiguities = self._canonical_ambiguities.get((sku, resolved_key), [])
+        if canonical_ambiguities:
+            return ActualLotCostResolution(
+                status="ambiguous_exact_lot",
+                source="canonical_lot_lineage",
+                requested_lot_id=requested_lot,
+                resolved_lot_id=resolved_lot,
+                lot_mapping_id=mapping_ids[0] if len(mapping_ids) == 1 else "",
+                warnings=("canonical_exact_lot_lineage_ambiguous",),
+                candidate_mapping_ids=mapping_ids,
+                candidate_lot_ids=(resolved_lot,),
+                candidate_version_ids=dedupe(
+                    version_id
+                    for row in canonical_ambiguities
+                    for version_id in (row.get("candidate_version_ids", ()) or ())
+                ),
+                candidate_cost_row_ids=dedupe(
+                    row_id
+                    for row in canonical_ambiguities
+                    for row_id in (row.get("candidate_cost_row_ids", ()) or ())
+                ),
+            )
+        lineage_error = self._canonical_lineage_errors.get((sku, resolved_key))
+        if lineage_error is not None:
+            return ActualLotCostResolution(
+                **{
+                    **lineage_error.__dict__,
+                    "requested_lot_id": requested_lot,
+                    "resolved_lot_id": resolved_lot,
+                    "lot_mapping_id": mapping_ids[0] if len(mapping_ids) == 1 else "",
+                }
+            )
         near_candidates = self._near_candidate_versions.get(
             (sku, lot_near_key(resolved_lot)), set()
         )
@@ -216,7 +303,15 @@ class ActualLotCostResolver:
         )
         return ActualLotCostResolution(
             status="resolved_exact_lot",
-            source="exact_lot_alias" if mapping_ids else "exact_lot",
+            source=(
+                "canonical_exact_lot_alias"
+                if mapping_ids and self._snapshot.authority_mode == "canonical"
+                else "canonical_exact_lot"
+                if self._snapshot.authority_mode == "canonical"
+                else "exact_lot_alias"
+                if mapping_ids
+                else "exact_lot"
+            ),
             requested_lot_id=requested_lot,
             resolved_lot_id=resolved_lot,
             lot_mapping_id=mapping_ids[0] if len(mapping_ids) == 1 else "",

@@ -29,6 +29,7 @@ ActualStatus = Literal[
     "missing_lot",
     "unknown_lot",
     "ambiguous_lot_mapping",
+    "multiple_lots_per_sales_line",
     "ambiguous_exact_lot",
     "missing_canonical_lot_lineage",
     "ambiguous_direct_lot_cost",
@@ -107,9 +108,12 @@ class CostResolutionSnapshot:
     activation_events: tuple[GenericRecord, ...]
     cost_versions: tuple[GenericRecord, ...]
     cost_rows: tuple[GenericRecord, ...]
+    planning_anchors: tuple[GenericRecord, ...] = ()
+    lot_lineage: tuple[GenericRecord, ...] = ()
     lot_aliases: tuple[GenericRecord, ...] = ()
     skus: tuple[GenericRecord, ...] = ()
     direct_lot_cost_records: tuple[GenericRecord, ...] = ()
+    authority_mode: Literal["compatibility", "canonical"] = "compatibility"
 
     @classmethod
     def from_records(
@@ -119,9 +123,12 @@ class CostResolutionSnapshot:
         activation_events: Sequence[GenericRecord],
         cost_versions: Sequence[GenericRecord],
         cost_rows: Sequence[GenericRecord] = (),
+        planning_anchors: Sequence[GenericRecord] = (),
+        lot_lineage: Sequence[GenericRecord] = (),
         lot_aliases: Sequence[GenericRecord] = (),
         skus: Sequence[GenericRecord] = (),
         direct_lot_cost_records: Sequence[GenericRecord] = (),
+        authority_mode: Literal["compatibility", "canonical"] = "compatibility",
     ) -> CostResolutionSnapshot:
         flattened_rows: list[GenericRecord] = [deepcopy(dict(row)) for row in cost_rows]
         explicit_keys = {
@@ -156,11 +163,16 @@ class CostResolutionSnapshot:
             activation_events=tuple(deepcopy(dict(row)) for row in activation_events),
             cost_versions=tuple(deepcopy(dict(row)) for row in cost_versions),
             cost_rows=tuple(flattened_rows),
+            planning_anchors=tuple(
+                deepcopy(dict(row)) for row in planning_anchors
+            ),
+            lot_lineage=tuple(deepcopy(dict(row)) for row in lot_lineage),
             lot_aliases=tuple(deepcopy(dict(row)) for row in lot_aliases),
             skus=tuple(deepcopy(dict(row)) for row in skus),
             direct_lot_cost_records=tuple(
                 deepcopy(dict(row)) for row in direct_lot_cost_records
             ),
+            authority_mode=authority_mode,
         )
 
 

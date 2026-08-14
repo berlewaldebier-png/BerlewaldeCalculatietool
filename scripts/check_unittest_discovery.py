@@ -230,6 +230,16 @@ required_rf012c2b_contracts = {
     "test_management_forecast.ManagementForecastSchemaContractTests.test_schema_is_additive_append_only_and_restricts_parent_deletion",
     "test_management_forecast.ManagementForecastFrontendContractTests.test_editor_reuses_the_server_read_model_and_loads_history_lazily",
 }
+required_rf012c3_contracts = {
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_canonical_mode_uses_only_persisted_anchor_and_lot_lineage",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_canonical_ambiguity_and_unknown_lot_fail_closed",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_canonical_non_lot_cost_uses_the_persisted_anchor",
+    "test_planning_actual_cost_resolver.PlanningActualCostResolverTests.test_margin_adapter_returns_components_from_the_canonical_cost_row",
+    "test_actual_cost_snapshot_policy.ActualCostSnapshotPolicyTests.test_regular_sync_guard_preserves_finalized_snapshots",
+    "test_actual_cost_snapshot_policy.ActualCostSnapshotPolicyTests.test_regular_sync_does_not_insert_a_missing_historical_snapshot",
+    "test_actual_cost_snapshot_policy.ActualCostSnapshotPolicyTests.test_explicit_correction_path_can_replace_a_snapshot",
+    "test_actual_cost_snapshot_policy.ActualCostSnapshotPolicyTests.test_multiple_lots_on_one_sales_line_fail_closed",
+}
 required_rf012d1_contracts = {
     "test_auth_route_matrix.AuthRouteMatrixTests.test_commercial_yearset_authority_routes_are_admin_only",
     "test_yearset_dossier.YearsetDossierProjectionTests.test_finalized_dossier_exposes_exact_frozen_plan_and_sku_values",
@@ -292,6 +302,7 @@ missing = sorted(
         | required_rf012c1_contracts
         | required_rf012c2_contracts
         | required_rf012c2b_contracts
+        | required_rf012c3_contracts
         | required_rf012d1_contracts
         | required_rf012d1a_contracts
         | required_rf012d2_contracts
@@ -309,5 +320,5 @@ print(
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
-    "RF-012C2, RF-012C2B, RF-012D1, RF-012D1A, RF-012D2, and RF-012D3 contracts collected"
+    "RF-012C2, RF-012C2B, RF-012C3, RF-012D1, RF-012D1A, RF-012D2, and RF-012D3 contracts collected"
 )

@@ -81,6 +81,8 @@ type OrderLineRow = {
   lot_near_match_number?: string;
   kostprijsversie_id?: string;
   kostprijsversie_label?: string;
+  resolution_warnings?: string[];
+  candidate_version_ids?: string[];
 };
 
 type InvoiceLineRow = {
@@ -118,6 +120,8 @@ type InvoiceLineRow = {
   lot_near_match_number?: string;
   kostprijsversie_id?: string;
   kostprijsversie_label?: string;
+  resolution_warnings?: string[];
+  candidate_version_ids?: string[];
 };
 
 type CompanyUnmappedProductRow = {
@@ -156,6 +160,7 @@ function formatDateNl(value: string) {
 }
 
 function costStatus(line: OrderLineRow | InvoiceLineRow) {
+  const status = String(line.cost_status || "").trim();
   const versionLabel = String(line.kostprijsversie_label || "").trim();
   const versionId = String(line.kostprijsversie_id || "").trim();
   const versionText = versionLabel || (versionId ? "kostprijsversie" : "");
@@ -170,6 +175,83 @@ function costStatus(line: OrderLineRow | InvoiceLineRow) {
       label: "geen kostprijs nodig",
       title: "Deze verkoopregel telt mee in omzet, maar is bewust gecategoriseerd als regel zonder kostprijsbron.",
       background: "rgba(95,156,255,0.14)",
+    };
+  }
+
+  if (status === "resolved_exact_lot" && versionText) {
+    return {
+      label: `exacte LOT + ${versionText}`,
+      title: "Exacte SKU/LOT-koppeling gevonden in de canonieke kostprijsautoriteit.",
+      background: "rgba(95,255,156,0.16)",
+    };
+  }
+
+  if (status === "resolved_non_lot_sku_cost" && versionText) {
+    return {
+      label: versionText,
+      title: "Deze SKU vereist geen LOT; de vastgelegde planningkostprijs voor het transactiekalenderjaar is gebruikt.",
+      background: "rgba(95,255,156,0.16)",
+    };
+  }
+
+  const unresolved: Record<string, { label: string; title: string }> = {
+    missing_lot: {
+      label: "LOT ontbreekt",
+      title: "Deze SKU vereist een LOT. Importeer of koppel de LOT voordat de marge definitief is.",
+    },
+    unknown_lot: {
+      label: "LOT niet gekoppeld",
+      title: "De LOT is niet exact gekoppeld aan een canonieke kostprijsregel. Controleer de LOT-koppeling in Beheer.",
+    },
+    ambiguous_lot_mapping: {
+      label: "LOT-koppeling dubbelzinnig",
+      title: "Meerdere LOT-koppelingen zijn mogelijk. Kies eerst expliciet de juiste interne LOT.",
+    },
+    multiple_lots_per_sales_line: {
+      label: "meerdere LOT's op verkoopregel",
+      title: "Deze verkoopregel bevat meerdere LOT's. Verdeel de regel eerst expliciet per LOT voordat de marge definitief wordt.",
+    },
+    ambiguous_exact_lot: {
+      label: "LOT-kostprijs dubbelzinnig",
+      title: "Dezelfde SKU/LOT verwijst naar meerdere kostprijsregels. Los dit eerst op in Datakwaliteit.",
+    },
+    missing_canonical_lot_lineage: {
+      label: "LOT-bron niet canoniek",
+      title: "Er is wel een losse LOT-kostprijs gevonden, maar nog geen gecontroleerde koppeling met kostprijsversie en SKU-regel.",
+    },
+    ambiguous_direct_lot_cost: {
+      label: "Meerdere LOT-bronnen",
+      title: "Meerdere losse LOT-kostprijsbronnen concurreren. Leg eerst één canonieke bron vast.",
+    },
+    missing_planning_anchor: {
+      label: "planningkostprijs ontbreekt",
+      title: "Deze non-LOT SKU mist een planningkostprijs voor het transactiekalenderjaar. Activeer of herstel het SKU-anker.",
+    },
+    ambiguous_planning_anchor: {
+      label: "planningkostprijs dubbelzinnig",
+      title: "Deze non-LOT SKU heeft geen eenduidig planninganker. Los dit eerst op in Datakwaliteit.",
+    },
+    missing_cost_version: {
+      label: "kostprijsversie ontbreekt",
+      title: "De vastgelegde bron verwijst niet meer eenduidig naar een kostprijsversie. Controleer de bronkoppeling.",
+    },
+    missing_cost_row: {
+      label: "SKU-kostprijs ontbreekt",
+      title: "De kostprijsversie bevat geen eenduidige regel voor deze SKU. Herstel de kostprijsbron.",
+    },
+    ambiguous_cost_row: {
+      label: "SKU-kostprijs dubbelzinnig",
+      title: "De kostprijsversie bevat meerdere mogelijke SKU-regels. Los dit eerst op in Datakwaliteit.",
+    },
+    invalid_cost: {
+      label: "kostprijs ongeldig",
+      title: "De gevonden kostprijs is niet positief. Controleer de kostprijscomponenten.",
+    },
+  };
+  if (unresolved[status]) {
+    return {
+      ...unresolved[status],
+      background: "rgba(255,77,77,0.16)",
     };
   }
 
@@ -650,15 +732,9 @@ export function OmzetEnMargeKlantDetail({
                                               ignored
                                             </span>
                                           ) : line.mapped ? (
-                                            line.missing_cost ? (
-                                              <span className="pill" style={{ background: "rgba(255,77,77,0.16)" }}>
-                                                missing cost
-                                              </span>
-                                            ) : (
-                                              <span className="pill" title={costStatus(line).title} style={{ background: costStatus(line).background }}>
-                                                {costStatus(line).label}
-                                              </span>
-                                            )
+                                            <span className="pill" title={costStatus(line).title} style={{ background: costStatus(line).background }}>
+                                              {costStatus(line).label}
+                                            </span>
                                           ) : (
                                             <span className="pill" style={{ background: "rgba(255,206,77,0.16)" }}>
                                               unmapped
