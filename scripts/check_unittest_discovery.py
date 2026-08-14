@@ -278,6 +278,19 @@ required_rf012d3_contracts = {
     "test_cost_history.CostHistoryReaderTests.test_reader_starts_read_only_and_never_initializes_schema",
     "test_cost_history.CostHistoryFrontendContractTests.test_history_is_lazy_read_only_and_has_accessible_disclosures",
 }
+required_rf012c4a_contracts = {
+    "test_active_sales_strategy.ActiveSalesStrategyProjectionTests.test_target_record_is_current_and_activation_price_remains_snapshot",
+    "test_active_sales_strategy.ActiveSalesStrategyProjectionTests.test_each_generation_sku_is_shown_once_and_shared_items_are_not_cloned",
+    "test_active_sales_strategy.ActiveSalesStrategyProjectionTests.test_missing_non_positive_ambiguous_and_not_applicable_stay_visible",
+    "test_active_sales_strategy.ActiveSalesStrategyProjectionTests.test_duplicate_generation_sku_fails_closed",
+    "test_active_sales_strategy.ActiveSalesStrategyProjectionTests.test_current_sell_in_overlay_replaces_active_snapshot_but_not_candidate_input",
+    "test_active_sales_strategy.ActiveSalesStrategyProjectionTests.test_current_sell_in_overlay_fails_closed_on_missing_target",
+    "test_active_sales_strategy.ActiveSalesStrategyReaderTests.test_reader_is_strictly_read_only_and_never_initializes_schema",
+    "test_active_sales_strategy.ActiveSalesStrategyWriterTests.test_writer_updates_only_exact_target_and_preserves_unknown_payload",
+    "test_active_sales_strategy.ActiveSalesStrategyWriterTests.test_writer_creates_one_deterministic_record_for_missing_price",
+    "test_active_sales_strategy.ActiveSalesStrategyWriterTests.test_writer_rejects_stale_price_hash_without_writing",
+    "test_active_sales_strategy.ActiveSalesStrategyFrontendContractTests.test_runtime_screen_uses_active_projection_while_wizard_keeps_draft_workspace",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -307,6 +320,7 @@ missing = sorted(
         | required_rf012d1a_contracts
         | required_rf012d2_contracts
         | required_rf012d3_contracts
+        | required_rf012c4a_contracts
     ).difference(ids)
 )
 
@@ -320,5 +334,6 @@ print(
     "all required LOT, RF-003, RF-004, RF-005, RF-005A, RF-006, RF-007, "
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
-    "RF-012C2, RF-012C2B, RF-012C3, RF-012D1, RF-012D1A, RF-012D2, and RF-012D3 contracts collected"
+    "RF-012C2, RF-012C2B, RF-012C3, RF-012D1, RF-012D1A, RF-012D2, "
+    "RF-012D3, and RF-012C4A contracts collected"
 )

@@ -170,12 +170,24 @@ class AuthRouteMatrixTests(unittest.TestCase):
         for path in (
             "/meta/commercial-yearsets/active/cost-overview",
             "/meta/commercial-yearsets/active/cost-history",
+            "/meta/commercial-yearsets/active/sales-strategy",
         ):
             with self.subTest(path=path):
                 self.assertEqual(
                     _static_access(_route(meta_router, path, "GET")),
                     "costs:view",
                 )
+
+        self.assertEqual(
+            _static_access(
+                _route(
+                    meta_router,
+                    "/meta/commercial-yearsets/active/sales-strategy",
+                    "PUT",
+                )
+            ),
+            "admin",
+        )
 
     def test_management_forecast_separates_view_and_revision_rights(self) -> None:
         self.assertEqual(
@@ -291,8 +303,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 185, normalized)
-        self.assertEqual(digest, "2706fac580bbaefcc16f11ffa55caf866c3dba8ad170395acd0ce243fb1feba3", normalized)
+        self.assertEqual(len(rows), 187, normalized)
+        self.assertEqual(digest, "dc361f4a7a097a79c2a2022d801f352b6bfba10c497ffec1edeec252ff09631c", normalized)
 
 
 if __name__ == "__main__":

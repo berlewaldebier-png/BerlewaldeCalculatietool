@@ -131,7 +131,7 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/navigation-actions.spec.ts --retries=0
 
-      - name: RF-012B1 sales-strategy screen contract
+      - name: RF-012C4A active sales-strategy screen contract
         working-directory: frontend
         run: npx playwright test tests/e2e/sales-strategy.screen.spec.ts --retries=0
 

@@ -4,7 +4,7 @@ import json
 from decimal import Decimal
 from typing import Any, Iterable
 
-from app.domain import postgres_storage
+from app.domain import active_sales_strategy_service, postgres_storage
 
 
 CONTRACT_VERSION = "rf-012c1-v1"
@@ -287,6 +287,19 @@ def read_quote_commercial_context(
             (run["id"],),
         ).fetchall()
 
+        live_price_rows = []
+        if generation["status"] == "active":
+            live_price_rows = conn.execute(
+                """
+                SELECT id, record_type, jaar, payload, updated_at
+                FROM sales_pricing_records
+                WHERE jaar = %s
+                  AND record_type = 'verkoopstrategie_product'
+                ORDER BY id
+                """,
+                (generation["operational_year"],),
+            ).fetchall()
+
     columns = (
         "sku_id",
         "scope_classification",
@@ -319,9 +332,18 @@ def read_quote_commercial_context(
         "price_readiness_status",
         "price_blocker_codes",
     )
+    projected_rows = [
+        dict(zip(columns, row, strict=True)) for row in candidate_rows
+    ]
+    if generation["status"] == "active":
+        live_columns = ("id", "record_type", "year", "payload", "updated_at")
+        projected_rows = active_sales_strategy_service.overlay_current_sell_in_prices(
+            projected_rows,
+            [dict(zip(live_columns, row, strict=True)) for row in live_price_rows],
+        )
     return build_quote_commercial_context(
         generation=generation,
         run=run,
-        rows=[dict(zip(columns, row, strict=True)) for row in candidate_rows],
+        rows=projected_rows,
         requested_generation_id=clean_generation_id,
     )
