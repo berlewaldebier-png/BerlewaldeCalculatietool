@@ -28,6 +28,7 @@ from app.domain import yearset_recovery_storage
 from app.domain import yearset_reconciliation_storage
 from app.domain import yearset_dossier_service
 from app.domain import active_cost_overview_service
+from app.domain import active_sales_strategy_service
 from app.domain import cost_history_service
 from app.domain import historical_yearset_wizard_service
 from app.domain import cost_authority_service
@@ -58,6 +59,7 @@ from app.schemas.cost_authority import (
     CostVersionBeerMappingApprovalRequest,
     PlanningCostRebaselinePrepareRequest,
 )
+from app.schemas.sales_strategy import ActiveSalesStrategyUpdateRequest
 
 
 router = APIRouter(prefix="/meta", tags=["meta"], dependencies=[Depends(require_user)])
@@ -3186,6 +3188,40 @@ def get_active_commercial_cost_history(
     """Return planning anchors and immutable cost/LOT history read-only."""
 
     return cost_history_service.read_active_cost_history()
+
+
+@router.get("/commercial-yearsets/active/sales-strategy")
+def get_active_commercial_sales_strategy(
+    session: dict = Depends(require_cost_view),
+) -> dict[str, Any]:
+    """Return one current sell-in row per active-generation SKU."""
+
+    return active_sales_strategy_service.read_active_sales_strategy(
+        can_edit=auth_policy.has_capability(session, auth_policy.CAP_ADMIN)
+    )
+
+
+@router.put("/commercial-yearsets/active/sales-strategy")
+def put_active_commercial_sales_strategy(
+    payload: ActiveSalesStrategyUpdateRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Update only explicitly changed active-generation SKU list prices."""
+
+    try:
+        return active_sales_strategy_service.update_active_sales_strategy(
+            generation_id=payload.generation_id,
+            run_id=payload.run_id,
+            manifest_hash=payload.manifest_hash,
+            changes=[change.model_dump() for change in payload.changes],
+            actor=str(session.get("username", "") or ""),
+        )
+    except active_sales_strategy_service.ActiveSalesStrategyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except active_sales_strategy_service.ActiveSalesStrategyBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/commercial-yearsets/{operational_year}/dossier")

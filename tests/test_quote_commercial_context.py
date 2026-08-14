@@ -218,6 +218,25 @@ class _ReadOnlyConnection:
                 json.dumps(row["price_blocker_codes"]),
             )
             return _Result(all_rows=[ordered])
+        if "FROM sales_pricing_records" in normalized:
+            payload = {
+                "id": "price-target-2026",
+                "record_type": "verkoopstrategie_product",
+                "jaar": 2026,
+                "sku_id": "sku-blond-case",
+                "sell_in_prices": {"list": 38},
+            }
+            return _Result(
+                all_rows=[
+                    (
+                        "price-target-2026",
+                        "verkoopstrategie_product",
+                        2026,
+                        payload,
+                        "2026-01-01T00:00:00+00:00",
+                    )
+                ]
+            )
         raise AssertionError(f"Unexpected SQL: {normalized}")
 
 
@@ -248,6 +267,47 @@ class QuoteCommercialContextReaderTests(unittest.TestCase):
         self.assertEqual(connection.statements[0], "SET TRANSACTION READ ONLY")
         self.assertEqual(result["status"], "ready")
         self.assertEqual(result["summary"]["quote_ready_count"], 1)
+
+    def test_active_reader_uses_current_target_price_without_mutating_candidate(self) -> None:
+        connection = _ReadOnlyConnection()
+
+        @contextmanager
+        def connect():
+            yield connection
+
+        original_execute = connection.execute
+
+        def execute(sql, params=()):
+            normalized = " ".join(str(sql).split())
+            if "FROM sales_pricing_records" in normalized:
+                payload = {
+                    "id": "price-target-2026",
+                    "record_type": "verkoopstrategie_product",
+                    "jaar": 2026,
+                    "sku_id": "sku-blond-case",
+                    "sell_in_prices": {"list": 40},
+                }
+                return _Result(
+                    all_rows=[
+                        (
+                            "price-target-2026",
+                            "verkoopstrategie_product",
+                            2026,
+                            payload,
+                            "2026-01-02T00:00:00+00:00",
+                        )
+                    ]
+                )
+            return original_execute(sql, params)
+
+        connection.execute = execute
+        with patch.object(
+            quote_commercial_context_service.postgres_storage, "connect", connect
+        ):
+            result = quote_commercial_context_service.read_quote_commercial_context()
+
+        self.assertEqual(result["items"][0]["list_price"], 40.0)
+        self.assertEqual(result["items"][0]["target_pricing_id"], "price-target-2026")
 
 
 if __name__ == "__main__":

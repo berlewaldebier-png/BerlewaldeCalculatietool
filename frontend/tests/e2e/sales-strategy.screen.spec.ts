@@ -27,24 +27,24 @@ function countMutationRequests(page: Page) {
   };
 }
 
-test.describe("RF-012B1 sales-strategy screen contract", () => {
+test.describe("RF-012C4A sales-strategy active-context contract", () => {
   test.skip(!TEST_USERNAME || !TEST_PASSWORD, "Requires TEST_USERNAME/TEST_PASSWORD");
 
   test("keeps year, grouping and search interactions read-only", async ({ page }) => {
     await ensureLoggedIn(page);
     await expect(page.getByRole("heading", { name: "Verkoopstrategie", level: 1 })).toBeVisible();
 
-    const productionYearEmptyState = page.getByText("Nog geen productiejaar", { exact: true });
-    if (await productionYearEmptyState.isVisible()) {
-      await expect(page.getByText(/Maak eerst een productiejaar aan/)).toBeVisible();
+    const activeYearsetEmptyState = page.getByText("Geen actieve verkoopstrategie", { exact: true });
+    if (await activeYearsetEmptyState.isVisible()) {
+      await expect(page.getByText(/geen gereed geactiveerde jaarset/i)).toBeVisible();
       return;
     }
 
     const mutations = countMutationRequests(page);
     const yearSelect = page.locator("main select.dataset-input");
     await expect(yearSelect).toBeVisible();
-    expect(await yearSelect.locator("option").count()).toBeGreaterThan(0);
-    await expect(page.getByRole("button", { name: "Opslaan", exact: true })).toBeVisible();
+    await expect(yearSelect).toBeDisabled();
+    await expect(page.getByRole("button", { name: /^Opslaan/ })).toBeVisible();
 
     const groupButtons = page.locator(".wizard-stack > section > button.module-card-title");
     const groupCount = await groupButtons.count();
@@ -58,9 +58,9 @@ test.describe("RF-012B1 sales-strategy screen contract", () => {
       await expect(groupButtons.first()).toHaveAttribute("aria-expanded", "false");
     }
 
-    const search = page.getByPlaceholder("Zoek bier of product...", { exact: true });
-    await search.fill("RF-012B1-geen-resultaat");
-    await expect(page.getByText(/Geen verkoopbare SKU's gevonden voor/)).toBeVisible();
+    const search = page.getByPlaceholder("Zoek stijl, SKU of code...", { exact: true });
+    await search.fill("RF-012C4A-geen-resultaat");
+    await expect(page.getByText("Geen SKU's gevonden.", { exact: true })).toBeVisible();
     await search.fill("");
 
     expect(mutations.value()).toBe(0);

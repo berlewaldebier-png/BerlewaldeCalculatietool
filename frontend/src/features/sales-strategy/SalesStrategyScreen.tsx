@@ -1,5 +1,5 @@
 import { PageShell } from "@/components/PageShell";
-import { VerkoopstrategieWorkspace } from "@/components/VerkoopstrategieWorkspace";
+import { ActiveSalesStrategyWorkspace } from "@/features/sales-strategy/ActiveSalesStrategyWorkspace";
 import type { SalesStrategyScreenModel } from "@/features/sales-strategy/salesStrategyScreenModel";
 
 export function SalesStrategyScreen({ model }: { model: SalesStrategyScreenModel }) {
@@ -10,7 +10,7 @@ export function SalesStrategyScreen({ model }: { model: SalesStrategyScreenModel
       activePath="/verkoopstrategie"
       navigation={model.navigation}
     >
-      <VerkoopstrategieWorkspace {...model.workspace} />
+      <ActiveSalesStrategyWorkspace initialProjection={model.projection} />
     </PageShell>
   );
 }

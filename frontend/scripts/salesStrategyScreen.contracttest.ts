@@ -3,6 +3,7 @@ import path from "node:path";
 import type { BeerViewRow } from "../src/components/verkoopstrategie/verkoopstrategieTypes";
 import type { StrategyRow } from "../src/components/verkoopstrategie/verkoopstrategieWorkspaceUtils";
 import type * as FormModelModule from "../src/features/sales-strategy/salesStrategyFormModel";
+import type * as ActiveModelModule from "../src/features/sales-strategy/activeSalesStrategyModel";
 import type * as ScreenModelModule from "../src/features/sales-strategy/salesStrategyScreenModel";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -89,36 +90,74 @@ function run() {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const {
     buildSalesStrategyScreenModel,
-    SALES_STRATEGY_DATASET_KEYS,
   } = require("../src/features/sales-strategy/salesStrategyScreenModel") as typeof ScreenModelModule;
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const {
+    activeSalesStrategyMarkup,
+    activeSalesStrategyStatusLabel,
+    filterActiveSalesStrategyGroups,
+  } = require("../src/features/sales-strategy/activeSalesStrategyModel") as typeof ActiveModelModule;
 
-  const verkoopprijzen = [{ id: "strategy-existing" }];
-  const model = buildSalesStrategyScreenModel({
-    navigation: [{ key: "sales", label: "Verkoopstrategie", description: "", href: "/verkoopstrategie", section: "Prijsbeheer" }],
-    datasets: {
-      productie: { "2025": {}, "2026": {} },
-      verkoopprijzen,
-      basisproducten: [{ id: "base-1" }],
-      "samengestelde-producten": [{ id: "bundle-1" }],
-      bieren: [{ id: "beer-1" }],
-      skus: [{ id: "sku-1" }],
-      articles: [{ id: "format-1" }],
-      "bom-lines": [{ id: "line-1" }],
-      berekeningen: [{ id: "cost-1" }],
-      channels: [{ id: "horeca" }],
-      kostprijsproductactiveringen: [{ id: "activation-1" }],
+  const navigation = [{ key: "sales", label: "Verkoopstrategie", description: "", href: "/verkoopstrategie", section: "Prijsbeheer" }];
+  const activeItem = {
+    sku_id: "sku-1",
+    sku_code: "BLOND-24",
+    sku_name: "Berlewalde Blond - Doos 24 x 33cl",
+    beer_name: "Berlewalde Blond",
+    canonical_beer_id: "beer-1",
+    subject_type: "beer",
+    subject_id: "beer-1",
+    sku_kind: "composite",
+    scope_classification: "carried_forward",
+    cost_price: 10,
+    cost_state: "ready" as const,
+    cost_blocker_codes: [],
+    activation_list_price: 15,
+    list_price: 16,
+    price_state: "ready" as const,
+    price_required: true,
+    price_reason_codes: [],
+    pricing_record_id: "price-1",
+    pricing_record_hash: "hash-1",
+    pricing_updated_at: "2026-01-01T00:00:00Z",
+    target_pricing_id: "price-1",
+    price_source: "target_record" as const,
+    editable: true,
+    display_priority: 0,
+  };
+  const projection = {
+    version: "rf-012c4a-v1",
+    status: "ready" as const,
+    read_only: false,
+    can_edit: true,
+    binding: {
+      generation_id: "generation-2026",
+      run_id: "run-2026",
+      operational_year: 2026,
+      manifest_hash: "manifest-2026",
+      validation_hash: "validation-2026",
     },
-  });
+    groups: [{ key: "beer:beer-1", label: "Berlewalde Blond", kind: "beer", priority: 0, items: [activeItem] }],
+    summary: {
+      sku_count: 1,
+      group_count: 1,
+      ready_price_count: 1,
+      missing_price_count: 0,
+      non_positive_price_count: 0,
+      ambiguous_price_count: 0,
+      not_applicable_price_count: 0,
+      compatibility_only_price_count: 0,
+    },
+    reason_codes: [],
+  };
+  const model = buildSalesStrategyScreenModel(navigation, projection);
   assert(model.navigation.length === 1, "Sales-strategy navigation projection changed.");
-  assert(model.workspace.endpoint === "/data/verkoopprijzen", "Sales-strategy save endpoint changed.");
-  assert(model.workspace.verkoopprijzen === verkoopprijzen, "Sales-strategy price rows were copied or transformed by the route.");
-  assert(model.workspace.bomLines?.[0]?.id === "line-1", "BOM dataset mapping changed.");
-  assert(model.workspace.kostprijsproductactiveringen[0]?.id === "activation-1", "Activation dataset mapping changed.");
-  assert(SALES_STRATEGY_DATASET_KEYS.length === 11, "Sales-strategy bootstrap dataset count changed.");
-
-  const emptyModel = buildSalesStrategyScreenModel({ datasets: {} });
-  assert(emptyModel.workspace.verkoopprijzen.length === 0, "Missing price rows no longer project to an empty list.");
-  assert(emptyModel.workspace.productie !== null, "Missing production data no longer projects to the existing empty state.");
+  assert(model.projection === projection, "The route no longer preserves the active-generation projection.");
+  assert(model.projection.binding?.operational_year === 2026, "The active operational year changed.");
+  assert(Math.abs(Number(activeSalesStrategyMarkup(activeItem, 16)) - 60) < 1e-9, "Active SKU markup calculation changed.");
+  assert(activeSalesStrategyStatusLabel(activeItem) === "prijs gezet", "Ready price status changed.");
+  assert(filterActiveSalesStrategyGroups(projection.groups, "blond").length === 1, "Active SKU search changed.");
+  assert(filterActiveSalesStrategyGroups(projection.groups, "tripel").length === 0, "Active SKU search includes unrelated groups.");
 
   assert(JSON.stringify(getProductionYears([{ jaar: 2026 }, { jaar: "2025" }, { jaar: 2026 }, { jaar: 0 }])) === "[2025,2026]", "Array production-year projection changed.");
   assert(JSON.stringify(getProductionYears({ "2027": {}, invalid: {}, "2026": {} })) === "[2026,2027]", "Object production-year projection changed.");
@@ -191,7 +230,7 @@ function run() {
 
 try {
   run();
-  console.log("salesStrategyScreen contracttest OK (SCREEN-017; RF-012B1)");
+  console.log("salesStrategyScreen contracttest OK (SCREEN-017; RF-012C4A + draft compatibility)");
 } catch (error) {
   console.error(error);
   process.exitCode = 1;
