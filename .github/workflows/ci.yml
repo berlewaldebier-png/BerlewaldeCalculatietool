@@ -135,7 +135,7 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/sales-strategy.screen.spec.ts --retries=0
 
-      - name: RF-012B2 recommended-price screen contract
+      - name: RF-012C4B active recommended-price screen contract
         working-directory: frontend
         run: npx playwright test tests/e2e/recommended-price.screen.spec.ts --retries=0
 

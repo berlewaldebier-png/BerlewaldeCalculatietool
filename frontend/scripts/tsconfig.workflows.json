@@ -40,6 +40,7 @@
     "../src/features/sales-strategy/salesStrategyFormModel.ts",
     "../src/features/recommended-price/recommendedPriceScreenModel.ts",
     "../src/features/recommended-price/recommendedPriceFormModel.ts",
+    "../src/features/recommended-price/activeRecommendedPriceModel.ts",
     "../src/components/adviesprijzen/adviesprijzenUtils.ts",
     "../src/components/adviesprijzen/adviesprijzenDerivations.ts",
     "../src/components/offerte-samenstellen/sellInResolver.ts",

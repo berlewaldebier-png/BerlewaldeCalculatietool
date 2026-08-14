@@ -171,6 +171,7 @@ class AuthRouteMatrixTests(unittest.TestCase):
             "/meta/commercial-yearsets/active/cost-overview",
             "/meta/commercial-yearsets/active/cost-history",
             "/meta/commercial-yearsets/active/sales-strategy",
+            "/meta/commercial-yearsets/active/recommended-prices",
         ):
             with self.subTest(path=path):
                 self.assertEqual(
@@ -183,6 +184,16 @@ class AuthRouteMatrixTests(unittest.TestCase):
                 _route(
                     meta_router,
                     "/meta/commercial-yearsets/active/sales-strategy",
+                    "PUT",
+                )
+            ),
+            "admin",
+        )
+        self.assertEqual(
+            _static_access(
+                _route(
+                    meta_router,
+                    "/meta/commercial-yearsets/active/recommended-prices",
                     "PUT",
                 )
             ),
@@ -303,8 +314,8 @@ class AuthRouteMatrixTests(unittest.TestCase):
 
         normalized = "\n".join(sorted(rows))
         digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        self.assertEqual(len(rows), 187, normalized)
-        self.assertEqual(digest, "dc361f4a7a097a79c2a2022d801f352b6bfba10c497ffec1edeec252ff09631c", normalized)
+        self.assertEqual(len(rows), 189, normalized)
+        self.assertEqual(digest, "d6ea472065e97da21b5624a38096e303cba6a3e47854a70d896b0100279ce3cc", normalized)
 
 
 if __name__ == "__main__":

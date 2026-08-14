@@ -29,6 +29,7 @@ from app.domain import yearset_reconciliation_storage
 from app.domain import yearset_dossier_service
 from app.domain import active_cost_overview_service
 from app.domain import active_sales_strategy_service
+from app.domain import active_recommended_price_service
 from app.domain import cost_history_service
 from app.domain import historical_yearset_wizard_service
 from app.domain import cost_authority_service
@@ -60,6 +61,7 @@ from app.schemas.cost_authority import (
     PlanningCostRebaselinePrepareRequest,
 )
 from app.schemas.sales_strategy import ActiveSalesStrategyUpdateRequest
+from app.schemas.recommended_prices import ActiveRecommendedPriceUpdateRequest
 
 
 router = APIRouter(prefix="/meta", tags=["meta"], dependencies=[Depends(require_user)])
@@ -3219,6 +3221,40 @@ def put_active_commercial_sales_strategy(
     except active_sales_strategy_service.ActiveSalesStrategyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except active_sales_strategy_service.ActiveSalesStrategyBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/commercial-yearsets/active/recommended-prices")
+def get_active_commercial_recommended_prices(
+    session: dict = Depends(require_cost_view),
+) -> dict[str, Any]:
+    """Return active SKU advice inputs and current channel markups."""
+
+    return active_recommended_price_service.read_active_recommended_prices(
+        can_edit=auth_policy.has_capability(session, auth_policy.CAP_ADMIN)
+    )
+
+
+@router.put("/commercial-yearsets/active/recommended-prices")
+def put_active_commercial_recommended_prices(
+    payload: ActiveRecommendedPriceUpdateRequest,
+    session: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Update only explicitly changed active-year channel markups."""
+
+    try:
+        return active_recommended_price_service.update_active_recommended_prices(
+            generation_id=payload.generation_id,
+            run_id=payload.run_id,
+            manifest_hash=payload.manifest_hash,
+            changes=[change.model_dump() for change in payload.changes],
+            actor=str(session.get("username", "") or ""),
+        )
+    except active_recommended_price_service.ActiveRecommendedPriceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except active_recommended_price_service.ActiveRecommendedPriceBlocked as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

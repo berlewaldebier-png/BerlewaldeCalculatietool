@@ -1,17 +1,20 @@
 import { RecommendedPriceScreen } from "@/features/recommended-price/RecommendedPriceScreen";
-import {
-  buildRecommendedPriceScreenModel,
-  RECOMMENDED_PRICE_DATASET_KEYS,
-  type RecommendedPriceDatasets,
-} from "@/features/recommended-price/recommendedPriceScreenModel";
-import { getBootstrap } from "@/lib/apiServer";
+import type { ActiveRecommendedPriceProjection } from "@/features/recommended-price/activeRecommendedPriceModel";
+import { buildRecommendedPriceScreenModel } from "@/features/recommended-price/recommendedPriceScreenModel";
+import { apiGetServer, getBootstrap } from "@/lib/apiServer";
 
 export default async function AdviesprijzenPage() {
-  const bootstrap = await getBootstrap<RecommendedPriceDatasets>(
-    [...RECOMMENDED_PRICE_DATASET_KEYS],
-    true,
-    "/adviesprijzen"
+  const [bootstrap, projection] = await Promise.all([
+    getBootstrap([], true, "/adviesprijzen"),
+    apiGetServer<ActiveRecommendedPriceProjection>(
+      "/meta/commercial-yearsets/active/recommended-prices",
+      "/adviesprijzen"
+    ),
+  ]);
+  return (
+    <RecommendedPriceScreen
+      model={buildRecommendedPriceScreenModel(bootstrap.navigation ?? [], projection)}
+    />
   );
-  return <RecommendedPriceScreen model={buildRecommendedPriceScreenModel(bootstrap)} />;
 }
 
