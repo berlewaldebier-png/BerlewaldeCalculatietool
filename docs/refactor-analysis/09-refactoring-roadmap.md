@@ -687,6 +687,8 @@ After RF-013A and all relevant RF-012C consumer migrations are complete, RF-014 
 
 Each candidate is a separate branch/PR with usage evidence. RF-014 must not delete historical quotes, yearsets, activations, cost versions, selling/advice prices, break-even snapshots or actual sales snapshots. Persisted-data/schema removal remains RF-015 and requires separate destructive approval.
 
+**RF-014A implementation note (2026-08-14):** the never-wired `VerkoopstrategieEditor.tsx` is the first single-path removal candidate. Current and historical import-graph searches found no caller: SCREEN-017 used `VerkoopstrategieWorkspace` when the unused editor was introduced and now uses the RF-012C4A `ActiveSalesStrategyWorkspace`; Nieuw jaar voorbereiden still deliberately uses `VerkoopstrategieWorkspace`. The frontend package is private and exports no component API, so the file cannot be an external package contract or independent route. An executable guard requires the candidate and all runtime references to remain absent while protecting both valid entrypoints. The draft PR is the human review window; no URL, API, formula, permission, schema or persisted data changes. See `41-rf-014a-unused-sales-strategy-editor.md`.
+
 ## RF-015 — Separately approved destructive cleanup
 
 - **Objective / findings:** only after all expand/backfill/dual-read/deprecation work, remove proven obsolete schema/data/compatibility paths for ARCH-001/002 and DATA findings.
