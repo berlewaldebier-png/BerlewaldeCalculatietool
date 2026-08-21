@@ -1,6 +1,11 @@
 # RF-011A — Read-only active commercial context resolver
 
-Status: implemented as a read-only candidate resolver; no consumer or persisted authority has switched.
+Status update (RF-014B): this historical characterization was superseded and
+its unused frontend resolver was removed. The active runtime authorities are
+documented in RF-012C1 through RF-012C4B. This document remains decision
+history, not a current implementation guide.
+
+Original RF-011A status: implemented as a read-only candidate resolver; no consumer or persisted authority had switched.
 
 ## Outcome
 
