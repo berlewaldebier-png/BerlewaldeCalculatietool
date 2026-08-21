@@ -308,6 +308,11 @@ required_rf014a_contracts = {
     "test_deprecated_frontend_paths.DeprecatedFrontendPathTests.test_current_sales_strategy_and_new_year_entrypoints_remain_explicit",
     "test_deprecated_frontend_paths.DeprecatedFrontendPathTests.test_frontend_is_not_a_public_component_package",
 }
+required_rf014b_contracts = {
+    "test_deprecated_frontend_paths.DeprecatedFrontendPathTests.test_unused_rf011a_resolver_and_exclusive_contract_are_absent",
+    "test_deprecated_frontend_paths.DeprecatedFrontendPathTests.test_current_quote_break_even_and_year_transition_paths_remain",
+    "test_deprecated_frontend_paths.DeprecatedFrontendPathTests.test_pricing_runner_no_longer_collects_removed_resolver",
+}
 missing = sorted(
     (
         required_lot_contracts
@@ -340,6 +345,7 @@ missing = sorted(
         | required_rf012c4a_contracts
         | required_rf012c4b_contracts
         | required_rf014a_contracts
+        | required_rf014b_contracts
     ).difference(ids)
 )
 
@@ -354,5 +360,5 @@ print(
     "RF-008, RF-010A, RF-010C, RF-010B, RF-011B, RF-013P, RF-013A, "
     "RF-013B, RF-013C, RF-013C1, RF-013C2, RF-013C3, RF-012C1 and "
     "RF-012C2, RF-012C2B, RF-012C3, RF-012D1, RF-012D1A, RF-012D2, "
-    "RF-012D3, RF-012C4A, RF-012C4B, and RF-014A contracts collected"
+    "RF-012D3, RF-012C4A, RF-012C4B, RF-014A, and RF-014B contracts collected"
 )
